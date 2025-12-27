@@ -21,6 +21,8 @@ pub struct ClientConfig {
     pub connect_timeout: Duration,
     /// Maximum duration allowed for completing the HTTP exchange.
     pub request_timeout: Duration,
+    /// Optional upper bound for reading the response payload.
+    pub read_timeout: Option<Duration>,
     /// Maximum number of response bytes buffered in memory.
     pub max_response_bytes: usize,
     /// Optional TLS connector used for HTTPS requests.
@@ -32,6 +34,7 @@ impl Default for ClientConfig {
         Self {
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(15),
+            read_timeout: Some(Duration::from_secs(15)),
             max_response_bytes: 16 * 1024 * 1024,
             tls: super::default_tls_connector(),
         }
@@ -508,12 +511,16 @@ async fn execute_http(
         .await
         .map_err(|_| ClientError::Timeout)??;
 
-    let response = timeout(
-        request_timeout,
-        read_response(&mut buffered, client.config.max_response_bytes),
-    )
-    .await
-    .map_err(|_| ClientError::Timeout)??;
+    let response = if let Some(limit) = client.config.read_timeout {
+        timeout(
+            limit,
+            read_response(&mut buffered, client.config.max_response_bytes),
+        )
+        .await
+        .map_err(|_| ClientError::Timeout)??
+    } else {
+        read_response(&mut buffered, client.config.max_response_bytes).await?
+    };
     Ok(response)
 }
 
@@ -540,6 +547,7 @@ async fn execute_https(
     let max_response_bytes = client.config.max_response_bytes;
     let url_clone = url.clone();
 
+    let read_timeout = client.config.read_timeout;
     let join = spawn_blocking(move || {
         execute_https_blocking(
             method,
@@ -552,6 +560,7 @@ async fn execute_https(
             connect_timeout,
             request_timeout,
             max_response_bytes,
+            read_timeout,
         )
     })
     .await
@@ -576,10 +585,18 @@ fn execute_https_blocking(
     connect_timeout: Duration,
     request_timeout: Duration,
     max_response_bytes: usize,
+    read_timeout: Option<Duration>,
 ) -> Result<ClientResponse, ClientError> {
     let stream = connect_blocking_with_retry(&addr, connect_timeout)?;
     let _ = stream.set_nodelay(true);
-    let _ = stream.set_read_timeout(Some(request_timeout));
+    match read_timeout {
+        Some(timeout) => {
+            let _ = stream.set_read_timeout(Some(timeout));
+        }
+        None => {
+            let _ = stream.set_read_timeout(None);
+        }
+    }
     let _ = stream.set_write_timeout(Some(request_timeout));
 
     let mut tls_stream = connector.connect(&host, stream)?;

@@ -431,14 +431,29 @@ impl RpcState {
         let Some(host) = host else {
             return false;
         };
+        let normalized = normalize_host_header(host);
         self.runtime_cfg
             .allowed_hosts
             .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(host.trim()))
+            .any(|allowed| allowed.eq_ignore_ascii_case(normalized.as_str()))
     }
 
     fn runtime(&self) -> Arc<RpcRuntimeConfig> {
         Arc::clone(&self.runtime_cfg)
+    }
+}
+
+fn normalize_host_header(host: &str) -> String {
+    let trimmed = host.trim();
+    if let Some(rest) = trimmed.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return rest[..end].to_string();
+        }
+    }
+    if let Some((name, _)) = trimmed.split_once(':') {
+        name.trim().to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 

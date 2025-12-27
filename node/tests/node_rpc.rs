@@ -1,13 +1,13 @@
 #![cfg(feature = "integration-tests")]
-use std::io::{self, ErrorKind};
+use std::io::{self, ErrorKind, Read, Write};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::Duration;
 
+use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
 use foundation_serialization::{
     binary,
     json::{Map, Number, Value},
 };
-use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
     config::RpcConfig,
@@ -17,9 +17,12 @@ use the_block::{
     sign_tx, Blockchain, RawTxPayload,
 };
 
-use runtime::net::TcpStream;
-use std::{collections::HashSet, fs, net::SocketAddr};
-use the_block::timeout;
+use runtime::spawn_blocking;
+use std::{
+    collections::HashSet,
+    fs,
+    net::{SocketAddr, TcpStream as StdTcpStream},
+};
 use util::timeout::expect_timeout;
 
 mod util;
@@ -32,16 +35,10 @@ fn rpc_debug() -> bool {
 }
 
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
-    rpc_result(addr, body, token)
-        .await
-        .expect("rpc request")
+    rpc_result(addr, body, token).await.expect("rpc request")
 }
 
-async fn rpc_result(
-    addr: &str,
-    body: &str,
-    token: Option<&str>,
-) -> Result<Value, RpcRequestError> {
+async fn rpc_result(addr: &str, body: &str, token: Option<&str>) -> Result<Value, RpcRequestError> {
     let resp = raw_rpc(addr, body, token).await?;
     foundation_serialization::json::from_str::<Value>(&resp)
         .map_err(|err| RpcRequestError::Parse(err.to_string()))
@@ -68,67 +65,80 @@ impl std::fmt::Display for RpcRequestError {
 
 async fn raw_rpc(addr: &str, body: &str, token: Option<&str>) -> Result<String, RpcRequestError> {
     let addr: SocketAddr = addr.parse().unwrap();
-    send_rpc_once(addr, body, token).await
+    let body = body.to_string();
+    let token = token.map(|t| t.to_string());
+    spawn_blocking(move || send_rpc_blocking(addr, body, token))
+        .await
+        .map_err(|err| RpcRequestError::Io(io::Error::new(ErrorKind::Other, err.to_string())))?
 }
 
-async fn send_rpc_once(
+fn send_rpc_blocking(
     addr: SocketAddr,
-    body: &str,
-    token: Option<&str>,
+    body: String,
+    token: Option<String>,
 ) -> Result<String, RpcRequestError> {
     let debug = rpc_debug();
     if debug {
         eprintln!("raw_rpc connect {addr}");
     }
-    let mut stream = timeboxed(TcpStream::connect(addr), "connect")
-        .await?
-        .map_err(RpcRequestError::Io)?;
+    let mut stream = connect_blocking(addr)?;
     let mut req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
         body.len()
     );
-    if let Some(t) = token {
+    if let Some(t) = token.as_deref() {
         req.push_str(&format!("Authorization: Bearer {}\r\n", t));
     }
     req.push_str("Connection: close\r\n\r\n");
-    req.push_str(body);
+    req.push_str(&body);
     if debug {
         eprintln!("raw_rpc write {} bytes", req.len());
     }
-    timeboxed(stream.write_all(req.as_bytes()), "write request")
-        .await?
-        .map_err(RpcRequestError::Io)?;
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|err| map_timeout(err, "write request"))?;
     if debug {
         eprintln!("raw_rpc read response");
     }
-    let body = read_http_body(&mut stream).await.map_err(RpcRequestError::Io)?;
-    let _ = stream.shutdown().await;
+    let body = read_http_body_blocking(&mut stream).map_err(RpcRequestError::Io)?;
+    let _ = stream.shutdown(std::net::Shutdown::Both);
     if debug {
         eprintln!("raw_rpc done");
     }
     String::from_utf8(body).map_err(RpcRequestError::Utf8)
 }
 
-async fn timeboxed<F, T>(fut: F, phase: &'static str) -> Result<T, RpcRequestError>
-where
-    F: std::future::Future<Output = T>,
-{
-    let duration = match phase {
-        "connect" => RPC_CONNECT_TIMEOUT,
-        _ => RPC_RW_TIMEOUT,
-    };
-    timeout(duration, fut)
-        .await
-        .map_err(|_| RpcRequestError::Timeout(phase))
+fn connect_blocking(addr: SocketAddr) -> Result<StdTcpStream, RpcRequestError> {
+    let stream = StdTcpStream::connect_timeout(&addr, RPC_CONNECT_TIMEOUT).map_err(|err| {
+        if err.kind() == ErrorKind::TimedOut {
+            RpcRequestError::Timeout("connect")
+        } else {
+            RpcRequestError::Io(err)
+        }
+    })?;
+    stream.set_nodelay(true).map_err(RpcRequestError::Io)?;
+    stream
+        .set_write_timeout(Some(RPC_RW_TIMEOUT))
+        .map_err(RpcRequestError::Io)?;
+    stream.set_read_timeout(None).map_err(RpcRequestError::Io)?;
+    Ok(stream)
 }
 
-async fn read_http_body(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+fn map_timeout(err: io::Error, phase: &'static str) -> RpcRequestError {
+    if err.kind() == ErrorKind::TimedOut || err.kind() == ErrorKind::WouldBlock {
+        RpcRequestError::Timeout(phase)
+    } else {
+        RpcRequestError::Io(err)
+    }
+}
+
+fn read_http_body_blocking(stream: &mut StdTcpStream) -> io::Result<Vec<u8>> {
     let mut buffer = Vec::new();
     let mut header_end = None;
     let mut content_length = None;
     loop {
         let mut chunk = [0u8; 4096];
-        let read = stream.read(&mut chunk).await?;
+        let read = stream.read(&mut chunk)?;
         if rpc_debug() {
             eprintln!("read_http_body chunk bytes={read}");
         }
@@ -145,6 +155,10 @@ async fn read_http_body(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
         if header_end.is_none() {
             if let Some(pos) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
                 header_end = Some(pos + 4);
+                if rpc_debug() {
+                    let header_text = String::from_utf8_lossy(&buffer[..pos]);
+                    eprintln!("http response header:\n{header_text}");
+                }
                 content_length = Some(parse_content_length(&buffer[..pos])?);
             }
         }
@@ -503,6 +517,7 @@ fn rpc_concurrent_controls() {
             admin_token_file: Some(token_file.to_str().unwrap().to_string()),
             enable_debug: true,
             relay_only: false,
+            request_timeout_ms: 20_000,
             ..Default::default()
         };
         let handle = the_block::spawn(run_rpc_server(
@@ -530,7 +545,7 @@ fn rpc_concurrent_controls() {
             let from = tx_from.clone();
             let to = tx_to.clone();
             handles.push(the_block::spawn(async move {
-                the_block::sleep(Duration::from_millis(500 * (i as u64))).await;
+                the_block::sleep(Duration::from_millis(5 * ((i as u64) + 1))).await;
                 if rpc_debug() {
                     eprintln!("rpc concurrent task {i} start");
                 }
@@ -579,10 +594,9 @@ fn rpc_concurrent_controls() {
             Some("testtoken"),
         )
         .await;
-        assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
-
         handle.abort();
         let _ = handle.await;
+        assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
     });
 }
 
@@ -599,6 +613,7 @@ fn rpc_error_responses() {
             admin_token_file: Some(token_file.to_str().unwrap().to_string()),
             enable_debug: true,
             relay_only: false,
+            request_timeout_ms: 20_000,
             ..Default::default()
         };
         let handle = the_block::spawn(run_rpc_server(
@@ -681,15 +696,26 @@ fn rpc_fragmented_request() {
             body
         );
         let addr_socket: SocketAddr = addr.parse().unwrap();
-        let mut stream = TcpStream::connect(addr_socket).await.unwrap();
-        let mid = req.len() / 2;
-        stream.write_all(&req.as_bytes()[..mid]).await.unwrap();
-        the_block::sleep(Duration::from_millis(5)).await;
-        stream.write_all(&req.as_bytes()[mid..]).await.unwrap();
-        let body = timeout(Duration::from_secs(120), read_http_body(&mut stream))
-            .await
-            .expect("fragmented read timed out")
-            .expect("fragmented read error");
+        let req_bytes = req.into_bytes();
+        let mid = req_bytes.len() / 2;
+        let first = req_bytes[..mid].to_vec();
+        let second = req_bytes[mid..].to_vec();
+        let body = spawn_blocking(move || {
+            let mut stream = StdTcpStream::connect(addr_socket).expect("connect fragmented stream");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(30)))
+                .expect("set write timeout");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(120)))
+                .expect("set read timeout");
+            stream.write_all(&first).expect("write first half");
+            std::thread::sleep(Duration::from_millis(5));
+            stream.write_all(&second).expect("write second half");
+            read_http_body_blocking(&mut stream)
+        })
+        .await
+        .expect("fragmented blocking task failed")
+        .expect("fragmented read error");
         let val: Value = foundation_serialization::json::from_slice(&body).unwrap();
         let result = val
             .get("Result")
