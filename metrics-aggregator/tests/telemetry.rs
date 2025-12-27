@@ -68,10 +68,8 @@ fn telemetry_round_trip() {
                     "last_updated": 1700000001,
                     "total_usd_micros": 250000,
                     "settlement_count": 6,
-                    "ct_price_usd_micros": 1250000,
-                    "it_price_usd_micros": 990000,
-                    "market_ct_price_usd_micros": 1300000,
-                    "market_it_price_usd_micros": 995000,
+                    "price_usd_micros": 1250000,
+                    "market_price_usd_micros": 1300000,
                     "cohort_utilization": [
                         {
                             "domain": "example.test",

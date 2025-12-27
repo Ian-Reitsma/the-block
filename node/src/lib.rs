@@ -611,7 +611,7 @@ pub struct Block {
     pub hash: String,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Canonical consumer reward recorded in the header. Must match tx[0].
-    pub coinbase_consumer: TokenAmount,
+    pub coinbase_block: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Canonical industrial reward recorded in the header. Must match tx[0].
     pub coinbase_industrial: TokenAmount,
@@ -638,37 +638,22 @@ pub struct Block {
     pub read_sub_liquidity_ct: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens paid out from advertising campaigns to viewers
-    pub ad_viewer_ct: TokenAmount,
+    pub ad_viewer: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens paid out from advertising campaigns to hosts
-    pub ad_host_ct: TokenAmount,
+    pub ad_host: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens paid out from advertising campaigns to hardware providers
-    pub ad_hardware_ct: TokenAmount,
+    pub ad_hardware: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens paid out from advertising campaigns to verifiers
-    pub ad_verifier_ct: TokenAmount,
+    pub ad_verifier: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens routed to the liquidity pool from advertising campaigns
-    pub ad_liquidity_ct: TokenAmount,
+    pub ad_liquidity: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Consumer tokens routed to the miner from advertising campaigns
-    pub ad_miner_ct: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens paid out from advertising campaigns to hosts
-    pub ad_host_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens paid out from advertising campaigns to hardware providers
-    pub ad_hardware_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens paid out from advertising campaigns to verifiers
-    pub ad_verifier_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens routed to the liquidity pool from advertising campaigns
-    pub ad_liquidity_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens routed to the miner from advertising campaigns
-    pub ad_miner_it: TokenAmount,
+    pub ad_miner: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Executed treasury disbursements surfaced alongside settlement payouts
     pub treasury_events: Vec<BlockTreasuryEvent>,
@@ -680,10 +665,7 @@ pub struct Block {
     pub ad_settlement_count: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Oracle price snapshot (CT) used for advertising settlements in this block
-    pub ad_oracle_ct_price_usd_micros: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Oracle price snapshot (IT) used for advertising settlements in this block
-    pub ad_oracle_it_price_usd_micros: u64,
+    pub ad_oracle_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// CT subsidy minted for compute in this block
     pub compute_sub_ct: TokenAmount,
@@ -691,19 +673,10 @@ pub struct Block {
     /// CT rebates paid to proof relayers in this block
     pub proof_rebate_ct: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// IT subsidy minted for storage operations in this block
-    pub storage_sub_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// IT subsidy minted for read delivery in this block
-    pub read_sub_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// IT subsidy minted for compute in this block
-    pub compute_sub_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
     /// Merkle root of all `ReadAck`s batched for this block
     pub read_root: [u8; 32],
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// blake3(total_fee_ct || total_fee_it) in hex
+    /// blake3(total_fee_block) in hex
     pub fee_checksum: String,
     #[serde(
         default = "foundation_serialization::defaults::default",
@@ -753,7 +726,7 @@ impl Default for Block {
             retune_hint: 0,
             nonce: 0,
             hash: String::new(),
-            coinbase_consumer: TokenAmount::new(0),
+            coinbase_block: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
             storage_sub_ct: TokenAmount::new(0),
             read_sub_ct: TokenAmount::new(0),
@@ -762,27 +735,18 @@ impl Default for Block {
             read_sub_hardware_ct: TokenAmount::new(0),
             read_sub_verifier_ct: TokenAmount::new(0),
             read_sub_liquidity_ct: TokenAmount::new(0),
-            ad_viewer_ct: TokenAmount::new(0),
-            ad_host_ct: TokenAmount::new(0),
-            ad_hardware_ct: TokenAmount::new(0),
-            ad_verifier_ct: TokenAmount::new(0),
-            ad_liquidity_ct: TokenAmount::new(0),
-            ad_miner_ct: TokenAmount::new(0),
-            ad_host_it: TokenAmount::new(0),
-            ad_hardware_it: TokenAmount::new(0),
-            ad_verifier_it: TokenAmount::new(0),
-            ad_liquidity_it: TokenAmount::new(0),
-            ad_miner_it: TokenAmount::new(0),
+            ad_viewer: TokenAmount::new(0),
+            ad_host: TokenAmount::new(0),
+            ad_hardware: TokenAmount::new(0),
+            ad_verifier: TokenAmount::new(0),
+            ad_liquidity: TokenAmount::new(0),
+            ad_miner: TokenAmount::new(0),
             treasury_events: Vec::new(),
             ad_total_usd_micros: 0,
             ad_settlement_count: 0,
-            ad_oracle_ct_price_usd_micros: 0,
-            ad_oracle_it_price_usd_micros: 0,
+            ad_oracle_price_usd_micros: 0,
             compute_sub_ct: TokenAmount::new(0),
             proof_rebate_ct: TokenAmount::new(0),
-            storage_sub_it: TokenAmount::new(0),
-            read_sub_it: TokenAmount::new(0),
-            compute_sub_it: TokenAmount::new(0),
             read_root: [0u8; 32],
             fee_checksum: String::new(),
             state_root: String::new(),
@@ -798,12 +762,6 @@ impl Default for Block {
             dilithium_sig: Vec::new(),
             receipts: Vec::new(),
         }
-    }
-}
-
-impl Block {
-    pub fn industrial_subsidies(&self) -> (TokenAmount, TokenAmount, TokenAmount) {
-        (self.storage_sub_it, self.read_sub_it, self.compute_sub_it)
     }
 }
 
@@ -1288,7 +1246,7 @@ impl Blockchain {
         ad_payout_total: u64,
         ad_total_usd_micros: u64,
         ad_settlement_count: u64,
-        ad_last_ct_price_usd_micros: u64,
+        ad_last_price_usd_micros: u64,
         compute_util_percent: u64,
         energy_snapshot: &crate::energy::EnergySnapshot,
     ) -> economics::MarketMetrics {
@@ -1366,10 +1324,10 @@ impl Blockchain {
 
         let ad_capacity = self.params.ad_cap_provider_count.max(1) as u64;
         let ad_utilization = ratio_u64(ad_settlement_count, ad_capacity);
-        let ad_cost_block = if ad_last_ct_price_usd_micros == 0 {
+        let ad_cost_block = if ad_last_price_usd_micros == 0 {
             0.0
         } else {
-            (ad_total_usd_micros as f64) / (ad_last_ct_price_usd_micros as f64)
+            (ad_total_usd_micros as f64) / (ad_last_price_usd_micros as f64)
         };
         let ad_effective_payout = ad_payout_total as f64;
         let ad_margin = if ad_cost_block > 0.0 {
@@ -1805,21 +1763,15 @@ impl Blockchain {
             host_addr,
             hardware_addr,
             verifier_addr,
-            viewer_ct: settlement.viewer_ct,
-            host_ct: settlement.host_ct,
-            hardware_ct: settlement.hardware_ct,
-            verifier_ct: settlement.verifier_ct,
-            liquidity_ct: settlement.liquidity_ct,
-            miner_ct: settlement.miner_ct,
-            total_ct: settlement.total_ct,
-            host_it: settlement.host_it,
-            hardware_it: settlement.hardware_it,
-            verifier_it: settlement.verifier_it,
-            liquidity_it: settlement.liquidity_it,
-            miner_it: settlement.miner_it,
+            viewer: settlement.viewer,
+            host: settlement.host,
+            hardware: settlement.hardware,
+            verifier: settlement.verifier,
+            liquidity: settlement.liquidity,
+            miner: settlement.miner,
+            total: settlement.total,
             total_usd_micros: settlement.total_usd_micros,
-            ct_price_usd_micros: settlement.ct_price_usd_micros,
-            it_price_usd_micros: settlement.it_price_usd_micros,
+            price_usd_micros: settlement.price_usd_micros,
             delivery_channel: settlement.delivery_channel,
             clearing_price_usd_micros: settlement.clearing_price_usd_micros,
             mesh_payload_digest: settlement.mesh_payload_digest.clone(),
@@ -1831,8 +1783,7 @@ impl Blockchain {
         crate::ad_readiness::record_settlement(
             ack.ts,
             settlement.total_usd_micros,
-            settlement.ct_price_usd_micros,
-            settlement.it_price_usd_micros,
+            settlement.price_usd_micros,
         );
     }
 }
@@ -1867,21 +1818,15 @@ pub struct AdSettlementRecord {
     pub host_addr: String,
     pub hardware_addr: String,
     pub verifier_addr: String,
-    pub viewer_ct: u64,
-    pub host_ct: u64,
-    pub hardware_ct: u64,
-    pub verifier_ct: u64,
-    pub liquidity_ct: u64,
-    pub miner_ct: u64,
-    pub total_ct: u64,
-    pub host_it: u64,
-    pub hardware_it: u64,
-    pub verifier_it: u64,
-    pub liquidity_it: u64,
-    pub miner_it: u64,
+    pub viewer: u64,
+    pub host: u64,
+    pub hardware: u64,
+    pub verifier: u64,
+    pub liquidity: u64,
+    pub miner: u64,
+    pub total: u64,
     pub total_usd_micros: u64,
-    pub ct_price_usd_micros: u64,
-    pub it_price_usd_micros: u64,
+    pub price_usd_micros: u64,
     pub delivery_channel: DeliveryChannel,
     pub clearing_price_usd_micros: u64,
     pub mesh_payload_digest: Option<String>,
@@ -2010,7 +1955,7 @@ impl Blockchain {
                         let mut migrated_chain = disk.chain.clone();
                         for b in &mut migrated_chain {
                             if let Some(cb) = b.transactions.first() {
-                                b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
+                                b.coinbase_block = TokenAmount::new(cb.payload.amount_consumer);
                                 b.coinbase_industrial =
                                     TokenAmount::new(cb.payload.amount_industrial);
                             }
@@ -2037,7 +1982,7 @@ impl Blockchain {
                                 b.nonce,
                                 b.difficulty,
                                 b.base_fee,
-                                b.coinbase_consumer,
+                                b.coinbase_block,
                                 b.coinbase_industrial,
                                 b.storage_sub_ct,
                                 b.read_sub_ct,
@@ -2046,26 +1991,17 @@ impl Blockchain {
                                 b.read_sub_hardware_ct,
                                 b.read_sub_verifier_ct,
                                 b.read_sub_liquidity_ct,
-                                b.ad_viewer_ct,
-                                b.ad_host_ct,
-                                b.ad_hardware_ct,
-                                b.ad_verifier_ct,
-                                b.ad_liquidity_ct,
-                                b.ad_miner_ct,
-                                b.ad_host_it,
-                                b.ad_hardware_it,
-                                b.ad_verifier_it,
-                                b.ad_liquidity_it,
-                                b.ad_miner_it,
+                                b.ad_viewer,
+                                b.ad_host,
+                                b.ad_hardware,
+                                b.ad_verifier,
+                                b.ad_liquidity,
+                                b.ad_miner,
                                 b.ad_total_usd_micros,
                                 b.ad_settlement_count,
-                                b.ad_oracle_ct_price_usd_micros,
-                                b.ad_oracle_it_price_usd_micros,
+                                b.ad_oracle_price_usd_micros,
                                 b.compute_sub_ct,
                                 b.proof_rebate_ct,
-                                b.storage_sub_it,
-                                b.read_sub_it,
-                                b.compute_sub_it,
                                 b.read_root,
                                 &b.fee_checksum,
                                 &b.transactions,
@@ -2082,7 +2018,7 @@ impl Blockchain {
                         let mut em_c = 0u64;
                         let mut em_i = 0u64;
                         for b in &migrated_chain {
-                            em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                            em_c = em_c.saturating_add(b.coinbase_block.get());
                             em_i = em_i.saturating_add(b.coinbase_industrial.get());
                         }
                         let bh = migrated_chain.len() as u64;
@@ -2159,7 +2095,7 @@ impl Blockchain {
                             let mut em_c = 0u64;
                             let mut em_i = 0u64;
                             for b in &disk.chain {
-                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_c = em_c.saturating_add(b.coinbase_block.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
                             }
                             disk.emission = em_c.saturating_add(em_i);
@@ -2175,8 +2111,7 @@ impl Blockchain {
                             let mut em_i = 0u64;
                             for b in &mut disk.chain {
                                 if let Some(cb) = b.transactions.first() {
-                                    b.coinbase_consumer =
-                                        TokenAmount::new(cb.payload.amount_consumer);
+                                    b.coinbase_block = TokenAmount::new(cb.payload.amount_consumer);
                                     b.coinbase_industrial =
                                         TokenAmount::new(cb.payload.amount_industrial);
                                 }
@@ -2203,7 +2138,7 @@ impl Blockchain {
                                     b.nonce,
                                     b.difficulty,
                                     b.base_fee,
-                                    b.coinbase_consumer,
+                                    b.coinbase_block,
                                     b.coinbase_industrial,
                                     b.storage_sub_ct,
                                     b.read_sub_ct,
@@ -2212,26 +2147,17 @@ impl Blockchain {
                                     b.read_sub_hardware_ct,
                                     b.read_sub_verifier_ct,
                                     b.read_sub_liquidity_ct,
-                                    b.ad_viewer_ct,
-                                    b.ad_host_ct,
-                                    b.ad_hardware_ct,
-                                    b.ad_verifier_ct,
-                                    b.ad_liquidity_ct,
-                                    b.ad_miner_ct,
-                                    b.ad_host_it,
-                                    b.ad_hardware_it,
-                                    b.ad_verifier_it,
-                                    b.ad_liquidity_it,
-                                    b.ad_miner_it,
+                                    b.ad_viewer,
+                                    b.ad_host,
+                                    b.ad_hardware,
+                                    b.ad_verifier,
+                                    b.ad_liquidity,
+                                    b.ad_miner,
                                     b.ad_total_usd_micros,
                                     b.ad_settlement_count,
-                                    b.ad_oracle_ct_price_usd_micros,
-                                    b.ad_oracle_it_price_usd_micros,
+                                    b.ad_oracle_price_usd_micros,
                                     b.compute_sub_ct,
                                     b.proof_rebate_ct,
-                                    b.storage_sub_it,
-                                    b.read_sub_it,
-                                    b.compute_sub_it,
                                     b.read_root,
                                     &b.fee_checksum,
                                     &b.transactions,
@@ -2244,7 +2170,7 @@ impl Blockchain {
                                     b.retune_hint,
                                     &b.receipts,
                                 );
-                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_c = em_c.saturating_add(b.coinbase_block.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
                             }
                             disk.emission = em_c.saturating_add(em_i);
@@ -2358,7 +2284,7 @@ impl Blockchain {
                     let mut migrated_chain = chain.clone();
                     for b in &mut migrated_chain {
                         if let Some(cb) = b.transactions.first() {
-                            b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
+                            b.coinbase_block = TokenAmount::new(cb.payload.amount_consumer);
                             b.coinbase_industrial = TokenAmount::new(cb.payload.amount_industrial);
                         }
                         let mut fee_consumer: u128 = 0;
@@ -2384,7 +2310,7 @@ impl Blockchain {
                             b.nonce,
                             b.difficulty,
                             b.base_fee,
-                            b.coinbase_consumer,
+                            b.coinbase_block,
                             b.coinbase_industrial,
                             b.storage_sub_ct,
                             b.read_sub_ct,
@@ -2393,26 +2319,17 @@ impl Blockchain {
                             b.read_sub_hardware_ct,
                             b.read_sub_verifier_ct,
                             b.read_sub_liquidity_ct,
-                            b.ad_viewer_ct,
-                            b.ad_host_ct,
-                            b.ad_hardware_ct,
-                            b.ad_verifier_ct,
-                            b.ad_liquidity_ct,
-                            b.ad_miner_ct,
-                            b.ad_host_it,
-                            b.ad_hardware_it,
-                            b.ad_verifier_it,
-                            b.ad_liquidity_it,
-                            b.ad_miner_it,
+                            b.ad_viewer,
+                            b.ad_host,
+                            b.ad_hardware,
+                            b.ad_verifier,
+                            b.ad_liquidity,
+                            b.ad_miner,
                             b.ad_total_usd_micros,
                             b.ad_settlement_count,
-                            b.ad_oracle_ct_price_usd_micros,
-                            b.ad_oracle_it_price_usd_micros,
+                            b.ad_oracle_price_usd_micros,
                             b.compute_sub_ct,
                             b.proof_rebate_ct,
-                            b.storage_sub_it,
-                            b.read_sub_it,
-                            b.compute_sub_it,
                             b.read_root,
                             &b.fee_checksum,
                             &b.transactions,
@@ -2429,7 +2346,7 @@ impl Blockchain {
                     let mut em_c = 0u64;
                     let mut em_i = 0u64;
                     for b in &migrated_chain {
-                        em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                        em_c = em_c.saturating_add(b.coinbase_block.get());
                         em_i = em_i.saturating_add(b.coinbase_industrial.get());
                     }
                     let bh = migrated_chain.len() as u64;
@@ -3043,7 +2960,7 @@ impl Blockchain {
             retune_hint: hint,
             nonce: 0,
             // genesis carries zero reward; fields included for stable hashing
-            coinbase_consumer: TokenAmount::new(0),
+            coinbase_block: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
             storage_sub_ct: TokenAmount::new(0),
             read_sub_ct: TokenAmount::new(0),
@@ -3052,12 +2969,12 @@ impl Blockchain {
             read_sub_hardware_ct: TokenAmount::new(0),
             read_sub_verifier_ct: TokenAmount::new(0),
             read_sub_liquidity_ct: TokenAmount::new(0),
-            ad_viewer_ct: TokenAmount::new(0),
-            ad_host_ct: TokenAmount::new(0),
-            ad_hardware_ct: TokenAmount::new(0),
-            ad_verifier_ct: TokenAmount::new(0),
-            ad_liquidity_ct: TokenAmount::new(0),
-            ad_miner_ct: TokenAmount::new(0),
+            ad_viewer: TokenAmount::new(0),
+            ad_host: TokenAmount::new(0),
+            ad_hardware: TokenAmount::new(0),
+            ad_verifier: TokenAmount::new(0),
+            ad_liquidity: TokenAmount::new(0),
+            ad_miner: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
             state_root: String::new(),
@@ -4427,7 +4344,7 @@ impl Blockchain {
             }
         }
 
-        let mut base_coinbase_consumer = reward
+        let mut base_coinbase_block = reward
             .0
             .checked_add(storage_sub_ct)
             .and_then(|v| v.checked_add(compute_sub_ct))
@@ -4546,7 +4463,6 @@ impl Blockchain {
             .saturating_sub(verifier_read_paid)
             .saturating_sub(liquidity_paid);
 
-        let dual_token_enabled = self.params.dual_token_settlement_enabled > 0;
         let ad_settlements = std::mem::take(&mut self.pending_ad_settlements);
 
         // Pre-allocate receipt vector with capacity hint (performance optimization)
@@ -4564,62 +4480,36 @@ impl Blockchain {
         let mut ad_verifier_total = 0u64;
         let mut ad_liquidity_total = 0u64;
         let mut ad_miner_total = 0u64;
-        let mut ad_host_it_total = 0u64;
-        let mut ad_hardware_it_total = 0u64;
-        let mut ad_verifier_it_total = 0u64;
-        let mut ad_liquidity_it_total = 0u64;
-        let mut ad_miner_it_total = 0u64;
         let mut ad_total_usd_micros = 0u64;
-        let mut ad_last_ct_price_usd_micros = 0u64;
-        let mut ad_last_it_price_usd_micros = 0u64;
+        let mut ad_last_price_usd_micros = 0u64;
         let mut ad_settlement_count = 0u64;
-        let mut host_it_payouts: Vec<(String, u64)> = Vec::new();
-        let mut hardware_it_payouts: Vec<(String, u64)> = Vec::new();
-        let mut verifier_it_payouts: Vec<(String, u64)> = Vec::new();
         for record in &ad_settlements {
-            if record.viewer_ct > 0 {
-                viewer_payouts.push((record.viewer_addr.clone(), record.viewer_ct));
-                ad_viewer_total = ad_viewer_total.saturating_add(record.viewer_ct);
+            if record.viewer > 0 {
+                viewer_payouts.push((record.viewer_addr.clone(), record.viewer));
+                ad_viewer_total = ad_viewer_total.saturating_add(record.viewer);
             }
-            if record.host_ct > 0 {
-                host_payouts.push((record.host_addr.clone(), record.host_ct));
-                ad_host_total = ad_host_total.saturating_add(record.host_ct);
+            if record.host > 0 {
+                host_payouts.push((record.host_addr.clone(), record.host));
+                ad_host_total = ad_host_total.saturating_add(record.host);
             }
-            if record.hardware_ct > 0 {
-                hardware_payouts.push((record.hardware_addr.clone(), record.hardware_ct));
-                ad_hardware_total = ad_hardware_total.saturating_add(record.hardware_ct);
+            if record.hardware > 0 {
+                hardware_payouts.push((record.hardware_addr.clone(), record.hardware));
+                ad_hardware_total = ad_hardware_total.saturating_add(record.hardware);
             }
-            if record.verifier_ct > 0 {
-                verifier_payouts.push((record.verifier_addr.clone(), record.verifier_ct));
-                ad_verifier_total = ad_verifier_total.saturating_add(record.verifier_ct);
+            if record.verifier > 0 {
+                verifier_payouts.push((record.verifier_addr.clone(), record.verifier));
+                ad_verifier_total = ad_verifier_total.saturating_add(record.verifier);
             }
-            ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity_ct);
-            ad_miner_total = ad_miner_total.saturating_add(record.miner_ct);
-            if dual_token_enabled {
-                if record.host_it > 0 {
-                    host_it_payouts.push((record.host_addr.clone(), record.host_it));
-                    ad_host_it_total = ad_host_it_total.saturating_add(record.host_it);
-                }
-                if record.hardware_it > 0 {
-                    hardware_it_payouts.push((record.hardware_addr.clone(), record.hardware_it));
-                    ad_hardware_it_total = ad_hardware_it_total.saturating_add(record.hardware_it);
-                }
-                if record.verifier_it > 0 {
-                    verifier_it_payouts.push((record.verifier_addr.clone(), record.verifier_it));
-                    ad_verifier_it_total = ad_verifier_it_total.saturating_add(record.verifier_it);
-                }
-                ad_liquidity_it_total = ad_liquidity_it_total.saturating_add(record.liquidity_it);
-                ad_miner_it_total = ad_miner_it_total.saturating_add(record.miner_it);
-            }
+            ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity);
+            ad_miner_total = ad_miner_total.saturating_add(record.miner);
             ad_total_usd_micros = ad_total_usd_micros.saturating_add(record.total_usd_micros);
-            ad_last_ct_price_usd_micros = record.ct_price_usd_micros;
-            ad_last_it_price_usd_micros = record.it_price_usd_micros;
+            ad_last_price_usd_micros = record.price_usd_micros;
             ad_settlement_count = ad_settlement_count.saturating_add(1);
             block_receipts.push(Receipt::Ad(AdReceipt {
                 campaign_id: record.campaign_id.clone(),
                 publisher: record.host_addr.clone(),
                 impressions: record.impressions,
-                spend_ct: record.total_ct,
+                spend_ct: record.total,
                 block_height: index,
                 conversions: record.conversions,
                 publisher_signature: vec![],
@@ -4686,12 +4576,6 @@ impl Blockchain {
         let ad_verifier_token = TokenAmount::new(ad_verifier_total);
         let ad_liquidity_token = TokenAmount::new(ad_liquidity_total);
         let ad_miner_token = TokenAmount::new(ad_miner_total);
-        let ad_host_it_token = TokenAmount::new(ad_host_it_total);
-        let ad_hardware_it_token = TokenAmount::new(ad_hardware_it_total);
-        let ad_verifier_it_token = TokenAmount::new(ad_verifier_it_total);
-        let ad_liquidity_it_token = TokenAmount::new(ad_liquidity_it_total);
-        let ad_miner_it_token = TokenAmount::new(ad_miner_it_total);
-
         let ad_total_ct = ad_viewer_total
             .saturating_add(ad_host_total)
             .saturating_add(ad_hardware_total)
@@ -4729,20 +4613,14 @@ impl Blockchain {
         } else {
             Vec::new()
         };
-        let liquidity_it_payouts = if dual_token_enabled && ad_liquidity_it_total > 0 {
-            vec![(liquidity_address().to_string(), ad_liquidity_it_total)]
-        } else {
-            Vec::new()
-        };
-
         if miner_share_total > 0 {
-            base_coinbase_consumer = base_coinbase_consumer
+            base_coinbase_block = base_coinbase_block
                 .checked_add(miner_share_total)
                 .ok_or_else(|| py_value_err("Fee overflow"))?;
         }
 
         let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
-        let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
+        let treasury_cut = base_coinbase_block.saturating_mul(treasury_percent) / 100;
         let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
             if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
@@ -4752,7 +4630,7 @@ impl Blockchain {
                 #[cfg(feature = "telemetry")]
                 diagnostics::tracing::error!(treasury_cut, "treasury_accrual_failed");
             } else {
-                base_coinbase_consumer = base_coinbase_consumer.saturating_sub(treasury_cut);
+                base_coinbase_block = base_coinbase_block.saturating_sub(treasury_cut);
                 actual_treasury_accrued = treasury_cut;
             }
         }
@@ -4783,16 +4661,9 @@ impl Blockchain {
             }
         }
 
-        let coinbase_consumer_total = base_coinbase_consumer
+        let coinbase_block_total = base_coinbase_block
             .checked_add(rebate_ct)
             .and_then(|v| v.checked_add(fee_industrial_u64))
-            .and_then(|v| {
-                if dual_token_enabled {
-                    v.checked_add(ad_miner_it_total)
-                } else {
-                    Some(v)
-                }
-            })
             .ok_or_else(|| py_value_err("Fee overflow"))?;
         let coinbase_industrial_total = 0;
 
@@ -4813,7 +4684,7 @@ impl Blockchain {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
                 to: miner_addr.to_owned(),
-                amount_consumer: coinbase_consumer_total,
+                amount_consumer: coinbase_block_total,
                 amount_industrial: coinbase_industrial_total,
                 fee: 0,
                 pct_ct: 100,
@@ -4928,7 +4799,7 @@ impl Blockchain {
         miner_shadow.balance.consumer = miner_shadow
             .balance
             .consumer
-            .checked_add(coinbase_consumer_total)
+            .checked_add(coinbase_block_total)
             .ok_or_else(|| py_value_err("miner consumer overflow"))?;
         miner_shadow.balance.industrial = miner_shadow
             .balance
@@ -4965,36 +4836,6 @@ impl Blockchain {
                 .checked_add(*amount)
                 .ok_or_else(|| py_value_err("read subsidy overflow"))?;
         }
-
-        for (addr, amount) in host_it_payouts
-            .iter()
-            .chain(hardware_it_payouts.iter())
-            .chain(verifier_it_payouts.iter())
-            .chain(liquidity_it_payouts.iter())
-        {
-            if *amount == 0 {
-                continue;
-            }
-            let entry = shadow_accounts.entry(addr.clone()).or_insert(Account {
-                address: addr.clone(),
-                balance: TokenBalance {
-                    consumer: 0,
-                    industrial: 0,
-                },
-                nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
-                pending_nonce: 0,
-                pending_nonces: HashSet::new(),
-                sessions: Vec::new(),
-            });
-            entry.balance.industrial = entry
-                .balance
-                .industrial
-                .checked_add(*amount)
-                .ok_or_else(|| py_value_err("industrial payout overflow"))?;
-        }
-
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
@@ -5027,7 +4868,7 @@ impl Blockchain {
             retune_hint: self.retune_hint,
             nonce: 0,
             hash: String::new(),
-            coinbase_consumer: TokenAmount::new(base_coinbase_consumer),
+            coinbase_block: TokenAmount::new(base_coinbase_block),
             coinbase_industrial: TokenAmount::new(coinbase_industrial_total),
             storage_sub_ct: storage_sub_token,
             read_sub_ct: read_sub_token,
@@ -5036,27 +4877,18 @@ impl Blockchain {
             read_sub_hardware_ct: read_sub_hardware_token,
             read_sub_verifier_ct: read_sub_verifier_token,
             read_sub_liquidity_ct: read_sub_liquidity_token,
-            ad_viewer_ct: ad_viewer_token,
-            ad_host_ct: ad_host_token,
-            ad_hardware_ct: ad_hardware_token,
-            ad_verifier_ct: ad_verifier_token,
-            ad_liquidity_ct: ad_liquidity_token,
-            ad_miner_ct: ad_miner_token,
-            ad_host_it: ad_host_it_token,
-            ad_hardware_it: ad_hardware_it_token,
-            ad_verifier_it: ad_verifier_it_token,
-            ad_liquidity_it: ad_liquidity_it_token,
-            ad_miner_it: ad_miner_it_token,
+            ad_viewer: ad_viewer_token,
+            ad_host: ad_host_token,
+            ad_hardware: ad_hardware_token,
+            ad_verifier: ad_verifier_token,
+            ad_liquidity: ad_liquidity_token,
+            ad_miner: ad_miner_token,
             treasury_events,
             ad_total_usd_micros,
             ad_settlement_count,
-            ad_oracle_ct_price_usd_micros: ad_last_ct_price_usd_micros,
-            ad_oracle_it_price_usd_micros: ad_last_it_price_usd_micros,
+            ad_oracle_price_usd_micros: ad_last_price_usd_micros,
             compute_sub_ct: compute_sub_token,
             proof_rebate_ct: TokenAmount::new(0),
-            storage_sub_it: TokenAmount::new(0),
-            read_sub_it: TokenAmount::new(0),
-            compute_sub_it: TokenAmount::new(0),
             read_root: batch.root,
             fee_checksum: fee_checksum.clone(),
             state_root: root.clone(),
@@ -5105,7 +4937,7 @@ impl Blockchain {
                 nonce,
                 diff,
                 block_base_fee,
-                block.coinbase_consumer,
+                block.coinbase_block,
                 block.coinbase_industrial,
                 block.storage_sub_ct,
                 block.read_sub_ct,
@@ -5114,26 +4946,17 @@ impl Blockchain {
                 block.read_sub_hardware_ct,
                 block.read_sub_verifier_ct,
                 block.read_sub_liquidity_ct,
-                block.ad_viewer_ct,
-                block.ad_host_ct,
-                block.ad_hardware_ct,
-                block.ad_verifier_ct,
-                block.ad_liquidity_ct,
-                block.ad_miner_ct,
-                block.ad_host_it,
-                block.ad_hardware_it,
-                block.ad_verifier_it,
-                block.ad_liquidity_it,
-                block.ad_miner_it,
+                block.ad_viewer,
+                block.ad_host,
+                block.ad_hardware,
+                block.ad_verifier,
+                block.ad_liquidity,
+                block.ad_miner,
                 block.ad_total_usd_micros,
                 block.ad_settlement_count,
-                block.ad_oracle_ct_price_usd_micros,
-                block.ad_oracle_it_price_usd_micros,
+                block.ad_oracle_price_usd_micros,
                 block.compute_sub_ct,
                 block.proof_rebate_ct,
-                block.storage_sub_it,
-                block.read_sub_it,
-                block.compute_sub_it,
                 block.read_root,
                 &fee_checksum,
                 &txs,
@@ -5249,7 +5072,7 @@ impl Blockchain {
                         self.economics_epoch_ad_payout_block,
                         total_ad_spend,
                         ad_settlement_count,
-                        ad_last_ct_price_usd_micros,
+                        ad_last_price_usd_micros,
                         util,
                         &energy_snapshot,
                     );
@@ -5488,7 +5311,7 @@ impl Blockchain {
                 miner.balance.consumer = miner
                     .balance
                     .consumer
-                    .checked_add(coinbase_consumer_total)
+                    .checked_add(coinbase_block_total)
                     .ok_or_else(|| py_value_err("miner consumer overflow"))?;
                 miner.balance.industrial = miner
                     .balance
@@ -5525,37 +5348,6 @@ impl Blockchain {
                         .checked_add(*amount)
                         .ok_or_else(|| py_value_err("read subsidy overflow"))?;
                     changed.insert(addr.clone());
-                }
-                if dual_token_enabled {
-                    for (addr, amount) in host_it_payouts
-                        .iter()
-                        .chain(hardware_it_payouts.iter())
-                        .chain(verifier_it_payouts.iter())
-                        .chain(liquidity_it_payouts.iter())
-                    {
-                        if *amount == 0 {
-                            continue;
-                        }
-                        let entry = self.accounts.entry(addr.clone()).or_insert(Account {
-                            address: addr.clone(),
-                            balance: TokenBalance {
-                                consumer: 0,
-                                industrial: 0,
-                            },
-                            nonce: 0,
-                            pending_consumer: 0,
-                            pending_industrial: 0,
-                            pending_nonce: 0,
-                            pending_nonces: HashSet::new(),
-                            sessions: Vec::new(),
-                        });
-                        entry.balance.industrial = entry
-                            .balance
-                            .industrial
-                            .checked_add(*amount)
-                            .ok_or_else(|| py_value_err("industrial payout overflow"))?;
-                        changed.insert(addr.clone());
-                    }
                 }
 
                 let mut touched_shards: HashSet<ShardId> = HashSet::new();
@@ -5684,7 +5476,7 @@ impl Blockchain {
             block.nonce,
             block.difficulty,
             block.base_fee,
-            block.coinbase_consumer,
+            block.coinbase_block,
             block.coinbase_industrial,
             block.storage_sub_ct,
             block.read_sub_ct,
@@ -5693,26 +5485,17 @@ impl Blockchain {
             block.read_sub_hardware_ct,
             block.read_sub_verifier_ct,
             block.read_sub_liquidity_ct,
-            block.ad_viewer_ct,
-            block.ad_host_ct,
-            block.ad_hardware_ct,
-            block.ad_verifier_ct,
-            block.ad_liquidity_ct,
-            block.ad_miner_ct,
-            block.ad_host_it,
-            block.ad_hardware_it,
-            block.ad_verifier_it,
-            block.ad_liquidity_it,
-            block.ad_miner_it,
+            block.ad_viewer,
+            block.ad_host,
+            block.ad_hardware,
+            block.ad_verifier,
+            block.ad_liquidity,
+            block.ad_miner,
             block.ad_total_usd_micros,
             block.ad_settlement_count,
-            block.ad_oracle_ct_price_usd_micros,
-            block.ad_oracle_it_price_usd_micros,
+            block.ad_oracle_price_usd_micros,
             block.compute_sub_ct,
             block.proof_rebate_ct,
-            block.storage_sub_it,
-            block.read_sub_it,
-            block.compute_sub_it,
             block.read_root,
             &block.fee_checksum,
             &block.transactions,
@@ -5736,7 +5519,7 @@ impl Blockchain {
             return Ok(false);
         }
 
-        if block.transactions[0].payload.amount_consumer != block.coinbase_consumer.0
+        if block.transactions[0].payload.amount_consumer != block.coinbase_block.0
             || block.transactions[0].payload.amount_industrial != block.coinbase_industrial.0
         {
             return Ok(false);
@@ -5782,10 +5565,9 @@ impl Blockchain {
         if h.finalize().to_hex().to_string() != block.fee_checksum {
             return Ok(false);
         }
-        let coinbase_consumer_total = block.coinbase_consumer.0 as u128;
+        let coinbase_block_total = block.coinbase_block.0 as u128;
         let coinbase_industrial_total = block.coinbase_industrial.0 as u128;
-        if coinbase_consumer_total < fee_tot_consumer
-            || coinbase_industrial_total < fee_tot_industrial
+        if coinbase_block_total < fee_tot_consumer || coinbase_industrial_total < fee_tot_industrial
         {
             return Ok(false);
         }
@@ -5806,7 +5588,7 @@ impl Blockchain {
             + fee_tot_consumer
             + fee_tot_industrial;
         let expected_industrial = 0u128;
-        if coinbase_consumer_total != expected_consumer
+        if coinbase_block_total != expected_consumer
             || coinbase_industrial_total != expected_industrial
         {
             return Ok(false);
@@ -5936,9 +5718,9 @@ impl Blockchain {
             if h.finalize().to_hex().to_string() != block.fee_checksum {
                 return Err(py_value_err("Fee checksum mismatch"));
             }
-            let coinbase_consumer_total = block.coinbase_consumer.0 as u128;
+            let coinbase_block_total = block.coinbase_block.0 as u128;
             let coinbase_industrial_total = block.coinbase_industrial.0 as u128;
-            if coinbase_consumer_total < fee_tot_consumer
+            if coinbase_block_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
             {
                 return Err(py_value_err("Fee mismatch"));
@@ -5963,7 +5745,7 @@ impl Blockchain {
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
-            if coinbase_consumer_total != expected_consumer
+            if coinbase_block_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
                 return Err(py_value_err("Coinbase mismatch"));
@@ -5984,7 +5766,7 @@ impl Blockchain {
             miner.balance.consumer = miner
                 .balance
                 .consumer
-                .checked_add(block.coinbase_consumer.0)
+                .checked_add(block.coinbase_block.0)
                 .ok_or_else(|| py_value_err("miner consumer overflow"))?;
             miner.balance.industrial = miner
                 .balance
@@ -5992,14 +5774,14 @@ impl Blockchain {
                 .checked_add(block.coinbase_industrial.0)
                 .ok_or_else(|| py_value_err("miner industrial overflow"))?;
             if let Some(cb) = block.transactions.first() {
-                if cb.payload.amount_consumer != block.coinbase_consumer.0
+                if cb.payload.amount_consumer != block.coinbase_block.0
                     || cb.payload.amount_industrial != block.coinbase_industrial.0
                 {
                     // reject forks that tamper with recorded coinbase totals
                     return Err(py_value_err("Coinbase mismatch"));
                 }
             }
-            self.emission += block.coinbase_consumer.0 + block.coinbase_industrial.0;
+            self.emission += block.coinbase_block.0 + block.coinbase_industrial.0;
             self.chain.push(block.clone());
             state::append_difficulty(
                 &std::path::Path::new(&self.path).join("diff_history"),
@@ -6092,7 +5874,7 @@ impl Blockchain {
             if b.transactions[0].payload.from_ != "0".repeat(34) {
                 return false;
             }
-            if b.transactions[0].payload.amount_consumer != b.coinbase_consumer.0
+            if b.transactions[0].payload.amount_consumer != b.coinbase_block.0
                 || b.transactions[0].payload.amount_industrial != b.coinbase_industrial.0
             {
                 return false;
@@ -6104,7 +5886,7 @@ impl Blockchain {
                 b.nonce,
                 b.difficulty,
                 b.base_fee,
-                b.coinbase_consumer,
+                b.coinbase_block,
                 b.coinbase_industrial,
                 b.storage_sub_ct,
                 b.read_sub_ct,
@@ -6113,26 +5895,17 @@ impl Blockchain {
                 b.read_sub_hardware_ct,
                 b.read_sub_verifier_ct,
                 b.read_sub_liquidity_ct,
-                b.ad_viewer_ct,
-                b.ad_host_ct,
-                b.ad_hardware_ct,
-                b.ad_verifier_ct,
-                b.ad_liquidity_ct,
-                b.ad_miner_ct,
-                b.ad_host_it,
-                b.ad_hardware_it,
-                b.ad_verifier_it,
-                b.ad_liquidity_it,
-                b.ad_miner_it,
+                b.ad_viewer,
+                b.ad_host,
+                b.ad_hardware,
+                b.ad_verifier,
+                b.ad_liquidity,
+                b.ad_miner,
                 b.ad_total_usd_micros,
                 b.ad_settlement_count,
-                b.ad_oracle_ct_price_usd_micros,
-                b.ad_oracle_it_price_usd_micros,
+                b.ad_oracle_price_usd_micros,
                 b.compute_sub_ct,
                 b.proof_rebate_ct,
-                b.storage_sub_it,
-                b.read_sub_it,
-                b.compute_sub_it,
                 b.read_root,
                 &b.fee_checksum,
                 &b.transactions,
@@ -6213,9 +5986,9 @@ impl Blockchain {
             if h.finalize().to_hex().to_string() != b.fee_checksum {
                 return false;
             }
-            let coinbase_consumer_total = b.coinbase_consumer.0 as u128;
+            let coinbase_block_total = b.coinbase_block.0 as u128;
             let coinbase_industrial_total = b.coinbase_industrial.0 as u128;
-            if coinbase_consumer_total < fee_tot_consumer
+            if coinbase_block_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
             {
                 return false;
@@ -6240,7 +6013,7 @@ impl Blockchain {
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
-            if coinbase_consumer_total != expected_consumer
+            if coinbase_block_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
                 return false;
@@ -6636,12 +6409,12 @@ mod tests {
         assert_eq!(block.read_sub_hardware_ct.0, 15);
         assert_eq!(block.read_sub_verifier_ct.0, 10);
         assert_eq!(block.read_sub_liquidity_ct.0, 5);
-        assert_eq!(block.ad_viewer_ct.0, 0);
-        assert_eq!(block.ad_host_ct.0, 0);
-        assert_eq!(block.ad_hardware_ct.0, 0);
-        assert_eq!(block.ad_verifier_ct.0, 0);
-        assert_eq!(block.ad_liquidity_ct.0, 0);
-        assert_eq!(block.ad_miner_ct.0, 0);
+        assert_eq!(block.ad_viewer.0, 0);
+        assert_eq!(block.ad_host.0, 0);
+        assert_eq!(block.ad_hardware.0, 0);
+        assert_eq!(block.ad_verifier.0, 0);
+        assert_eq!(block.ad_liquidity.0, 0);
+        assert_eq!(block.ad_miner.0, 0);
 
         let pk = signing.verifying_key().to_bytes();
         let viewer_address = super::viewer_address_from_pk(&pk);
@@ -6871,20 +6644,11 @@ fn calculate_hash_with_cached_receipts(
     ad_verifier: TokenAmount,
     ad_liquidity: TokenAmount,
     ad_miner: TokenAmount,
-    ad_host_it: TokenAmount,
-    ad_hardware_it: TokenAmount,
-    ad_verifier_it: TokenAmount,
-    ad_liquidity_it: TokenAmount,
-    ad_miner_it: TokenAmount,
     ad_total_usd_micros: u64,
     ad_settlement_count: u64,
-    ad_oracle_ct_price_usd_micros: u64,
-    ad_oracle_it_price_usd_micros: u64,
+    ad_oracle_price_usd_micros: u64,
     compute_sub: TokenAmount,
     proof_rebate: TokenAmount,
-    storage_sub_it: TokenAmount,
-    read_sub_it: TokenAmount,
-    compute_sub_it: TokenAmount,
     read_root: [u8; 32],
     fee_checksum: &str,
     txs: &[SignedTransaction],
@@ -6924,20 +6688,11 @@ fn calculate_hash_with_cached_receipts(
         ad_verifier: ad_verifier.0,
         ad_liquidity: ad_liquidity.0,
         ad_miner: ad_miner.0,
-        ad_host_it: ad_host_it.0,
-        ad_hardware_it: ad_hardware_it.0,
-        ad_verifier_it: ad_verifier_it.0,
-        ad_liquidity_it: ad_liquidity_it.0,
-        ad_miner_it: ad_miner_it.0,
         ad_total_usd_micros,
         ad_settlement_count,
-        ad_oracle_ct_price_usd_micros,
-        ad_oracle_it_price_usd_micros,
+        ad_oracle_price_usd_micros,
         compute_sub: compute_sub.0,
         proof_rebate: proof_rebate.0,
-        storage_sub_it: storage_sub_it.0,
-        read_sub_it: read_sub_it.0,
-        compute_sub_it: compute_sub_it.0,
         read_root,
         fee_checksum,
         state_root,
@@ -6977,20 +6732,11 @@ fn calculate_hash(
     ad_verifier: TokenAmount,
     ad_liquidity: TokenAmount,
     ad_miner: TokenAmount,
-    ad_host_it: TokenAmount,
-    ad_hardware_it: TokenAmount,
-    ad_verifier_it: TokenAmount,
-    ad_liquidity_it: TokenAmount,
-    ad_miner_it: TokenAmount,
     ad_total_usd_micros: u64,
     ad_settlement_count: u64,
-    ad_oracle_ct_price_usd_micros: u64,
-    ad_oracle_it_price_usd_micros: u64,
+    ad_oracle_price_usd_micros: u64,
     compute_sub: TokenAmount,
     proof_rebate: TokenAmount,
-    storage_sub_it: TokenAmount,
-    read_sub_it: TokenAmount,
-    compute_sub_it: TokenAmount,
     read_root: [u8; 32],
     fee_checksum: &str,
     txs: &[SignedTransaction],
@@ -7039,20 +6785,11 @@ fn calculate_hash(
         ad_verifier,
         ad_liquidity,
         ad_miner,
-        ad_host_it,
-        ad_hardware_it,
-        ad_verifier_it,
-        ad_liquidity_it,
-        ad_miner_it,
         ad_total_usd_micros,
         ad_settlement_count,
-        ad_oracle_ct_price_usd_micros,
-        ad_oracle_it_price_usd_micros,
+        ad_oracle_price_usd_micros,
         compute_sub,
         proof_rebate,
-        storage_sub_it,
-        read_sub_it,
-        compute_sub_it,
         read_root,
         fee_checksum,
         txs,

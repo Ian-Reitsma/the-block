@@ -436,7 +436,7 @@ fn write_payout_table(
         "    ad_total_usd_micros: {} (settlements: {}, ct_price: {}, it_price: {})",
         breakdown.total_usd_micros,
         breakdown.settlement_count,
-        breakdown.ct_price_usd_micros,
+        breakdown.price_usd_micros,
         breakdown.it_price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
@@ -549,8 +549,8 @@ fn write_prometheus_payload(
     .map_err(|err| format!("failed to write output: {err}"))?;
     writeln!(
         writer,
-        "explorer_block_payout_ad_ct_price_usd_micros {}",
-        breakdown.ct_price_usd_micros
+        "explorer_block_payout_ad_price_usd_micros {}",
+        breakdown.price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
     writeln!(

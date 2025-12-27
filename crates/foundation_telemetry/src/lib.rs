@@ -32,13 +32,9 @@ pub struct AdReadinessTelemetry {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub settlement_count: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub ct_price_usd_micros: u64,
+    pub price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub it_price_usd_micros: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub market_ct_price_usd_micros: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub market_it_price_usd_micros: u64,
+    pub market_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub cohort_utilization: Vec<AdReadinessCohortTelemetry>,
     #[serde(default)]
@@ -224,10 +220,8 @@ impl TelemetrySummary {
                     "last_updated",
                     "total_usd_micros",
                     "settlement_count",
-                    "ct_price_usd_micros",
-                    "it_price_usd_micros",
-                    "market_ct_price_usd_micros",
-                    "market_it_price_usd_micros",
+                    "price_usd_micros",
+                    "market_price_usd_micros",
                 ] {
                     let field_path = child_path(&readiness_path, field);
                     expect_u64_field(readiness, field, &field_path)?;

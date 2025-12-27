@@ -793,7 +793,7 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
-| `ad_market.inventory` | `{selector_filter?:{domain_tier?,interest_tag?,presence_bucket_id?,badge?}}` | `{status:"ok",distribution:DistributionPolicy,oracle:{ct_price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot],selector_prices:Vec<SelectorBidSpec>}` | `-32603` when the market handle is not configured, `-32035` selector violates privacy |
+| `ad_market.inventory` | `{selector_filter?:{domain_tier?,interest_tag?,presence_bucket_id?,badge?}}` | `{status:"ok",distribution:DistributionPolicy,oracle:{price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot],selector_prices:Vec<SelectorBidSpec>}` | `-32603` when the market handle is not configured, `-32035` selector violates privacy |
 | `ad_market.list_campaigns` | `{selector_filter?}` | `{status:"ok",campaigns:[CampaignSummary]}` | `-32603` when disabled |
 | `ad_market.distribution` | `{selector_id?}` | `{status:"ok",distribution:DistributionPolicy,selector_overrides?:Vec<SelectorBidSpec>}` | `-32603` |
 | `ad_market.budget` | `{campaign_id?}` | `{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...},privacy_budget:{...}}` mirroring `budget_snapshot_to_value` | `-32603` |

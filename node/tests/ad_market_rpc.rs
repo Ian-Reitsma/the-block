@@ -422,11 +422,7 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(creative_ids.len(), 1);
     assert_eq!(creative_ids[0].as_str(), Some("creative-1"));
     assert_eq!(
-        inventory["oracle"]["ct_price_usd_micros"].as_u64(),
-        Some(MICROS_PER_DOLLAR)
-    );
-    assert_eq!(
-        inventory["oracle"]["it_price_usd_micros"].as_u64(),
+        inventory["oracle"]["price_usd_micros"].as_u64(),
         Some(MICROS_PER_DOLLAR)
     );
     let cohorts = inventory["cohort_prices"]
@@ -449,10 +445,6 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(dist["hardware_percent"].as_u64(), Some(20));
     assert_eq!(dist["verifier_percent"].as_u64(), Some(5));
     assert_eq!(dist["liquidity_percent"].as_u64(), Some(5));
-    assert_eq!(
-        dist["liquidity_split_ct_ppm"].as_u64(),
-        Some(DistributionPolicy::default().liquidity_split_ct_ppm as u64)
-    );
 
     let readiness_initial = expect_ok(harness.call("ad_market.readiness", Value::Null));
     assert_eq!(readiness_initial["status"].as_str(), Some("ok"));
@@ -500,15 +492,12 @@ fn ad_market_rpc_endpoints_round_trip() {
             .len(),
         0
     );
-    assert!(readiness_ready["ct_price_usd_micros"].as_u64().is_some());
-    assert!(readiness_ready["it_price_usd_micros"].as_u64().is_some());
+    assert!(readiness_ready["price_usd_micros"].as_u64().is_some());
     let oracle = readiness_ready["oracle"].as_object().expect("oracle map");
     let snapshot_oracle = oracle["snapshot"].as_object().expect("snapshot oracle");
-    assert!(snapshot_oracle["ct_price_usd_micros"].as_u64().is_some());
-    assert!(snapshot_oracle["it_price_usd_micros"].as_u64().is_some());
+    assert!(snapshot_oracle["price_usd_micros"].as_u64().is_some());
     let market_oracle = oracle["market"].as_object().expect("market oracle");
-    assert!(market_oracle["ct_price_usd_micros"].as_u64().is_some());
-    assert!(market_oracle["it_price_usd_micros"].as_u64().is_some());
+    assert!(market_oracle["price_usd_micros"].as_u64().is_some());
     let utilization_ready = readiness_ready
         .get("utilization")
         .and_then(Value::as_object)
@@ -1737,8 +1726,7 @@ fn rpc_record_conversion_rejects_unknown_creative() {
 #[testkit::tb_serial]
 fn mesh_holdout_treatment_settlement_has_mesh_fields() {
     let mut config = MarketplaceConfig::default();
-    config.default_oracle.ct_price_usd_micros = 1_000_000;
-    config.default_oracle.it_price_usd_micros = 1_000_000;
+    config.default_oracle.price_usd_micros = 1_000_000;
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_mesh_holdout_treatment", config);
     let market = harness

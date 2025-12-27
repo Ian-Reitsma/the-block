@@ -89,7 +89,6 @@ impl<'a> Runtime<'a> {
             Some(handle) => handle,
             None => return,
         };
-        let current = market.distribution();
         let clamp_percent = |value: i64| value.clamp(0, 100) as u64;
         let policy = DistributionPolicy::new(
             clamp_percent(self.bc.params.read_subsidy_viewer_percent),
@@ -97,9 +96,7 @@ impl<'a> Runtime<'a> {
             clamp_percent(self.bc.params.read_subsidy_hardware_percent),
             clamp_percent(self.bc.params.read_subsidy_verifier_percent),
             clamp_percent(self.bc.params.read_subsidy_liquidity_percent),
-        )
-        .with_liquidity_split(current.liquidity_split_ct_ppm)
-        .with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
+        );
         market.update_distribution(policy.normalize());
     }
 

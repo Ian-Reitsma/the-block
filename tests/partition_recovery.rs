@@ -13,7 +13,7 @@ fn dummy_block() -> Block {
         retune_hint: 0,
         nonce: 0,
         hash: String::new(),
-        coinbase_consumer: 0,
+        coinbase_block: 0,
         coinbase_industrial: 0,
         storage_sub_ct: 0,
         read_sub_ct: 0,

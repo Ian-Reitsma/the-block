@@ -1244,19 +1244,12 @@ pub struct ProviderSettlementRecord {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RolePayoutBreakdown {
     pub total_ct: u64,
-    pub total_it: u64,
     pub viewer_ct: u64,
-    pub viewer_it: u64,
     pub host_ct: u64,
-    pub host_it: u64,
     pub hardware_ct: u64,
-    pub hardware_it: u64,
     pub verifier_ct: u64,
-    pub verifier_it: u64,
     pub liquidity_ct: u64,
-    pub liquidity_it: u64,
     pub miner_ct: u64,
-    pub miner_it: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1365,8 +1358,7 @@ pub struct BlockPayoutBreakdown {
     pub advertising: RolePayoutBreakdown,
     pub total_usd_micros: u64,
     pub settlement_count: u64,
-    pub ct_price_usd_micros: u64,
-    pub it_price_usd_micros: u64,
+    pub price_usd_micros: u64,
     pub treasury_events: Vec<TreasuryTimelineEvent>,
 }
 
@@ -1401,12 +1393,12 @@ impl BlockPayoutBreakdown {
             miner_it: 0,
         };
 
-        let ad_viewer = block.ad_viewer_ct.get();
-        let ad_host = block.ad_host_ct.get();
-        let ad_hardware = block.ad_hardware_ct.get();
-        let ad_verifier = block.ad_verifier_ct.get();
-        let ad_liquidity = block.ad_liquidity_ct.get();
-        let ad_miner = block.ad_miner_ct.get();
+        let ad_viewer = block.ad_viewer.get();
+        let ad_host = block.ad_host.get();
+        let ad_hardware = block.ad_hardware.get();
+        let ad_verifier = block.ad_verifier.get();
+        let ad_liquidity = block.ad_liquidity.get();
+        let ad_miner = block.ad_miner.get();
         let ad_total = ad_viewer
             .saturating_add(ad_host)
             .saturating_add(ad_hardware)
@@ -1453,7 +1445,7 @@ impl BlockPayoutBreakdown {
             advertising: ad_breakdown,
             total_usd_micros: block.ad_total_usd_micros,
             settlement_count: block.ad_settlement_count,
-            ct_price_usd_micros: block.ad_oracle_ct_price_usd_micros,
+            price_usd_micros: block.ad_oracle_price_usd_micros,
             it_price_usd_micros: block.ad_oracle_it_price_usd_micros,
             treasury_events,
         }
@@ -1508,12 +1500,12 @@ impl BlockPayoutBreakdown {
             miner_it: 0,
         };
 
-        let ad_viewer = Self::field_u64(map, "ad_viewer_ct");
-        let ad_host = Self::field_u64(map, "ad_host_ct");
-        let ad_hardware = Self::field_u64(map, "ad_hardware_ct");
-        let ad_verifier = Self::field_u64(map, "ad_verifier_ct");
-        let ad_liquidity = Self::field_u64(map, "ad_liquidity_ct");
-        let ad_miner = Self::field_u64(map, "ad_miner_ct");
+        let ad_viewer = Self::field_u64(map, "ad_viewer");
+        let ad_host = Self::field_u64(map, "ad_host");
+        let ad_hardware = Self::field_u64(map, "ad_hardware");
+        let ad_verifier = Self::field_u64(map, "ad_verifier");
+        let ad_liquidity = Self::field_u64(map, "ad_liquidity");
+        let ad_miner = Self::field_u64(map, "ad_miner");
         let ad_total = ad_viewer
             .saturating_add(ad_host)
             .saturating_add(ad_hardware)
@@ -1551,8 +1543,8 @@ impl BlockPayoutBreakdown {
             .max(Self::field_u64(map, "ad_total_usd_micros"));
         let settlement_count = Self::field_u64(map, "settlement_count")
             .max(Self::field_u64(map, "ad_settlement_count"));
-        let ct_price = Self::field_u64(map, "ct_price_usd_micros")
-            .max(Self::field_u64(map, "ad_oracle_ct_price_usd_micros"));
+        let ct_price = Self::field_u64(map, "price_usd_micros")
+            .max(Self::field_u64(map, "ad_oracle_price_usd_micros"));
         let it_price = Self::field_u64(map, "it_price_usd_micros")
             .max(Self::field_u64(map, "ad_oracle_it_price_usd_micros"));
 
@@ -1563,7 +1555,7 @@ impl BlockPayoutBreakdown {
             advertising: ad_breakdown,
             total_usd_micros: total_usd,
             settlement_count,
-            ct_price_usd_micros: ct_price,
+            price_usd_micros: ct_price,
             it_price_usd_micros: it_price,
             treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
         })
@@ -1589,7 +1581,7 @@ impl BlockPayoutBreakdown {
                 advertising,
                 total_usd_micros: Self::field_u64(map, "total_usd_micros"),
                 settlement_count: Self::field_u64(map, "settlement_count"),
-                ct_price_usd_micros: Self::field_u64(map, "ct_price_usd_micros"),
+                price_usd_micros: Self::field_u64(map, "price_usd_micros"),
                 it_price_usd_micros: Self::field_u64(map, "it_price_usd_micros"),
                 treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
             });
@@ -1613,8 +1605,8 @@ impl BlockPayoutBreakdown {
             Self::number(self.settlement_count),
         );
         map.insert(
-            "ct_price_usd_micros".into(),
-            Self::number(self.ct_price_usd_micros),
+            "price_usd_micros".into(),
+            Self::number(self.price_usd_micros),
         );
         map.insert(
             "it_price_usd_micros".into(),

@@ -47,7 +47,7 @@ fn block_lookup_via_router() {
                 "retune_hint": 0,
                 "nonce": 123,
                 "hash": "b1",
-                "coinbase_consumer": 0,
+                "coinbase_block": 0,
                 "coinbase_industrial": 0,
                 "storage_sub_ct": 0,
                 "read_sub_ct": {read_total},
@@ -56,12 +56,12 @@ fn block_lookup_via_router() {
                 "read_sub_hardware_ct": {read_hardware},
                 "read_sub_verifier_ct": {read_verifier},
                 "read_sub_liquidity_ct": {read_liquidity},
-                "ad_viewer_ct": {ad_viewer},
-                "ad_host_ct": {ad_host},
-                "ad_hardware_ct": {ad_hardware},
-                "ad_verifier_ct": {ad_verifier},
-                "ad_liquidity_ct": {ad_liquidity},
-                "ad_miner_ct": {ad_miner},
+                "ad_viewer": {ad_viewer},
+                "ad_host": {ad_host},
+                "ad_hardware": {ad_hardware},
+                "ad_verifier": {ad_verifier},
+                "ad_liquidity": {ad_liquidity},
+                "ad_miner": {ad_miner},
                 "ad_host_it": {ad_host_it},
                 "ad_hardware_it": {ad_hardware_it},
                 "ad_verifier_it": {ad_verifier_it},
@@ -69,7 +69,7 @@ fn block_lookup_via_router() {
                 "ad_miner_it": {ad_miner_it},
                 "ad_total_usd_micros": {ad_total_usd_micros},
                 "ad_settlement_count": {ad_settlement_count},
-                "ad_oracle_ct_price_usd_micros": {ad_ct_price},
+                "ad_oracle_price_usd_micros": {ad_ct_price},
                 "ad_oracle_it_price_usd_micros": {ad_it_price},
                 "compute_sub_ct": 0,
                 "proof_rebate_ct": 0,
@@ -139,7 +139,7 @@ fn block_lookup_via_router() {
         assert_eq!(payouts.advertising.miner_it, ad_miner_it);
         assert_eq!(payouts.total_usd_micros, ad_total_usd_micros);
         assert_eq!(payouts.settlement_count, ad_settlement_count);
-        assert_eq!(payouts.ct_price_usd_micros, ad_ct_price);
+        assert_eq!(payouts.price_usd_micros, ad_ct_price);
         assert_eq!(payouts.it_price_usd_micros, ad_it_price);
         assert!(payouts.treasury_events.is_empty());
     });

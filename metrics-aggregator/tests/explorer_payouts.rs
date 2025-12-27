@@ -302,7 +302,7 @@ fn explorer_payout_summary_metrics_exposed() {
             scalar_metric(8.0),
         );
         metrics.insert(
-            "explorer_block_payout_ad_ct_price_usd_micros".to_string(),
+            "explorer_block_payout_ad_price_usd_micros".to_string(),
             scalar_metric(25_000.0),
         );
         metrics.insert(
@@ -344,7 +344,7 @@ fn explorer_payout_summary_metrics_exposed() {
         assert_eq!(settlement_count, 8.0);
         let ct_price = scrape_peer_metric(
             &body,
-            "explorer_block_payout_ad_ct_price_usd_micros",
+            "explorer_block_payout_ad_price_usd_micros",
             "explorer-node",
         )
         .expect("ct price metric");

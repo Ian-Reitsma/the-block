@@ -1109,7 +1109,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 </ul>
 <p><strong>Common errors</strong>: <code>-32602</code> invalid params, <code>-32603</code> internal/disabled, <code>-32000</code> duplicate campaign, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030..-32033</code> advertiser auth failures.</p>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
-<tr><td><code>ad_market.inventory</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy,oracle:{ct_price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot]}</code></td><td><code>-32603</code> when the market handle is not configured</td></tr>
+<tr><td><code>ad_market.inventory</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy,oracle:{price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot]}</code></td><td><code>-32603</code> when the market handle is not configured</td></tr>
 <tr><td><code>ad_market.list_campaigns</code></td><td>none</td><td><code>{status:"ok",campaigns:[CampaignSummary]}</code></td><td><code>-32603</code> when disabled</td></tr>
 <tr><td><code>ad_market.distribution</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy}</code></td><td><code>-32603</code></td></tr>
 <tr><td><code>ad_market.budget</code></td><td>none</td><td><code>{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...}}</code> mirroring <code>budget_snapshot_to_value</code></td><td><code>-32603</code></td></tr>

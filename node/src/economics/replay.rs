@@ -111,7 +111,7 @@ pub fn replay_economics_to_height(
         }
 
         // Accumulate emissions from this block
-        emission = emission.saturating_add(block.coinbase_consumer.0);
+        emission = emission.saturating_add(block.coinbase_block.0);
         emission = emission.saturating_add(block.coinbase_industrial.0);
 
         // Track miner

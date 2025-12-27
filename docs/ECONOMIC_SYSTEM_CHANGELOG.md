@@ -133,7 +133,7 @@ All 3 integration tests passing with new economics:
 - **Ad & Tariff Controllers (Layer 4):** Still drift toward governance targets
 - **Governance System:** All 39 parameters still work (inflation params now legacy)
 - **Account Balances:** Still track consumer/industrial sub-ledgers internally
-- **Block Structure:** Still has coinbase_consumer/coinbase_industrial fields
+- **Block Structure:** Still has coinbase_block/coinbase_industrial fields
 
 ### ⚠️ Changed Behavior
 

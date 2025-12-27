@@ -157,20 +157,6 @@ pub fn persist_snapshot(base: &str, market: &MarketplaceHandle, epoch: u64) -> s
         "liquidity_percent".into(),
         JsonValue::Number(number_from_u64(policy.liquidity_percent)),
     );
-    pol.insert(
-        "liquidity_split_ct_ppm".into(),
-        JsonValue::Number(JsonNumber::from(policy.liquidity_split_ct_ppm as u64)),
-    );
-    pol.insert(
-        "normalized_liquidity_ppm".into(),
-        JsonValue::Number(number_from_u64(
-            (policy.liquidity_split_ct_ppm.min(PPM_SCALE as u32)) as u64,
-        )),
-    );
-    pol.insert(
-        "dual_token_settlement_enabled".into(),
-        JsonValue::Bool(policy.dual_token_settlement_enabled),
-    );
     root.insert("distribution".into(), JsonValue::Object(pol));
     let mut med = JsonMap::new();
     med.insert(

@@ -667,12 +667,8 @@ pub fn inventory(market: Option<&MarketplaceHandle>) -> Value {
     root.insert("distribution".into(), distribution_to_value(distribution));
     let mut oracle_map = Map::new();
     oracle_map.insert(
-        "ct_price_usd_micros".into(),
-        Value::Number(Number::from(oracle.ct_price_usd_micros)),
-    );
-    oracle_map.insert(
-        "it_price_usd_micros".into(),
-        Value::Number(Number::from(oracle.it_price_usd_micros)),
+        "price_usd_micros".into(),
+        Value::Number(Number::from(oracle.price_usd_micros)),
     );
     root.insert("oracle".into(), Value::Object(oracle_map));
     let items: Vec<Value> = campaigns.iter().map(campaign_summary_to_value).collect();
@@ -782,17 +778,13 @@ pub fn readiness(
     if let Some(market_handle) = market {
         let oracle = market_handle.oracle();
         let cohorts = market_handle.cohort_prices();
-        handle.record_utilization(
-            &cohorts,
-            oracle.ct_price_usd_micros,
-            oracle.it_price_usd_micros,
-        );
+        handle.record_utilization(&cohorts, oracle.price_usd_micros);
         // Allow the market to adapt distribution weights from live utilization.
         market_handle.recompute_distribution_from_utilization();
         distribution_value = Some(distribution_to_value(market_handle.distribution()));
     } else {
         let empty: Vec<CohortPriceSnapshot> = Vec::new();
-        handle.record_utilization(&empty, 0, 0);
+        handle.record_utilization(&empty, 0);
     }
     let snapshot = handle.snapshot();
     #[cfg(feature = "telemetry")]
@@ -915,12 +907,8 @@ pub fn readiness(
         Value::Number(Number::from(snapshot.settlement_count)),
     );
     root.insert(
-        "ct_price_usd_micros".into(),
-        Value::Number(Number::from(snapshot.ct_price_usd_micros)),
-    );
-    root.insert(
-        "it_price_usd_micros".into(),
-        Value::Number(Number::from(snapshot.it_price_usd_micros)),
+        "price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.price_usd_micros)),
     );
     let blockers: Vec<Value> = snapshot.blockers.into_iter().map(Value::String).collect();
     root.insert("blockers".into(), Value::Array(blockers));
@@ -931,22 +919,14 @@ pub fn readiness(
     let mut oracle_map = Map::new();
     let mut snapshot_oracle = Map::new();
     snapshot_oracle.insert(
-        "ct_price_usd_micros".into(),
-        Value::Number(Number::from(snapshot.ct_price_usd_micros)),
-    );
-    snapshot_oracle.insert(
-        "it_price_usd_micros".into(),
-        Value::Number(Number::from(snapshot.it_price_usd_micros)),
+        "price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.price_usd_micros)),
     );
     oracle_map.insert("snapshot".into(), Value::Object(snapshot_oracle));
     let mut market_oracle = Map::new();
     market_oracle.insert(
-        "ct_price_usd_micros".into(),
-        Value::Number(Number::from(snapshot.market_ct_price_usd_micros)),
-    );
-    market_oracle.insert(
-        "it_price_usd_micros".into(),
-        Value::Number(Number::from(snapshot.market_it_price_usd_micros)),
+        "price_usd_micros".into(),
+        Value::Number(Number::from(snapshot.market_price_usd_micros)),
     );
     oracle_map.insert("market".into(), Value::Object(market_oracle));
     root.insert("oracle".into(), Value::Object(oracle_map));
@@ -1136,10 +1116,6 @@ fn distribution_to_value(policy: DistributionPolicy) -> Value {
     map.insert(
         "liquidity_percent".into(),
         Value::Number(Number::from(policy.liquidity_percent)),
-    );
-    map.insert(
-        "liquidity_split_ct_ppm".into(),
-        Value::Number(Number::from(policy.liquidity_split_ct_ppm)),
     );
     Value::Object(map)
 }
