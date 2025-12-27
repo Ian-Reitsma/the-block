@@ -30,7 +30,7 @@ fn build_signed_tx(
         amount_consumer: amount,
         amount_industrial: amount,
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: Vec::new(),
     };

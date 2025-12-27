@@ -284,9 +284,9 @@ pub enum DisbursementValidationError {
 #[serde(crate = "foundation_serialization::serde")]
 pub enum DisbursementError {
     InsufficientFunds {
-        required_ct: u64,
+        required: u64,
         required_it: u64,
-        available_ct: u64,
+        available: u64,
         available_it: u64,
     },
     InvalidTarget {

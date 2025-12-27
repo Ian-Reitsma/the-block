@@ -35,7 +35,7 @@ fn session_nonce_and_expiry() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };

@@ -13,7 +13,7 @@ fn sample_offer_job(id: &str) -> (Offer, Job) {
         consumer_bond: 1,
         units: 1,
         price_per_unit: 1,
-        fee_pct_ct: 0,
+        fee_pct: 0,
         capability: Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,

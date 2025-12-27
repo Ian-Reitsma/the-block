@@ -72,7 +72,7 @@ def test_valid_env_returns_handle(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1_000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )
@@ -87,7 +87,7 @@ def test_valid_env_returns_handle(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1_000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )

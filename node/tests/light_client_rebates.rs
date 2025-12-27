@@ -23,7 +23,7 @@ fn rebate_persistence_across_restart() {
         bc.add_account("miner".into(), 0, 0).expect("add miner");
         bc.record_proof_relay(b"relay", 4);
         let block = bc.mine_block("miner").expect("mine block");
-        assert_eq!(block.proof_rebate_ct, TokenAmount::new(4));
+        assert_eq!(block.proof_rebate, TokenAmount::new(4));
         let history = bc.proof_tracker.receipt_history(None, None, 8);
         assert_eq!(history.receipts.len(), 1);
         assert_eq!(history.receipts[0].amount, 4);
@@ -47,7 +47,7 @@ fn rebate_rollback_restores_pending_balances() {
     bc.add_account("miner".into(), 0, 0).expect("add miner");
     bc.record_proof_relay(b"relay", 6);
     let block = bc.mine_block("miner").expect("mine block");
-    assert_eq!(block.proof_rebate_ct, TokenAmount::new(6));
+    assert_eq!(block.proof_rebate, TokenAmount::new(6));
     let restored = bc.proof_tracker.rollback_claim(block.index);
     assert_eq!(restored, 6);
     let snapshot = bc.proof_tracker.snapshot();

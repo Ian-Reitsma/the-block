@@ -102,13 +102,13 @@ fn ledger_settlement_updates_balances() {
     register_stake(&json_map(vec![
         ("reference", Value::String("ledger-stake".to_string())),
         ("owner_account", Value::String("bidder-ledger".to_string())),
-        ("deposit_ct", Value::Number(Number::from(1_500))),
+        ("deposit", Value::Number(Number::from(1_500))),
     ]))
     .expect("register stake");
 
     list_for_sale(&json_map(vec![
         ("domain", Value::String(domain.to_string())),
-        ("min_bid_ct", Value::Number(Number::from(1_500))),
+        ("min_bid", Value::Number(Number::from(1_500))),
         ("protocol_fee_bps", Value::Number(Number::from(500))),
         ("royalty_bps", Value::Number(Number::from(100))),
         ("seller_account", Value::String("seller-ledger".to_string())),
@@ -118,7 +118,7 @@ fn ledger_settlement_updates_balances() {
     place_bid(&json_map(vec![
         ("domain", Value::String(domain.to_string())),
         ("bidder_account", Value::String("bidder-ledger".to_string())),
-        ("bid_ct", Value::Number(Number::from(1_500))),
+        ("bid", Value::Number(Number::from(1_500))),
         ("stake_reference", Value::String("ledger-stake".to_string())),
     ]))
     .expect("bid");
@@ -172,19 +172,19 @@ fn losing_bidder_keeps_balance_and_unlocked_stake() {
     register_stake(&json_map(vec![
         ("reference", Value::String("stake-low".to_string())),
         ("owner_account", Value::String("bidder-low".to_string())),
-        ("deposit_ct", Value::Number(Number::from(1_000))),
+        ("deposit", Value::Number(Number::from(1_000))),
     ]))
     .expect("register stake low");
     register_stake(&json_map(vec![
         ("reference", Value::String("stake-high".to_string())),
         ("owner_account", Value::String("bidder-high".to_string())),
-        ("deposit_ct", Value::Number(Number::from(1_000))),
+        ("deposit", Value::Number(Number::from(1_000))),
     ]))
     .expect("register stake high");
 
     list_for_sale(&json_map(vec![
         ("domain", Value::String(domain.to_string())),
-        ("min_bid_ct", Value::Number(Number::from(1_000))),
+        ("min_bid", Value::Number(Number::from(1_000))),
         ("protocol_fee_bps", Value::Number(Number::from(400))),
         ("royalty_bps", Value::Number(Number::from(100))),
         ("seller_account", Value::String("seller-loss".to_string())),
@@ -194,7 +194,7 @@ fn losing_bidder_keeps_balance_and_unlocked_stake() {
     place_bid(&json_map(vec![
         ("domain", Value::String(domain.to_string())),
         ("bidder_account", Value::String("bidder-low".to_string())),
-        ("bid_ct", Value::Number(Number::from(1_100))),
+        ("bid", Value::Number(Number::from(1_100))),
         ("stake_reference", Value::String("stake-low".to_string())),
     ]))
     .expect("initial bid");
@@ -202,7 +202,7 @@ fn losing_bidder_keeps_balance_and_unlocked_stake() {
     place_bid(&json_map(vec![
         ("domain", Value::String(domain.to_string())),
         ("bidder_account", Value::String("bidder-high".to_string())),
-        ("bid_ct", Value::Number(Number::from(1_400))),
+        ("bid", Value::Number(Number::from(1_400))),
         ("stake_reference", Value::String("stake-high".to_string())),
     ]))
     .expect("outbid");
@@ -222,7 +222,7 @@ fn losing_bidder_keeps_balance_and_unlocked_stake() {
     drop(guard);
 
     let snapshot = stake_snapshot("stake-low").expect("stake-low snapshot");
-    assert_eq!(snapshot.locked_ct, 0);
+    assert_eq!(snapshot.locked, 0);
 
     let history = history_for(domain);
     let records = extract_records(&history, domain);
@@ -249,7 +249,7 @@ fn stake_registration_and_withdrawal_moves_funds() {
     register_stake(&json_map(vec![
         ("reference", Value::String("stake-ledger".to_string())),
         ("owner_account", Value::String("stake-owner".to_string())),
-        ("deposit_ct", Value::Number(Number::from(2_000))),
+        ("deposit", Value::Number(Number::from(2_000))),
     ]))
     .expect("register stake");
 
@@ -263,7 +263,7 @@ fn stake_registration_and_withdrawal_moves_funds() {
     withdraw_stake(&json_map(vec![
         ("reference", Value::String("stake-ledger".to_string())),
         ("owner_account", Value::String("stake-owner".to_string())),
-        ("withdraw_ct", Value::Number(Number::from(500))),
+        ("withdraw", Value::Number(Number::from(500))),
     ]))
     .expect("withdraw stake");
 
@@ -275,7 +275,7 @@ fn stake_registration_and_withdrawal_moves_funds() {
 
     let snapshot = stake_snapshot("stake-ledger").expect("stake snapshot");
     assert_eq!(snapshot.amount, 1_500);
-    assert_eq!(snapshot.locked_ct, 0);
+    assert_eq!(snapshot.locked, 0);
 
     clear_ledger_context();
 }
@@ -303,7 +303,7 @@ fn stake_ledger_events_are_persisted() {
             "owner_account",
             Value::String("stake-ledger-events".to_string()),
         ),
-        ("deposit_ct", Value::Number(Number::from(750))),
+        ("deposit", Value::Number(Number::from(750))),
     ]))
     .expect("register stake with events");
 
@@ -327,7 +327,7 @@ fn stake_ledger_events_are_persisted() {
             "owner_account",
             Value::String("stake-ledger-events".to_string()),
         ),
-        ("withdraw_ct", Value::Number(Number::from(250))),
+        ("withdraw", Value::Number(Number::from(250))),
     ]))
     .expect("withdraw partial stake");
 
@@ -355,7 +355,7 @@ fn stake_ledger_events_are_persisted() {
             "owner_account",
             Value::String("stake-ledger-events".to_string()),
         ),
-        ("withdraw_ct", Value::Number(Number::from(500))),
+        ("withdraw", Value::Number(Number::from(500))),
     ]))
     .expect("withdraw remaining stake");
 
@@ -414,13 +414,13 @@ fn cancelling_auction_releases_locked_stake() {
     register_stake(&json_map(vec![
         ("reference", Value::String("stake-cancel".to_string())),
         ("owner_account", Value::String("bidder-cancel".to_string())),
-        ("deposit_ct", Value::Number(Number::from(1_200))),
+        ("deposit", Value::Number(Number::from(1_200))),
     ]))
     .expect("register bidder stake");
 
     list_for_sale(&json_map(vec![
         ("domain", Value::String("cancel-me.block".to_string())),
-        ("min_bid_ct", Value::Number(Number::from(1_200))),
+        ("min_bid", Value::Number(Number::from(1_200))),
         ("seller_account", Value::String("seller-cancel".to_string())),
     ]))
     .expect("list domain");
@@ -428,7 +428,7 @@ fn cancelling_auction_releases_locked_stake() {
     place_bid(&json_map(vec![
         ("domain", Value::String("cancel-me.block".to_string())),
         ("bidder_account", Value::String("bidder-cancel".to_string())),
-        ("bid_ct", Value::Number(Number::from(1_200))),
+        ("bid", Value::Number(Number::from(1_200))),
         ("stake_reference", Value::String("stake-cancel".to_string())),
     ]))
     .expect("bid domain");
@@ -440,7 +440,7 @@ fn cancelling_auction_releases_locked_stake() {
     .expect("cancel sale");
 
     let snapshot = stake_snapshot("stake-cancel").expect("stake snapshot");
-    assert_eq!(snapshot.locked_ct, 0);
+    assert_eq!(snapshot.locked, 0);
 
     // NOTE: Sandbox mode - balances remain unchanged
     let guard = chain.lock().unwrap();
@@ -479,20 +479,20 @@ fn dns_auction_summary_reports_metrics() {
     register_stake(&json_map(vec![
         ("reference", Value::String("stake-summary".to_string())),
         ("owner_account", Value::String("bidder-summary".to_string())),
-        ("deposit_ct", Value::Number(Number::from(2_000))),
+        ("deposit", Value::Number(Number::from(2_000))),
     ]))
     .expect("register settled stake");
     register_stake(&json_map(vec![
         ("reference", Value::String("stake-active".to_string())),
         ("owner_account", Value::String("bidder-active".to_string())),
-        ("deposit_ct", Value::Number(Number::from(1_200))),
+        ("deposit", Value::Number(Number::from(1_200))),
     ]))
     .expect("register active stake");
 
     let settled_domain = "summary-finished.block";
     list_for_sale(&json_map(vec![
         ("domain", Value::String(settled_domain.to_string())),
-        ("min_bid_ct", Value::Number(Number::from(1_500))),
+        ("min_bid", Value::Number(Number::from(1_500))),
         ("protocol_fee_bps", Value::Number(Number::from(400))),
         ("royalty_bps", Value::Number(Number::from(100))),
         (
@@ -507,7 +507,7 @@ fn dns_auction_summary_reports_metrics() {
             "bidder_account",
             Value::String("bidder-summary".to_string()),
         ),
-        ("bid_ct", Value::Number(Number::from(1_700))),
+        ("bid", Value::Number(Number::from(1_700))),
         (
             "stake_reference",
             Value::String("stake-summary".to_string()),
@@ -523,7 +523,7 @@ fn dns_auction_summary_reports_metrics() {
     let active_domain = "summary-active.block";
     list_for_sale(&json_map(vec![
         ("domain", Value::String(active_domain.to_string())),
-        ("min_bid_ct", Value::Number(Number::from(900))),
+        ("min_bid", Value::Number(Number::from(900))),
         ("protocol_fee_bps", Value::Number(Number::from(300))),
         ("royalty_bps", Value::Number(Number::from(50))),
         (
@@ -535,7 +535,7 @@ fn dns_auction_summary_reports_metrics() {
     place_bid(&json_map(vec![
         ("domain", Value::String(active_domain.to_string())),
         ("bidder_account", Value::String("bidder-active".to_string())),
-        ("bid_ct", Value::Number(Number::from(1_000))),
+        ("bid", Value::Number(Number::from(1_000))),
         ("stake_reference", Value::String("stake-active".to_string())),
     ]))
     .expect("active bid");
@@ -559,7 +559,7 @@ fn dns_auction_summary_reports_metrics() {
         .as_object()
         .expect("stake snapshot");
     assert!(
-        stake["total_locked_ct"].as_u64().unwrap_or(0) >= 1_000,
+        stake["total_locked"].as_u64().unwrap_or(0) >= 1_000,
         "stake snapshot captures locked stake"
     );
     let metrics = summary["metrics"].as_object().expect("metrics map");

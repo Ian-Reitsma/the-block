@@ -22,7 +22,7 @@ fn test_contract() -> StorageContract {
         retention_blocks: 12,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 0,
+        total_deposit: 0,
         last_payment_block: None,
         storage_root: tree.root,
     }
@@ -53,10 +53,7 @@ fn market_persists_contracts_and_records_proofs() {
     let record = &contracts[0];
     assert_eq!(record.contract.object_id, "obj");
     assert_eq!(record.contract.accrued, 18);
-    assert_eq!(
-        record.contract.total_deposit_ct,
-        record.replicas[0].deposit_ct
-    );
+    assert_eq!(record.contract.total_deposit, record.replicas[0].deposit);
     assert_eq!(record.replicas[0].proof_successes, 1);
     assert_eq!(record.replicas[0].proof_failures, 1);
 }

@@ -56,7 +56,7 @@ fn mining_diverts_treasury_share() -> Result<()> {
     let start_len = NODE_GOV_STORE.treasury_balance_history()?.len();
 
     let mut chain = Blockchain::default();
-    chain.params.treasury_percent_ct = 25;
+    chain.params.treasury_percent = 25;
     chain
         .mine_block("miner")
         .map_err(|e| format!("mine block: {e}"))?;

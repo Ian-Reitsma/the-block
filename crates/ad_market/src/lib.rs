@@ -1546,13 +1546,9 @@ pub struct SettlementBreakdown {
     pub campaign_id: String,
     pub creative_id: String,
     pub bytes: u64,
-    #[serde(alias = "price_ct", alias = "price_per_mib_ct")]
     pub price_per_mib_usd_micros: u64,
-    #[serde(alias = "total_ct")]
     pub total_usd_micros: u64,
-    #[serde(alias = "demand_ct")]
     pub demand_usd_micros: u64,
-    #[serde(alias = "resource_floor_ct")]
     pub resource_floor_usd_micros: u64,
     #[serde(default)]
     pub clearing_price_usd_micros: u64,
@@ -1566,19 +1562,12 @@ pub struct SettlementBreakdown {
     pub resource_floor_breakdown: ResourceFloorBreakdown,
     pub runner_up_quality_bid_usd_micros: u64,
     pub quality_adjusted_bid_usd_micros: u64,
-    #[serde(alias = "viewer_ct")]
     pub viewer: u64,
-    #[serde(alias = "host_ct")]
     pub host: u64,
-    #[serde(alias = "hardware_ct")]
     pub hardware: u64,
-    #[serde(alias = "verifier_ct")]
     pub verifier: u64,
-    #[serde(alias = "liquidity_ct")]
     pub liquidity: u64,
-    #[serde(alias = "miner_ct")]
     pub miner: u64,
-    #[serde(alias = "total_ct")]
     pub total: u64,
     pub unsettled_usd_micros: u64,
     #[serde(alias = "price_usd_micros", alias = "price_usd_micros")]

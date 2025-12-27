@@ -67,7 +67,7 @@ pub struct YourMarketReceipt {
     pub units: u64,
 
     /// Payment in consumer tokens (CT)
-    pub payment_ct: u64,
+    pub payment: u64,
 
     /// Block height when settled
     pub block_height: u64,
@@ -103,7 +103,7 @@ impl Receipt {
     pub fn settlement_amount(&self) -> u64 {
         match self {
             // ... existing cases
-            Receipt::YourMarket(r) => r.payment_ct,
+            Receipt::YourMarket(r) => r.payment,
         }
     }
 
@@ -128,7 +128,7 @@ pub struct YourMarketReceipt {
     pub settlement_id: String,
     pub provider: String,
     pub units: u64,
-    pub payment_ct: u64,
+    pub payment: u64,
     pub block_height: u64,
     pub proof_data: [u8; 32],
 }
@@ -151,7 +151,7 @@ impl YourMarket {
             settlement_id: settlement_id.to_string(),
             provider: settlement.provider.clone(),
             units: settlement.units,
-            payment_ct: payment,
+            payment: payment,
             block_height: current_block,
             proof_data: settlement.proof_hash,
         });
@@ -219,7 +219,7 @@ pub fn drain_your_market_receipts() -> Vec<crate::receipts::YourMarketReceipt> {
             settlement_id: r.settlement_id,
             provider: r.provider,
             units: r.units,
-            payment_ct: r.payment_ct,
+            payment: r.payment,
             block_height: r.block_height,
             proof_data: r.proof_data,
         })
@@ -346,7 +346,7 @@ pub struct StorageReceipt {
     pub contract_id: String,
     pub provider: String,
     pub bytes: u64,
-    pub price_ct: u64,
+    pub price: u64,
     pub block_height: u64,
     pub provider_escrow: u64,
 }
@@ -366,7 +366,7 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
             contract_id: r.contract_id,
             provider: r.provider,
             bytes: r.bytes,
-            price_ct: r.price_ct,
+            price: r.price,
             block_height: r.block_height,
             provider_escrow: r.provider_escrow,
         })
@@ -611,7 +611,7 @@ fn receipt_telemetry_recorded() {
     let receipts = vec![
         Receipt::YourMarket(YourMarketReceipt {
             settlement_id: "s1".into(),
-            payment_ct: 100,
+            payment: 100,
             // ...
         }),
     ];

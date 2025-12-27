@@ -136,7 +136,7 @@ pub struct AdReceipt {
     pub campaign_id: String,       // Campaign identifier
     pub publisher: String,         // Publisher address
     pub impressions: u64,          // Impressions delivered
-    pub spend_ct: u64,             // BLOCK spent by advertiser
+    pub spend: u64,             // BLOCK spent by advertiser
     pub block_height: u64,         // Settlement block
     pub conversions: u32,          // Attributed conversions
 }
@@ -352,7 +352,7 @@ pub fn derive_market_metrics_from_chain(
                 },
                 Receipt::Ad(r) => {
                     metrics.ad_impressions += r.impressions;
-                    metrics.ad_revenue += r.spend_ct;
+                    metrics.ad_revenue += r.spend;
                 },
             }
         }
@@ -543,7 +543,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - Oracle trust roots are defined in `config/default.toml` under `energy.provider_keys`. Each entry maps a provider ID to a 32-byte Ed25519 public key; reloads hot-swap the verifier registry via `node::energy::configure_provider_keys` so operators can rotate or revoke keys without restarts.
 - RPC wiring (`node/src/rpc/energy.rs`) exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`, `energy.receipts`, `energy.credits`, `energy.disputes`, `energy.flag_dispute`, and `energy.resolve_dispute`. The CLI (`cli/src/energy.rs`) emits the same JSON schema and prints providers, receipts, credits, and disputes so oracle adapters (`crates/oracle-adapter`) and explorers stay aligned. `docs/testnet/ENERGY_QUICKSTART.md` covers bootstrap, signature validation, dispute rehearsal, and how to script `contract-cli energy` calls.
 - Governance owns `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps`. Proposals feed those values through the shared governance crate, latch them in `node/src/governance/params.rs`, then invoke `node::energy::set_governance_params`, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.
-- Observability: `energy_market` emits gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_avg_price`), counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`, `energy_kwh_traded_total`, `energy_signature_failure_total{provider,reason}`), histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`), and simple health probes (`node::energy::check_energy_market_health`). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope or signature failures spike.
+- Observability: `energy_market` emits gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_avg_price`), counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_total`, `energy_dispute_{open,resolve}_total`, `energy_kwh_traded_total`, `energy_signature_failure_total{provider,reason}`), histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`), and simple health probes (`node::energy::check_energy_market_health`). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope or signature failures spike.
 
 ### Energy, Governance, and RPC Next Tasks
 - **Governance + Params**

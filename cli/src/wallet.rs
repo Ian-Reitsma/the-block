@@ -56,7 +56,7 @@ pub enum WalletCmd {
         amount: u64,
         fee: u64,
         nonce: u64,
-        pct_ct: u8,
+        pct: u8,
         memo: Option<String>,
         lane: String,
         rpc: String,
@@ -126,7 +126,12 @@ impl WalletCmd {
                     OptionSpec::new("nonce", "nonce", "Transaction nonce").default("0"),
                 ))
                 .arg(ArgSpec::Option(
-                    OptionSpec::new("pct_ct", "pct-ct", "Percent of CT to allocate").default("100"),
+                    OptionSpec::new(
+                        "pct",
+                        "pct",
+                        "Percent of the fee routed through the consumer lane",
+                    )
+                    .default("100"),
                 ))
                 .arg(ArgSpec::Option(OptionSpec::new(
                     "memo",
@@ -222,7 +227,7 @@ impl WalletCmd {
                 let amount = parse_u64_required(take_string(sub_matches, "amount"), "amount")?;
                 let fee = parse_u64_required(take_string(sub_matches, "fee"), "fee")?;
                 let nonce = parse_u64_required(take_string(sub_matches, "nonce"), "nonce")?;
-                let pct_ct = parse_required::<u8>(take_string(sub_matches, "pct_ct"), "pct-ct")?;
+                let pct = parse_required::<u8>(take_string(sub_matches, "pct"), "pct")?;
                 let memo = take_string(sub_matches, "memo");
                 let lane =
                     take_string(sub_matches, "lane").unwrap_or_else(|| "consumer".to_string());
@@ -239,7 +244,7 @@ impl WalletCmd {
                     amount,
                     fee,
                     nonce,
-                    pct_ct,
+                    pct,
                     memo,
                     lane,
                     rpc,
@@ -415,7 +420,7 @@ pub fn handle(cmd: WalletCmd) {
             amount,
             fee,
             nonce,
-            pct_ct,
+            pct,
             memo,
             lane,
             rpc,
@@ -475,7 +480,7 @@ pub fn handle(cmd: WalletCmd) {
                 &to,
                 amount,
                 fee,
-                pct_ct,
+                pct,
                 nonce,
                 &memo_bytes,
                 auto_bump,
@@ -576,7 +581,7 @@ pub fn handle(cmd: WalletCmd) {
                 amount_consumer: amount,
                 amount_industrial: 0,
                 fee: 0,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 0,
                 memo: Vec::new(),
             };
@@ -615,7 +620,7 @@ pub fn build_tx_default_locale(
     to: &str,
     amount: u64,
     fee: u64,
-    pct_ct: u8,
+    pct: u8,
     nonce: u64,
     memo: &[u8],
     auto_bump: bool,
@@ -631,7 +636,7 @@ pub fn build_tx_default_locale(
         to,
         amount,
         fee,
-        pct_ct,
+        pct,
         nonce,
         memo,
         auto_bump,
@@ -650,7 +655,7 @@ pub fn build_tx(
     to: &str,
     amount: u64,
     fee: u64,
-    pct_ct: u8,
+    pct: u8,
     nonce: u64,
     memo: &[u8],
     auto_bump: bool,
@@ -746,7 +751,7 @@ pub fn build_tx(
         });
     }
 
-    let pct_ct = pct_ct.min(100);
+    let pct = pct.min(100);
     let (amount_consumer, amount_industrial) = match lane {
         FeeLane::Consumer => (amount, 0),
         FeeLane::Industrial => (0, amount),
@@ -757,7 +762,7 @@ pub fn build_tx(
         amount_consumer,
         amount_industrial,
         fee: evaluation.effective_fee,
-        pct_ct,
+        pct,
         nonce,
         memo: memo.to_vec(),
     };
@@ -846,7 +851,7 @@ pub fn preview_build_tx_report(
     to: &str,
     amount: u64,
     fee: u64,
-    pct_ct: u8,
+    pct: u8,
     nonce: u64,
     memo: &[u8],
     auto_bump: bool,
@@ -878,7 +883,7 @@ pub fn preview_build_tx_report(
         return Ok((report, evaluation.event.clone()));
     }
 
-    let pct_ct = pct_ct.min(100);
+    let pct = pct.min(100);
     let (amount_consumer, amount_industrial) = match lane {
         FeeLane::Consumer => (amount, 0),
         FeeLane::Industrial => (0, amount),
@@ -889,7 +894,7 @@ pub fn preview_build_tx_report(
         amount_consumer,
         amount_industrial,
         fee: evaluation.effective_fee,
-        pct_ct,
+        pct,
         nonce,
         memo: memo.to_vec(),
     };
@@ -973,10 +978,7 @@ mod tests {
             Value::Number(Number::from(payload.amount_industrial)),
         );
         map.insert("fee".to_string(), Value::Number(Number::from(payload.fee)));
-        map.insert(
-            "pct_ct".to_string(),
-            Value::Number(Number::from(payload.pct_ct)),
-        );
+        map.insert("pct".to_string(), Value::Number(Number::from(payload.pct)));
         map.insert(
             "nonce".to_string(),
             Value::Number(Number::from(payload.nonce)),
@@ -1135,7 +1137,7 @@ mod tests {
         assert_eq!(payload.amount_consumer, 0);
         assert_eq!(payload.amount_industrial, 50);
         assert_eq!(payload.fee, 25);
-        assert_eq!(payload.pct_ct, 80);
+        assert_eq!(payload.pct, 80);
         assert_eq!(payload.nonce, 42);
         assert_eq!(payload.memo.as_slice(), b"memo");
 
@@ -1167,7 +1169,7 @@ mod tests {
             Value::Number(Number::from(50u64)),
         );
         payload_value.insert("fee".to_string(), Value::Number(Number::from(25u64)));
-        payload_value.insert("pct_ct".to_string(), Value::Number(Number::from(80u64)));
+        payload_value.insert("pct".to_string(), Value::Number(Number::from(80u64)));
         payload_value.insert("nonce".to_string(), Value::Number(Number::from(42u64)));
         let memo: Vec<Value> = payload
             .memo

@@ -137,7 +137,7 @@ fn signer_closure(
             amount_consumer: disbursement.amount,
             amount_industrial: 0,
             fee: base_fee,
-            pct_ct: 100,
+            pct: 100,
             nonce,
             memo: safe_memo,
         };

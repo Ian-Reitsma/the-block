@@ -57,7 +57,7 @@ fn mempool_stats_rpc() {
                     amount_consumer: 1,
                     amount_industrial: 0,
                     fee: (i + 1) * 10,
-                    pct_ct: 100,
+                    pct: 100,
                     nonce: i + 1,
                     memo: Vec::new(),
                 };

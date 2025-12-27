@@ -259,10 +259,10 @@ When consumer latency jumps above `comfort_threshold_p90` (governance parameter)
 ### 5.3 Storage-market incentives
 
 - `storage_market/src/lib.rs` models each contract as `ContractRecord { contract: StorageContract, replicas: Vec<ReplicaIncentive> }`.
-- `ReplicaIncentive` fields: `allocated_shares`, `price_per_block`, `deposit_ct`, success/failure counters, last proof block, last outcome.
+- `ReplicaIncentive` fields: `allocated_shares`, `price_per_block`, `deposit`, success/failure counters, last proof block, last outcome.
 - SLAs recorded via `record_proof_outcome`:
   - Success ➜ increment `proof_successes`, no slashing.
-  - Failure ➜ deduct `min(price_per_block, deposit_ct)` and increment `proof_failures`.
+  - Failure ➜ deduct `min(price_per_block, deposit)` and increment `proof_failures`.
 - CLI/RPC:
   - `storage_market.provider_balances`, `storage_market.audit_log`, and explorer views show deposits, accrued CT, and slashes.
 
@@ -613,7 +613,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 - `governance/src/treasury.rs` enforces:
   - Non‑negative balances (`ct`, `industrial`) tracked in sled.
-  - Streaming caps and kill switches (`kill_switch_subsidy_reduction`, `treasury_percent_ct`).
+  - Streaming caps and kill switches (`kill_switch_subsidy_reduction`, `treasury_percent`).
   - Audit log size ≤ 256 entries; older entries roll off but anchor hashes persist.
 - Executor snapshots (CLI `contract-cli gov treasury executor`) must show monotonic `last_tick_at`. Settlement anchors are hashed and appended to the audit log for replayability.
 
@@ -1349,7 +1349,7 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 | `industrial_admission_min_capacity` | 10 | Minimum queue capacity before opening industrial lane. |
 | `fairshare_global_max_ppm` | 250 000 | QoS cap per account in parts‑per‑million. |
 | `burst_refill_rate_per_s_ppm` | 500 000 (≈30 tx/min) | Token bucket refill rate. |
-| `beta_storage_sub_ct`, `gamma_read_sub_ct`, `kappa_cpu_sub_ct`, `lambda_bytes_out_sub_ct` | 50/20/10/5 | Subsidy multipliers (basis points). |
+| `beta_storage_sub`, `gamma_read_sub`, `kappa_cpu_sub`, `lambda_bytes_out_sub` | 50/20/10/5 | Subsidy multipliers (basis points). |
 | `read_subsidy_*_percent` | Derived defaults | Split READ_SUB_CT across viewer/host/hardware/verifier/liquidity. |
 | `kill_switch_subsidy_reduction` | 0 | Emergency knob to damp multipliers. |
 | `miner_reward_logistic_target`, `logistic_slope_milli`, `miner_hysteresis` | 100 / ~230 / 10 | Shape of logistic emission curve. |

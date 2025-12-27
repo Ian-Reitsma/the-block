@@ -131,7 +131,7 @@ pub fn replay_economics_to_height(
         }
 
         // TODO: Accumulate treasury inflow from successful accruals
-        // For now, estimate from treasury_percent_ct × coinbase
+        // For now, estimate from treasury_percent × coinbase
         // This needs to be made precise by tracking actual accrual success
 
         // At epoch boundaries, execute economics control laws

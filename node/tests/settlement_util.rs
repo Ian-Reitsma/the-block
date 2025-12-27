@@ -20,6 +20,12 @@ impl SettlementCtx {
     }
 }
 
+impl Default for SettlementCtx {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for SettlementCtx {
     fn drop(&mut self) {
         settlement::Settlement::shutdown();

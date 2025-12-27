@@ -62,7 +62,7 @@ fn rpc_inflation_reports_industrial() {
             Value::Number(_)
         ));
         assert!(matches!(
-            val["result"]["rent_rate_ct_per_byte"],
+            val["result"]["rent_rate_per_byte"],
             Value::Number(_)
         ));
 

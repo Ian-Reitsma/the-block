@@ -337,10 +337,7 @@ pub fn write_sla_history_from_str(text: &str, out: &mut dyn Write) -> io::Result
                     .and_then(|v| v.as_str())
                     .unwrap_or("-");
                 let burned = entry.get("burned").and_then(|v| v.as_u64()).unwrap_or(0);
-                let refunded = entry
-                    .get("refunded")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                let refunded = entry.get("refunded").and_then(|v| v.as_u64()).unwrap_or(0);
                 let deadline = entry.get("deadline").and_then(|v| v.as_u64()).unwrap_or(0);
                 let resolved_at = entry
                     .get("resolved_at")

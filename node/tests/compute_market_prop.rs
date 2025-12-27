@@ -23,7 +23,7 @@ fn match_and_finalize_payout() {
                 consumer_bond: 1,
                 units: slices as u64,
                 price_per_unit: price,
-                fee_pct_ct: 100,
+                fee_pct: 100,
                 capability: scheduler::Capability::default(),
                 reputation: 0,
                 reputation_multiplier: 1.0,

@@ -674,20 +674,20 @@ fn write_params(writer: &mut Writer, params: &Params) -> EncodeResult<()> {
     writer.write_i64(params.fairshare_global_max_ppm);
     writer.write_string("burst_refill_rate_per_s_ppm");
     writer.write_i64(params.burst_refill_rate_per_s_ppm);
-    writer.write_string("beta_storage_sub_ct");
-    writer.write_i64(params.beta_storage_sub_ct);
-    writer.write_string("gamma_read_sub_ct");
-    writer.write_i64(params.gamma_read_sub_ct);
-    writer.write_string("kappa_cpu_sub_ct");
-    writer.write_i64(params.kappa_cpu_sub_ct);
-    writer.write_string("lambda_bytes_out_sub_ct");
-    writer.write_i64(params.lambda_bytes_out_sub_ct);
-    writer.write_string("treasury_percent_ct");
-    writer.write_i64(params.treasury_percent_ct);
-    writer.write_string("proof_rebate_limit_ct");
-    writer.write_i64(params.proof_rebate_limit_ct);
-    writer.write_string("rent_rate_ct_per_byte");
-    writer.write_i64(params.rent_rate_ct_per_byte);
+    writer.write_string("beta_storage_sub");
+    writer.write_i64(params.beta_storage_sub);
+    writer.write_string("gamma_read_sub");
+    writer.write_i64(params.gamma_read_sub);
+    writer.write_string("kappa_cpu_sub");
+    writer.write_i64(params.kappa_cpu_sub);
+    writer.write_string("lambda_bytes_out_sub");
+    writer.write_i64(params.lambda_bytes_out_sub);
+    writer.write_string("treasury_percent");
+    writer.write_i64(params.treasury_percent);
+    writer.write_string("proof_rebate_limit");
+    writer.write_i64(params.proof_rebate_limit);
+    writer.write_string("rent_rate_per_byte");
+    writer.write_i64(params.rent_rate_per_byte);
     writer.write_string("kill_switch_subsidy_reduction");
     writer.write_i64(params.kill_switch_subsidy_reduction);
     writer.write_string("miner_reward_logistic_target");
@@ -773,32 +773,32 @@ fn read_params(reader: &mut Reader<'_>) -> binary_struct::Result<Params> {
             params.burst_refill_rate_per_s_ppm = reader.read_i64()?;
             Ok(())
         }
-        "beta_storage_sub_ct" => {
-            params.beta_storage_sub_ct = reader.read_i64()?;
+        "beta_storage_sub" => {
+            params.beta_storage_sub = reader.read_i64()?;
             Ok(())
         }
-        "gamma_read_sub_ct" => {
-            params.gamma_read_sub_ct = reader.read_i64()?;
+        "gamma_read_sub" => {
+            params.gamma_read_sub = reader.read_i64()?;
             Ok(())
         }
-        "kappa_cpu_sub_ct" => {
-            params.kappa_cpu_sub_ct = reader.read_i64()?;
+        "kappa_cpu_sub" => {
+            params.kappa_cpu_sub = reader.read_i64()?;
             Ok(())
         }
-        "lambda_bytes_out_sub_ct" => {
-            params.lambda_bytes_out_sub_ct = reader.read_i64()?;
+        "lambda_bytes_out_sub" => {
+            params.lambda_bytes_out_sub = reader.read_i64()?;
             Ok(())
         }
-        "treasury_percent_ct" => {
-            params.treasury_percent_ct = reader.read_i64()?;
+        "treasury_percent" => {
+            params.treasury_percent = reader.read_i64()?;
             Ok(())
         }
-        "proof_rebate_limit_ct" => {
-            params.proof_rebate_limit_ct = reader.read_i64()?;
+        "proof_rebate_limit" => {
+            params.proof_rebate_limit = reader.read_i64()?;
             Ok(())
         }
-        "rent_rate_ct_per_byte" => {
-            params.rent_rate_ct_per_byte = reader.read_i64()?;
+        "rent_rate_per_byte" => {
+            params.rent_rate_per_byte = reader.read_i64()?;
             Ok(())
         }
         "kill_switch_subsidy_reduction" => {
@@ -1308,7 +1308,7 @@ mod tests {
                 amount_consumer: 1,
                 amount_industrial: 2,
                 fee: 3,
-                pct_ct: 50,
+                pct: 50,
                 nonce: 7,
                 memo: vec![1, 2, 3],
             },
@@ -1341,13 +1341,13 @@ mod tests {
             hash: String::from("hash"),
             coinbase_block: TokenAmount::new(11),
             coinbase_industrial: TokenAmount::new(12),
-            storage_sub_ct: TokenAmount::new(13),
-            read_sub_ct: TokenAmount::new(14),
-            read_sub_viewer_ct: TokenAmount::new(2),
-            read_sub_host_ct: TokenAmount::new(3),
-            read_sub_hardware_ct: TokenAmount::new(4),
-            read_sub_verifier_ct: TokenAmount::new(1),
-            read_sub_liquidity_ct: TokenAmount::new(2),
+            storage_sub: TokenAmount::new(13),
+            read_sub: TokenAmount::new(14),
+            read_sub_viewer: TokenAmount::new(2),
+            read_sub_host: TokenAmount::new(3),
+            read_sub_hardware: TokenAmount::new(4),
+            read_sub_verifier: TokenAmount::new(1),
+            read_sub_liquidity: TokenAmount::new(2),
             ad_viewer: TokenAmount::new(5),
             ad_host: TokenAmount::new(6),
             ad_hardware: TokenAmount::new(7),
@@ -1358,8 +1358,8 @@ mod tests {
             ad_total_usd_micros: 26,
             ad_settlement_count: 2,
             ad_oracle_price_usd_micros: 27,
-            compute_sub_ct: TokenAmount::new(15),
-            proof_rebate_ct: TokenAmount::new(16),
+            compute_sub: TokenAmount::new(15),
+            proof_rebate: TokenAmount::new(16),
             read_root: [0; 32],
             fee_checksum: String::new(),
             state_root: String::new(),

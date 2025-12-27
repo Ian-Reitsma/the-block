@@ -21,7 +21,7 @@ fn serialize_roundtrip_vectors() {
             amount_consumer: rng.gen(),
             amount_industrial: rng.gen(),
             fee: rng.gen(),
-            pct_ct: rng.gen_range(0u32..=100) as u8,
+            pct: rng.gen_range(0u32..=100) as u8,
             nonce: rng.gen(),
             memo: {
                 let len = rng.gen_range(0..16);

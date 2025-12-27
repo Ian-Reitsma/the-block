@@ -1397,7 +1397,7 @@ fn autodetect_python_bridge_lib() -> Option<String> {
         return None;
     }
     let libdir = Command::new("python3")
-        .args(&[
+        .args([
             "-c",
             "import sysconfig; print(sysconfig.get_config_var('LIBDIR') or '')",
         ])
@@ -1411,7 +1411,7 @@ fn autodetect_python_bridge_lib() -> Option<String> {
         return None;
     }
     let libname = Command::new("python3")
-        .args(&[
+        .args([
             "-c",
             "import sysconfig; print(sysconfig.get_config_var('LDLIBRARY') or '')",
         ])

@@ -56,7 +56,7 @@ pub struct ReplicaIncentive {
     pub provider_id: String,
     pub allocated_shares: u16,
     pub price_per_block: u64,
-    pub deposit_ct: u64,
+    pub deposit: u64,
     #[serde(default)]
     pub proof_successes: u64,
     #[serde(default)]
@@ -72,13 +72,13 @@ impl ReplicaIncentive {
         provider_id: String,
         allocated_shares: u16,
         price_per_block: u64,
-        deposit_ct: u64,
+        deposit: u64,
     ) -> Self {
         Self {
             provider_id,
             allocated_shares,
             price_per_block,
-            deposit_ct,
+            deposit,
             proof_successes: 0,
             proof_failures: 0,
             last_proof_block: None,
@@ -95,8 +95,8 @@ impl ReplicaIncentive {
         } else {
             self.proof_failures = self.proof_failures.saturating_add(1);
             self.last_outcome = Some(ProofOutcome::Failure);
-            let slash = self.price_per_block.min(self.deposit_ct);
-            self.deposit_ct = self.deposit_ct.saturating_sub(slash);
+            let slash = self.price_per_block.min(self.deposit);
+            self.deposit = self.deposit.saturating_sub(slash);
             (ProofOutcome::Failure, slash)
         }
     }
@@ -122,7 +122,7 @@ pub struct ProofRecord {
     pub outcome: ProofOutcome,
     pub slashed_ct: u64,
     pub amount_accrued_ct: u64,
-    pub remaining_deposit_ct: u64,
+    pub remaining_deposit: u64,
     pub proof_successes: u64,
     pub proof_failures: u64,
 }
@@ -162,8 +162,8 @@ impl StorageMarket {
         mut contract: StorageContract,
         replicas: Vec<ReplicaIncentive>,
     ) -> Result<ContractRecord> {
-        let total_deposit: u64 = replicas.iter().map(|replica| replica.deposit_ct).sum();
-        contract.total_deposit_ct = total_deposit;
+        let total_deposit: u64 = replicas.iter().map(|replica| replica.deposit).sum();
+        contract.total_deposit = total_deposit;
         let record = ContractRecord::with_replicas(contract, replicas);
         let key = record.contract.object_id.as_bytes();
         let value = serialize_contract_record(&record)?;
@@ -228,18 +228,15 @@ impl StorageMarket {
                 let (outcome, slashed) = replica.record_outcome(block, success);
                 let successes = replica.proof_successes;
                 let failures = replica.proof_failures;
-                let remaining = replica.deposit_ct;
+                let remaining = replica.deposit;
                 (outcome, slashed, successes, failures, remaining)
             };
             if success {
                 let pay_block = block.saturating_sub(1);
                 let _ = record.contract.pay(pay_block);
             }
-            record.contract.total_deposit_ct = record
-                .replicas
-                .iter()
-                .map(|replica| replica.deposit_ct)
-                .sum();
+            record.contract.total_deposit =
+                record.replicas.iter().map(|replica| replica.deposit).sum();
             let updated = serialize_contract_record(&record)?;
             match self
                 .contracts
@@ -252,7 +249,7 @@ impl StorageMarket {
                         outcome,
                         slashed_ct: slashed,
                         amount_accrued_ct: record.contract.accrued,
-                        remaining_deposit_ct: remaining_deposit,
+                        remaining_deposit,
                         proof_successes,
                         proof_failures,
                     };

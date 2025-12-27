@@ -5,18 +5,18 @@
   "properties": {
     "selector": {"type": "integer", "minimum": 0, "maximum": 2},
     "fee": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
-    "fee_ct": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
-    "fee_it": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}
+    "fee_consumer": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "fee_industrial": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}
   },
-  "required": ["selector", "fee", "fee_ct", "fee_it"],
+  "required": ["selector", "fee", "fee_consumer", "fee_industrial"],
   "additionalProperties": false,
   "examples": [
-    {"selector": 2, "fee": 100, "fee_ct": 50, "fee_it": 50},
+    {"selector": 2, "fee": 100, "fee_consumer": 50, "fee_industrial": 50},
     {
       "selector": 3,
       "fee": 1,
-      "fee_ct": 0,
-      "fee_it": 1,
+      "fee_consumer": 0,
+      "fee_industrial": 1,
       "$comment": "invalid selector: must be <=2"
     }
   ],

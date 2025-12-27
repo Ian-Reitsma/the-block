@@ -23,7 +23,7 @@ fn main() {
             amount_consumer: 0,
             amount_industrial: 0,
             fee,
-            pct_ct: 100,
+            pct: 100,
             nonce,
             memo: Vec::new(),
         };

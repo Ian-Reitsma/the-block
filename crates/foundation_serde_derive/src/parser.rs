@@ -93,7 +93,7 @@ fn parse_meta_item(tokens: &[TokenTree]) -> Result<Option<SerdeMeta>, Error> {
     if tokens.is_empty() {
         return Ok(None);
     }
-    if let Some(TokenTree::Ident(ident)) = tokens.get(0) {
+    if let Some(TokenTree::Ident(ident)) = tokens.first() {
         let key = ident.to_string();
         match key.as_str() {
             "rename" => {
@@ -223,8 +223,7 @@ fn parse_generics(cursor: &mut TokenCursor) -> Result<Generics, Error> {
 
 fn extract_param_name(param: &str) -> (String, ParamKind) {
     let trimmed = param.trim();
-    if trimmed.starts_with("const ") {
-        let rest = &trimmed["const ".len()..];
+    if let Some(rest) = trimmed.strip_prefix("const ") {
         let name = rest
             .split(|c: char| c == ':' || c == '=' || c.is_whitespace())
             .next()

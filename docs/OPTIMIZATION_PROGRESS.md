@@ -94,7 +94,7 @@ Bounded by: [baseline_min, baseline_max] to prevent extreme drift
 ### 3. Dynamic Domain Reserve Pricing (Tier 1)
 **Date Completed**: 2025-12-05
 **Files Modified**: `node/src/gateway/dns.rs`
-**Constants Eliminated**: 1 (user-provided `min_bid_ct` now optional, defaults to computed reserve)
+**Constants Eliminated**: 1 (user-provided `min_bid` now optional, defaults to computed reserve)
 
 **Formula Implemented**:
 ```

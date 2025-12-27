@@ -360,9 +360,7 @@ pub fn apply_rebates(block: &mut Block, amount: u64) {
         block.coinbase_block = block
             .coinbase_block
             .saturating_add(TokenAmount::new(amount));
-        block.proof_rebate = block
-            .proof_rebate
-            .saturating_add(TokenAmount::new(amount));
+        block.proof_rebate = block.proof_rebate.saturating_add(TokenAmount::new(amount));
     }
 }
 

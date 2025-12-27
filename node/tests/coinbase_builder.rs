@@ -34,7 +34,7 @@ fn coinbase_claims_proof_rebates() {
     assert_eq!(info_before.last_claim_height, None);
 
     let block = bc.mine_block("miner").expect("mine block");
-    assert_eq!(block.proof_rebate_ct, TokenAmount::new(3));
+    assert_eq!(block.proof_rebate, TokenAmount::new(3));
 
     let after = bc.proof_tracker.snapshot();
     assert_eq!(after.pending_total, 0);

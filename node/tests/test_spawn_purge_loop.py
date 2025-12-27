@@ -59,7 +59,7 @@ def test_spawn_purge_loop_concurrent(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1_000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )
@@ -122,7 +122,7 @@ def test_spawn_purge_loop_overlap_reverse_trigger(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1_000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )

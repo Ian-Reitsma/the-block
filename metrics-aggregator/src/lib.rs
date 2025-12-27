@@ -8280,7 +8280,6 @@ fn parse_legacy_balance_history(bytes: &[u8]) -> io::Result<Vec<TreasuryBalanceS
         let balance = parse_u64_field(obj.get("balance"), "balance")?;
         let delta = obj
             .get("delta")
-            .or_else(|| obj.get("delta_ct"))
             .map(|value| parse_i64_field(Some(value), "delta"))
             .transpose()?
             .unwrap_or(0);

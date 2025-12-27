@@ -313,7 +313,7 @@ fn rpc_nonce_replay_rejected() {
     let did_dir = dir.path().join("did_db");
     fs::create_dir_all(&did_dir).expect("create did dir");
     std::env::set_var("TB_DID_DB_PATH", did_dir.to_str().expect("did path"));
-    let dids = Arc::new(Mutex::new(DidRegistry::open(&DidRegistry::default_path())));
+    let dids = Arc::new(Mutex::new(DidRegistry::open(DidRegistry::default_path())));
     std::env::remove_var("TB_DID_DB_PATH");
 
     let mining = Arc::new(AtomicBool::new(false));
@@ -536,7 +536,7 @@ fn rpc_concurrent_controls() {
         let tx_amount_consumer = 1;
         let tx_amount_industrial = 0;
         let tx_fee = 1000;
-        let tx_pct_ct = 100;
+        let tx_pct = 100;
 
         let mut handles = Vec::new();
         for i in 0..6 {
@@ -565,7 +565,7 @@ fn rpc_concurrent_controls() {
                             amount_consumer: tx_amount_consumer,
                             amount_industrial: tx_amount_industrial,
                             fee: tx_fee,
-                            pct_ct: tx_pct_ct,
+                            pct: tx_pct,
                             nonce: (i + 1) as u64,
                             memo: Vec::new(),
                         };

@@ -27,11 +27,11 @@ pub struct ReleaseSignersResponse {
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct InflationParamsResponse {
-    pub beta_storage_sub_ct: i64,
-    pub gamma_read_sub_ct: i64,
-    pub kappa_cpu_sub_ct: i64,
-    pub lambda_bytes_out_sub_ct: i64,
-    pub rent_rate_ct_per_byte: i64,
+    pub beta_storage_sub: i64,
+    pub gamma_read_sub: i64,
+    pub kappa_cpu_sub: i64,
+    pub lambda_bytes_out_sub: i64,
+    pub rent_rate_per_byte: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -55,12 +55,12 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "IndustrialAdmissionMinCapacity" => Some(ParamKey::IndustrialAdmissionMinCapacity),
         "FeeFloorWindow" => Some(ParamKey::FeeFloorWindow),
         "FeeFloorPercentile" => Some(ParamKey::FeeFloorPercentile),
-        "BetaStorageSubCt" => Some(ParamKey::BetaStorageSubCt),
-        "GammaReadSubCt" => Some(ParamKey::GammaReadSubCt),
-        "KappaCpuSubCt" => Some(ParamKey::KappaCpuSubCt),
-        "LambdaBytesOutSubCt" => Some(ParamKey::LambdaBytesOutSubCt),
-        "TreasuryPercentCt" => Some(ParamKey::TreasuryPercentCt),
-        "RentRateCtPerByte" => Some(ParamKey::RentRateCtPerByte),
+        "BetaStorageSub" => Some(ParamKey::BetaStorageSub),
+        "GammaReadSub" => Some(ParamKey::GammaReadSub),
+        "KappaCpuSub" => Some(ParamKey::KappaCpuSub),
+        "LambdaBytesOutSub" => Some(ParamKey::LambdaBytesOutSub),
+        "TreasuryPercent" => Some(ParamKey::TreasuryPercent),
+        "RentRatePerByte" => Some(ParamKey::RentRatePerByte),
         "MinerRewardLogisticTarget" => Some(ParamKey::MinerRewardLogisticTarget),
         "BadgeExpirySecs" => Some(ParamKey::BadgeExpirySecs),
         "JurisdictionRegion" => Some(ParamKey::JurisdictionRegion),
@@ -227,11 +227,11 @@ pub fn release_signers(store: &GovStore) -> Result<ReleaseSignersResponse, RpcEr
 
 pub fn inflation_params(params: &Params) -> InflationParamsResponse {
     InflationParamsResponse {
-        beta_storage_sub_ct: params.beta_storage_sub_ct,
-        gamma_read_sub_ct: params.gamma_read_sub_ct,
-        kappa_cpu_sub_ct: params.kappa_cpu_sub_ct,
-        lambda_bytes_out_sub_ct: params.lambda_bytes_out_sub_ct,
-        rent_rate_ct_per_byte: params.rent_rate_ct_per_byte,
+        beta_storage_sub: params.beta_storage_sub,
+        gamma_read_sub: params.gamma_read_sub,
+        kappa_cpu_sub: params.kappa_cpu_sub,
+        lambda_bytes_out_sub: params.lambda_bytes_out_sub,
+        rent_rate_per_byte: params.rent_rate_per_byte,
     }
 }
 

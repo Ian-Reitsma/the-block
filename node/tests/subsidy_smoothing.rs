@@ -23,11 +23,11 @@ fn smoothing_limits_burst_effect() {
     for epoch in 0..5 {
         retune_multipliers(&mut params, supply, &util, epoch, base, 0.0, Some(0));
     }
-    let prev = params.beta_storage_sub_ct;
+    let prev = params.beta_storage_sub;
     // bursty epoch
     util.bytes_stored = 1_000_000.0;
     retune_multipliers(&mut params, supply, &util, 5, base, 0.0, Some(0));
-    assert!(params.beta_storage_sub_ct >= (prev as f64 * 0.85) as i64);
+    assert!(params.beta_storage_sub >= (prev as f64 * 0.85) as i64);
 }
 
 #[test]
@@ -50,8 +50,8 @@ fn steady_usage_stable_multiplier() {
     for epoch in 0..5 {
         retune_multipliers(&mut params, supply, &util, epoch, base, 0.0, Some(0));
     }
-    let prev = params.beta_storage_sub_ct;
+    let prev = params.beta_storage_sub;
     retune_multipliers(&mut params, supply, &util, 5, base, 0.0, Some(0));
     // Allow a small integer jitter when utilisation remains steady.
-    assert!((params.beta_storage_sub_ct - prev).abs() <= 3);
+    assert!((params.beta_storage_sub - prev).abs() <= 3);
 }

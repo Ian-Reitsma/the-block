@@ -41,7 +41,7 @@ fn admission_and_block_accounting() {
         amount_consumer: 0,
         amount_industrial: 0,
         fee: 10,
-        pct_ct: 37,
+        pct: 37,
         nonce: 1,
         memo: Vec::new(),
     };

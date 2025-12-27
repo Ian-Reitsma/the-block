@@ -1287,7 +1287,7 @@ fn parse_param_key(name: &str) -> Option<ParamKey> {
         "runtime.backend" | "RuntimeBackend" => Some(ParamKey::RuntimeBackend),
         "transport.provider" | "TransportProvider" => Some(ParamKey::TransportProvider),
         "storage.engine_policy" | "StorageEnginePolicy" => Some(ParamKey::StorageEnginePolicy),
-        "treasury.percent_ct" | "TreasuryPercentCt" => Some(ParamKey::TreasuryPercentCt),
+        "treasury.percent" | "TreasuryPercent" => Some(ParamKey::TreasuryPercent),
         // Dynamic readiness controls
         "readiness.use_percentiles" | "AdUsePercentileThresholds" => {
             Some(ParamKey::AdUsePercentileThresholds)

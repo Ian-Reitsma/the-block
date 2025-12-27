@@ -878,10 +878,10 @@ pub struct Blockchain {
     pub base_fee: u64,
     /// Governance-controlled economic parameters
     pub params: Params,
-    pub beta_storage_sub_ct_raw: i64,
-    pub gamma_read_sub_ct_raw: i64,
-    pub kappa_cpu_sub_ct_raw: i64,
-    pub lambda_bytes_out_sub_ct_raw: i64,
+    pub beta_storage_sub_raw: i64,
+    pub gamma_read_sub_raw: i64,
+    pub kappa_cpu_sub_raw: i64,
+    pub lambda_bytes_out_sub_raw: i64,
     /// Bytes stored during the current epoch
     pub epoch_storage_bytes: u64,
     /// Bytes served during the current epoch
@@ -1097,10 +1097,10 @@ impl Default for Blockchain {
             config: NodeConfig::default(),
             base_fee: 1,
             params,
-            beta_storage_sub_ct_raw: 50,
-            gamma_read_sub_ct_raw: 20,
-            kappa_cpu_sub_ct_raw: 10,
-            lambda_bytes_out_sub_ct_raw: 5,
+            beta_storage_sub_raw: 50,
+            gamma_read_sub_raw: 20,
+            kappa_cpu_sub_raw: 10,
+            lambda_bytes_out_sub_raw: 5,
             epoch_storage_bytes: 0,
             epoch_read_bytes: 0,
             epoch_viewer_bytes: HashMap::new(),
@@ -1252,7 +1252,7 @@ impl Blockchain {
     ) -> economics::MarketMetrics {
         let storage_capacity = crate::storage::pipeline::l2_cap_bytes_per_epoch();
         let storage_utilization = ratio_u64(self.epoch_storage_bytes, storage_capacity);
-        let rent_rate = self.params.rent_rate_ct_per_byte.max(0) as u64;
+        let rent_rate = self.params.rent_rate_per_byte.max(0) as u64;
         let storage_cost_total =
             u128::from(self.epoch_storage_bytes).saturating_mul(rent_rate as u128);
         let storage_payout_total = u128::from(storage_payout_total);
@@ -1474,7 +1474,7 @@ impl Blockchain {
         if proofs == 0 {
             return;
         }
-        let limit = self.params.proof_rebate_limit_ct.max(0) as u64;
+        let limit = self.params.proof_rebate_limit.max(0) as u64;
         if limit == 0 {
             return;
         }
@@ -1963,7 +1963,7 @@ impl Blockchain {
                             let mut fee_industrial: u128 = 0;
                             for tx in b.transactions.iter().skip(1) {
                                 if let Ok((c, i)) =
-                                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                    crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                                 {
                                     fee_consumer += c as u128;
                                     fee_industrial += i as u128;
@@ -2119,7 +2119,7 @@ impl Blockchain {
                                 let mut fee_i: u128 = 0;
                                 for tx in b.transactions.iter().skip(1) {
                                     if let Ok((c, i)) =
-                                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                        crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                                     {
                                         fee_c += c as u128;
                                         fee_i += i as u128;
@@ -2291,7 +2291,7 @@ impl Blockchain {
                         let mut fee_industrial: u128 = 0;
                         for tx in b.transactions.iter().skip(1) {
                             if let Ok((c, i)) =
-                                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                             {
                                 fee_consumer += c as u128;
                                 fee_industrial += i as u128;
@@ -2451,7 +2451,7 @@ impl Blockchain {
             let mut fee_consumer: u128 = 0;
             let mut fee_industrial: u128 = 0;
             for tx in b.transactions.iter().skip(1) {
-                if let Ok((c, i)) = crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+                if let Ok((c, i)) = crate::fee::decompose(tx.payload.pct, tx.payload.fee) {
                     fee_consumer += c as u128;
                     fee_industrial += i as u128;
                 }
@@ -2527,7 +2527,7 @@ impl Blockchain {
                                 if tx.payload.from_ != "0".repeat(34) {
                                     if let Some(s) = bc.accounts.get_mut(&tx.payload.from_) {
                                         if let Ok((fee_c, fee_i)) =
-                                            crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                            crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                                         {
                                             let total_c = tx.payload.amount_consumer + fee_c;
                                             let total_i = tx.payload.amount_industrial + fee_i;
@@ -2652,10 +2652,10 @@ impl Blockchain {
         );
         crate::net::load_peer_metrics();
         let infl = crate::config::load_inflation(path);
-        bc.params.beta_storage_sub_ct = (infl.beta_storage_sub_ct * 1000.0) as i64;
-        bc.params.gamma_read_sub_ct = (infl.gamma_read_sub_ct * 1000.0) as i64;
-        bc.params.kappa_cpu_sub_ct = (infl.kappa_cpu_sub_ct * 1000.0) as i64;
-        bc.params.lambda_bytes_out_sub_ct = (infl.lambda_bytes_out_sub_ct * 1000.0) as i64;
+        bc.params.beta_storage_sub = (infl.beta_storage_sub * 1000.0) as i64;
+        bc.params.gamma_read_sub = (infl.gamma_read_sub * 1000.0) as i64;
+        bc.params.kappa_cpu_sub = (infl.kappa_cpu_sub * 1000.0) as i64;
+        bc.params.lambda_bytes_out_sub = (infl.lambda_bytes_out_sub * 1000.0) as i64;
         bc.params.risk_lambda = (infl.risk_lambda * 1000.0) as i64;
         bc.params.entropy_phi = (infl.entropy_phi * 1000.0) as i64;
         bc.params.haar_eta = (infl.haar_eta * 1000.0) as i64;
@@ -2797,7 +2797,7 @@ impl Blockchain {
                     }
                     if let Some(acc) = bc.accounts.get_mut(&e.sender) {
                         if let Ok((fee_consumer, fee_industrial)) =
-                            crate::fee::decompose(e.tx.payload.pct_ct, bc.base_fee + e.tx.tip)
+                            crate::fee::decompose(e.tx.payload.pct, bc.base_fee + e.tx.tip)
                         {
                             acc.pending_consumer += e.tx.payload.amount_consumer + fee_consumer;
                             acc.pending_industrial +=
@@ -3197,7 +3197,7 @@ impl Blockchain {
             panic!("admission panic");
         }
 
-        if tx.payload.pct_ct > 100 {
+        if tx.payload.pct > 100 {
             #[cfg(feature = "telemetry-json")]
             {
                 let tx_hash = tx.id();
@@ -3237,7 +3237,7 @@ impl Blockchain {
             return Err(TxAdmissionError::FeeTooLow);
         }
         let (fee_consumer, fee_industrial) =
-            match crate::fee::decompose(tx.payload.pct_ct, required_total) {
+            match crate::fee::decompose(tx.payload.pct, required_total) {
                 Ok(v) => v,
                 Err(FeeError::InvalidSelector) => {
                     #[cfg(feature = "telemetry")]
@@ -3345,7 +3345,7 @@ impl Blockchain {
                 mempool::scoring::evict_on_overflow(1);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
                     if let Ok((c, i)) = crate::fee::decompose(
-                        ev_entry.tx.payload.pct_ct,
+                        ev_entry.tx.payload.pct,
                         self.base_fee + ev_entry.tx.tip,
                     ) {
                         let total_c = ev_entry.tx.payload.amount_consumer + c;
@@ -3837,7 +3837,7 @@ impl Blockchain {
             let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.pct_ct, self.base_fee + tx.tip)
+                    crate::fee::decompose(tx.payload.pct, self.base_fee + tx.tip)
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -3893,7 +3893,7 @@ impl Blockchain {
             let tx_hash = tx.id();
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.pct_ct, self.base_fee + tx.tip)
+                    crate::fee::decompose(tx.payload.pct, self.base_fee + tx.tip)
                 {
                     let total_consumer = tx.payload.amount_consumer + fee_consumer;
                     let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -4286,7 +4286,7 @@ impl Blockchain {
         let mut fee_sum_industrial: u128 = 0;
         for tx in &included {
             if let Ok((fee_consumer, fee_industrial)) =
-                crate::fee::decompose(tx.payload.pct_ct, tx.tip)
+                crate::fee::decompose(tx.payload.pct, tx.tip)
             {
                 fee_sum_consumer += fee_consumer as u128;
                 fee_sum_industrial += fee_industrial as u128;
@@ -4299,16 +4299,16 @@ impl Blockchain {
         let (cpu_ms, bytes_out) = crate::exec::take_metrics();
         self.epoch_cpu_ms = self.epoch_cpu_ms.saturating_add(cpu_ms);
         self.epoch_bytes_out = self.epoch_bytes_out.saturating_add(bytes_out);
-        let storage_sub_ct =
-            (self.beta_storage_sub_ct_raw as u64).saturating_mul(self.epoch_storage_bytes);
+        let storage_sub =
+            (self.beta_storage_sub_raw as u64).saturating_mul(self.epoch_storage_bytes);
         let delta_read_bytes = self
             .epoch_read_bytes
             .saturating_sub(self.settled_read_bytes);
-        let read_sub_ct = (self.gamma_read_sub_ct_raw as u64).saturating_mul(delta_read_bytes);
-        let mut compute_sub_ct = (self.kappa_cpu_sub_ct_raw as u64)
+        let read_sub = (self.gamma_read_sub_raw as u64).saturating_mul(delta_read_bytes);
+        let mut compute_sub = (self.kappa_cpu_sub_raw as u64)
             .saturating_mul(self.epoch_cpu_ms)
             .saturating_add(
-                (self.lambda_bytes_out_sub_ct_raw as u64).saturating_mul(self.epoch_bytes_out),
+                (self.lambda_bytes_out_sub_raw as u64).saturating_mul(self.epoch_bytes_out),
             );
 
         // === SUPPLY CAP ENFORCEMENT (EARLY) ===
@@ -4316,20 +4316,20 @@ impl Blockchain {
         // We'll check again later after rebates are calculated, but this early check
         // prevents inconsistencies in subsidy distributions.
         let remaining_supply = MAX_SUPPLY_BLOCK.saturating_sub(self.emission);
-        let preliminary_mint = storage_sub_ct
-            .saturating_add(read_sub_ct)
-            .saturating_add(compute_sub_ct)
+        let preliminary_mint = storage_sub
+            .saturating_add(read_sub)
+            .saturating_add(compute_sub)
             .saturating_add(reward.0);
 
         // Make subsidies mutable so we can clamp them if needed
-        let mut storage_sub_ct = storage_sub_ct;
-        let mut read_sub_ct = read_sub_ct;
+        let mut storage_sub = storage_sub;
+        let mut read_sub = read_sub;
 
         if preliminary_mint > remaining_supply {
             // Approaching cap - preserve subsidies first, clamp reward
-            let subsidies_only = storage_sub_ct
-                .saturating_add(read_sub_ct)
-                .saturating_add(compute_sub_ct);
+            let subsidies_only = storage_sub
+                .saturating_add(read_sub)
+                .saturating_add(compute_sub);
 
             if subsidies_only <= remaining_supply {
                 // Subsidies fit, zero reward
@@ -4337,26 +4337,26 @@ impl Blockchain {
             } else {
                 // Even subsidies exceed cap - scale proportionally
                 let scale = (remaining_supply as f64) / (subsidies_only as f64);
-                storage_sub_ct = ((storage_sub_ct as f64) * scale).floor() as u64;
-                read_sub_ct = ((read_sub_ct as f64) * scale).floor() as u64;
-                compute_sub_ct = ((compute_sub_ct as f64) * scale).floor() as u64;
+                storage_sub = ((storage_sub as f64) * scale).floor() as u64;
+                read_sub = ((read_sub as f64) * scale).floor() as u64;
+                compute_sub = ((compute_sub as f64) * scale).floor() as u64;
                 reward = TokenAmount::new(0);
             }
         }
 
         let mut base_coinbase_block = reward
             .0
-            .checked_add(storage_sub_ct)
-            .and_then(|v| v.checked_add(compute_sub_ct))
+            .checked_add(storage_sub)
+            .and_then(|v| v.checked_add(compute_sub))
             .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| py_value_err("Fee overflow"))?;
 
         self.economics_epoch_storage_payout_block = self
             .economics_epoch_storage_payout_block
-            .saturating_add(storage_sub_ct.saturating_add(read_sub_ct));
+            .saturating_add(storage_sub.saturating_add(read_sub));
         self.economics_epoch_compute_payout_block = self
             .economics_epoch_compute_payout_block
-            .saturating_add(compute_sub_ct);
+            .saturating_add(compute_sub);
 
         let viewer_deltas: Vec<(String, u64)> = self
             .epoch_viewer_bytes
@@ -4421,7 +4421,7 @@ impl Blockchain {
         let verifier_percent = self.params.read_subsidy_verifier_percent.max(0) as u64;
         let liquidity_percent = self.params.read_subsidy_liquidity_percent.max(0) as u64;
         let role_allocations = distribute_scalar(
-            read_sub_ct,
+            read_sub,
             &[
                 (0, viewer_percent),
                 (1, host_percent),
@@ -4456,7 +4456,7 @@ impl Blockchain {
         liquidity_paid =
             liquidity_paid.saturating_add(verifier_target.saturating_sub(verifier_read_paid));
 
-        let mut miner_share_total = read_sub_ct
+        let mut miner_share_total = read_sub
             .saturating_sub(viewer_read_paid)
             .saturating_sub(host_read_paid)
             .saturating_sub(hardware_read_paid)
@@ -4509,7 +4509,7 @@ impl Blockchain {
                 campaign_id: record.campaign_id.clone(),
                 publisher: record.host_addr.clone(),
                 impressions: record.impressions,
-                spend_ct: record.total,
+                spend: record.total,
                 block_height: index,
                 conversions: record.conversions,
                 publisher_signature: vec![],
@@ -4524,7 +4524,7 @@ impl Blockchain {
                 ),
                 provider: receipt.seller.clone(),
                 energy_units: receipt.kwh_delivered,
-                price_ct: receipt.price_paid,
+                price: receipt.price_paid,
                 block_height: receipt.block_settled,
                 proof_hash: receipt.meter_reading_hash,
                 provider_signature: vec![],
@@ -4619,7 +4619,7 @@ impl Blockchain {
                 .ok_or_else(|| py_value_err("Fee overflow"))?;
         }
 
-        let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
+        let treasury_percent = self.params.treasury_percent.clamp(0, 100) as u64;
         let treasury_cut = base_coinbase_block.saturating_mul(treasury_percent) / 100;
         let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
@@ -4640,18 +4640,18 @@ impl Blockchain {
 
         // === SUPPLY CAP ENFORCEMENT (FINAL - REBATES) ===
         // Subsidies and reward were already clamped earlier. Now clamp rebates if needed.
-        let mut rebate_ct = self.proof_tracker.claim_all(index);
+        let mut rebate_tokens = self.proof_tracker.claim_all(index);
         let remaining = MAX_SUPPLY_BLOCK.saturating_sub(self.emission);
-        let subsidies_and_reward = storage_sub_ct
-            .saturating_add(read_sub_ct)
-            .saturating_add(compute_sub_ct)
+        let subsidies_and_reward = storage_sub
+            .saturating_add(read_sub)
+            .saturating_add(compute_sub)
             .saturating_add(reward.0);
 
-        if subsidies_and_reward.saturating_add(rebate_ct) > remaining {
+        if subsidies_and_reward.saturating_add(rebate_tokens) > remaining {
             // Clamp rebates to fit within remaining cap
             let rebate_max = remaining.saturating_sub(subsidies_and_reward);
-            if rebate_ct > rebate_max {
-                rebate_ct = rebate_max;
+            if rebate_tokens > rebate_max {
+                rebate_tokens = rebate_max;
                 #[cfg(feature = "telemetry")]
                 diagnostics::tracing::warn!(
                     remaining,
@@ -4662,7 +4662,7 @@ impl Blockchain {
         }
 
         let coinbase_block_total = base_coinbase_block
-            .checked_add(rebate_ct)
+            .checked_add(rebate_tokens)
             .and_then(|v| v.checked_add(fee_industrial_u64))
             .ok_or_else(|| py_value_err("Fee overflow"))?;
         let coinbase_industrial_total = 0;
@@ -4672,14 +4672,14 @@ impl Blockchain {
         fee_hasher.update(&fee_industrial_u64.to_le_bytes());
         let fee_checksum = fee_hasher.finalize().to_hex().to_string();
 
-        let storage_sub_token = TokenAmount::new(storage_sub_ct);
-        let read_sub_token = TokenAmount::new(read_sub_ct);
+        let storage_sub_token = TokenAmount::new(storage_sub);
+        let read_sub_token = TokenAmount::new(read_sub);
         let read_sub_viewer_token = TokenAmount::new(viewer_read_paid);
         let read_sub_host_token = TokenAmount::new(host_read_paid);
         let read_sub_hardware_token = TokenAmount::new(hardware_read_paid);
         let read_sub_verifier_token = TokenAmount::new(verifier_read_paid);
         let read_sub_liquidity_token = TokenAmount::new(liquidity_paid);
-        let compute_sub_token = TokenAmount::new(compute_sub_ct);
+        let compute_sub_token = TokenAmount::new(compute_sub);
         let coinbase = SignedTransaction {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
@@ -4687,7 +4687,7 @@ impl Blockchain {
                 amount_consumer: coinbase_block_total,
                 amount_industrial: coinbase_industrial_total,
                 fee: 0,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 0,
                 memo: Vec::new(),
             },
@@ -4751,7 +4751,7 @@ impl Blockchain {
             if tx.payload.from_ != "0".repeat(34) {
                 if let Some(s) = shadow_accounts.get_mut(&tx.payload.from_) {
                     let (fee_c, fee_i) =
-                        crate::fee::decompose(tx.payload.pct_ct, block_base_fee + tx.tip)
+                        crate::fee::decompose(tx.payload.pct, block_base_fee + tx.tip)
                             .unwrap_or((0, 0));
                     let total_c = tx.payload.amount_consumer + fee_c;
                     let total_i = tx.payload.amount_industrial + fee_i;
@@ -4926,7 +4926,7 @@ impl Blockchain {
             )));
         }
 
-        crate::blockchain::process::apply_coinbase_rebates(&mut block, rebate_ct);
+        crate::blockchain::process::apply_coinbase_rebates(&mut block, rebate_tokens);
 
         let mut nonce = 0u64;
         loop {
@@ -5038,10 +5038,10 @@ impl Blockchain {
                         rolling,
                         None,
                     );
-                    self.beta_storage_sub_ct_raw = raw[0];
-                    self.gamma_read_sub_ct_raw = raw[1];
-                    self.kappa_cpu_sub_ct_raw = raw[2];
-                    self.lambda_bytes_out_sub_ct_raw = raw[3];
+                    self.beta_storage_sub_raw = raw[0];
+                    self.gamma_read_sub_raw = raw[1];
+                    self.kappa_cpu_sub_raw = raw[2];
+                    self.lambda_bytes_out_sub_raw = raw[3];
                     let (backlog, util) = crate::compute_market::price_board::backlog_utilization();
                     let ind = inflation::retuning::retune_industrial_multiplier(
                         std::path::Path::new(&self.path),
@@ -5226,7 +5226,7 @@ impl Blockchain {
                         changed.insert(tx.payload.from_.clone());
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             let (fee_consumer, fee_industrial) =
-                                crate::fee::decompose(tx.payload.pct_ct, block_base_fee + tx.tip)
+                                crate::fee::decompose(tx.payload.pct, block_base_fee + tx.tip)
                                     .unwrap_or((0, 0));
                             let total_consumer = tx.payload.amount_consumer + fee_consumer;
                             let total_industrial = tx.payload.amount_industrial + fee_industrial;
@@ -5367,11 +5367,11 @@ impl Blockchain {
                 }
 
                 // Total minted = subsidies + reward + rebates (all clamped by cap enforcement earlier)
-                let minted = storage_sub_ct
-                    .saturating_add(read_sub_ct)
-                    .saturating_add(compute_sub_ct)
+                let minted = storage_sub
+                    .saturating_add(read_sub)
+                    .saturating_add(compute_sub)
                     .saturating_add(reward.0)
-                    .saturating_add(rebate_ct);
+                    .saturating_add(rebate_tokens);
 
                 // Paranoid assertion: ensure we never exceed cap
                 debug_assert!(
@@ -5547,7 +5547,7 @@ impl Blockchain {
                 return Ok(false);
             }
             *exp += 1;
-            match crate::fee::decompose(tx.payload.pct_ct, tx.tip) {
+            match crate::fee::decompose(tx.payload.pct, tx.tip) {
                 Ok((fee_consumer, fee_industrial)) => {
                     fee_tot_consumer += fee_consumer as u128;
                     fee_tot_industrial += fee_industrial as u128;
@@ -5675,7 +5675,7 @@ impl Blockchain {
                     }
                     if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                         let (fee_consumer, fee_industrial) =
-                            crate::fee::decompose(tx.payload.pct_ct, block.base_fee + tx.tip)
+                            crate::fee::decompose(tx.payload.pct, block.base_fee + tx.tip)
                                 .unwrap_or((0, 0));
                         let total_c = tx.payload.amount_consumer + fee_consumer;
                         let total_i = tx.payload.amount_industrial + fee_industrial;
@@ -5964,7 +5964,7 @@ impl Blockchain {
                 if !seen.insert(tx.id()) {
                     return false;
                 }
-                match crate::fee::decompose(tx.payload.pct_ct, tx.tip) {
+                match crate::fee::decompose(tx.payload.pct, tx.tip) {
                     Ok((fee_consumer, fee_industrial)) => {
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
@@ -6385,10 +6385,10 @@ mod tests {
         let mut bc = Blockchain::default();
         bc.block_reward = TokenAmount::new(0);
         bc.economics_block_reward_per_block = 1; // Set to 1 to avoid INITIAL_BLOCK_REWARD fallback, but effectively zero after logistic factor
-        bc.beta_storage_sub_ct_raw = 0;
-        bc.kappa_cpu_sub_ct_raw = 0;
-        bc.lambda_bytes_out_sub_ct_raw = 0;
-        bc.gamma_read_sub_ct_raw = 1;
+        bc.beta_storage_sub_raw = 0;
+        bc.kappa_cpu_sub_raw = 0;
+        bc.lambda_bytes_out_sub_raw = 0;
+        bc.gamma_read_sub_raw = 1;
         bc.params.read_subsidy_viewer_percent = 40;
         bc.params.read_subsidy_host_percent = 30;
         bc.params.read_subsidy_hardware_percent = 15;
@@ -6558,7 +6558,7 @@ mod market_metric_tests {
         bc.economics_epoch_storage_payout_block = 5_000;
         bc.economics_epoch_compute_payout_block = 3_000;
         bc.economics_epoch_ad_payout_block = 1_000;
-        bc.params.rent_rate_ct_per_byte = 5;
+        bc.params.rent_rate_per_byte = 5;
         bc.params.ad_cap_provider_count = 10;
 
         crate::compute_market::price_board::record_price(FeeLane::Industrial, 100, 1.0);

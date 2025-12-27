@@ -14,7 +14,7 @@ pub fn run_spike() {
             amount_consumer: 0,
             amount_industrial: 0,
             fee: bc.base_fee + 100,
-            pct_ct: 100,
+            pct: 100,
             nonce: n,
             memo: vec![],
         };

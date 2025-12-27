@@ -56,6 +56,7 @@ The receipt system is **fully integrated and production-ready**. All components 
   - `RECEIPTS_STORAGE_PER_BLOCK`, etc.
 - ✅ Settlement amount tracking:
   - `RECEIPT_SETTLEMENT_STORAGE_CT`, etc.
+- ✅ Treasury balance exports in the metrics aggregator now write the `delta` field exclusively; `_ct` aliases were removed so CLI dumps and dashboards must emit the updated field name.
 - ✅ Serialization size: `RECEIPT_BYTES_TOTAL`
 - ✅ Module exported in `node/src/telemetry.rs`
 - ✅ `record_receipts()` function called during block processing
@@ -97,7 +98,7 @@ Receipt::Ad(AdReceipt {
     campaign_id: record.campaign_id.clone(),
     publisher: record.host_addr.clone(),
     impressions: record.impressions,
-    spend_ct: record.total_ct,
+    spend: record.total_ct,
     block_height: index,  // ✅ Current block height
     conversions: record.conversions,
 })
@@ -120,7 +121,7 @@ EnergyReceipt {
     buyer,
     seller: provider.provider_id.clone(),
     kwh_delivered: kwh_consumed,
-    price_ct: total_cost,
+    price: total_cost,
     block_settled: block,  // ✅ Passed from caller
     treasury_fee,
     meter_reading_hash: meter_hash,
@@ -132,7 +133,7 @@ Receipt::Energy(EnergyReceipt {
     contract_id: format!("energy:{}", hex::encode(receipt.meter_reading_hash)),
     provider: receipt.seller.clone(),
     energy_units: receipt.kwh_delivered,
-    price_ct: receipt.price_paid,
+    price: receipt.price_paid,
     block_height: receipt.block_settled,  // ✅ From market receipt
     proof_hash: receipt.meter_reading_hash,
 })
@@ -182,7 +183,7 @@ self.pending_receipts.push(crate::ComputeReceipt {
     job_id: resolution.job_id.clone(),
     provider: state.provider.clone(),
     compute_units: total_units,
-    payment_ct: total_payment,
+    payment: total_payment,
     block_height: self.current_block,  // ✅ Was 0, now correct
     verified,
 });

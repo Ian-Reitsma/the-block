@@ -83,7 +83,7 @@ fn write_raw_payload(writer: &mut Writer, payload: &RawTxPayload) -> EncodeResul
         struct_writer.field_u64("amount_consumer", payload.amount_consumer);
         struct_writer.field_u64("amount_industrial", payload.amount_industrial);
         struct_writer.field_u64("fee", payload.fee);
-        struct_writer.field_u8("pct_ct", payload.pct_ct);
+        struct_writer.field_u8("pct", payload.pct);
         struct_writer.field_u64("nonce", payload.nonce);
         struct_writer.field_with("memo", |field_writer| {
             if result.is_ok() {
@@ -102,7 +102,7 @@ pub(crate) fn read_raw_payload(reader: &mut Reader<'_>) -> binary_struct::Result
     let mut amount_consumer = None;
     let mut amount_industrial = None;
     let mut fee = None;
-    let mut pct_ct = None;
+    let mut pct = None;
     let mut nonce = None;
     let mut memo = None;
 
@@ -118,7 +118,7 @@ pub(crate) fn read_raw_payload(reader: &mut Reader<'_>) -> binary_struct::Result
             "amount_industrial",
         ),
         "fee" => assign_once(&mut fee, reader.read_u64()?, "fee"),
-        "pct_ct" => assign_once(&mut pct_ct, reader.read_u8()?, "pct_ct"),
+        "pct" => assign_once(&mut pct, reader.read_u8()?, "pct"),
         "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
         "memo" => assign_once(&mut memo, reader.read_bytes()?, "memo"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
@@ -131,7 +131,7 @@ pub(crate) fn read_raw_payload(reader: &mut Reader<'_>) -> binary_struct::Result
         amount_industrial: amount_industrial
             .ok_or(DecodeError::MissingField("amount_industrial"))?,
         fee: fee.ok_or(DecodeError::MissingField("fee"))?,
-        pct_ct: pct_ct.ok_or(DecodeError::MissingField("pct_ct"))?,
+        pct: pct.ok_or(DecodeError::MissingField("pct"))?,
         nonce: nonce.ok_or(DecodeError::MissingField("nonce"))?,
         memo: memo.unwrap_or_default(),
     })
@@ -476,7 +476,7 @@ mod tests {
             amount_consumer: 10,
             amount_industrial: 5,
             fee: 2,
-            pct_ct: 75,
+            pct: 75,
             nonce: 9,
             memo: vec![1, 2, 3],
         }
@@ -527,7 +527,7 @@ mod tests {
         assert_eq!(decoded.amount_consumer, payload.amount_consumer);
         assert_eq!(decoded.amount_industrial, payload.amount_industrial);
         assert_eq!(decoded.fee, payload.fee);
-        assert_eq!(decoded.pct_ct, payload.pct_ct);
+        assert_eq!(decoded.pct, payload.pct);
         assert_eq!(decoded.nonce, payload.nonce);
         assert_eq!(decoded.memo, payload.memo);
     }

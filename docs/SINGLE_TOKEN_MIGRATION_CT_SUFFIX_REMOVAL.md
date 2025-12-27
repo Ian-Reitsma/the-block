@@ -95,17 +95,11 @@ compute_sub_ct → compute_sub
 proof_rebate_ct → proof_rebate
 ```
 
-**IMPORTANT:** The Block struct retains serde aliases for backward compatibility with stored block data:
-```rust
-#[serde(default = "...", alias = "storage_sub_ct")]
-pub storage_sub: TokenAmount,
-```
-
-This allows reading old blocks from the database while using new field names in code.
+**IMPORTANT:** Legacy serde aliases have been removed. Nodes now emit and accept only the new field names, so historical block data must be migrated (or re-ingested) to keep parity.
 
 **All usages updated in:**
 - `node/src/lib.rs` - struct definition and all field accesses throughout the file
-- `node/src/block_binary.rs` - encoder now writes new key names, decoder accepts both old and new keys
+- `node/src/block_binary.rs` - encoder/decoder both use the new key names exclusively
 - `node/src/light_client/proof_tracker.rs` - updated `.proof_rebate` access
 
 ---
@@ -114,12 +108,7 @@ This allows reading old blocks from the database while using new field names in 
 
 **Encoder (around line 150-200):** Now writes fields with new names (e.g., "storage_sub" not "storage_sub_ct")
 
-**Decoder (around line 300-400):** Accepts both old and new key names for backward compat:
-```rust
-"storage_sub" | "storage_sub_ct" => assign_once(&mut storage_sub, reader.read_u64()?, "storage_sub"),
-"read_sub" | "read_sub_ct" => assign_once(&mut read_sub, reader.read_u64()?, "read_sub"),
-// etc...
-```
+**Decoder (around line 300-400):** Only recognizes the new key names; the `_ct` aliases were removed to keep the binary codec consistent with the single-token spec.
 
 **Test code (around line 750-830):** Updated to use new field names in sample_block() construction.
 
@@ -133,324 +122,85 @@ This allows reading old blocks from the database while using new field names in 
 - Added missing ad_* fields
 - Changed integer literals to `.into()` for TokenAmount conversion
 
+
+### 6. Governance Subsidy + Treasury Params
+
+**Locations:** `governance/src/{lib.rs,params.rs,codec.rs,store.rs,treasury.rs}`, `node/src/governance/{mod.rs,params.rs,codec.rs,store.rs}`, `node/src/{lib.rs,ledger_binary.rs,rpc/{governance.rs,inflation.rs},rpc/client.rs,config.rs}`, `cli/src/gov.rs`, `config/inflation.toml`, `node/tests/{subsidy_smoothing.rs,inflation_params_rpc.rs,rpc_inflation.rs,treasury.rs,ad_read_distribution.rs}`, `docs/system_reference.md`
+
+- Dropped `_ct` suffixes from the subsidy multipliers and treasury knobs:
+  - `beta_storage_sub`, `gamma_read_sub`, `kappa_cpu_sub`, `lambda_bytes_out_sub`
+  - `treasury_percent`, `proof_rebate_limit`, `rent_rate_per_byte`
+- Renamed the raw economics samples on `Blockchain` (`beta_storage_sub_raw`, etc.) and updated the deterministic metrics plumbing.
+- `ParamKey` variants, codecs, sled stores, RPC payloads, config defaults, and ledger binary encoding now emit the new identifiers. RPC clients and tests expect the updated JSON keys.
+- `DisbursementError::InsufficientFunds` now reports `{required, available}` for the single BLOCK balance; the `_ct` suffix is gone.
+- Docs now describe the new identifiers, keeping the spec aligned with implementation.
+
+---
+
+### 7. Explorer Block Payout Fixtures (cli/tests/explorer.rs)
+
+- Block payout fixtures now serialize `storage_sub`, `read_sub_*`, `compute_sub`, and `proof_rebate` without `_ct`. Table/Prometheus outputs, JSON parsing, and the CLI tests all exercise the new field names.
+
+---
+
+### 8. Storage Contract + Importer Totals (storage/**, node/src/rpc/storage.rs, cli/tests/storage_importer.rs)
+
+- `StorageContract::total_deposit` replaces the old `_ct` field everywhere (storage market codec, importer, RPC, CLI, integration tests). JSON keys changed so snapshots/imports never emit `_ct`.
+
+---
+
+### 9. DNS Gateway Auction Fields (node/src/gateway/dns.rs, cli/src/gateway.rs, node/tests/dns_auction_ledger.rs, node/src/launch_governor/mod.rs)
+
+- DNS config, bid/auction records, CLI payloads, and telemetry now expose `base_reserve`, `min_bid`, `stake_requirement`, `stake_locked`, `deposit`, `bid`, `price`, `protocol_fee`, `royalty_fee`, `settlement_amounts`, `locked`, `withdraw`, and `coverage_demand` without `_ct`.
+- Launch Governor samples track `settlement_p90` and compute coverage using the renamed settlement vector so metrics stay consistent with the runtime structs.
+
+### 10. DEX AMM Pool + Sims
+
+- `dex/src/amm.rs` drops the dual-token naming. The pool now exposes `base_reserve`/`quote_reserve` and swaps via `swap_base_for_quote` and `swap_quote_for_base`, so the AMM math no longer references `_ct`/`_it`.
+- `dex/tests/amm.rs` and `sim/dex_liquidity.rs` exercise the renamed helpers and verify slippage/invariant guarantees with the single-token naming.
+- `node/src/dex/storage_binary.rs` encodes/decodes AMM pools with the new field names, and the sled round-trip tests cover the updated schema.
+
+### 11. Metrics Aggregator Treasury History
+
+- `metrics-aggregator/src/lib.rs` now expects the `delta` field when parsing treasury balance snapshots; the legacy `delta_ct` alias was removed to keep telemetry aligned with the single-token schema.
+- `metrics-aggregator/tests/treasury.rs` exercises the updated schema by feeding legacy string payloads that emit `delta`.
+- `docs/RECEIPT_STATUS.md` and `docs/RECEIPT_INTEGRATION_COMPLETE.md` document the new field requirement so operators update their CLI dumps and dashboards.
+
+### 12. Receipt Settlement Fields
+
+- `StorageReceipt`, `EnergyReceipt`, `ComputeReceipt`, and `AdReceipt` drop the `_ct` suffixes (`price`, `payment`, `spend` now express settlement amounts in BLOCK). The binary codec, crypto hashing, validation logic, deterministic metrics engine, and compute/storage RPC drainers were updated accordingly.
+- All receipt integration tests, stress tests, and security suites now use the new field names; telemetry + deterministic derivation consume the updated identifiers.
+- Receipt docs (`RECEIPT_STATUS.md`, `RECEIPT_INTEGRATION_COMPLETE.md`, `MARKET_RECEIPT_INTEGRATION.md`, `RECEIPT_VALIDATION_GUIDE.md`, `INSTRUCTIONS.md`, and the architecture spec) describe the renamed fields so operators and tooling stop emitting `_ct` payloads.
+
+### 13. Transaction Fee Split Surfaces (`pct`)
+
+- `RawTxPayload::pct` replaces the legacy `pct_ct` flag throughout the ledger, network envelopes, RPCs, CLI/wallet tooling, and the binary codec (`node/src/transaction.rs`, `node/src/transaction/binary.rs`, `node/src/net/message.rs`, `cli/src/wallet.rs`, `cli/src/tx.rs`, `scripts/node_e2e.sh`, `scripts/node_drive_existing.sh`). All mempool/fee tests (`tests/base_fee_adjustment.rs`, `node/tests/mempool_*`, python fixtures) now emit the new key, ensuring blocks serialize the updated field name exclusively.
+- Fee decomposition helpers and compute-market admission structs now expose `pct`/`fee_pct` and return `(fee_consumer, fee_industrial)` tuples, keeping the naming aligned with the single-token spec.
+
+### 14. Storage Contract Deposits
+
+- Storage market records, codecs, RPC payloads, and CLI/importer fixtures now use `deposit`/`remaining_deposit` instead of the `_ct` suffixed variants (`storage_market/src/lib.rs`, `storage_market/src/codec.rs`, `storage_market/src/receipts.rs`, `node/src/rpc/storage.rs`, `storage/tests/market_incentives.rs`, `storage_market/tests/*`, `cli/tests/storage_importer.rs`). Docs describing replica incentives mirror the new identifiers.
+
+### 15. Fee Vector & Schema Updates
+
+- `docs/spec/fee_v2.schema.json` (`mdbook` copy included) and `node/tests/vectors/fee_v2_vectors.csv` now publish `fee_consumer`/`fee_industrial`, and the CSV-driven tests (`node/tests/test_fee_vectors.py`, `node/tests/fee_vectors.rs`) assert against those keys so tooling stops referencing `_ct`/`_it`.
+
+### 16. Energy Treasury Telemetry
+
+- The treasury fee counter now emits as `energy_treasury_fee_total` in telemetry (`node/src/telemetry.rs`, `node/src/energy.rs`) and the associated docs (`docs/architecture.md`, `docs/developer_handbook.md`), keeping dashboards/operators on the BLOCK-denominated label without the `_ct` suffix.
+
 ---
 
 ## REMAINING WORK
+## REMAINING WORK
 
-### 1. explorer/tests/block_api.rs
+### 1. Misc Test & Telemetry Fixtures
 
-**Status:** PARTIALLY DONE - needs completion
+- Rebuild/publish the mdBook artifacts (`docs/book/**/*.html`, search index) so the generated pages pick up the new subsidy/metric names; any `_ct` references left after the rebuild should be patched manually before tagging.
 
-**Lines to update:**
-
-**Lines 44-61:** JSON fixture - change keys from `_ct` suffix to no suffix:
-```json
-// BEFORE:
-"storage_sub_ct": 0,
-"read_sub_ct": {read_total},
-"read_sub_viewer_ct": {read_viewer},
-...
-"compute_sub_ct": 0,
-"proof_rebate_ct": 0,
-
-// AFTER:
-"storage_sub": 0,
-"read_sub": {read_total},
-"read_sub_viewer": {read_viewer},
-...
-"compute_sub": 0,
-"proof_rebate": 0,
-```
-
-**Lines 142-159:** Same JSON fixture changes for the second test block.
-
-**Lines 212:** JSON fixture - `"read_sub_ct"` → `"read_sub"`
-
-**Lines 277-282:** Block struct construction - change field names:
-```rust
-// BEFORE:
-read_sub_ct: TokenAmount::new(read_total),
-read_sub_viewer_ct: TokenAmount::new(read_viewer),
-...
-
-// AFTER:
-read_sub: TokenAmount::new(read_total),
-read_sub_viewer: TokenAmount::new(read_viewer),
-...
-```
-
-**Lines 306:** JSON fixture - `"read_sub_ct"` → `"read_sub"`
-
----
-
-### 2. Governance Params (governance/src/params.rs AND node/src/governance/params.rs)
-
-**Status:** NOT STARTED
-
-**Fields to rename (both files have identical structures):**
-
-```rust
-// Struct fields (around line 569 in governance/, line 287 in node/):
-pub beta_storage_sub_ct: i64,   → pub beta_storage_sub: i64,
-pub gamma_read_sub_ct: i64,     → pub gamma_read_sub: i64,
-pub kappa_cpu_sub_ct: i64,      → pub kappa_cpu_sub: i64,
-pub lambda_bytes_out_sub_ct: i64, → pub lambda_bytes_out_sub: i64,
-pub treasury_percent_ct: i64,   → pub treasury_percent: i64,
-pub proof_rebate_limit_ct: i64, → pub proof_rebate_limit: i64,
-pub rent_rate_ct_per_byte: i64, → pub rent_rate_per_byte: i64,
-```
-
-**Files affected:**
-- `governance/src/params.rs` - struct definition, Default impl, to_json(), from_json(), apply functions
-- `node/src/governance/params.rs` - same changes
-- `governance/src/store.rs` - ParamKey enum and param key matching
-- `node/src/governance/store.rs` - same changes
-- `node/src/rpc/governance.rs` - GovernanceParams response struct
-- `node/src/rpc/client.rs` - GovernanceParams parsing
-- `node/src/rpc/inflation.rs` - InflationParams struct
-- `node/src/ledger_binary.rs` - binary encoding/decoding of params
-- `node/src/lib.rs` - `beta_storage_sub_ct_raw`, `gamma_read_sub_ct_raw` fields
-- `node/src/config.rs` - InflationConfig struct
-- `node/tests/subsidy_smoothing.rs` - test assertions
-- `node/tests/inflation_params_rpc.rs` - test assertions
-- `node/tests/ad_read_distribution.rs` - setting `gamma_read_sub_ct_raw`
-
-**Note:** The ParamKey enum likely has variants like `BetaStorageSubCt`, `GammaReadSubCt` that need renaming.
-
----
-
-### 3. DNS Gateway Fields (node/src/gateway/dns.rs)
-
-**Status:** NOT STARTED
-
-**Fields to rename (approximately 50+ occurrences):**
-
-```rust
-// Config struct (around line 69):
-base_reserve_ct: u64,  → base_reserve: u64,
-
-// Bid struct (around line 169):
-stake_locked_ct: u64,  → stake_locked: u64,
-
-// Auction record structs (around line 180-210):
-min_bid_ct: u64,           → min_bid: u64,
-stake_requirement_ct: u64, → stake_requirement: u64,
-last_sale_price_ct: u64,   → last_sale_price: u64,
-price_ct: u64,             → price: u64,
-protocol_fee_ct: u64,      → protocol_fee: u64,
-royalty_fee_ct: u64,       → royalty_fee: u64,
-settlement_ct: u64,        → settlement: u64,
-locked_ct: u64,            → locked: u64,
-deposit_ct: u64,           → deposit: u64,
-withdraw_ct: u64,          → withdraw: u64,
-available_ct,              → available,
-withdrawn_ct,              → withdrawn,
-```
-
-**Also update:**
-- All function parameters using these names
-- All JSON key strings in to_json() functions
-- All JSON key lookups in from_json() functions
-- All metric recording functions
-- settlement_amounts_ct Vec field
-
----
-
-### 4. Storage Contract Fields (storage/src/contract.rs)
-
-**Status:** NOT STARTED
-
-**Fields to rename:**
-```rust
-// Line 31:
-pub total_deposit_ct: u64, → pub total_deposit: u64,
-```
-
-**Files affected:**
-- `storage/src/contract.rs` - struct definition
-- `storage/src/provider_integration.rs` - field usage
-- `storage/tests/proof_security.rs` - test struct construction
-- `storage/tests/market_incentives.rs` - test struct construction
-- `storage_market/tests/importer.rs` - JSON serialization
-- `storage_market/tests/engine_paths.rs` - field assertions (total_deposit_ct, amount_accrued_ct, remaining_deposit_ct, slashed_ct, deposit_ct)
-- `tests/storage_market.rs` - test struct construction
-
----
-
-### 5. DEX AMM Functions (dex/src/amm.rs)
-
-**Status:** NOT STARTED
-
-**This relates to the dual-token model removal. Functions to rename:**
-
-```rust
-// Line 52:
-pub fn swap_ct_for_it(&mut self, ct_in: u128) -> u128
-→ Consider removing entirely or renaming to single-token swap
-
-// Line 63:
-pub fn swap_it_for_ct(&mut self, it_in: u128) -> u128
-→ Consider removing entirely or renaming to single-token swap
-```
-
-**Internal variables to rename:**
-- `share_ct` → `share`
-- `new_ct` → `new_reserve` (or similar)
-- `ct_out` → `out` (or similar)
-
-**Files affected:**
-- `dex/src/amm.rs` - function definitions
-- `dex/tests/amm.rs` - test calls
-- `sim/dex_liquidity.rs` - simulation using swap functions
-
-**QUESTION FOR USER:** Should these DEX swap functions be removed entirely as part of dual-token removal, or just renamed?
-
----
-
-### 6. Misc Test Files
-
-**Status:** NOT STARTED
-
-**sim/fee_spike.rs line 17:**
-```rust
-pct_ct: 100,  → pct: 100,  (or pct_block if needed)
-```
-
-**sim/mempool_spam.rs line 26:**
-```rust
-pct_ct: 100,  → pct: 100,
-```
-
-**tests/base_fee_adjustment.rs line 12:**
-```rust
-pct_ct: 100,  → pct: 100,
-```
-
-**tests/shard_consensus.rs lines 20, 35:**
-```rust
-pct_ct: 0,  → pct: 0,
-```
-
-**tests/account_abstraction.rs line 38:**
-```rust
-pct_ct: 100,  → pct: 100,
-```
-
----
-
-### 7. Governance Treasury (governance/src/treasury.rs)
-
-**Status:** NOT STARTED
-
-**Lines 287-289:**
-```rust
-required_ct: u64, → required: u64,
-available_ct: u64, → available: u64,
-```
-
----
-
-### 8. Metrics Aggregator (metrics-aggregator/src/lib.rs)
-
-**Status:** NOT STARTED
-
-**Line 8283:**
-```rust
-.or_else(|| obj.get("delta_ct"))  → .or_else(|| obj.get("delta"))
-```
-
-Also check for any `delta_ct` JSON key references.
-
----
-
-### 9. Metrics Treasury Test (metrics-aggregator/tests/treasury.rs)
-
-**Status:** NOT STARTED
-
-**Line 143:**
-```json
-"delta_ct": "450",  → "delta": "450",
-```
-
----
-
-## VERIFICATION STEPS
-
-After all changes:
-
-1. `cargo check` - ensure compilation
-2. `cargo test` - run all tests
-3. Search for remaining `_ct` references: `grep -r "_ct[^a-z]" --include="*.rs" .`
-4. Search for remaining `_it` references: `grep -r "_it[^a-z]" --include="*.rs" .`
-
----
-
-## SERDE ALIAS STRATEGY
-
-For backward compatibility with stored data, certain structs use serde aliases:
-
-**Block struct:** Uses aliases to read old block data from database:
-```rust
-#[serde(alias = "storage_sub_ct")]
-pub storage_sub: TokenAmount,
-```
-
-**Binary decoder:** Accepts both old and new key names:
-```rust
-"storage_sub" | "storage_sub_ct" => ...
-```
-
-**JSON fixtures in tests:** Should be updated to use new key names, but serde aliases ensure old data still works.
-
----
-
-## FILES SUMMARY
-
-### Completed:
-- `node/src/lib.rs`
-- `node/src/block_binary.rs`
-- `node/src/compute_market/settlement.rs`
-- `node/src/compute_market/mod.rs`
-- `node/src/rpc/compute_market.rs`
-- `node/src/light_client/proof_tracker.rs`
-- `explorer/src/lib.rs`
-- `cli/src/explorer.rs`
-- `cli/src/compute.rs`
-- `tests/partition_recovery.rs`
-
-### Remaining:
-- `explorer/tests/block_api.rs` (partial)
-- `governance/src/params.rs`
-- `governance/src/store.rs`
-- `governance/src/treasury.rs`
-- `node/src/governance/params.rs`
-- `node/src/governance/store.rs`
-- `node/src/rpc/governance.rs`
-- `node/src/rpc/client.rs`
-- `node/src/rpc/inflation.rs`
-- `node/src/ledger_binary.rs`
-- `node/src/config.rs`
-- `node/src/gateway/dns.rs`
-- `node/tests/subsidy_smoothing.rs`
-- `node/tests/inflation_params_rpc.rs`
-- `node/tests/ad_read_distribution.rs`
-- `storage/src/contract.rs`
-- `storage/src/provider_integration.rs`
-- `storage/tests/proof_security.rs`
-- `storage/tests/market_incentives.rs`
-- `storage_market/tests/importer.rs`
-- `storage_market/tests/engine_paths.rs`
-- `tests/storage_market.rs`
-- `dex/src/amm.rs`
-- `dex/tests/amm.rs`
-- `sim/dex_liquidity.rs`
-- `sim/fee_spike.rs`
-- `sim/mempool_spam.rs`
-- `tests/base_fee_adjustment.rs`
-- `tests/shard_consensus.rs`
-- `tests/account_abstraction.rs`
-- `metrics-aggregator/src/lib.rs`
-- `metrics-aggregator/tests/treasury.rs`
+### Outstanding Files
+- `docs/book/system_reference.html`, `docs/book/print.html`, `docs/book/searchindex.js` (subsidy multiplier table still lists `_ct` names)
+- Any remaining doc references surfaced by the grep commands below
 
 ---
 
@@ -475,4 +225,4 @@ grep -rn "_it[^a-z]" --include="*.rs" .
 ---
 
 *Last updated: 2025-12-27*
-*Current status: Block struct and core structs updated, governance params and DNS gateway pending*
+*Current status: Core structs, DEX pool, and aggregator completed; focus shifts to sims/tests + telemetry fixtures.*

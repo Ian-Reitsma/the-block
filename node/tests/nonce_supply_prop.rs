@@ -28,7 +28,7 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
                 amount_consumer: 1,
                 amount_industrial: 1,
                 fee: 1000,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 1,
                 memo: Vec::new(),
             };
@@ -60,7 +60,7 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
                     amount_consumer: consumer,
                     amount_industrial: industrial,
                     fee: 1000,
-                    pct_ct: 100,
+                    pct: 100,
                     nonce: expected_nonce + 1,
                     memo: Vec::new(),
                 };

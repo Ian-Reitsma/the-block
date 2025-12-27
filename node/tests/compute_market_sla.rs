@@ -17,7 +17,7 @@ fn job_timeout_and_resubmit_penalizes() {
         consumer_bond: 5,
         units: 1,
         price_per_unit: 1,
-        fee_pct_ct: 0,
+        fee_pct: 0,
         capability: Capability {
             cpu_cores: 1,
             ..Default::default()
@@ -64,7 +64,7 @@ fn job_timeout_and_resubmit_penalizes() {
         consumer_bond: 5,
         units: 1,
         price_per_unit: 1,
-        fee_pct_ct: 0,
+        fee_pct: 0,
         capability: Capability {
             cpu_cores: 1,
             ..Default::default()

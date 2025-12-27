@@ -51,7 +51,7 @@ fn block_application_is_atomic() {
         amount_consumer: 10,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -62,7 +62,7 @@ fn block_application_is_atomic() {
         amount_consumer: 200,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 100,
+        pct: 100,
         nonce: 2,
         memo: Vec::new(),
     };

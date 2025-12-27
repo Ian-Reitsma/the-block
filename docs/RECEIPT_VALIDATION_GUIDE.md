@@ -42,7 +42,7 @@ let receipt = Receipt::Storage(StorageReceipt {
     contract_id: "sc_123".into(),
     provider: "provider_1".into(),
     bytes: 1000,
-    price_ct: 500,
+    price: 500,
     block_height: 100,
     provider_escrow: 10000,
 });
@@ -276,7 +276,7 @@ fn valid_receipt_passes() {
         contract_id: "sc_123".into(),
         provider: "provider_1".into(),
         bytes: 1000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
     });
@@ -290,7 +290,7 @@ fn empty_contract_id_fails() {
         contract_id: "".into(), // Empty!
         provider: "provider_1".into(),
         bytes: 1000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
     });

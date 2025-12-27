@@ -78,7 +78,7 @@ pub struct Offer {
     pub price_per_unit: u64,
     /// Percentage of `price` paid in consumer tokens. `0` routes the entire
     /// amount to industrial tokens, `100` routes it all to consumer tokens.
-    pub fee_pct_ct: u8,
+    pub fee_pct: u8,
     /// Hardware capability advertised by the provider.
     #[serde(default = "foundation_serialization::defaults::default")]
     pub capability: scheduler::Capability,
@@ -102,8 +102,8 @@ impl Offer {
         if self.units == 0 {
             return Err("no units offered");
         }
-        if self.fee_pct_ct > 100 {
-            return Err("invalid fee_pct_ct");
+        if self.fee_pct > 100 {
+            return Err("invalid fee_pct");
         }
         if !scheduler::validate_multiplier(self.reputation_multiplier) {
             return Err("invalid reputation multiplier");
@@ -288,7 +288,7 @@ struct JobState {
     provider_capability: scheduler::Capability,
     provider_bond: u64,
     price_per_unit: u64,
-    fee_pct_ct: u8,
+    fee_pct: u8,
     paid_slices: usize,
     completed: bool,
 }
@@ -355,7 +355,7 @@ impl Market {
                             job_id: resolution.job_id.clone(),
                             provider: state.provider.clone(),
                             compute_units: total_units,
-                            payment_ct: total_payment,
+                            payment: total_payment,
                             block_height: self.current_block,
                             verified,
                             provider_signature: vec![],
@@ -492,7 +492,7 @@ impl Market {
             provider_capability: offer.capability.clone(),
             provider_bond: offer.provider_bond,
             price_per_unit: offer.price_per_unit,
-            fee_pct_ct: offer.fee_pct_ct,
+            fee_pct: offer.fee_pct,
             paid_slices: 0,
             completed: false,
         };
@@ -656,7 +656,7 @@ impl Market {
             .checked_mul(state.price_per_unit)
             .ok_or("payout overflow")?;
         let (expected_ct, expected_it) =
-            crate::fee::decompose(state.fee_pct_ct, total_expected).map_err(|_| "payout split")?;
+            crate::fee::decompose(state.fee_pct, total_expected).map_err(|_| "payout split")?;
         if proof.payout_ct == 0 && proof.payout_it == 0 {
             // Legacy receipts send total payout through alias field
             proof.payout_ct = proof.total();
@@ -989,7 +989,7 @@ mod tests {
             consumer_bond: 1,
             units: 10,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1056,7 +1056,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1118,7 +1118,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1166,7 +1166,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1220,7 +1220,7 @@ mod tests {
             consumer_bond: 1,
             units: 2,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1292,7 +1292,7 @@ mod tests {
             consumer_bond: 5,
             units: 1,
             price_per_unit: 1,
-            fee_pct_ct: 0,
+            fee_pct: 0,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1327,7 +1327,7 @@ mod tests {
             consumer_bond: 5,
             units: 1,
             price_per_unit: 1,
-            fee_pct_ct: 0,
+            fee_pct: 0,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1401,7 +1401,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 2,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,

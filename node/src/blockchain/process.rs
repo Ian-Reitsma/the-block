@@ -92,7 +92,7 @@ pub fn validate_and_apply(
         let _tx_timer = TransactionProcessingTimer::new();
 
         verify_stateless(tx)?;
-        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.pct, tx.payload.fee)
             .map_err(|_| TxAdmissionError::FeeOverflow)?;
         if tx.payload.from_ != zero_address {
             let sender_key = tx.payload.from_.clone();
@@ -249,8 +249,8 @@ pub fn commit(chain: &mut Blockchain, deltas: Vec<StateDelta>) -> std::io::Resul
 }
 
 /// Apply rebate claims to a block's coinbase totals after subsidy calculation.
-pub fn apply_coinbase_rebates(block: &mut Block, rebate_ct: u64) {
-    crate::light_client::proof_tracker::apply_rebates(block, rebate_ct);
+pub fn apply_coinbase_rebates(block: &mut Block, rebate_amount: u64) {
+    crate::light_client::proof_tracker::apply_rebates(block, rebate_amount);
 }
 
 pub(crate) fn shard_state_root(

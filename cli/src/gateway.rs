@@ -69,8 +69,8 @@ impl GatewayCmd {
 pub enum DomainAction {
     List {
         domain: String,
-        min_bid_ct: u64,
-        stake_requirement_ct: Option<u64>,
+        min_bid: u64,
+        stake_requirement: Option<u64>,
         duration_secs: Option<u64>,
         seller: Option<String>,
         seller_stake: Option<String>,
@@ -82,7 +82,7 @@ pub enum DomainAction {
     Bid {
         domain: String,
         bidder: String,
-        bid_ct: u64,
+        bid: u64,
         stake_reference: Option<String>,
         url: String,
         auth: Option<String>,
@@ -102,14 +102,14 @@ pub enum DomainAction {
     StakeRegister {
         reference: String,
         owner: String,
-        deposit_ct: u64,
+        deposit: u64,
         url: String,
         auth: Option<String>,
     },
     StakeWithdraw {
         reference: String,
         owner: String,
-        withdraw_ct: u64,
+        withdraw: u64,
         url: String,
         auth: Option<String>,
     },
@@ -462,10 +462,10 @@ impl DomainAction {
             "list" => {
                 let domain = require_positional(sub_matches, "domain")?;
                 let min_bid_raw = require_positional(sub_matches, "min_bid")?;
-                let min_bid_ct = min_bid_raw.parse::<u64>().map_err(|_| {
+                let min_bid = min_bid_raw.parse::<u64>().map_err(|_| {
                     format!("invalid value '{min_bid_raw}' for 'min_bid': expected integer")
                 })?;
-                let stake_requirement_ct = match take_string(sub_matches, "stake-requirement") {
+                let stake_requirement = match take_string(sub_matches, "stake-requirement") {
                     Some(raw) => Some(raw.parse::<u64>().map_err(|_| {
                         format!("invalid value '{raw}' for '--stake-requirement': expected integer")
                     })?),
@@ -493,8 +493,8 @@ impl DomainAction {
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
                 Ok(DomainAction::List {
                     domain,
-                    min_bid_ct,
-                    stake_requirement_ct,
+                    min_bid,
+                    stake_requirement,
                     duration_secs,
                     seller: take_string(sub_matches, "seller"),
                     seller_stake: take_string(sub_matches, "seller-stake"),
@@ -507,7 +507,7 @@ impl DomainAction {
             "bid" => {
                 let domain = require_positional(sub_matches, "domain")?;
                 let bid_raw = require_positional(sub_matches, "bid")?;
-                let bid_ct = bid_raw.parse::<u64>().map_err(|_| {
+                let bid = bid_raw.parse::<u64>().map_err(|_| {
                     format!("invalid value '{bid_raw}' for 'bid': expected integer")
                 })?;
                 let bidder = take_string(sub_matches, "bidder")
@@ -517,7 +517,7 @@ impl DomainAction {
                 Ok(DomainAction::Bid {
                     domain,
                     bidder,
-                    bid_ct,
+                    bid,
                     stake_reference: take_string(sub_matches, "stake-ref"),
                     url,
                     auth: take_string(sub_matches, "auth"),
@@ -550,7 +550,7 @@ impl DomainAction {
             "stake-register" => {
                 let reference = require_positional(sub_matches, "reference")?;
                 let deposit_raw = require_positional(sub_matches, "deposit")?;
-                let deposit_ct = deposit_raw.parse::<u64>().map_err(|_| {
+                let deposit = deposit_raw.parse::<u64>().map_err(|_| {
                     format!("invalid value '{deposit_raw}' for 'deposit': expected integer")
                 })?;
                 let owner = take_string(sub_matches, "owner")
@@ -560,7 +560,7 @@ impl DomainAction {
                 Ok(DomainAction::StakeRegister {
                     reference,
                     owner,
-                    deposit_ct,
+                    deposit,
                     url,
                     auth: take_string(sub_matches, "auth"),
                 })
@@ -568,7 +568,7 @@ impl DomainAction {
             "stake-withdraw" => {
                 let reference = require_positional(sub_matches, "reference")?;
                 let amount_raw = require_positional(sub_matches, "amount")?;
-                let withdraw_ct = amount_raw.parse::<u64>().map_err(|_| {
+                let withdraw = amount_raw.parse::<u64>().map_err(|_| {
                     format!("invalid value '{amount_raw}' for 'amount': expected integer")
                 })?;
                 let owner = take_string(sub_matches, "owner")
@@ -578,7 +578,7 @@ impl DomainAction {
                 Ok(DomainAction::StakeWithdraw {
                     reference,
                     owner,
-                    withdraw_ct,
+                    withdraw,
                     url,
                     auth: take_string(sub_matches, "auth"),
                 })
@@ -682,8 +682,8 @@ pub fn handle(cmd: GatewayCmd) {
             match action {
                 DomainAction::List {
                     domain,
-                    min_bid_ct,
-                    stake_requirement_ct,
+                    min_bid,
+                    stake_requirement,
                     duration_secs,
                     seller,
                     seller_stake,
@@ -694,14 +694,11 @@ pub fn handle(cmd: GatewayCmd) {
                 } => {
                     let mut params = vec![
                         ("domain".to_owned(), Value::String(domain.clone())),
-                        (
-                            "min_bid_ct".to_owned(),
-                            Value::Number(Number::from(min_bid_ct)),
-                        ),
+                        ("min_bid".to_owned(), Value::Number(Number::from(min_bid))),
                     ];
-                    if let Some(value) = stake_requirement_ct {
+                    if let Some(value) = stake_requirement {
                         params.push((
-                            "stake_requirement_ct".to_owned(),
+                            "stake_requirement".to_owned(),
                             Value::Number(Number::from(value)),
                         ));
                     }
@@ -749,7 +746,7 @@ pub fn handle(cmd: GatewayCmd) {
                 DomainAction::Bid {
                     domain,
                     bidder,
-                    bid_ct,
+                    bid,
                     stake_reference,
                     url,
                     auth,
@@ -757,7 +754,7 @@ pub fn handle(cmd: GatewayCmd) {
                     let mut params = vec![
                         ("domain".to_owned(), Value::String(domain)),
                         ("bidder_account".to_owned(), Value::String(bidder)),
-                        ("bid_ct".to_owned(), Value::Number(Number::from(bid_ct))),
+                        ("bid".to_owned(), Value::Number(Number::from(bid))),
                     ];
                     if let Some(value) = stake_reference {
                         params.push(("stake_reference".to_owned(), Value::String(value)));
@@ -845,17 +842,14 @@ pub fn handle(cmd: GatewayCmd) {
                 DomainAction::StakeRegister {
                     reference,
                     owner,
-                    deposit_ct,
+                    deposit,
                     url,
                     auth,
                 } => {
                     let params = json_map_from(vec![
                         ("reference".to_owned(), Value::String(reference)),
                         ("owner_account".to_owned(), Value::String(owner)),
-                        (
-                            "deposit_ct".to_owned(),
-                            Value::Number(Number::from(deposit_ct)),
-                        ),
+                        ("deposit".to_owned(), Value::Number(Number::from(deposit))),
                     ]);
                     let payload = json_object_from(vec![
                         ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),
@@ -880,17 +874,14 @@ pub fn handle(cmd: GatewayCmd) {
                 DomainAction::StakeWithdraw {
                     reference,
                     owner,
-                    withdraw_ct,
+                    withdraw,
                     url,
                     auth,
                 } => {
                     let params = json_map_from(vec![
                         ("reference".to_owned(), Value::String(reference)),
                         ("owner_account".to_owned(), Value::String(owner)),
-                        (
-                            "withdraw_ct".to_owned(),
-                            Value::Number(Number::from(withdraw_ct)),
-                        ),
+                        ("withdraw".to_owned(), Value::Number(Number::from(withdraw))),
                     ]);
                     let payload = json_object_from(vec![
                         ("jsonrpc".to_owned(), Value::String("2.0".to_owned())),

@@ -1,7 +1,7 @@
-beta_storage_sub_ct = 0.05
-gamma_read_sub_ct = 0.02
-kappa_cpu_sub_ct = 0.01
-lambda_bytes_out_sub_ct = 0.005
+beta_storage_sub = 0.05
+gamma_read_sub = 0.02
+kappa_cpu_sub = 0.01
+lambda_bytes_out_sub = 0.005
 risk_lambda = 2.772588722239781
 entropy_phi = 2.0
 vdf_kappa = 268435456

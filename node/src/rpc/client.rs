@@ -192,11 +192,11 @@ impl From<HttpClientError> for RpcClientError {
 
 #[derive(Debug)]
 pub struct InflationParams {
-    pub beta_storage_sub_ct: i64,
-    pub gamma_read_sub_ct: i64,
-    pub kappa_cpu_sub_ct: i64,
-    pub lambda_bytes_out_sub_ct: i64,
-    pub rent_rate_ct_per_byte: i64,
+    pub beta_storage_sub: i64,
+    pub gamma_read_sub: i64,
+    pub kappa_cpu_sub: i64,
+    pub lambda_bytes_out_sub: i64,
+    pub rent_rate_per_byte: i64,
     pub industrial_multiplier: i64,
     pub industrial_backlog: u64,
     pub industrial_utilization: u64,
@@ -400,11 +400,11 @@ fn parse_inflation_params(value: &Value) -> Result<InflationParams, RpcClientErr
         .as_object()
         .ok_or_else(|| invalid_response("inflation.params result must be an object"))?;
     Ok(InflationParams {
-        beta_storage_sub_ct: field_i64(map, "beta_storage_sub_ct")?,
-        gamma_read_sub_ct: field_i64(map, "gamma_read_sub_ct")?,
-        kappa_cpu_sub_ct: field_i64(map, "kappa_cpu_sub_ct")?,
-        lambda_bytes_out_sub_ct: field_i64(map, "lambda_bytes_out_sub_ct")?,
-        rent_rate_ct_per_byte: field_i64(map, "rent_rate_ct_per_byte")?,
+        beta_storage_sub: field_i64(map, "beta_storage_sub")?,
+        gamma_read_sub: field_i64(map, "gamma_read_sub")?,
+        kappa_cpu_sub: field_i64(map, "kappa_cpu_sub")?,
+        lambda_bytes_out_sub: field_i64(map, "lambda_bytes_out_sub")?,
+        rent_rate_per_byte: field_i64(map, "rent_rate_per_byte")?,
         industrial_multiplier: field_i64(map, "industrial_multiplier")?,
         industrial_backlog: field_u64(map, "industrial_backlog")?,
         industrial_utilization: field_u64(map, "industrial_utilization")?,

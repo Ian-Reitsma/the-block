@@ -4082,15 +4082,15 @@ pub static ENERGY_SETTLEMENT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
-pub static ENERGY_TREASURY_FEE_CT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+pub static ENERGY_TREASURY_FEE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
-        "energy_treasury_fee_ct_total",
-        "CT accrued into the treasury via energy settlements",
+        "energy_treasury_fee_total",
+        "BLOCK accrued into the treasury via energy settlements",
     )
-    .unwrap_or_else(|e| panic!("counter energy_treasury_fee_ct_total: {e}"));
+    .unwrap_or_else(|e| panic!("counter energy_treasury_fee_total: {e}"));
     REGISTRY
         .register(Box::new(c.clone()))
-        .unwrap_or_else(|e| panic!("registry energy_treasury_fee_ct_total: {e}"));
+        .unwrap_or_else(|e| panic!("registry energy_treasury_fee_total: {e}"));
     c.handle()
 });
 

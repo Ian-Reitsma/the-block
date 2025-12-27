@@ -448,11 +448,11 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <h3 id="53-storage-market-incentives"><a class="header" href="#53-storage-market-incentives">5.3 Storage-market incentives</a></h3>
 <ul>
 <li><code>storage_market/src/lib.rs</code> models each contract as <code>ContractRecord { contract: StorageContract, replicas: Vec&lt;ReplicaIncentive&gt; }</code>.</li>
-<li><code>ReplicaIncentive</code> fields: <code>allocated_shares</code>, <code>price_per_block</code>, <code>deposit_ct</code>, success/failure counters, last proof block, last outcome.</li>
+<li><code>ReplicaIncentive</code> fields: <code>allocated_shares</code>, <code>price_per_block</code>, <code>deposit</code>, success/failure counters, last proof block, last outcome.</li>
 <li>SLAs recorded via <code>record_proof_outcome</code>:
 <ul>
 <li>Success ➜ increment <code>proof_successes</code>, no slashing.</li>
-<li>Failure ➜ deduct <code>min(price_per_block, deposit_ct)</code> and increment <code>proof_failures</code>.</li>
+<li>Failure ➜ deduct <code>min(price_per_block, deposit)</code> and increment <code>proof_failures</code>.</li>
 </ul>
 </li>
 <li>CLI/RPC:

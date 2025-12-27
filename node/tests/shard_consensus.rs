@@ -12,7 +12,7 @@ fn cross_shard_envelope_routes() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 0,
+        pct: 0,
         nonce: 0,
         memo: Vec::new(),
     };

@@ -140,7 +140,7 @@ fn treasury_metrics_accept_legacy_string_fields() {
         {
             "id": "9",
             "balance": "450",
-            "delta_ct": "450",
+            "delta": "450",
             "recorded_at": "12345",
             "event": "ACCRUAL"
         }

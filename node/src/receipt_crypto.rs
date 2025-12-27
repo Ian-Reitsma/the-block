@@ -215,7 +215,7 @@ fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
     hasher.update(receipt.contract_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.bytes.to_le_bytes());
-    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.price.to_le_bytes());
     hasher.update(&receipt.provider_escrow.to_le_bytes());
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
@@ -231,7 +231,7 @@ fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
     hasher.update(receipt.job_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.compute_units.to_le_bytes());
-    hasher.update(&receipt.payment_ct.to_le_bytes());
+    hasher.update(&receipt.payment.to_le_bytes());
     hasher.update(&[u8::from(receipt.verified)]);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
@@ -247,7 +247,7 @@ fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
     hasher.update(receipt.contract_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.energy_units.to_le_bytes());
-    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.price.to_le_bytes());
     hasher.update(&receipt.proof_hash);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
@@ -263,7 +263,7 @@ fn build_ad_preimage(receipt: &AdReceipt) -> Vec<u8> {
     hasher.update(receipt.campaign_id.as_bytes());
     hasher.update(receipt.publisher.as_bytes());
     hasher.update(&receipt.impressions.to_le_bytes());
-    hasher.update(&receipt.spend_ct.to_le_bytes());
+    hasher.update(&receipt.spend.to_le_bytes());
     hasher.update(&receipt.conversions.to_le_bytes());
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
@@ -364,7 +364,7 @@ mod tests {
             contract_id: "contract_001".into(),
             provider: "provider_001".into(),
             bytes: 1_000_000,
-            price_ct: 500,
+            price: 500,
             block_height: 100,
             provider_escrow: 10000,
             provider_signature: vec![],
@@ -401,7 +401,7 @@ mod tests {
             contract_id: "contract_001".into(),
             provider: "provider_001".into(),
             bytes: 1_000_000,
-            price_ct: 500,
+            price: 500,
             block_height: 100,
             provider_escrow: 10000,
             provider_signature: vec![],
@@ -437,7 +437,7 @@ mod tests {
             contract_id: "contract_001".into(),
             provider: "provider_001".into(),
             bytes: 1_000_000,
-            price_ct: 500,
+            price: 500,
             block_height: 100,
             provider_escrow: 10000,
             provider_signature: vec![],

@@ -43,19 +43,19 @@ fn settle_ad_campaign(
     campaign_id: String,
     publisher: String,
     impressions: u64,
-    spend_ct: u64,
+    spend: u64,
     conversions: u32,
     block_height: u64,
 ) -> Result<(), SettlementError> {
     // 1. Process payment (existing logic)
-    self.transfer_payment(&campaign_id, &publisher, spend_ct)?;
+    self.transfer_payment(&campaign_id, &publisher, spend)?;
     
     // 2. Create receipt for audit trail
     let receipt = Receipt::Ad(AdReceipt {
         campaign_id: campaign_id.clone(),
         publisher: publisher.clone(),
         impressions,
-        spend_ct,
+        spend,
         block_height,
         conversions,
     });
@@ -132,7 +132,7 @@ impl Blockchain {
 - `campaign_id`: Unique campaign identifier
 - `publisher`: Publisher address receiving payment
 - `impressions`: Number of ad impressions delivered
-- `spend_ct`: Total CT tokens spent
+- `spend`: Total BLOCK tokens spent
 - `conversions`: Number of conversions tracked
 - `block_height`: Current block height
 
@@ -159,7 +159,7 @@ pub fn finalize_ad_delivery(
         campaign_id: campaign.id.clone(),
         publisher: campaign.publisher.clone(),
         impressions: delivery_proof.impressions,
-        spend_ct: spend,
+        spend: spend,
         block_height,
         conversions: delivery_proof.conversions,
     }));
@@ -178,7 +178,7 @@ pub fn finalize_ad_delivery(
 - `contract_id`: Storage contract identifier
 - `provider`: Provider address
 - `bytes`: Bytes stored this period
-- `price_ct`: CT tokens paid
+- `price`: BLOCK tokens paid
 - `block_height`: Current block height
 - `provider_escrow`: Escrow held for SLA
 
@@ -205,7 +205,7 @@ pub fn settle_storage_period(
         contract_id: contract.id.clone(),
         provider: contract.provider.clone(),
         bytes: contract.bytes,
-        price_ct: payment,
+        price: payment,
         block_height,
         provider_escrow: contract.escrow_amount,
     }))
@@ -222,7 +222,7 @@ pub fn settle_storage_period(
 - `job_id`: Compute job identifier
 - `provider`: Provider address
 - `compute_units`: Units of computation delivered
-- `payment_ct`: CT tokens paid
+- `payment`: BLOCK tokens paid
 - `block_height`: Current block height
 - `verified`: Whether SNARK proof verified
 
@@ -252,7 +252,7 @@ pub fn complete_compute_job(
         job_id: job.id.clone(),
         provider: job.provider.clone(),
         compute_units: job.compute_units,
-        payment_ct: job.payment,
+        payment: job.payment,
         block_height,
         verified,
     }))
@@ -269,7 +269,7 @@ pub fn complete_compute_job(
 - `contract_id`: Energy delivery contract
 - `provider`: Energy provider address
 - `energy_units`: kWh or similar delivered
-- `price_ct`: CT tokens paid per unit
+- `price`: BLOCK tokens paid per unit
 - `block_height`: Current block height
 - `proof_hash`: Hash of grid delivery proof
 
@@ -300,7 +300,7 @@ pub fn settle_energy_delivery(
         contract_id: contract.id.clone(),
         provider: contract.provider.clone(),
         energy_units: delivery.energy_kwh,
-        price_ct: payment,
+        price: payment,
         block_height,
         proof_hash,
     }))
@@ -339,7 +339,7 @@ mod tests {
             Receipt::Ad(ad) => {
                 assert_eq!(ad.campaign_id, "test_campaign");
                 assert_eq!(ad.impressions, 1000);
-                assert_eq!(ad.spend_ct, 500);
+                assert_eq!(ad.spend, 500);
                 assert_eq!(ad.block_height, 100);
             }
             _ => panic!("Expected Ad receipt"),

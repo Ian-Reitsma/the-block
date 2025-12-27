@@ -31,28 +31,28 @@ impl std::error::Error for FeeError {}
 /// Split a raw fee into consumer and industrial components based on a
 /// consumer percentage.
 ///
-/// `pct_ct` expresses the fraction of `fee` paid in consumer tokens. It must be
+/// `pct` expresses the fraction of `fee` paid in consumer tokens. It must be
 /// within `0..=100`, where `0` routes the entire fee to industrial tokens and
 /// `100` routes it entirely to consumer tokens.
 ///
-/// Returns `(fee_ct, fee_it)` on success.
-pub fn decompose(pct_ct: u8, fee: u64) -> Result<(u64, u64), FeeError> {
+/// Returns `(fee_consumer, fee_industrial)` on success.
+pub fn decompose(pct: u8, fee: u64) -> Result<(u64, u64), FeeError> {
     if fee > MAX_FEE {
         return Err(FeeError::Overflow);
     }
-    if pct_ct > 100 {
+    if pct > 100 {
         return Err(FeeError::InvalidSelector);
     }
     let fee128 = fee as u128;
-    let pct128 = pct_ct as u128;
-    let ct = (fee128 * pct128).div_ceil(100) as u64;
-    let it = fee - ct;
-    Ok((ct, it))
+    let pct128 = pct as u128;
+    let consumer = (fee128 * pct128).div_ceil(100) as u64;
+    let industrial = fee - consumer;
+    Ok((consumer, industrial))
 }
 
 /// Python wrapper for [`decompose`].
-pub fn decompose_py(pct_ct: u8, fee: u64) -> PyResult<(u64, u64)> {
-    decompose(pct_ct, fee).map_err(|e| match e {
+pub fn decompose_py(pct: u8, fee: u64) -> PyResult<(u64, u64)> {
+    decompose(pct, fee).map_err(|e| match e {
         FeeError::InvalidSelector => PyError::value("invalid selector"),
         FeeError::Overflow => PyError::value("fee overflow"),
     })

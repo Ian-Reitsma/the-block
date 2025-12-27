@@ -2060,7 +2060,7 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
-            key: ParamKey::BetaStorageSubCt,
+            key: ParamKey::BetaStorageSub,
             default: 50,
             min: 0,
             max: 1_000_000,
@@ -2070,7 +2070,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::GammaReadSubCt,
+            key: ParamKey::GammaReadSub,
             default: 20,
             min: 0,
             max: 1_000_000,
@@ -2245,7 +2245,7 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
-            key: ParamKey::KappaCpuSubCt,
+            key: ParamKey::KappaCpuSub,
             default: 10,
             min: 0,
             max: 1_000_000,
@@ -2255,7 +2255,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::LambdaBytesOutSubCt,
+            key: ParamKey::LambdaBytesOutSub,
             default: 5,
             min: 0,
             max: 1_000_000,
@@ -2265,7 +2265,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::TreasuryPercentCt,
+            key: ParamKey::TreasuryPercent,
             default: 0,
             min: 0,
             max: 100,
@@ -2275,7 +2275,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::ProofRebateLimitCt,
+            key: ParamKey::ProofRebateLimit,
             default: default_proof_rebate_limit(),
             min: 0,
             max: 1_000_000,
@@ -2285,7 +2285,7 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::RentRateCtPerByte,
+            key: ParamKey::RentRatePerByte,
             default: 0,
             min: 0,
             max: 1_000_000,
@@ -3056,8 +3056,7 @@ pub fn retune_multipliers(
         params.beta_storage_sub = (params.beta_storage_sub as f64 * 0.95).round() as i64;
         params.gamma_read_sub = (params.gamma_read_sub as f64 * 0.95).round() as i64;
         params.kappa_cpu_sub = (params.kappa_cpu_sub as f64 * 0.95).round() as i64;
-        params.lambda_bytes_out_sub =
-            (params.lambda_bytes_out_sub as f64 * 0.95).round() as i64;
+        params.lambda_bytes_out_sub = (params.lambda_bytes_out_sub as f64 * 0.95).round() as i64;
     }
     if params.kill_switch_subsidy_reduction > 0 {
         #[cfg(feature = "telemetry")]
@@ -3083,8 +3082,7 @@ pub fn retune_multipliers(
         params.beta_storage_sub = (params.beta_storage_sub as f64 * factor).round() as i64;
         params.gamma_read_sub = (params.gamma_read_sub as f64 * factor).round() as i64;
         params.kappa_cpu_sub = (params.kappa_cpu_sub as f64 * factor).round() as i64;
-        params.lambda_bytes_out_sub =
-            (params.lambda_bytes_out_sub as f64 * factor).round() as i64;
+        params.lambda_bytes_out_sub = (params.lambda_bytes_out_sub as f64 * factor).round() as i64;
     }
     if let Ok(mut f) = OpenOptions::new()
         .create(true)

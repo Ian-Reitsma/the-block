@@ -34,7 +34,7 @@ fn sign_storage_receipt(receipt: &mut StorageReceipt, sk: &SigningKey) {
     hasher.update(receipt.contract_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.bytes.to_le_bytes());
-    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.price.to_le_bytes());
     hasher.update(&receipt.provider_escrow.to_le_bytes());
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
@@ -50,7 +50,7 @@ fn sign_compute_receipt(receipt: &mut ComputeReceipt, sk: &SigningKey) {
     hasher.update(receipt.job_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.compute_units.to_le_bytes());
-    hasher.update(&receipt.payment_ct.to_le_bytes());
+    hasher.update(&receipt.payment.to_le_bytes());
     hasher.update(&[u8::from(receipt.verified)]);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
@@ -65,7 +65,7 @@ fn reject_unsigned_storage_receipt() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![], // UNSIGNED
@@ -88,7 +88,7 @@ fn reject_invalid_signature() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -125,7 +125,7 @@ fn reject_unknown_provider() {
         contract_id: "contract_001".into(),
         provider: "provider_unknown".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -158,7 +158,7 @@ fn reject_duplicate_receipt_across_blocks() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -203,7 +203,7 @@ fn reject_corrupted_signature() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -241,7 +241,7 @@ fn accept_valid_storage_receipt() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -273,7 +273,7 @@ fn accept_valid_compute_receipt() {
         job_id: "job_001".into(),
         provider: "provider_001".into(),
         compute_units: 1000,
-        payment_ct: 250,
+        payment: 250,
         block_height: 100,
         verified: true,
         provider_signature: vec![],
@@ -303,7 +303,7 @@ fn receipt_deduplication_registry() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![1, 2, 3],
@@ -331,7 +331,7 @@ fn nonce_prevents_replay_across_multiple_receipts() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -342,7 +342,7 @@ fn nonce_prevents_replay_across_multiple_receipts() {
         contract_id: "contract_002".into(),
         provider: "provider_001".into(),
         bytes: 2_000_000,
-        price_ct: 1000,
+        price: 1000,
         block_height: 100,
         provider_escrow: 20000,
         provider_signature: vec![],
@@ -388,7 +388,7 @@ fn forged_settlement_data_rejected() {
         contract_id: "contract_001".into(),
         provider: "provider_001".into(),
         bytes: 1_000_000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
         provider_signature: vec![],
@@ -398,7 +398,7 @@ fn forged_settlement_data_rejected() {
     sign_storage_receipt(&mut receipt, &sk);
 
     // Attacker modifies settlement data after signing
-    receipt.price_ct = 5_000_000; // Inflate price 10,000x
+    receipt.price = 5_000_000; // Inflate price 10,000x
 
     let mut registry = ProviderRegistry::new();
     registry
@@ -406,7 +406,7 @@ fn forged_settlement_data_rejected() {
         .expect("register provider");
     let mut nonce_tracker = NonceTracker::new(100);
 
-    // Signature won't verify because price_ct changed
+    // Signature won't verify because price changed
     let result = validate_receipt(
         &Receipt::Storage(receipt),
         100,

@@ -12,7 +12,7 @@ fn invalid_proof_rejected() {
         consumer_bond: 1,
         units: 1,
         price_per_unit: 5,
-        fee_pct_ct: 100,
+        fee_pct: 100,
         capability: scheduler::Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,

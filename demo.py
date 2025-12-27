@@ -246,7 +246,7 @@ def decode_payload_demo() -> None:
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        pct_ct=50,
+        pct=50,
         nonce=0,
         memo=b"demo",
     )
@@ -282,7 +282,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
             amount_consumer=1,
             amount_industrial=0,
             fee=BASE_FEE,
-            pct_ct=sel,
+            pct=sel,
             nonce=next_nonce,
             memo=b"selector demo",
         )
@@ -296,7 +296,7 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        pct_ct=100,
+        pct=100,
         nonce=2,
         memo=b"reused nonce",
     )
@@ -320,7 +320,7 @@ def mine_blocks(bc: the_block.Blockchain, accounts: list[str], priv: bytes) -> N
             amount_consumer=1,
             amount_industrial=0,
             fee=BASE_FEE,
-            pct_ct=50,
+            pct=50,
             nonce=i + 4,
             memo=b"block transfer",
         )
@@ -369,19 +369,19 @@ def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
 
 def fee_split_demo() -> None:
     """Show fee splitting between CT and IT."""
-    explain("Demonstrating fee splitting via pct_ct")
+    explain("Demonstrating fee splitting via pct")
     payload = the_block.RawTxPayload(
         from_="alice",
         to="bob",
         amount_consumer=0,
         amount_industrial=0,
         nonce=0,
-        pct_ct=50,
+        pct=50,
         fee=1,
     )
     raw = the_block.canonical_payload(payload)
     decoded = the_block.decode_payload(raw)
-    explain(f"encoded pct_ct=50, decoded pct_ct={decoded.pct_ct}")
+    explain(f"encoded pct=50, decoded pct={decoded.pct}")
 
 
 def escrow_demo() -> None:
@@ -421,7 +421,7 @@ def restart_purge_demo(priv: bytes) -> None:
         amount_consumer=1,
         amount_industrial=0,
         fee=BASE_FEE,
-        pct_ct=50,
+        pct=50,
         nonce=1,
         memo=b"expire",
     )

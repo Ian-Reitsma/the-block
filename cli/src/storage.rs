@@ -983,7 +983,7 @@ pub fn handle(cmd: StorageCmd) {
                 retention_blocks: retention,
                 next_payment_block: 1,
                 accrued: 0,
-                total_deposit_ct: 0,
+                total_deposit: 0,
                 last_payment_block: None,
                 storage_root: tree.root,
             };
@@ -994,7 +994,7 @@ pub fn handle(cmd: StorageCmd) {
                 amount_consumer: total,
                 amount_industrial: 0,
                 fee: 0,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 0,
                 memo: Vec::new(),
             };

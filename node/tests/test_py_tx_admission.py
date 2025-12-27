@@ -16,7 +16,7 @@ def test_unknown_sender(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )
@@ -36,7 +36,7 @@ def test_nonce_gap(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1000,
-        pct_ct=100,
+        pct=100,
         nonce=2,
         memo=b"",
     )
@@ -56,7 +56,7 @@ def test_insufficient_balance(tmp_path):
         amount_consumer=10,
         amount_industrial=0,
         fee=1000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )

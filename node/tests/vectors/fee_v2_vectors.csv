@@ -1,4 +1,4 @@
-selector,fee,fee_ct,fee_it,blake3_hash
+selector,fee,fee_consumer,fee_industrial,blake3_hash
 0,0,0,0,9d15372b1830735a0a2d05214669e3271a754aac46fe303b68bb3046013a0574
 1,1,0,1,89be45b3119620d28d5dacb1dd589b02ee259adf2671d34686445da547a18820
 2,2,1,1,a8c65d9a6e85e9c3befaf6bd55985f2b3d324b30510aa282bce51d0aecb4aff7

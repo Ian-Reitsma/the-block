@@ -1117,10 +1117,10 @@ pub fn config_dir() -> Option<String> {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InflationConfig {
-    pub beta_storage_sub_ct: f64,
-    pub gamma_read_sub_ct: f64,
-    pub kappa_cpu_sub_ct: f64,
-    pub lambda_bytes_out_sub_ct: f64,
+    pub beta_storage_sub: f64,
+    pub gamma_read_sub: f64,
+    pub kappa_cpu_sub: f64,
+    pub lambda_bytes_out_sub: f64,
     pub risk_lambda: f64,
     pub entropy_phi: f64,
     pub vdf_kappa: u64,
@@ -1133,10 +1133,10 @@ pub struct InflationConfig {
 impl Default for InflationConfig {
     fn default() -> Self {
         Self {
-            beta_storage_sub_ct: 0.05,
-            gamma_read_sub_ct: 0.02,
-            kappa_cpu_sub_ct: 0.01,
-            lambda_bytes_out_sub_ct: 0.005,
+            beta_storage_sub: 0.05,
+            gamma_read_sub: 0.02,
+            kappa_cpu_sub: 0.01,
+            lambda_bytes_out_sub: 0.005,
             risk_lambda: 4.0 * std::f64::consts::LN_2,
             entropy_phi: 2.0,
             vdf_kappa: 1u64 << 28,

@@ -369,12 +369,8 @@ fn write_payout_table(
         breakdown.hash, breakdown.height
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
-    writeln!(
-        writer,
-        "{:<12} {:>16} {:>16}",
-        "role", "read", "ad"
-    )
-    .map_err(|err| format!("failed to write output: {err}"))?;
+    writeln!(writer, "{:<12} {:>16} {:>16}", "role", "read", "ad")
+        .map_err(|err| format!("failed to write output: {err}"))?;
     writeln!(writer, "{:-<12} {:-<16} {:-<16}", "", "", "")
         .map_err(|err| format!("failed to write output: {err}"))?;
     for (role, read, ad) in [
@@ -409,27 +405,19 @@ fn write_payout_table(
             breakdown.advertising.miner,
         ),
     ] {
-        writeln!(
-            writer,
-            "{:<12} {:>16} {:>16}",
-            role, read, ad
-        )
-        .map_err(|err| format!("failed to write output: {err}"))?;
+        writeln!(writer, "{:<12} {:>16} {:>16}", role, read, ad)
+            .map_err(|err| format!("failed to write output: {err}"))?;
     }
     writeln!(
         writer,
         "{:<12} {:>16} {:>16}",
-        "total",
-        breakdown.read_subsidy.total,
-        breakdown.advertising.total,
+        "total", breakdown.read_subsidy.total, breakdown.advertising.total,
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
     writeln!(
         writer,
         "    ad_total_usd_micros: {} (settlements: {}, price: {})",
-        breakdown.total_usd_micros,
-        breakdown.settlement_count,
-        breakdown.price_usd_micros
+        breakdown.total_usd_micros, breakdown.settlement_count, breakdown.price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
     if breakdown.treasury_events.is_empty() {

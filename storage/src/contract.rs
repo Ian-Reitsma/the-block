@@ -28,7 +28,7 @@ pub struct StorageContract {
     pub accrued: u64,
     /// Combined replica deposit currently reserved for the contract
     #[serde(default)]
-    pub total_deposit_ct: u64,
+    pub total_deposit: u64,
     /// Last block height where `pay` advanced the schedule
     #[serde(default)]
     pub last_payment_block: Option<u64>,
@@ -113,7 +113,7 @@ mod tests {
             retention_blocks: 5,
             next_payment_block: 1,
             accrued: 0,
-            total_deposit_ct: 0,
+            total_deposit: 0,
             last_payment_block: None,
             storage_root: MerkleTree::build(&[b"chunk0".as_ref()])
                 .expect("build tree")

@@ -1446,12 +1446,12 @@ impl BlockPayoutBreakdown {
             .or_else(|| map.get("index").and_then(|value| value.as_u64()))
             .unwrap_or(0);
 
-        let read_total = Self::field_u64(map, "read_sub").max(Self::field_u64(map, "read_sub_ct"));
-        let read_viewer = Self::field_u64(map, "read_sub_viewer").max(Self::field_u64(map, "read_sub_viewer_ct"));
-        let read_host = Self::field_u64(map, "read_sub_host").max(Self::field_u64(map, "read_sub_host_ct"));
-        let read_hardware = Self::field_u64(map, "read_sub_hardware").max(Self::field_u64(map, "read_sub_hardware_ct"));
-        let read_verifier = Self::field_u64(map, "read_sub_verifier").max(Self::field_u64(map, "read_sub_verifier_ct"));
-        let read_liquidity = Self::field_u64(map, "read_sub_liquidity").max(Self::field_u64(map, "read_sub_liquidity_ct"));
+        let read_total = Self::field_u64(map, "read_sub");
+        let read_viewer = Self::field_u64(map, "read_sub_viewer");
+        let read_host = Self::field_u64(map, "read_sub_host");
+        let read_hardware = Self::field_u64(map, "read_sub_hardware");
+        let read_verifier = Self::field_u64(map, "read_sub_verifier");
+        let read_liquidity = Self::field_u64(map, "read_sub_liquidity");
         let read_roles_sum = read_viewer
             .saturating_add(read_host)
             .saturating_add(read_hardware)

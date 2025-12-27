@@ -6,6 +6,6 @@ pub fn simulate() {
     let mut b = Pool::new();
     a.add_liquidity(1000, 1000);
     b.add_liquidity(1000, 1000);
-    let _ = a.swap_ct_for_it(50);
-    let _ = b.swap_it_for_ct(40);
+    let _ = a.swap_base_for_quote(50);
+    let _ = b.swap_quote_for_base(40);
 }

@@ -35,8 +35,8 @@ pub struct StorageReceipt {
     pub provider: String,
     /// Bytes contracted in this settlement
     pub bytes: u64,
-    /// Price paid to provider (CT)
-    pub price_ct: u64,
+    /// Price paid to provider
+    pub price: u64,
     /// Settlement block height
     pub block_height: u64,
     /// Provider's total escrow balance at settlement
@@ -61,8 +61,8 @@ pub struct ComputeReceipt {
     pub provider: String,
     /// Compute units consumed
     pub compute_units: u64,
-    /// Payment to provider (CT)
-    pub payment_ct: u64,
+    /// Payment to provider
+    pub payment: u64,
     /// Settlement block height
     pub block_height: u64,
     /// SNARK verification success
@@ -87,8 +87,8 @@ pub struct EnergyReceipt {
     pub provider: String,
     /// Energy units delivered (kWh * 1000 for fixed-point)
     pub energy_units: u64,
-    /// Price paid (CT)
-    pub price_ct: u64,
+    /// Price paid
+    pub price: u64,
     /// Settlement block height
     pub block_height: u64,
     /// Grid verification proof hash
@@ -113,8 +113,8 @@ pub struct AdReceipt {
     pub publisher: String,
     /// Impressions delivered
     pub impressions: u64,
-    /// Ad spend (CT)
-    pub spend_ct: u64,
+    /// Ad spend
+    pub spend: u64,
     /// Settlement block height
     pub block_height: u64,
     /// Conversion events recorded
@@ -137,13 +137,13 @@ impl Receipt {
         }
     }
 
-    /// Get the settlement amount in CT (currency token).
+    /// Get the settlement amount in BLOCK tokens.
     pub fn settlement_amount(&self) -> u64 {
         match self {
-            Receipt::Storage(r) => r.price_ct,
-            Receipt::Compute(r) => r.payment_ct,
-            Receipt::Energy(r) => r.price_ct,
-            Receipt::Ad(r) => r.spend_ct,
+            Receipt::Storage(r) => r.price,
+            Receipt::Compute(r) => r.payment,
+            Receipt::Energy(r) => r.price,
+            Receipt::Ad(r) => r.spend,
         }
     }
 
@@ -168,7 +168,7 @@ mod tests {
             contract_id: "sc_123".into(),
             provider: "provider_1".into(),
             bytes: 1000,
-            price_ct: 500,
+            price: 500,
             block_height: 100,
             provider_escrow: 10000,
             provider_signature: vec![0u8; 64],
@@ -186,7 +186,7 @@ mod tests {
             job_id: "job_456".into(),
             provider: "provider_2".into(),
             compute_units: 1000,
-            payment_ct: 200,
+            payment: 200,
             block_height: 101,
             verified: true,
             provider_signature: vec![0u8; 64],
@@ -204,7 +204,7 @@ mod tests {
             contract_id: "ec_789".into(),
             provider: "grid_operator_1".into(),
             energy_units: 5000,
-            price_ct: 250,
+            price: 250,
             block_height: 102,
             proof_hash: [0u8; 32],
             provider_signature: vec![0u8; 64],
@@ -222,7 +222,7 @@ mod tests {
             campaign_id: "camp_101".into(),
             publisher: "pub_1".into(),
             impressions: 10000,
-            spend_ct: 100,
+            spend: 100,
             block_height: 103,
             conversions: 50,
             publisher_signature: vec![0u8; 64],

@@ -94,7 +94,7 @@ pub fn derive_market_metrics_from_chain(
         for receipt in &block.receipts {
             match receipt {
                 Receipt::Storage(r) => {
-                    storage_state.revenue_ct = storage_state.revenue_ct.saturating_add(r.price_ct);
+                    storage_state.revenue_ct = storage_state.revenue_ct.saturating_add(r.price);
                     storage_state.capacity = storage_state.capacity.saturating_add(r.bytes);
                     storage_state.provider_escrow = storage_state
                         .provider_escrow
@@ -103,8 +103,7 @@ pub fn derive_market_metrics_from_chain(
                     storage_state.providers.insert(r.provider.clone());
                 }
                 Receipt::Compute(r) => {
-                    compute_state.revenue_ct =
-                        compute_state.revenue_ct.saturating_add(r.payment_ct);
+                    compute_state.revenue_ct = compute_state.revenue_ct.saturating_add(r.payment);
                     compute_state.capacity = compute_state.capacity.saturating_add(r.compute_units);
                     if r.verified {
                         compute_state.verified_count += 1;
@@ -113,13 +112,13 @@ pub fn derive_market_metrics_from_chain(
                     compute_state.providers.insert(r.provider.clone());
                 }
                 Receipt::Energy(r) => {
-                    energy_state.revenue_ct = energy_state.revenue_ct.saturating_add(r.price_ct);
+                    energy_state.revenue_ct = energy_state.revenue_ct.saturating_add(r.price);
                     energy_state.capacity = energy_state.capacity.saturating_add(r.energy_units);
                     energy_state.settlement_count += 1;
                     energy_state.providers.insert(r.provider.clone());
                 }
                 Receipt::Ad(r) => {
-                    ad_state.revenue_ct = ad_state.revenue_ct.saturating_add(r.spend_ct);
+                    ad_state.revenue_ct = ad_state.revenue_ct.saturating_add(r.spend);
                     ad_state.impressions = ad_state.impressions.saturating_add(r.impressions);
                     ad_state.conversions =
                         ad_state.conversions.saturating_add(r.conversions as u64);

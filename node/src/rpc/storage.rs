@@ -73,8 +73,8 @@ fn proof_record_value(record: &ProofRecord) -> Value {
     map.insert("object_id".into(), Value::String(record.object_id.clone()));
     map.insert("provider".into(), Value::String(record.provider_id.clone()));
     map.insert(
-        "remaining_deposit_ct".into(),
-        Value::Number(Number::from(record.remaining_deposit_ct)),
+        "remaining_deposit".into(),
+        Value::Number(Number::from(record.remaining_deposit)),
     );
     map.insert(
         "accrued_ct".into(),
@@ -115,8 +115,8 @@ fn replica_value(object_id: &str, contract: &StorageContract, replica: &ReplicaI
         Value::Number(Number::from(replica.price_per_block)),
     );
     map.insert(
-        "deposit_ct".into(),
-        Value::Number(Number::from(replica.deposit_ct)),
+        "deposit".into(),
+        Value::Number(Number::from(replica.deposit)),
     );
     map.insert(
         "proof_successes".into(),
@@ -131,8 +131,8 @@ fn replica_value(object_id: &str, contract: &StorageContract, replica: &ReplicaI
         Value::Number(Number::from(contract.accrued)),
     );
     map.insert(
-        "contract_total_deposit_ct".into(),
-        Value::Number(Number::from(contract.total_deposit_ct)),
+        "contract_total_deposit".into(),
+        Value::Number(Number::from(contract.total_deposit)),
     );
     map.insert(
         "last_payment_block".into(),
@@ -252,8 +252,8 @@ pub fn upload(
                 ("providers", Value::Array(providers)),
                 ("replicas", Value::Array(replica_values)),
                 (
-                    "total_deposit_ct",
-                    Value::Number(Number::from(record.contract.total_deposit_ct)),
+                    "total_deposit",
+                    Value::Number(Number::from(record.contract.total_deposit)),
                 ),
             ])
         }
@@ -599,7 +599,7 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
             contract_id: r.contract_id,
             provider: r.provider,
             bytes: r.bytes,
-            price_ct: r.price_ct,
+            price: r.price,
             block_height: r.block_height,
             provider_escrow: r.provider_escrow,
             provider_signature: vec![],
@@ -689,7 +689,7 @@ mod tests {
             retention_blocks: 20,
             next_payment_block: 10,
             accrued: 0,
-            total_deposit_ct: 0,
+            total_deposit: 0,
             last_payment_block: None,
             storage_root: tree.root,
         };
@@ -713,9 +713,7 @@ mod tests {
         assert_eq!(providers_json.len(), 2);
         let replicas = response["replicas"].as_array().expect("replicas array");
         assert_eq!(replicas.len(), 2);
-        let deposit = response["total_deposit_ct"]
-            .as_u64()
-            .expect("deposit value");
+        let deposit = response["total_deposit"].as_u64().expect("deposit value");
         assert!(deposit > 0);
         reset_state();
     }

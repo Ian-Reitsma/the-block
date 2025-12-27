@@ -57,7 +57,7 @@ fn recovers_from_crash_during_import() {
                 amount_consumer: 10,
                 amount_industrial: 0,
                 fee: 0,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 1,
                 memo: Vec::new(),
             },

@@ -223,9 +223,9 @@ pub fn reserve(
     bal_consumer: &mut u64,
     bal_industrial: &mut u64,
     price: u64,
-    fee_pct_ct: u8,
+    fee_pct: u8,
 ) -> Result<(u64, u64), &'static str> {
-    let (ct, it) = crate::fee::decompose(fee_pct_ct, price).map_err(|_| "invalid_split")?;
+    let (ct, it) = crate::fee::decompose(fee_pct, price).map_err(|_| "invalid_split")?;
     if *bal_consumer < ct || *bal_industrial < it {
         return Err("insufficient_funds");
     }

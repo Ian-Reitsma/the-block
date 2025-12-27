@@ -488,11 +488,11 @@ fn deserialize_variant(
             let len = fields.len();
             let bindings: Vec<String> = (0..len).map(|i| format!("value{i}")).collect();
             let mut seq_lines = Vec::new();
-            for i in 0..len {
+            for (i, binding) in bindings.iter().enumerate() {
                 seq_lines.push(format!(
                     "let {binding} = seq.next_element()?.ok_or_else(|| {serde_path}::de::Error::invalid_length({i}, &self))?;",
-                    binding = bindings[i],
                     serde_path = serde_path,
+                    binding = binding,
                     i = i
                 ));
             }
@@ -656,7 +656,7 @@ fn deserialize_variant(
             let struct_init = fields
                 .iter()
                 .map(|f| f.name.as_ref().unwrap())
-                .map(|name| format!("{name}"))
+                .map(|name| name.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
             let visitor_generics = visitor_generics(type_params);

@@ -278,7 +278,7 @@ fn invalid_gossip_tx_rejected() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -399,7 +399,7 @@ fn handshake_version_mismatch_rejected() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -448,7 +448,7 @@ fn handshake_feature_mismatch_rejected() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -523,7 +523,7 @@ fn peer_rate_limit_and_ban() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 1000,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -568,7 +568,7 @@ fn partition_state_replay() {
             amount_consumer: 5,
             amount_industrial: 0,
             fee: 1000,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         };

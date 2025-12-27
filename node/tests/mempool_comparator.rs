@@ -24,7 +24,7 @@ fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
         amount_consumer: 1,
         amount_industrial: 1,
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: Vec::new(),
     };
@@ -82,7 +82,7 @@ fn ordering_stable_after_heap_rebuild() {
             amount_consumer: 1,
             amount_industrial: 1,
             fee,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         };

@@ -2769,7 +2769,7 @@ fn dispatch(
                 retention_blocks,
                 next_payment_block: start_block + 1,
                 accrued: 0,
-                total_deposit_ct: 0,
+                total_deposit: 0,
                 last_payment_block: None,
                 storage_root: tree.root,
             };

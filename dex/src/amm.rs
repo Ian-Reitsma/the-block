@@ -2,11 +2,11 @@
 
 use foundation_serialization::{Deserialize, Serialize};
 
-/// Constant-product automated market maker pool for CT/IT pairs.
+/// Constant-product automated market maker pool for generic base/quote lanes.
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, Default)]
 pub struct Pool {
-    pub ct_reserve: u128,
-    pub it_reserve: u128,
+    pub base_reserve: u128,
+    pub quote_reserve: u128,
     pub total_shares: u128,
 }
 
@@ -18,20 +18,20 @@ impl Pool {
     /// Add liquidity to the pool returning minted pool shares.
     /// The initial LP share is the geometric mean of deposits; subsequent
     /// deposits mint shares proportional to existing reserves.
-    pub fn add_liquidity(&mut self, ct: u128, it: u128) -> u128 {
-        assert!(ct > 0 && it > 0, "zero liquidity");
+    pub fn add_liquidity(&mut self, base: u128, quote: u128) -> u128 {
+        assert!(base > 0 && quote > 0, "zero liquidity");
         if self.total_shares == 0 {
-            let share = (ct * it).integer_sqrt();
-            self.ct_reserve = ct;
-            self.it_reserve = it;
+            let share = (base * quote).integer_sqrt();
+            self.base_reserve = base;
+            self.quote_reserve = quote;
             self.total_shares = share;
             share
         } else {
-            let share_ct = self.total_shares * ct / self.ct_reserve;
-            let share_it = self.total_shares * it / self.it_reserve;
-            let share = share_ct.min(share_it);
-            self.ct_reserve += ct;
-            self.it_reserve += it;
+            let share_base = self.total_shares * base / self.base_reserve;
+            let share_quote = self.total_shares * quote / self.quote_reserve;
+            let share = share_base.min(share_quote);
+            self.base_reserve += base;
+            self.quote_reserve += quote;
             self.total_shares += share;
             share
         }
@@ -40,34 +40,34 @@ impl Pool {
     /// Remove liquidity returning the withdrawn reserves.
     pub fn remove_liquidity(&mut self, share: u128) -> (u128, u128) {
         assert!(share <= self.total_shares);
-        let ct = self.ct_reserve * share / self.total_shares;
-        let it = self.it_reserve * share / self.total_shares;
-        self.ct_reserve -= ct;
-        self.it_reserve -= it;
+        let base = self.base_reserve * share / self.total_shares;
+        let quote = self.quote_reserve * share / self.total_shares;
+        self.base_reserve -= base;
+        self.quote_reserve -= quote;
         self.total_shares -= share;
-        (ct, it)
+        (base, quote)
     }
 
-    /// Swap CT for IT; returns the IT amount received.
-    pub fn swap_ct_for_it(&mut self, ct_in: u128) -> u128 {
-        assert!(ct_in > 0);
-        let k = self.ct_reserve * self.it_reserve;
-        self.ct_reserve += ct_in;
-        let new_it = k / self.ct_reserve;
-        let it_out = self.it_reserve - new_it;
-        self.it_reserve = new_it;
-        it_out
+    /// Swap base for quote; returns the quote amount received.
+    pub fn swap_base_for_quote(&mut self, base_in: u128) -> u128 {
+        assert!(base_in > 0);
+        let k = self.base_reserve * self.quote_reserve;
+        self.base_reserve += base_in;
+        let new_quote = k / self.base_reserve;
+        let quote_out = self.quote_reserve - new_quote;
+        self.quote_reserve = new_quote;
+        quote_out
     }
 
-    /// Swap IT for CT; returns the CT amount received.
-    pub fn swap_it_for_ct(&mut self, it_in: u128) -> u128 {
-        assert!(it_in > 0);
-        let k = self.ct_reserve * self.it_reserve;
-        self.it_reserve += it_in;
-        let new_ct = k / self.it_reserve;
-        let ct_out = self.ct_reserve - new_ct;
-        self.ct_reserve = new_ct;
-        ct_out
+    /// Swap quote for base; returns the base amount received.
+    pub fn swap_quote_for_base(&mut self, quote_in: u128) -> u128 {
+        assert!(quote_in > 0);
+        let k = self.base_reserve * self.quote_reserve;
+        self.quote_reserve += quote_in;
+        let new_base = k / self.quote_reserve;
+        let base_out = self.base_reserve - new_base;
+        self.base_reserve = new_base;
+        base_out
     }
 }
 
@@ -99,17 +99,17 @@ mod tests {
     fn constant_product_invariant() {
         let mut p = Pool::new();
         p.add_liquidity(1000, 1000);
-        let k = p.ct_reserve * p.it_reserve;
-        let _ = p.swap_ct_for_it(100);
-        assert!(p.ct_reserve * p.it_reserve <= k);
+        let k = p.base_reserve * p.quote_reserve;
+        let _ = p.swap_base_for_quote(100);
+        assert!(p.base_reserve * p.quote_reserve <= k);
     }
 
     #[test]
     fn add_remove_liquidity_roundtrip() {
         let mut p = Pool::new();
         let share = p.add_liquidity(500, 500);
-        let (ct, it) = p.remove_liquidity(share);
-        assert_eq!(ct, 500);
-        assert_eq!(it, 500);
+        let (base, quote) = p.remove_liquidity(share);
+        assert_eq!(base, 500);
+        assert_eq!(quote, 500);
     }
 }

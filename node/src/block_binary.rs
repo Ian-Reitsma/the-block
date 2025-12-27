@@ -207,16 +207,10 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         ),
         "storage_sub" => assign_once(&mut storage_sub, reader.read_u64()?, "storage_sub"),
         "read_sub" => assign_once(&mut read_sub, reader.read_u64()?, "read_sub"),
-        "read_sub_viewer" => assign_once(
-            &mut read_sub_viewer,
-            reader.read_u64()?,
-            "read_sub_viewer",
-        ),
-        "read_sub_host" => assign_once(
-            &mut read_sub_host,
-            reader.read_u64()?,
-            "read_sub_host",
-        ),
+        "read_sub_viewer" => {
+            assign_once(&mut read_sub_viewer, reader.read_u64()?, "read_sub_viewer")
+        }
+        "read_sub_host" => assign_once(&mut read_sub_host, reader.read_u64()?, "read_sub_host"),
         "read_sub_hardware" => assign_once(
             &mut read_sub_hardware,
             reader.read_u64()?,
@@ -259,9 +253,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
             "ad_oracle_price_usd_micros",
         ),
         "compute_sub" => assign_once(&mut compute_sub, reader.read_u64()?, "compute_sub"),
-        "proof_rebate" => {
-            assign_once(&mut proof_rebate, reader.read_u64()?, "proof_rebate")
-        }
+        "proof_rebate" => assign_once(&mut proof_rebate, reader.read_u64()?, "proof_rebate"),
         "read_root" => assign_once(&mut read_root, read_fixed(reader)?, "read_root"),
         "fee_checksum" => assign_once(&mut fee_checksum, reader.read_string()?, "fee_checksum"),
         "state_root" => assign_once(&mut state_root, reader.read_string()?, "state_root"),
@@ -398,7 +390,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("contract_id", &r.contract_id);
                 struct_writer.field_string("provider", &r.provider);
                 struct_writer.field_u64("bytes", r.bytes);
-                struct_writer.field_u64("price_ct", r.price_ct);
+                struct_writer.field_u64("price", r.price);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("provider_escrow", r.provider_escrow);
                 struct_writer.field_with("provider_signature", |field_writer| {
@@ -412,7 +404,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("job_id", &r.job_id);
                 struct_writer.field_string("provider", &r.provider);
                 struct_writer.field_u64("compute_units", r.compute_units);
-                struct_writer.field_u64("payment_ct", r.payment_ct);
+                struct_writer.field_u64("payment", r.payment);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("verified", if r.verified { 1 } else { 0 });
                 struct_writer.field_with("provider_signature", |field_writer| {
@@ -426,7 +418,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("contract_id", &r.contract_id);
                 struct_writer.field_string("provider", &r.provider);
                 struct_writer.field_u64("energy_units", r.energy_units);
-                struct_writer.field_u64("price_ct", r.price_ct);
+                struct_writer.field_u64("price", r.price);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_with("proof_hash", |field_writer| {
                     write_fixed(field_writer, &r.proof_hash);
@@ -442,7 +434,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("campaign_id", &r.campaign_id);
                 struct_writer.field_string("publisher", &r.publisher);
                 struct_writer.field_u64("impressions", r.impressions);
-                struct_writer.field_u64("spend_ct", r.spend_ct);
+                struct_writer.field_u64("spend", r.spend);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("conversions", r.conversions as u64);
                 struct_writer.field_with("publisher_signature", |field_writer| {
@@ -468,9 +460,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut compute_units = None;
         let mut energy_units = None;
         let mut impressions = None;
-        let mut price_ct = None;
-        let mut payment_ct = None;
-        let mut spend_ct = None;
+        let mut price = None;
+        let mut payment = None;
+        let mut spend = None;
         let mut block_height = None;
         let mut provider_escrow = None;
         let mut verified = None;
@@ -491,9 +483,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "compute_units" => assign_once(&mut compute_units, reader.read_u64()?, "compute_units"),
             "energy_units" => assign_once(&mut energy_units, reader.read_u64()?, "energy_units"),
             "impressions" => assign_once(&mut impressions, reader.read_u64()?, "impressions"),
-            "price_ct" => assign_once(&mut price_ct, reader.read_u64()?, "price_ct"),
-            "payment_ct" => assign_once(&mut payment_ct, reader.read_u64()?, "payment_ct"),
-            "spend_ct" => assign_once(&mut spend_ct, reader.read_u64()?, "spend_ct"),
+            "price" => assign_once(&mut price, reader.read_u64()?, "price"),
+            "payment" => assign_once(&mut payment, reader.read_u64()?, "payment"),
+            "spend" => assign_once(&mut spend, reader.read_u64()?, "spend"),
             "block_height" => assign_once(&mut block_height, reader.read_u64()?, "block_height"),
             "provider_escrow" => {
                 assign_once(&mut provider_escrow, reader.read_u64()?, "provider_escrow")
@@ -523,7 +515,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,
                 bytes: bytes.ok_or(DecodeError::MissingField("bytes"))?,
-                price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
+                price: price.ok_or(DecodeError::MissingField("price"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 provider_escrow: provider_escrow
                     .ok_or(DecodeError::MissingField("provider_escrow"))?,
@@ -536,7 +528,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,
                 compute_units: compute_units.ok_or(DecodeError::MissingField("compute_units"))?,
-                payment_ct: payment_ct.ok_or(DecodeError::MissingField("payment_ct"))?,
+                payment: payment.ok_or(DecodeError::MissingField("payment"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 verified: verified.ok_or(DecodeError::MissingField("verified"))? != 0,
                 provider_signature: provider_signature
@@ -548,7 +540,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,
                 energy_units: energy_units.ok_or(DecodeError::MissingField("energy_units"))?,
-                price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
+                price: price.ok_or(DecodeError::MissingField("price"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 proof_hash: proof_hash.ok_or(DecodeError::MissingField("proof_hash"))?,
                 provider_signature: provider_signature
@@ -560,7 +552,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 campaign_id: campaign_id.ok_or(DecodeError::MissingField("campaign_id"))?,
                 publisher: publisher.ok_or(DecodeError::MissingField("publisher"))?,
                 impressions: impressions.ok_or(DecodeError::MissingField("impressions"))?,
-                spend_ct: spend_ct.ok_or(DecodeError::MissingField("spend_ct"))?,
+                spend: spend.ok_or(DecodeError::MissingField("spend"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 conversions: conversions.ok_or(DecodeError::MissingField("conversions"))? as u32,
                 publisher_signature: publisher_signature
@@ -723,7 +715,7 @@ mod tests {
                 amount_consumer: 1,
                 amount_industrial: 2,
                 fee: 3,
-                pct_ct: 50,
+                pct: 50,
                 nonce: 7,
                 memo: vec![1, 2, 3],
             },

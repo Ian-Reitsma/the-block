@@ -135,7 +135,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
     let chain_path = dir.path().join("chain");
     let mut bc = Blockchain::new(chain_path.to_str().expect("path"));
     bc.difficulty = 0;
-    bc.gamma_read_sub_ct_raw = 1;
+    bc.gamma_read_sub_raw = 1;
     bc.params.read_subsidy_viewer_percent = 40;
     bc.params.read_subsidy_host_percent = 20;
     bc.params.read_subsidy_hardware_percent = 10;
@@ -181,12 +181,12 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
     let block = bc.mine_block_at("miner", 1).expect("mined block");
     assert!(bc.pending_ad_settlements.is_empty());
 
-    assert_eq!(block.read_sub_ct.value(), 450);
-    assert_eq!(block.read_sub_viewer_ct.value(), 200);
-    assert_eq!(block.read_sub_host_ct.value(), 100);
-    assert_eq!(block.read_sub_hardware_ct.value(), 50);
-    assert_eq!(block.read_sub_verifier_ct.value(), 50);
-    assert_eq!(block.read_sub_liquidity_ct.value(), 55);
+    assert_eq!(block.read_sub.value(), 450);
+    assert_eq!(block.read_sub_viewer.value(), 200);
+    assert_eq!(block.read_sub_host.value(), 100);
+    assert_eq!(block.read_sub_hardware.value(), 50);
+    assert_eq!(block.read_sub_verifier.value(), 50);
+    assert_eq!(block.read_sub_liquidity.value(), 55);
     assert_eq!(block.ad_viewer.value(), 30);
     assert_eq!(block.ad_host.value(), 20);
     assert_eq!(block.ad_hardware.value(), 10);
@@ -205,13 +205,13 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         .expect("viewer balance");
     assert_eq!(
         viewer_balance.consumer,
-        block.read_sub_viewer_ct.value() + block.ad_viewer.value()
+        block.read_sub_viewer.value() + block.ad_viewer.value()
     );
 
     let host_balance = bc.get_account_balance(&host_addr).expect("host balance");
     assert_eq!(
         host_balance.consumer,
-        block.read_sub_host_ct.value() + block.ad_host.value()
+        block.read_sub_host.value() + block.ad_host.value()
     );
 
     let hardware_balance = bc
@@ -219,7 +219,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         .expect("hardware balance");
     assert_eq!(
         hardware_balance.consumer,
-        block.read_sub_hardware_ct.value() + block.ad_hardware.value()
+        block.read_sub_hardware.value() + block.ad_hardware.value()
     );
 
     let verifier_balance = bc
@@ -227,16 +227,13 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         .expect("verifier balance");
     assert_eq!(
         verifier_balance.consumer,
-        block.read_sub_verifier_ct.value() + block.ad_verifier.value()
+        block.read_sub_verifier.value() + block.ad_verifier.value()
     );
 
     let liquidity_balance = bc
         .get_account_balance(liquidity_addr)
         .expect("liquidity balance");
-    assert_eq!(
-        liquidity_balance.consumer,
-        block.read_sub_liquidity_ct.value()
-    );
+    assert_eq!(liquidity_balance.consumer, block.read_sub_liquidity.value());
 
     assert_eq!(block.receipts.len(), 1);
     match &block.receipts[0] {
@@ -244,7 +241,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
             assert_eq!(ad.campaign_id, "cmp-1");
             assert_eq!(ad.publisher, host_addr);
             assert_eq!(ad.impressions, 1);
-            assert_eq!(ad.spend_ct, 80);
+            assert_eq!(ad.spend, 80);
             assert_eq!(ad.block_height, block.index);
             assert_eq!(ad.conversions, 0);
         }

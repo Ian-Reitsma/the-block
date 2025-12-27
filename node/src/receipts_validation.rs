@@ -238,9 +238,9 @@ pub fn validate_receipt(
                     field: "bytes".to_string(),
                 });
             }
-            if r.price_ct == 0 {
+            if r.price == 0 {
                 return Err(ValidationError::ZeroValue {
-                    field: "price_ct".to_string(),
+                    field: "price".to_string(),
                 });
             }
             if r.provider_signature.is_empty() {
@@ -255,9 +255,9 @@ pub fn validate_receipt(
                     field: "compute_units".to_string(),
                 });
             }
-            if r.payment_ct == 0 {
+            if r.payment == 0 {
                 return Err(ValidationError::ZeroValue {
-                    field: "payment_ct".to_string(),
+                    field: "payment".to_string(),
                 });
             }
             if r.provider_signature.is_empty() {
@@ -272,9 +272,9 @@ pub fn validate_receipt(
                     field: "energy_units".to_string(),
                 });
             }
-            if r.price_ct == 0 {
+            if r.price == 0 {
                 return Err(ValidationError::ZeroValue {
-                    field: "price_ct".to_string(),
+                    field: "price".to_string(),
                 });
             }
             if r.provider_signature.is_empty() {
@@ -289,9 +289,9 @@ pub fn validate_receipt(
                     field: "impressions".to_string(),
                 });
             }
-            if r.spend_ct == 0 {
+            if r.spend == 0 {
                 return Err(ValidationError::ZeroValue {
-                    field: "spend_ct".to_string(),
+                    field: "spend".to_string(),
                 });
             }
             if r.publisher_signature.is_empty() {
@@ -371,7 +371,7 @@ mod tests {
             contract_id: "contract_001".into(),
             provider: "provider_001".into(),
             bytes: 1_000_000,
-            price_ct: 500,
+            price: 500,
             block_height,
             provider_escrow: 10000,
             provider_signature: vec![],
@@ -386,7 +386,7 @@ mod tests {
         hasher.update(receipt.contract_id.as_bytes());
         hasher.update(receipt.provider.as_bytes());
         hasher.update(&receipt.bytes.to_le_bytes());
-        hasher.update(&receipt.price_ct.to_le_bytes());
+        hasher.update(&receipt.price.to_le_bytes());
         hasher.update(&receipt.provider_escrow.to_le_bytes());
         hasher.update(&receipt.signature_nonce.to_le_bytes());
         let preimage = hasher.finalize();
@@ -457,7 +457,7 @@ mod tests {
             contract_id: "contract_001".into(),
             provider: "provider_001".into(),
             bytes: 1_000_000,
-            price_ct: 500,
+            price: 500,
             block_height: 100,
             provider_escrow: 10000,
             provider_signature: vec![], // Empty

@@ -181,7 +181,7 @@ pub struct RawTxPayload {
     pub amount_consumer: u64,
     pub amount_industrial: u64,
     pub fee: u64,
-    pub pct_ct: u8,
+    pub pct: u8,
     pub nonce: u64,
     pub memo: Vec<u8>,
 }
@@ -194,7 +194,7 @@ impl RawTxPayload {
         amount_consumer: u64,
         amount_industrial: u64,
         fee: u64,
-        pct_ct: u8,
+        pct: u8,
         nonce: u64,
         memo: Vec<u8>,
     ) -> Self {
@@ -204,7 +204,7 @@ impl RawTxPayload {
             amount_consumer,
             amount_industrial,
             fee,
-            pct_ct,
+            pct,
             nonce,
             memo,
         }
@@ -212,13 +212,13 @@ impl RawTxPayload {
 
     fn __repr__(&self) -> String {
         format!(
-            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, pct_ct={}, nonce={}, memo_len={})",
+            "RawTxPayload(from='{}', to='{}', amount_consumer={}, amount_industrial={}, fee={}, pct={}, nonce={}, memo_len={})",
             self.from_,
             self.to,
             self.amount_consumer,
             self.amount_industrial,
             self.fee,
-            self.pct_ct,
+            self.pct,
             self.nonce,
             self.memo.len(),
         )
@@ -330,7 +330,7 @@ pub fn verify_stateless(tx: &SignedTransaction) -> Result<(), TxAdmissionError> 
     if !verify_signed_tx(tx) {
         return Err(TxAdmissionError::BadSignature);
     }
-    match fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+    match fee::decompose(tx.payload.pct, tx.payload.fee) {
         Ok(_) => Ok(()),
         Err(FeeError::InvalidSelector) => Err(TxAdmissionError::InvalidSelector),
         Err(FeeError::Overflow) => Err(TxAdmissionError::FeeOverflow),
@@ -711,7 +711,7 @@ mod tests {
             amount_consumer: 1,
             amount_industrial: 0,
             fee: 100,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         }

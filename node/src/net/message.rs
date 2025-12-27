@@ -447,7 +447,7 @@ mod tests {
             amount_consumer: 10,
             amount_industrial: 20,
             fee: 2,
-            pct_ct: 64,
+            pct: 64,
             nonce: 9,
             memo: vec![1, 2, 3],
         }
@@ -485,13 +485,13 @@ mod tests {
             hash: "hash".into(),
             coinbase_block: TokenAmount::new(10),
             coinbase_industrial: TokenAmount::new(11),
-            storage_sub_ct: TokenAmount::new(12),
-            read_sub_ct: TokenAmount::new(13),
-            read_sub_viewer_ct: TokenAmount::new(2),
-            read_sub_host_ct: TokenAmount::new(3),
-            read_sub_hardware_ct: TokenAmount::new(4),
-            read_sub_verifier_ct: TokenAmount::new(1),
-            read_sub_liquidity_ct: TokenAmount::new(3),
+            storage_sub: TokenAmount::new(12),
+            read_sub: TokenAmount::new(13),
+            read_sub_viewer: TokenAmount::new(2),
+            read_sub_host: TokenAmount::new(3),
+            read_sub_hardware: TokenAmount::new(4),
+            read_sub_verifier: TokenAmount::new(1),
+            read_sub_liquidity: TokenAmount::new(3),
             ad_viewer: TokenAmount::new(5),
             ad_host: TokenAmount::new(6),
             ad_hardware: TokenAmount::new(7),
@@ -502,8 +502,8 @@ mod tests {
             ad_total_usd_micros: 0,
             ad_settlement_count: 0,
             ad_oracle_price_usd_micros: 0,
-            compute_sub_ct: TokenAmount::new(14),
-            proof_rebate_ct: TokenAmount::new(15),
+            compute_sub: TokenAmount::new(14),
+            proof_rebate: TokenAmount::new(15),
             read_root: [1u8; 32],
             fee_checksum: "fee".into(),
             state_root: "state".into(),
@@ -654,10 +654,10 @@ mod tests {
                     block.coinbase_industrial.get(),
                     expected.coinbase_industrial.get()
                 );
-                assert_eq!(block.storage_sub_ct.get(), expected.storage_sub_ct.get());
-                assert_eq!(block.read_sub_ct.get(), expected.read_sub_ct.get());
-                assert_eq!(block.compute_sub_ct.get(), expected.compute_sub_ct.get());
-                assert_eq!(block.proof_rebate_ct.get(), expected.proof_rebate_ct.get());
+                assert_eq!(block.storage_sub.get(), expected.storage_sub.get());
+                assert_eq!(block.read_sub.get(), expected.read_sub.get());
+                assert_eq!(block.compute_sub.get(), expected.compute_sub.get());
+                assert_eq!(block.proof_rebate.get(), expected.proof_rebate.get());
                 assert_eq!(block.read_root, expected.read_root);
                 assert_eq!(block.fee_checksum, expected.fee_checksum);
                 assert_eq!(block.state_root, expected.state_root);

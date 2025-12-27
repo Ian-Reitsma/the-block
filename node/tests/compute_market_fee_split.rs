@@ -16,7 +16,7 @@ fn mixed_split_escrow_and_settlement() {
         consumer_bond: 1,
         units: 1,
         price_per_unit: 20,
-        fee_pct_ct: 25,
+        fee_pct: 25,
         capability: the_block::compute_market::scheduler::Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,
@@ -26,7 +26,7 @@ fn mixed_split_escrow_and_settlement() {
         &mut bal_ct,
         &mut bal_it,
         offer.price_per_unit,
-        offer.fee_pct_ct,
+        offer.fee_pct,
     )
     .unwrap();
     assert_eq!((ct, it), (5, 15));
@@ -47,7 +47,7 @@ fn full_ct_split_and_refund() {
         consumer_bond: 1,
         units: 1,
         price_per_unit: 10,
-        fee_pct_ct: 100,
+        fee_pct: 100,
         capability: the_block::compute_market::scheduler::Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,
@@ -57,7 +57,7 @@ fn full_ct_split_and_refund() {
         &mut bal_ct,
         &mut bal_it,
         offer.price_per_unit,
-        offer.fee_pct_ct,
+        offer.fee_pct,
     )
     .unwrap();
     assert_eq!((ct, it), (10, 0));
