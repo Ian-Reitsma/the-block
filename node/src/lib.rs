@@ -664,7 +664,7 @@ pub struct Block {
     /// Number of advertising settlements applied in this block
     pub ad_settlement_count: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Oracle price snapshot (CT) used for advertising settlements in this block
+    /// Oracle price snapshot (BLOCK) used for advertising settlements in this block
     pub ad_oracle_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Subsidy minted for compute in this block

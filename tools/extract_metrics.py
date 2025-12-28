@@ -43,8 +43,34 @@ class Metric:
             return "ppm"
         if name.endswith("_percent") or "percent" in desc:
             return "percent"
-        if name.endswith("_ct") or " ct" in desc:
-            return "CT"
+        block_metrics = {
+            "base_reward",
+            "rent_escrow_burned_total",
+            "rent_escrow_locked_total",
+            "rent_escrow_refunded_total",
+            "slashing_burn_total",
+            "receipt_settlement_storage",
+            "receipt_settlement_compute",
+            "receipt_settlement_energy",
+            "receipt_settlement_ad",
+            "energy_settlement_total",
+            "energy_treasury_fee_total",
+            "dns_stake_locked",
+        }
+        if (
+            name in block_metrics
+            or name.endswith("_block")
+            or name.endswith("_reward")
+            or name.endswith("_rebate")
+            or "settlement" in name
+            or "treasury" in name
+            or name.startswith("rent_escrow")
+            or name.startswith("dns_stake")
+            or "stake" in name
+            or "burn" in name
+            or "block" in desc
+        ):
+            return "BLOCK"
         if "usd" in desc:
             return "USD-equivalent"
         if name.endswith("_total") or "total" in desc or "count" in desc:

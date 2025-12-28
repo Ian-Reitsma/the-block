@@ -38,9 +38,9 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 ### 4. Telemetry Layer
 - ✅ [node/src/telemetry/receipts.rs:8-205](node/src/telemetry/receipts.rs) - Complete metrics
 - ✅ Per-market counters: `RECEIPTS_STORAGE`, `RECEIPTS_COMPUTE`, etc.
-- ✅ Settlement amount tracking: `RECEIPT_SETTLEMENT_*_CT`
+- ✅ Settlement amount tracking: `RECEIPT_SETTLEMENT_*` (BLOCK-denominated)
 - ✅ Block-level gauges: `RECEIPTS_*_PER_BLOCK`
-- ✅ Treasury balance history exported through the metrics aggregator now encodes `delta` (legacy `_ct` keys were removed), so operators must emit the updated field name across CLI/automation.
+- ✅ Treasury balance history exported through the metrics aggregator now encodes `delta` (legacy `` keys were removed), so operators must emit the updated field name across CLI/automation.
 - ✅ Total receipt size: `RECEIPT_BYTES_TOTAL`
 
 ### 5. Deterministic Metrics Engine
@@ -314,11 +314,11 @@ receipts_compute_per_block
 receipts_energy_per_block
 receipts_ad_per_block
 
-# Settlement amounts (current block, CT)
-receipt_settlement_storage_ct
-receipt_settlement_compute_ct
-receipt_settlement_energy_ct
-receipt_settlement_ad_ct
+# Settlement amounts (current block, BLOCK)
+receipt_settlement_storage
+receipt_settlement_compute
+receipt_settlement_energy
+receipt_settlement_ad
 
 # Total receipt serialization size
 receipt_bytes_total

@@ -177,7 +177,19 @@
                     <main>
                         <h1 id="architecture"><a class="header" href="#architecture">Architecture</a></h1>
 <p>Everything below reflects what ships in <code>main</code> today. Paths reference the exact modules so engineers can cross-check behaviour while hacking.</p>
+<blockquote>
+<p><strong>For newcomers:</strong> This doc is technical. Each major section starts with a plain-language explainer. If you want a gentler intro, read <a href="overview.html"><code>docs/overview.md</code></a> first.</p>
+</blockquote>
 <h2 id="ledger-and-consensus"><a class="header" href="#ledger-and-consensus">Ledger and Consensus</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> The ledger is the shared spreadsheet everyone agrees on. It tracks who owns what BLOCK and what services are owed. Blocks are like pages — every ~1 second, a new page is added containing recent transactions. "Consensus" is how all the computers (nodes) agree on which page comes next, preventing anyone from cheating.</p>
+<p><strong>Key concepts:</strong></p>
+<ul>
+<li><strong>Regular blocks</strong>: Added every ~1 second</li>
+<li><strong>Macro-blocks</strong>: Periodic checkpoints (every N blocks) that summarize state and make syncing faster</li>
+<li><strong>State roots</strong>: Cryptographic fingerprints that prove what's in the ledger without showing everything</li>
+</ul>
+</blockquote>
 <h3 id="block-format-and-state"><a class="header" href="#block-format-and-state">Block Format and State</a></h3>
 <ul>
 <li><code>node/src/blockchain</code> and <code>node/src/ledger_binary.rs</code> define the canonical block/ledger codecs using <code>codec::profiles</code>. Ledger snapshots embed service-badge flags, governance params, subsidy buckets, and AI-diagnostics toggles so upgrades round-trip without drift.</li>
@@ -213,6 +225,17 @@
 <li>The DKG helper crate <code>dkg/</code> plus <code>node/src/dkg.rs</code> coordinates committee key refresh without exposing transcripts.</li>
 </ul>
 <h2 id="transaction-and-execution-pipeline"><a class="header" href="#transaction-and-execution-pipeline">Transaction and Execution Pipeline</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> When you want to send BLOCK or use a service, you create a "transaction" — a signed message saying what you want to do. Here's the journey:</p>
+<ol>
+<li><strong>You sign it</strong> — Your wallet creates and signs the transaction</li>
+<li><strong>It enters the mempool</strong> — The "waiting room" where transactions sit before being included in a block</li>
+<li><strong>The scheduler picks it</strong> — Transactions are batched by priority (higher fees = faster)</li>
+<li><strong>It gets executed</strong> — The node runs the transaction, updating balances</li>
+<li><strong>A receipt is created</strong> — Proof that it happened, anchored in the ledger</li>
+</ol>
+<p><strong>Fee lanes</strong> are like different queues at the post office: regular, priority, special services. Each has rules and pricing.</p>
+</blockquote>
 <h3 id="transaction-lifecycle"><a class="header" href="#transaction-lifecycle">Transaction Lifecycle</a></h3>
 <ul>
 <li><code>node/src/transaction.rs</code> and <code>node/src/tx</code> encode canonical transaction envelopes shared with CLI/explorer via <code>foundation_serialization</code>. Account abstraction hooks (<code>docs/account_abstraction.md</code> equivalent) now live in <code>node/src/identity/handle_registry.rs</code> and <code>node/src/transaction/fee.rs</code>.</li>
@@ -221,7 +244,7 @@
 <h3 id="fee-lanes-and-rebates"><a class="header" href="#fee-lanes-and-rebates">Fee Lanes and Rebates</a></h3>
 <ul>
 <li>Fee lanes are typed via <code>node/src/transaction::FeeLane</code> and <code>node/src/fee</code>, with rebate hooks under <code>node/src/fees</code> and <code>node/src/fee/readiness</code>. Governance controls floors through <code>governance/src/params.rs</code> and telemetry tracks enforcement (<code>gateway_fee_floor_*</code> metrics).</li>
-<li>Rebates post ledger entries that auto-apply to the submitter before consuming liquid CT. Reference detail lives in <code>docs/economics_and_governance.md#fee-lanes-and-rebates</code>.</li>
+<li>Rebates post ledger entries that auto-apply to the submitter before consuming liquid BLOCK. Reference detail lives in <code>docs/economics_and_governance.md#fee-lanes-and-rebates</code>.</li>
 </ul>
 <h3 id="mempool-admission-and-eviction"><a class="header" href="#mempool-admission-and-eviction">Mempool Admission and Eviction</a></h3>
 <ul>
@@ -243,7 +266,333 @@
 <li>Distributed handles, DIDs, and registry logic live in <code>node/src/identity</code>. Binary codecs for handles/DIDs ensure explorers, wallets, and RPC share the same storage bytes.</li>
 <li>Light clients rely on this identity layer for DID revocation proofs and remote signer flows (<code>node/src/light_client</code>).</li>
 </ul>
+<h2 id="market-receipts-and-audit-trail"><a class="header" href="#market-receipts-and-audit-trail">Market Receipts and Audit Trail</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> Every time a market settles (storage provided, compute executed, energy delivered, ad shown), the system creates a "receipt" — permanent proof of what happened. These receipts:</p>
+<ol>
+<li><strong>Live on-chain</strong> — Stored in every block</li>
+<li><strong>Prove consensus</strong> — Included in block hash so nodes validate them</li>
+<li><strong>Drive economics</strong> — Launch Governor uses receipts to measure real market activity</li>
+<li><strong>Enable auditing</strong> — Anyone can replay the chain and verify all settlements</li>
+</ol>
+<p><strong>Why this matters:</strong> Without receipts in consensus, malicious nodes could lie about market activity. With receipts, the entire network validates every settlement.</p>
+</blockquote>
+<h3 id="receipt-types-and-schema"><a class="header" href="#receipt-types-and-schema">Receipt Types and Schema</a></h3>
+<p><strong>Four market receipt types exist</strong> (<code>node/src/receipts.rs</code>):</p>
+<h4 id="storage-receipt"><a class="header" href="#storage-receipt">Storage Receipt</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct StorageReceipt {
+    pub file_id: String,           // Unique file identifier
+    pub provider: String,          // Storage provider address
+    pub bytes_stored: u64,         // Total bytes in this settlement
+    pub cost: u64,              // BLOCK paid to provider
+    pub block_height: u64,         // When this settled
+    pub duration_epochs: u32,      // How many epochs of storage
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Tracks:</strong> File storage settlements, bytes delivered, provider compensation</p>
+<h4 id="compute-receipt"><a class="header" href="#compute-receipt">Compute Receipt</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ComputeReceipt {
+    pub job_id: String,            // Unique job identifier
+    pub worker: String,            // Compute provider address
+    pub compute_units: u64,        // Units consumed
+    pub cost: u64,              // BLOCK paid to worker
+    pub block_height: u64,         // When job completed
+    pub proof_type: String,        // "snark", "trusted", etc.
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Tracks:</strong> Computation jobs, resource usage, verification method</p>
+<h4 id="energy-receipt"><a class="header" href="#energy-receipt">Energy Receipt</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct EnergyReceipt {
+    pub meter_id: String,          // Smart meter identifier
+    pub provider: String,          // Energy provider address
+    pub kwh_delivered: u64,        // Energy delivered (in milliwatt-hours)
+    pub cost: u64,              // BLOCK paid to provider
+    pub block_height: u64,         // Settlement block
+    pub oracle_signature: Vec&lt;u8&gt;, // Oracle attestation
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Tracks:</strong> Energy delivery, meter readings, oracle verification</p>
+<h4 id="ad-receipt"><a class="header" href="#ad-receipt">Ad Receipt</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AdReceipt {
+    pub campaign_id: String,       // Campaign identifier
+    pub publisher: String,         // Publisher address
+    pub impressions: u64,          // Impressions delivered
+    pub spend: u64,             // BLOCK spent by advertiser
+    pub block_height: u64,         // Settlement block
+    pub conversions: u32,          // Attributed conversions
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Tracks:</strong> Ad delivery, impressions, spend, attribution</p>
+<h3 id="receipt-lifecycle"><a class="header" href="#receipt-lifecycle">Receipt Lifecycle</a></h3>
+<p><strong>End-to-End Flow:</strong></p>
+<pre><code>┌─────────────────┐
+│ Market Activity │  (Storage/Compute/Energy/Ad)
+│  (off-chain)    │
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Market Contract │  Validates settlement
+│  Settlement     │  Creates Receipt struct
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Pending Buffer  │  Market holds receipts during epoch
+│ (per market)    │  Accumulates all settlements
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Block Assembly  │  Miner collects all pending receipts
+│  (consensus)    │  Serializes via encode_receipts()
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Block Hash      │  receipts_serialized included in BLAKE3
+│  Calculation    │  Makes receipts consensus-critical
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Block Broadcast │  Full block with receipts propagates
+│  (gossip)       │  All nodes validate receipts via hash
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Telemetry       │  receipt_storage_total++
+│  Recording      │  receipt_bytes_per_block updated
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Metrics Engine  │  Derives market utilization
+│  Derivation     │  Calculates provider margins
+└────────┬────────┘
+         │
+         v
+┌─────────────────┐
+│ Launch Governor │  Uses metrics for economic gates
+│  Consumption    │  Adjusts subsidy allocation
+└─────────────────┘
+</code></pre>
+<h3 id="consensus-integration"><a class="header" href="#consensus-integration">Consensus Integration</a></h3>
+<p><strong>Block Hash Calculation</strong> (<code>node/src/hashlayout.rs</code>):</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct BlockEncoder&lt;'a&gt; {
+    // ... existing fields ...
+    pub receipts_serialized: &amp;'a [u8],  // Added December 2025
+}
+
+impl&lt;'a&gt; HashEncoder for BlockEncoder&lt;'a&gt; {
+    fn encode(&amp;self, h: &amp;mut Hasher) {
+        // ... hash all block fields ...
+        
+        // Consensus-critical: receipts affect block hash
+        h.update(&amp;(self.receipts_serialized.len() as u32).to_le_bytes());
+        h.update(self.receipts_serialized);
+        
+        // ... continue hashing ...
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Why receipts are in the hash:</strong></p>
+<ul>
+<li>Prevents nodes from lying about market activity</li>
+<li>Enables deterministic metrics derivation</li>
+<li>Makes receipt tampering result in hash mismatch (rejected block)</li>
+<li>Allows lightweight receipt verification (just check block hash)</li>
+</ul>
+<p><strong>Block Construction Pattern:</strong></p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// 1. Collect receipts from all markets
+let mut receipts = Vec::new();
+receipts.extend(storage_market.drain_pending_receipts());
+receipts.extend(compute_market.drain_pending_receipts());
+receipts.extend(energy_market.drain_pending_receipts());
+receipts.extend(ad_market.drain_pending_receipts());
+
+// 2. Serialize for consensus
+let receipts_bytes = block_binary::encode_receipts(&amp;receipts)?;
+
+// 3. Build block encoder
+let encoder = hashlayout::BlockEncoder {
+    // ... other fields ...
+    receipts_serialized: &amp;receipts_bytes,
+};
+
+// 4. Calculate hash (includes receipts)
+let hash = encoder.encode(&amp;mut hasher);
+
+// 5. Construct final block
+Block {
+    hash,
+    receipts,  // Stored in block
+    // ... other fields ...
+}
+
+### Block Validation and Transaction Verification
+
+- `node/src/blockchain/process.rs::validate_and_apply` no longer clones `Blockchain::accounts` wholesale. It copies each account lazily the first time a transaction touches it, records the touched addresses, and emits `StateDelta` entries for only the mutated accounts so block validation keeps working set size proportional to per-block activity rather than the entire universe.
+- `node/src/transaction.rs::verify_signed_tx` reuses the canonical payload bytes when building the domain-separated message, and the cache key now hashes that message plus the signing/public-key material in one pass. Deduplicated hashing removes the redundant BLAKE3 pass that previously serialized and hashed the entire transaction while still mapping each unique signed transaction to a stable `[u8; 32]` cache key.
+<span class="boring">}</span></code></pre></pre>
+<h3 id="receipt-serialization"><a class="header" href="#receipt-serialization">Receipt Serialization</a></h3>
+<p><strong>Binary Format</strong> (<code>node/src/block_binary.rs</code>):</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn encode_receipts(receipts: &amp;[Receipt]) -&gt; EncodeResult&lt;Vec&lt;u8&gt;&gt; {
+    let mut writer = Writer::with_capacity(receipts.len() * 256);
+    write_receipts(&amp;mut writer, receipts)?;
+    Ok(writer.finish())
+}
+
+fn write_receipts(writer: &amp;mut Writer, receipts: &amp;[Receipt]) -&gt; EncodeResult&lt;()&gt; {
+    writer.write_array(receipts.len(), |array_writer| {
+        for receipt in receipts {
+            array_writer.item_with(|item_writer| {
+                write_receipt(item_writer, receipt)
+            });
+        }
+    });
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Determinism guarantees:</strong></p>
+<ul>
+<li>Fixed field order (no HashMap iteration)</li>
+<li>Length-prefixed arrays</li>
+<li>Platform-independent encoding (no native integers)</li>
+<li>Same serialization across all nodes</li>
+</ul>
+<h3 id="telemetry-and-observability"><a class="header" href="#telemetry-and-observability">Telemetry and Observability</a></h3>
+<p><strong>Receipt Metrics</strong> (<code>node/src/telemetry/receipts.rs</code>):</p>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Type</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>receipts_storage_total</code></td><td>Counter</td><td>Total storage receipts processed</td></tr>
+<tr><td><code>receipts_compute_total</code></td><td>Counter</td><td>Total compute receipts processed</td></tr>
+<tr><td><code>receipts_energy_total</code></td><td>Counter</td><td>Total energy receipts processed</td></tr>
+<tr><td><code>receipts_ad_total</code></td><td>Counter</td><td>Total ad receipts processed</td></tr>
+<tr><td><code>receipts_per_block</code></td><td>Gauge</td><td>Receipts in current block</td></tr>
+<tr><td><code>receipts_storage_per_block</code></td><td>Gauge</td><td>Storage receipts in current block</td></tr>
+<tr><td><code>receipts_compute_per_block</code></td><td>Gauge</td><td>Compute receipts in current block</td></tr>
+<tr><td><code>receipts_energy_per_block</code></td><td>Gauge</td><td>Energy receipts in current block</td></tr>
+<tr><td><code>receipts_ad_per_block</code></td><td>Gauge</td><td>Ad receipts in current block</td></tr>
+<tr><td><code>receipt_bytes_per_block</code></td><td>Gauge</td><td>Serialized receipt size (bytes)</td></tr>
+<tr><td><code>receipt_settlement_storage</code></td><td>Gauge</td><td>Storage settlement amount (BLOCK)</td></tr>
+<tr><td><code>receipt_settlement_compute</code></td><td>Gauge</td><td>Compute settlement amount (BLOCK)</td></tr>
+<tr><td><code>receipt_settlement_energy</code></td><td>Gauge</td><td>Energy settlement amount (BLOCK)</td></tr>
+<tr><td><code>receipt_settlement_ad</code></td><td>Gauge</td><td>Ad settlement amount (BLOCK)</td></tr>
+<tr><td><code>metrics_derivation_duration_ms</code></td><td>Histogram</td><td>Time to derive metrics from receipts</td></tr>
+</tbody></table>
+</div>
+<p><strong>Usage:</strong></p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(feature = "telemetry")]
+{
+    let serialized = block_binary::encode_receipts(&amp;block.receipts).unwrap_or_default();
+    telemetry::receipts::record_receipts(&amp;block.receipts, serialized.len());
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="economic-metrics-derivation"><a class="header" href="#economic-metrics-derivation">Economic Metrics Derivation</a></h3>
+<p><strong>Deterministic Engine</strong> (<code>node/src/economics/deterministic_metrics.rs</code>):</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn derive_market_metrics_from_chain(
+    blocks: &amp;[Block],
+) -&gt; MarketMetrics {
+    let mut metrics = MarketMetrics::default();
+    
+    for block in blocks {
+        for receipt in &amp;block.receipts {
+            match receipt {
+                Receipt::Storage(r) =&gt; {
+                    metrics.storage_volume += r.bytes_stored;
+                    metrics.storage_revenue += r.cost;
+                },
+                Receipt::Compute(r) =&gt; {
+                    metrics.compute_units += r.compute_units;
+                    metrics.compute_revenue += r.cost;
+                },
+                Receipt::Energy(r) =&gt; {
+                    metrics.energy_kwh += r.kwh_delivered;
+                    metrics.energy_revenue += r.cost;
+                },
+                Receipt::Ad(r) =&gt; {
+                    metrics.ad_impressions += r.impressions;
+                    metrics.ad_revenue += r.spend;
+                },
+            }
+        }
+    }
+    
+    // Calculate derived metrics
+    metrics.storage_utilization = calculate_utilization(
+        metrics.storage_volume,
+        STORAGE_CAPACITY,
+    );
+    // ... other calculations ...
+    
+    metrics
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Launch Governor Integration:</strong></p>
+<p>The Launch Governor consumes receipt-derived metrics:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// In launch_governor gate evaluation
+let metrics = derive_market_metrics_from_chain(&amp;recent_blocks);
+
+if metrics.storage_utilization &gt;= STORAGE_GATE_THRESHOLD
+    &amp;&amp; metrics.compute_utilization &gt;= COMPUTE_GATE_THRESHOLD
+    &amp;&amp; metrics.energy_utilization &gt;= ENERGY_GATE_THRESHOLD
+    &amp;&amp; metrics.ad_utilization &gt;= AD_GATE_THRESHOLD
+{
+    // Activate economics gate
+    create_intent(GateType::Economics, metrics);
+}
+<span class="boring">}</span></code></pre></pre>
+<p>See <code>docs/operations.md#receipt-telemetry</code> for Grafana dashboard setup and alerting.</p>
+<h3 id="implementation-status"><a class="header" href="#implementation-status">Implementation Status</a></h3>
+<p><strong>✅ Complete (December 2025):</strong></p>
+<ul>
+<li>Receipt type definitions (<code>node/src/receipts.rs</code>)</li>
+<li>Block serialization with receipts</li>
+<li>Consensus hash integration (<code>node/src/hashlayout.rs</code>)</li>
+<li>Telemetry system (<code>node/src/telemetry/receipts.rs</code>)</li>
+<li>Metrics derivation engine</li>
+<li>Integration tests</li>
+<li>Documentation</li>
+</ul>
+<p><strong>⏳ In Progress:</strong></p>
+<ul>
+<li>BlockEncoder call site updates (manual grep + edit)</li>
+<li>Market receipt emission (ad, storage, compute, energy)</li>
+<li>Deployment to testnet</li>
+</ul>
+<p><strong>See:</strong> <code>RECEIPT_INTEGRATION_INDEX.md</code> for complete status, guides, and next steps.</p>
 <h2 id="networking-and-propagation"><a class="header" href="#networking-and-propagation">Networking and Propagation</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> Nodes need to talk to each other to share blocks and transactions. This section covers how they find each other, establish secure connections, and gossip information across the network.</p>
+<p><strong>Key concepts:</strong></p>
+<ul>
+<li><strong>P2P (Peer-to-Peer)</strong>: Nodes connect directly to each other, no central server</li>
+<li><strong>QUIC</strong>: A fast, modern transport protocol (like TCP but better for unreliable networks)</li>
+<li><strong>Gossip</strong>: How information spreads — each node tells a few others, who tell a few others, etc.</li>
+<li><strong>Handshake</strong>: The initial "hello" where nodes agree on capabilities and verify identities</li>
+</ul>
+</blockquote>
 <h3 id="p2p-handshake"><a class="header" href="#p2p-handshake">P2P Handshake</a></h3>
 <ul>
 <li><code>node/src/p2p/handshake.rs</code> negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the <code>p2p_overlay</code> crate with in-house and stub adapters.</li>
@@ -271,7 +620,7 @@
 </ul>
 <h3 id="quic-transport-1"><a class="header" href="#quic-transport-1">QUIC Transport</a></h3>
 <ul>
-<li>The in-house transport crate (<code>crates/transport</code>) abstracts Quinn and s2n providers. <code>node/src/net/quic.rs</code> publishes diag snapshots through RPC/CLI (<code>tb-cli net quic-stats</code>).</li>
+<li>The in-house transport crate (<code>crates/transport</code>) abstracts Quinn and s2n providers. <code>node/src/net/quic.rs</code> publishes diag snapshots through RPC/CLI (<code>contract-cli net quic-stats</code>).</li>
 <li>Mutual-TLS materials derive from node keys, are cached, and rotate via governance toggles. Chaos tooling lives in <code>docs/operations.md#chaos-and-fault-drills</code>.</li>
 </ul>
 <h3 id="localnet-and-range-boost"><a class="header" href="#localnet-and-range-boost">LocalNet and Range Boost</a></h3>
@@ -285,6 +634,16 @@
 <li>A* routing heuristics, swarm presets, and bootstrap flow are summarized from the former <code>docs/net_a_star.md</code>, <code>docs/swarm.md</code>, <code>docs/net_bootstrap.md</code>, and <code>docs/network_topologies.md</code> into this section.</li>
 </ul>
 <h2 id="storage-and-state"><a class="header" href="#storage-and-state">Storage and State</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> The Block lets you store files in a decentralized way — like Dropbox, but no single company controls it. Files are:</p>
+<ol>
+<li><strong>Chunked</strong> — Split into pieces</li>
+<li><strong>Encrypted</strong> — So only you can read them</li>
+<li><strong>Erasure coded</strong> — Spread across multiple providers so the file survives even if some go offline</li>
+<li><strong>Tracked on-chain</strong> — The ledger knows who stores what and pays them BLOCK</li>
+</ol>
+<p><strong>SimpleDb</strong> is our internal key-value store that handles crash-safe writes using atomic file operations.</p>
+</blockquote>
 <h3 id="storage-pipeline"><a class="header" href="#storage-pipeline">Storage Pipeline</a></h3>
 <ul>
 <li><code>node/src/storage/pipeline.rs</code> handles chunk sizing, erasure coding, encryption/compression selection, and provider placement. <code>coding/</code> supplies the compressor/erasure backends with runtime switches recorded in telemetry.</li>
@@ -304,7 +663,7 @@
 </ul>
 <h3 id="snapshots-and-state-pruning"><a class="header" href="#snapshots-and-state-pruning">Snapshots and State Pruning</a></h3>
 <ul>
-<li>WAL + snapshot lifecycle is inside <code>node/src/storage/wal.rs</code>, <code>docs/operations.md#wal-and-snapshots</code>, and CLI commands <code>tb-cli snapshots ...</code>.</li>
+<li>WAL + snapshot lifecycle is inside <code>node/src/storage/wal.rs</code>, <code>docs/operations.md#wal-and-snapshots</code>, and CLI commands <code>contract-cli snapshots ...</code>.</li>
 <li>State pruning logic lives under <code>node/src/state_pruning.rs</code>; governance knobs guard pruning depth and compaction windows.</li>
 </ul>
 <h3 id="repair-and-simulation"><a class="header" href="#repair-and-simulation">Repair and Simulation</a></h3>
@@ -318,6 +677,24 @@
 <li>Examples: bridge header persistence (v8), DEX escrow (v9), and industrial subsidies (v10). Migrations run during startup with telemetry for progress and error handling.</li>
 </ul>
 <h2 id="compute-marketplace"><a class="header" href="#compute-marketplace">Compute Marketplace</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> Think of this as a built-in AWS marketplace where people sell compute time, and the blockchain can audit that the work actually got done.</p>
+<p><strong>How it works:</strong></p>
+<ol>
+<li><strong>Provider offers compute</strong> — "I have a GPU, I'll run your jobs for X BLOCK per hour"</li>
+<li><strong>Consumer submits a job</strong> — "Run this ML model on my data"</li>
+<li><strong>Work gets done</strong> — Provider executes the job</li>
+<li><strong>SNARK receipt proves it</strong> — A small cryptographic proof shows the work was done correctly, without re-running it</li>
+<li><strong>BLOCK changes hands</strong> — Provider gets paid, consumer gets results</li>
+</ol>
+<p><strong>Key terms:</strong></p>
+<ul>
+<li><strong>Offer</strong>: A provider's listing (price, capacity, bond deposited)</li>
+<li><strong>SNARK receipt</strong>: Proof that computation happened correctly</li>
+<li><strong>SLA (Service Level Agreement)</strong>: Rules about quality/uptime; violations can lead to slashing</li>
+<li><strong>Lane</strong>: Priority tier for different job types</li>
+</ul>
+</blockquote>
 <h3 id="offers-and-matching"><a class="header" href="#offers-and-matching">Offers and Matching</a></h3>
 <ul>
 <li>Computation lives under <code>node/src/compute_market</code>. Offers, bids, and receipts serialize through <code>foundation_serialization</code> and are exposed over RPC (<code>node/src/rpc/compute_market.rs</code>).</li>
@@ -326,12 +703,13 @@
 <h3 id="lane-scheduler"><a class="header" href="#lane-scheduler">Lane Scheduler</a></h3>
 <ul>
 <li>The matcher rotates fairness windows per lane and is backed by sled state stored under <code>state/market</code>. Lane telemetrics feed <code>match_loop_latency_seconds{lane}</code>.</li>
+<li>SLA slashing is being layered atop the same scheduler per <code>AGENTS.md §15.B</code>: failed workloads will emit slash receipts anchored in BLOCK subsidy sub-ledgers, remediation dashboards (Grafana panels sourced from <code>monitoring/</code>) will highlight degraded lanes, and deterministic replay tests will cover fairness windows, starvation protection, and persisted receipts.</li>
 </ul>
 <h3 id="workloads-and-snark-receipts"><a class="header" href="#workloads-and-snark-receipts">Workloads and SNARK Receipts</a></h3>
 <ul>
 <li>Supported workloads: transcode, inference, GPU hash, SNARK. SNARK proofs now run through <code>node/src/compute_market/snark.rs</code>, which wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled shapes per digest, and chooses CPU/GPU provers (with telemetry exported via <code>snark_prover_latency_seconds{backend}</code> / <code>snark_prover_failure_total{backend}</code>).</li>
 <li>Proof bundles carry circuit/output/witness commitments and serialized proof bytes; they are attached to SLA records in <code>compute_market::settlement</code> and surfaced over RPC via <code>compute_market.sla_history</code>.</li>
-<li>Explorer ingest mirrors the same payloads: <code>tb-cli explorer sync-proofs --db explorer.db --url http://node:26658</code> streams <code>compute_market.sla_history(limit)</code> responses, persists the serialized <code>Vec&lt;ProofBundle&gt;</code> per job (<code>compute_sla_proofs</code> table), and exposes them under <code>/compute/sla/history</code> so dashboards can render fingerprints/artifacts without talking to the node.</li>
+<li>Explorer ingest mirrors the same payloads: <code>contract-cli explorer sync-proofs --db explorer.db --url http://node:26658</code> streams <code>compute_market.sla_history(limit)</code> responses, persists the serialized <code>Vec&lt;ProofBundle&gt;</code> per job (<code>compute_sla_proofs</code> table), and exposes them under <code>/compute/sla/history</code> so dashboards can render fingerprints/artifacts without talking to the node.</li>
 <li>Providers that advertise CUDA/ROCm GPUs (or dedicated accelerators) automatically attempt GPU proving first; failures fall back to CPU while feeding scheduler accelerator telemetry so providers can be reweighted.</li>
 <li>Benchmark harnesses for the prover live under <code>node/src/compute_market/tests/prover.rs</code> so operators can compare CPU/GPU latency locally before enabling accelerators.</li>
 </ul>
@@ -345,12 +723,25 @@
 <li>CBM hooks live in <code>node/src/compute_market/cbm.rs</code>. Governance toggles lane payouts, refundable deposits, and SLA slashing (<code>compute_market::settlement::SlaOutcome</code>).</li>
 </ul>
 <h2 id="energy-market"><a class="header" href="#energy-market">Energy Market</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> The energy market lets you buy and sell real-world electricity with built-in verification. Smart meters send cryptographically signed readings to the network, which turns them into "credits" that can be settled for BLOCK.</p>
+<p><strong>Example flow:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Step</th><th>What Happens</th></tr></thead><tbody>
+<tr><td>1. Register</td><td>Provider signs up with capacity (e.g., 10,000 kWh) and price (e.g., 50 BLOCK/kWh)</td></tr>
+<tr><td>2. Meter reading</td><td>Smart meter sends signed reading: "1,000 kWh delivered"</td></tr>
+<tr><td>3. Credit created</td><td>Network verifies signature, creates an <code>EnergyCredit</code></td></tr>
+<tr><td>4. Settlement</td><td>Customer settles 500 kWh → <code>EnergyReceipt</code> created, treasury fee deducted</td></tr>
+<tr><td>5. Payout</td><td>Provider receives BLOCK in their account</td></tr>
+</tbody></table>
+</div>
+<p><strong>If someone disputes a reading:</strong> A special "dispute" record is created, triggering review.</p>
+</blockquote>
 <ul>
 <li>Energy credits live in <code>crates/energy-market</code> with the node wrapper in <code>node/src/energy.rs</code>. Providers, credits, and receipts persist in sled via <code>SimpleDb::open_named(names::ENERGY_MARKET, …)</code>; set <code>TB_ENERGY_MARKET_DIR</code> to relocate the DB. The store snapshots to bytes (<code>EnergyMarket::{to_bytes,from_bytes}</code>) on every mutation and uses the same fsync+rename discipline as other <code>SimpleDb</code> consumers so restarts replay identical state.</li>
 <li>Oracle trust roots are defined in <code>config/default.toml</code> under <code>energy.provider_keys</code>. Each entry maps a provider ID to a 32-byte Ed25519 public key; reloads hot-swap the verifier registry via <code>node::energy::configure_provider_keys</code> so operators can rotate or revoke keys without restarts.</li>
-<li>RPC wiring (<code>node/src/rpc/energy.rs</code>) exposes <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, and <code>energy.settle</code>. The CLI (<code>cli/src/energy.rs</code>) emits the same JSON schema and prints providers, outstanding credits (meter hashes), and settled receipts, so oracle adapters (<code>crates/oracle-adapter</code>) and explorers stay aligned. <code>docs/testnet/ENERGY_QUICKSTART.md</code> covers bootstrap, signature validation, dispute rehearsal, and how to script <code>tb-cli energy</code> calls.</li>
+<li>RPC wiring (<code>node/src/rpc/energy.rs</code>) exposes <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, <code>energy.settle</code>, <code>energy.receipts</code>, <code>energy.credits</code>, <code>energy.disputes</code>, <code>energy.flag_dispute</code>, and <code>energy.resolve_dispute</code>. The CLI (<code>cli/src/energy.rs</code>) emits the same JSON schema and prints providers, receipts, credits, and disputes so oracle adapters (<code>crates/oracle-adapter</code>) and explorers stay aligned. <code>docs/testnet/ENERGY_QUICKSTART.md</code> covers bootstrap, signature validation, dispute rehearsal, and how to script <code>contract-cli energy</code> calls.</li>
 <li>Governance owns <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code>. Proposals feed those values through the shared governance crate, latch them in <code>node/src/governance/params.rs</code>, then invoke <code>node::energy::set_governance_params</code>, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.</li>
-<li>Observability: <code>energy_market</code> emits gauges (<code>energy_providers_count</code>, <code>energy_avg_price</code>), counters (<code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_signature_failure_total{provider,reason}</code>), histograms (<code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>), and simple health probes (<code>node::energy::check_energy_market_health</code>). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope.</li>
+<li>Observability: <code>energy_market</code> emits gauges (<code>energy_provider_total</code>, <code>energy_pending_credits_total</code>, <code>energy_receipt_total</code>, <code>energy_active_disputes_total</code>, <code>energy_avg_price</code>), counters (<code>energy_provider_register_total</code>, <code>energy_meter_reading_total{provider}</code>, <code>energy_settlement_total{provider}</code>, <code>energy_treasury_fee_total</code>, <code>energy_dispute_{open,resolve}_total</code>, <code>energy_kwh_traded_total</code>, <code>energy_signature_failure_total{provider,reason}</code>), histograms (<code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>), and simple health probes (<code>node::energy::check_energy_market_health</code>). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope or signature failures spike.</li>
 </ul>
 <h3 id="energy-governance-and-rpc-next-tasks"><a class="header" href="#energy-governance-and-rpc-next-tasks">Energy, Governance, and RPC Next Tasks</a></h3>
 <ul>
@@ -364,24 +755,24 @@
 </li>
 <li><strong>Energy + Oracle</strong>
 <ul>
-<li>Ed25519 verification now lives inside <code>oracle-adapter</code> (<code>Ed25519SignatureVerifier</code>) with provider-key registration. Node config (<code>energy.provider_keys</code>) defines the trusted keys and hot-swaps the verifier registry on reload; remaining work focuses on quorum/expiry policies, slashing telemetry, and dispute RPCs.</li>
-<li>Add oracle quorum/expiry policy (multi-reading attestation) with slashing telemetry and dispute RPCs.</li>
+<li>Ed25519 verification now lives inside <code>oracle-adapter</code> (<code>Ed25519SignatureVerifier</code>) with provider-key registration so adapters reject unsigned readings. Provider keys load from <code>energy.provider_keys</code> in the node config and propagate into the sled-backed verifier registry automatically. Remaining work focuses on oracle quorum/expiry policies, ledger anchoring, and advanced telemetry.</li>
+<li>Add oracle quorum/expiry policy (multi-reading attestation) with richer slashing telemetry.</li>
 <li>Persist energy receipts to ledger anchors or dedicated sled trees with replay tests.</li>
-<li>Expand CLI flows: list providers/receipts, dispute + open cases, and provider updates (price + stake top-up).</li>
+<li>Expand CLI/ explorer flows for provider updates (price, stake top-up) once governance exposes the payloads.</li>
 </ul>
 </li>
 <li><strong>RPC + CLI Hardening</strong>
 <ul>
 <li>Add RPC auth + rate limiting specific to the <code>energy.*</code> endpoints (aligned with gateway policy).</li>
-<li>Cover negative cases + structured errors for <code>energy.submit_reading</code> (bad signature, stale timestamp, wrong meter).</li>
+<li>Cover negative cases + structured errors for <code>energy.submit_reading</code> (bad signature, stale timestamp, wrong meter) and the new dispute endpoints.</li>
 <li>Publish JSON schema snippets for energy payloads/oracle messages plus round-trip CLI tests.</li>
 </ul>
 </li>
 <li><strong>Telemetry + Observability</strong>
 <ul>
-<li>Extend Grafana dashboards: provider count, pending credits, settlement rate, slash totals.</li>
-<li>Add SLOs/alerts for oracle latency, slashing spikes, settlement stalls.</li>
-<li>Wire metrics-aggregator summary endpoints so <code>/wrappers</code> and <code>/telemetry/summary</code> expose energy stats.</li>
+<li>Extend Grafana dashboards: provider count, pending credits, dispute trends, settlement rate, slash totals.</li>
+<li>Add SLOs/alerts for oracle latency, slashing spikes, settlement stalls, and dispute backlog.</li>
+<li>Wire metrics-aggregator summary endpoints so <code>/wrappers</code> and <code>/telemetry/summary</code> expose the new energy stats.</li>
 </ul>
 </li>
 <li><strong>Network + Transport</strong>
@@ -423,20 +814,40 @@
 </li>
 </ul>
 <h2 id="bridges-dex-and-settlement"><a class="header" href="#bridges-dex-and-settlement">Bridges, DEX, and Settlement</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong></p>
+<ul>
+<li><strong>Bridges</strong> let you move assets between The Block and other blockchains (like Ethereum). A "relayer" watches both chains and proves that a deposit on one side should unlock funds on the other.</li>
+<li><strong>DEX (Decentralized Exchange)</strong> lets you trade tokens without a central exchange. Order books and "trust lines" (credit relationships between parties) are tracked on-chain.</li>
+<li><strong>HTLC (Hash Time-Locked Contracts)</strong> enable atomic swaps: "I'll give you X if you reveal a secret; otherwise we both get refunds after timeout."</li>
+</ul>
+</blockquote>
 <h3 id="token-bridges"><a class="header" href="#token-bridges">Token Bridges</a></h3>
 <ul>
 <li>The <code>bridges/</code> crate handles POW header verification, relayer sets, telemetry, and dispute handling. RPC wiring lives in <code>node/src/rpc/bridge.rs</code>.</li>
 <li>Verified headers persist in sled (schema migration v8) and CLI commands under <code>cli/src/bridge.rs</code> manage challenge windows.</li>
+<li>Release-verifier tooling now tracks relayer payload attestations, signer-set rotations, and escrow proof exports per <code>AGENTS.md §15.E</code>. Every bridge change must update <code>docs/security_and_privacy.md#release-provenance-and-supply-chain</code>, emit telemetry counters (<code>bridge_signer_rotation_total</code>, <code>bridge_partial_payment_retry_total</code>), and keep explorer dashboards aligned with the canonical snapshot JSON produced by the CLI.</li>
 </ul>
 <h3 id="dex-and-trust-lines"><a class="header" href="#dex-and-trust-lines">DEX and Trust Lines</a></h3>
 <ul>
 <li><code>node/src/dex</code> + <code>dex/</code> supply order books, trust-line routing, escrow constraints, and adapters (Uniswap/Osmosis). Trust-line state is sled-backed and streamed to explorers/CLI.</li>
+<li>Deterministic replay coverage for escrow settlement and AMM invariants plus telemetry for multi-hop routing latency, escrow fulfillment, and signer rotations are required by the same <code>AGENTS.md §15.E</code> directive so dashboards and operators never diverge from node state.</li>
 </ul>
 <h3 id="htlc-and-cross-chain"><a class="header" href="#htlc-and-cross-chain">HTLC and Cross-Chain</a></h3>
 <ul>
 <li>Atomic swap primitives (<code>docs/htlc_swaps.md</code> replacement) were folded into <code>node/src/dex/htlc.rs</code> with RPC + CLI helpers. Governance tracks lane quotas and telemetry under <code>DEX_*</code> metrics.</li>
 </ul>
 <h2 id="gateway-and-client-access"><a class="header" href="#gateway-and-client-access">Gateway and Client Access</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> The gateway is the "front door" where wallets and apps talk to nodes. It handles:</p>
+<ul>
+<li><strong>HTTP/API requests</strong> — Apps call JSON-RPC methods to read state or submit transactions</li>
+<li><strong>DNS publishing</strong> — Register <code>.block</code> domains that point to your content</li>
+<li><strong>Mobile cache</strong> — Encrypted offline storage so phones work without network</li>
+<li><strong>Light clients</strong> — Lightweight sync for devices that can't store the full chain</li>
+</ul>
+<p><strong>User story:</strong> Your wallet app connects to a gateway node. When you check your balance, the app calls an RPC method. When you send BLOCK, it submits a signed transaction. When you go offline, the mobile cache keeps recent data locally.</p>
+</blockquote>
 <h3 id="http-gateway"><a class="header" href="#http-gateway">HTTP Gateway</a></h3>
 <ul>
 <li><code>node/src/gateway/http.rs</code> uses <code>crates/httpd</code> for the router, TLS, and WebSocket upgrades. Gateways serve static content, APIs, and compute relays from the embedded storage pipeline.</li>
@@ -448,7 +859,7 @@
 </ul>
 <h3 id="dns-auctions-and-staking"><a class="header" href="#dns-auctions-and-staking">DNS Auctions and Staking</a></h3>
 <ul>
-<li>Gateway domain auctions use stake-backed bids and escrowed CT recorded under <code>node/src/gateway/dns.rs</code> (see <code>StakeEscrowRecord</code>). RPC/CLI support deposit, withdraw, and refund flows with error codes under the same module.</li>
+<li>Gateway domain auctions use stake-backed bids and escrowed BLOCK recorded under <code>node/src/gateway/dns.rs</code> (see <code>StakeEscrowRecord</code>). RPC/CLI support deposit, withdraw, and refund flows with error codes under the same module.</li>
 </ul>
 <h3 id="mobile-gateway-cache"><a class="header" href="#mobile-gateway-cache">Mobile Gateway Cache</a></h3>
 <ul>
@@ -461,9 +872,107 @@
 </ul>
 <h3 id="read-receipts"><a class="header" href="#read-receipts">Read Receipts</a></h3>
 <ul>
-<li><code>node/src/gateway/read_receipt.rs</code> records signed acknowledgements, batches them for ledger inclusion, and exposes CLI/metrics counters. Economics for <code>READ_SUB_CT</code> live in <code>docs/economics_and_governance.md</code>.</li>
+<li><code>node/src/gateway/read_receipt.rs</code> records signed acknowledgements, batches them for ledger inclusion, and exposes CLI/metrics counters. Economics for <code>READ_SUB</code> live in <code>docs/economics_and_governance.md</code>.</li>
+</ul>
+<h2 id="launch-governor"><a class="header" href="#launch-governor">Launch Governor</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> The launch governor is an automated system that decides when the network is "ready" for different operational phases. Think of it like a safety system that monitors network health and only enables features when metrics look stable.</p>
+<p><strong>Example:</strong> Before enabling live DNS auctions, the governor watches:</p>
+<ul>
+<li>Are blocks arriving at regular intervals?</li>
+<li>Are peers staying connected?</li>
+<li>Are test auctions completing successfully?</li>
+</ul>
+<p>Once these metrics hit target thresholds consistently (a "streak"), the governor transitions the network to the next phase.</p>
+</blockquote>
+<h3 id="gates-and-actions"><a class="header" href="#gates-and-actions">Gates and Actions</a></h3>
+<p>The governor manages two primary gates:</p>
+<div class="table-wrapper"><table><thead><tr><th>Gate</th><th>Purpose</th><th>Actions</th></tr></thead><tbody>
+<tr><td><strong>operational</strong></td><td>Core network readiness</td><td><code>Enter</code> (enable), <code>Exit</code> (disable)</td></tr>
+<tr><td><strong>naming</strong></td><td>DNS auction readiness</td><td><code>Rehearsal</code> (test mode), <code>Trade</code> (live auctions)</td></tr>
+</tbody></table>
+</div>
+<p>Upcoming gates extend the same pattern:</p>
+<div class="table-wrapper"><table><thead><tr><th>Gate (planned)</th><th>Scope</th><th>Notes</th></tr></thead><tbody>
+<tr><td><strong>economics</strong></td><td>Block reward + subsidy autopilot</td><td>Shadow mode will ensure <code>NetworkIssuanceController</code> outputs count/volume/treasury metrics (<code>economics_epoch_*</code>) and the persisted <code>economics_block_reward_per_block</code> stay within bounds before runtime parameters flip.</td></tr>
+<tr><td><strong>storage</strong>, <strong>compute</strong>, <strong>energy</strong>, <strong>ad</strong></td><td>Market-specific rehearsal/live toggles</td><td>Each gate will watch the telemetry already described in the respective architecture sections (utilization, margins, disputes, backlog) and will only enable “trade” mode after sustained streaks. Backlog tracked in <code>AGENTS.md §15</code>.</td></tr>
+</tbody></table>
+</div>
+<p>Gate states progress as: <code>Inactive</code> → <code>Active</code>/<code>Rehearsal</code> → <code>Trade</code></p>
+<h3 id="signal-providers"><a class="header" href="#signal-providers">Signal Providers</a></h3>
+<p>The governor monitors two signal sources:</p>
+<p><strong>Chain Signals</strong> (<code>ChainSample</code>):</p>
+<ul>
+<li><code>block_spacing</code> — Milliseconds between consecutive blocks (measures stability)</li>
+<li><code>difficulty</code> — Mining difficulty trend (detects hashrate changes)</li>
+<li><code>replay</code> — Success ratio of block validation replays</li>
+<li><code>peer_liveness</code> — Ratio of successful peer requests vs drops</li>
+<li><code>fee_band</code> — Median and P90 consumer fees</li>
+</ul>
+<p><strong>DNS Signals</strong> (<code>DnsSample</code>):</p>
+<ul>
+<li><code>txt_success</code> — TXT record publish success ratio</li>
+<li><code>dispute_share</code> — Ratio of auctions ending in disputes</li>
+<li><code>completion</code> — Auction completion ratio</li>
+<li><code>stake_coverage_ratio</code> — Locked stake vs P90 settlement amounts</li>
+<li><code>settle_durations_ms</code> — How long settlements take</li>
+</ul>
+<h3 id="intent-system"><a class="header" href="#intent-system">Intent System</a></h3>
+<p>When gate conditions are met, the governor creates <strong>intents</strong>—timestamped records of planned state changes:</p>
+<ol>
+<li><strong>Intent created</strong> — Captures metrics snapshot, computes BLAKE3 hash</li>
+<li><strong>Optional signing</strong> — Ed25519 signature with node key (if <code>TB_GOVERNOR_SIGN=1</code>)</li>
+<li><strong>Persistence</strong> — Saved to <code>governor_db/</code> via SimpleDb</li>
+<li><strong>Apply at epoch</strong> — Intents apply one epoch after creation (timelock)</li>
+<li><strong>State update</strong> — Governance runtime receives parameter changes</li>
+</ol>
+<p>Intent records include:</p>
+<ul>
+<li><code>id</code> — Unique identifier (<code>{gate}-{epoch}-{seq}</code>)</li>
+<li><code>params_patch</code> — JSON patch for governance parameters</li>
+<li><code>snapshot_hash_hex</code> — BLAKE3 hash for auditability</li>
+<li><code>metrics</code> — Summary and raw metrics that triggered the decision</li>
+</ul>
+<p>The RPC output now also contains an <code>economics_prev_market_metrics</code> array derived from <code>EconomicsPrevMetric</code>, and <code>tb-cli governor status</code> prints this deterministic snapshot alongside the regular <code>economics_sample</code>. This makes it easy to reconcile the governor’s JSON/RPC data with the Prometheus gauges stamped <code>economics_prev_market_metrics_{utilization,provider_margin}_ppm</code>.</p>
+<h3 id="configuration"><a class="header" href="#configuration">Configuration</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Environment Variable</th><th>Purpose</th><th>Default/Guidance</th></tr></thead><tbody>
+<tr><td><code>TB_GOVERNOR_ENABLED</code></td><td>Enables the background task</td><td><code>false</code> by default; <strong>must be <code>1</code> on shared testnets and mainnet</strong></td></tr>
+<tr><td><code>TB_GOVERNOR_DB</code></td><td>SimpleDb path for intent history</td><td><code>governor_db/</code> relative to node data dir</td></tr>
+<tr><td><code>TB_GOVERNOR_WINDOW_SECS</code></td><td>Rolling window used for signal sampling</td><td>Default <code>2 ×</code> epoch. Increase (e.g. <code>4 ×</code>) on mainnet to avoid flapping.</td></tr>
+<tr><td><code>TB_GOVERNOR_SIGN</code></td><td>Emit signed decision sidecars</td><td><code>0</code> for local/dev. <strong>Set to <code>1</code> on production clusters</strong> so every intent has an Ed25519 attestation.</td></tr>
+<tr><td><code>TB_NODE_KEY_HEX</code></td><td>Hex-encoded Ed25519 secret used for signing</td><td>Required when <code>TB_GOVERNOR_SIGN=1</code>.</td></tr>
+</tbody></table>
+</div>
+<p><strong>Modes:</strong> New gates should ship in <strong>shadow mode</strong> first—emit intents + snapshots but skip <code>apply_intent</code>—until operators confirm the metrics and thresholds behave as expected. Switch to active mode by enabling <code>TB_GOVERNOR_ENABLED=1</code> (and keeping <code>apply_intent</code> wired) only after the shadow run is documented in <code>docs/operations.md</code>.</p>
+<h3 id="rpc-methods"><a class="header" href="#rpc-methods">RPC Methods</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>governor.status</code></td><td>Current gate states, epoch, pending intents, plus the deterministic <code>EconomicsPrevMetric</code> snapshot (<code>economics_prev_market_metrics</code>) that mirrors the <code>economics_prev_market_metrics_{utilization,provider_margin}_ppm</code> gauges.</td></tr>
+<tr><td><code>governor.decisions</code></td><td>Recent intent history (with <code>limit</code> param)</td></tr>
+<tr><td><code>governor.snapshot</code></td><td>Load persisted decision for specific epoch</td></tr>
+</tbody></table>
+</div>
+<h3 id="source-files"><a class="header" href="#source-files">Source Files</a></h3>
+<ul>
+<li><code>node/src/launch_governor/mod.rs</code> — Gate controllers, intent planning, signal evaluation</li>
+<li><code>node/src/governor_snapshot.rs</code> — Snapshot persistence and signing</li>
+<li><code>node/src/rpc/governor.rs</code> — RPC handlers</li>
 </ul>
 <h2 id="telemetry-and-instrumentation"><a class="header" href="#telemetry-and-instrumentation">Telemetry and Instrumentation</a></h2>
+<blockquote>
+<p><strong>Plain English:</strong> Telemetry is how operators know what's happening inside the node. The system exports:</p>
+<ul>
+<li><strong>Metrics</strong> — Numbers like "transactions processed per second" or "peer count"</li>
+<li><strong>Logs</strong> — Text records of what happened and when</li>
+<li><strong>Dashboards</strong> — Visual graphs (via Grafana) showing health over time</li>
+</ul>
+<p><strong>The basic pattern:</strong></p>
+<ol>
+<li>Node collects metrics internally</li>
+<li>Metrics aggregator pulls them from multiple nodes</li>
+<li>Grafana displays pretty graphs</li>
+<li>Alerts fire when something looks wrong</li>
+</ol>
+</blockquote>
 <h3 id="runtime-telemetry"><a class="header" href="#runtime-telemetry">Runtime Telemetry</a></h3>
 <ul>
 <li><code>node/src/telemetry.rs</code> registers every metric (TLS warnings, coding results, gossip fanout, SLA counters). CLI + aggregator share the same registry via <code>runtime::telemetry</code>.</li>
@@ -484,7 +993,15 @@
 </ul>
 <h3 id="ad-marketplace"><a class="header" href="#ad-marketplace">Ad Marketplace</a></h3>
 <ul>
-<li>Ad market crates (<code>ad_market</code>, <code>node/src/ad_policy_snapshot.rs</code>, <code>node/src/ad_readiness.rs</code>) manage policy snapshots, ANN proofs, conversion tokens, and mesh deliveries. CLI + RPC surfaces sit in <code>cli/src/ad_market.rs</code> and <code>node/src/rpc/ad_market.rs</code>.</li>
+<li>Ad targeting is now spec'd as a multi-signal platform, not a badge-only preview. <code>crates/ad_market</code> hosts the cohort schema, privacy budget manager, uplift estimator, budget broker, and attestation logic; <code>node/src/ad_policy_snapshot.rs</code>, <code>node/src/ad_readiness.rs</code>, and <code>node/src/read_receipt.rs</code> persist/snapshot selector utilization, while <code>node/src/rpc/ad_market.rs</code>, <code>cli/src/ad_market.rs</code>, <code>cli/src/gov.rs</code>, and <code>cli/src/explorer.rs</code> surface every selector knob through the RPC/CLI/explorer stack.</li>
+<li><strong>Cohort schema (<code>CohortKeyV2</code>)</strong> — Cohorts are keyed by <code>{domain,String, domain_tier:DomainTier, domain_owner?:AccountId, provider?:String, badges:Vec&lt;BadgeId&gt;, interest_tags:Vec&lt;InterestTagId&gt;, presence_bucket?:PresenceBucket, selectors_version:u16}</code> with <code>DomainTier ∈ {premium,reserved,community,unverified}</code> sourced from <code>node/src/gateway/dns.rs</code> stakes, governance-owned interest tags, and Range Boost presence buckets. Sled keys migrate via dual writes (<code>cohort_v1:*</code> + <code>cohort_v2:*</code>) plus reversible replays inside <code>node/src/ad_policy_snapshot.rs</code>/<code>node/src/ad_readiness.rs</code> so operators can downgrade if the migration stalls.</li>
+<li><strong>Multi-signal auctions</strong> — <code>crates/ad_market/src/budget.rs</code> teaches the budget broker to price and pace selectors individually via <code>{selector: SelectorBidSpec {clearing_price_usd_micros, shading_factor_bps, slot_cap, max_pacing_ppm}}</code>. RPC payloads (<code>node/src/rpc/ad_market.rs</code>) and CLI helpers expose selector maps for <code>register_campaign</code>, <code>inventory</code>, <code>distribution</code>, <code>budget</code>, and <code>readiness</code> so advertisers can mix badges, interest tags, domains, and presence. Explorer summaries render per-selector revenue in <code>cli/src/explorer.rs</code>.</li>
+<li><strong>Self-tuning PI controller</strong> — Budget pacing now hinges on a PI controller that runs inside each <code>CampaignBudgetState</code>. The controller tracks the relative error between <code>epoch_spend</code> and <code>epoch_target</code>, integrates it, and applies a <code>dual_price</code> adjustment once per reservation; the error zero-crossings feed a Ziegler-Nichols inspired tuner that recalculates <code>Kp/Ki</code> so the spend stays within the configured robustness window. The tuning knobs live in <code>BudgetBrokerConfig.pi_tuner</code> (fields: <code>enabled</code>, <code>kp_min</code>, <code>kp_max</code>, <code>ki_min</code>, <code>ki_max</code>, <code>ki_ratio</code>, <code>tuning_sensitivity</code>, <code>zero_cross_min_interval_micros</code>, and <code>max_integral</code>) and are normalized alongside the existing step/dual steps. <code>CampaignBudgetSnapshot.pi_controller</code> persists the controller state so deterministic replays keep the same gain history, and the resulting <code>dual_price</code>/<code>kappa</code> traces continue to surface through the existing telemetry guards.</li>
+<li><strong>Proof-of-presence targeting</strong> — <code>node/src/localnet</code>, <code>node/src/range_boost</code>, and <code>node/src/service_badge.rs</code> mint <code>PresenceReceipt {beacon_id,device_key,mesh_node,location_bucket,radius_meters,confidence_bps,minted_at_micros,expires_at_micros}</code> entries that <code>crates/ad_market/src/attestation.rs</code> verifies. Receipts are cached in a privacy-safe sled store, gated by governance knobs <code>TB_PRESENCE_TTL_SECS</code>, <code>TB_PRESENCE_RADIUS_METERS</code>, and <code>TB_PRESENCE_PROOF_CACHE_SIZE</code>, and exposed through new RPCs (<code>ad_market.list_presence_cohorts</code>, <code>ad_market.reserve_presence</code>). Node <code>bin</code> logic already cancels reservations when <code>presence_badge</code> checks fail; this feature extends those hooks to the new attestation types and read-readiness rehearsal gate.</li>
+<li><strong>Domain marketplace + interest ingestion</strong> — <code>node/src/gateway/dns.rs</code> emits ownership tiers and auction/intent metadata that feed the ad-policy snapshot. A governance-owned registry maps <code>.block</code> categories and premium tiers to <code>interest_tags</code>, so advertisers can reserve or exclude those audiences. Synchronization happens alongside the ad policy snapshot pruning pipeline, and readiness snapshots surface <code>domain_tier_supply_ppm</code> and <code>interest_tag_supply_ppm</code> buckets for operators. Docs (<code>docs/system_reference.md</code>, <code>docs/apis_and_tooling.md</code>) enumerate RPC validation errors for misaligned tiers/tags.</li>
+<li><strong>Analytics, conversions, and uplift</strong> — <code>crates/ad_market/src/uplift.rs</code> now manages holdout cohorts per selector, exposing readiness/ROAS deltas via <code>ad_market.readiness</code>. <code>ad_market.record_conversion</code> accepts <code>value_usd_micros</code>, <code>value</code>, <code>currency_code</code>, <code>attribution_window_secs</code>, and <code>selector_weights[]</code> so advertisers can attribute conversions back to badges, interest tags, domains, and presence proofs. Readiness reports publish inventory depth, presence-proof freshness histograms, domain-tier utilization, and privacy budget status per selector, while CLI/explorer commands mirror the same aggregates.</li>
+<li><strong>Privacy + governance guardrails</strong> — <code>crates/ad_market/src/privacy.rs</code> clamps selector combinations (badge + premium domain + precise presence requires explicit opt-in) and guarantees k-anonymity before releasing supply or readiness data. Violations surface via RPC errors and telemetry (<code>ad_privacy_budget_utilization_ratio</code>, <code>ad_privacy_denial_total</code>). Governance proposals (via <code>cli/src/gov.rs</code>) own selector caps, privacy budgets, interest registries, and presence TTL/radius settings.</li>
+<li><strong>Observability + gate cadence</strong> — <code>metrics-aggregator/src/lib.rs</code> adds segment readiness counters (<code>ad_segment_ready_total{domain_tier,presence_bucket,interest_tag}</code>), competitiveness stats (<code>ad_auction_top_bid_usd_micros{selector}</code>, <code>ad_bid_shading_factor_bps{selector}</code>, <code>ad_auction_win_rate{selector}</code>), conversion values (<code>ad_conversion_value_total{selector}</code>), and privacy usage histograms. The aggregator exports them through <code>/wrappers</code>, Grafana panels live under <code>monitoring/ad_market_dashboard.json</code>, and <code>docs/operations.md#telemetry-wiring</code> now requires screenshots from <code>npm ci --prefix monitoring &amp;&amp; make monitor</code> whenever these metrics change. Every touch to <code>crates/ad_market</code>, <code>node/src/rpc/ad_market.rs</code>, <code>node/src/localnet</code>, <code>node/src/range_boost</code>, <code>node/src/gateway/dns.rs</code>, <code>node/src/ad_policy_snapshot.rs</code>, <code>node/src/ad_readiness.rs</code>, <code>metrics-aggregator/</code>, <code>monitoring/</code>, or the associated CLI/explorer files must rerun the full gate list (<code>just lint</code>, <code>just fmt</code>, <code>just test-fast</code>, <code>just test-full</code>, <code>cargo test -p the_block --test replay</code>, <code>cargo test -p the_block --test settlement_audit --release</code>, <code>scripts/fuzz_coverage.sh</code>) with transcripts attached per <code>AGENTS.md §0.6</code>.</li>
 </ul>
 <h3 id="law-enforcement-portal-and-jurisdiction-packs"><a class="header" href="#law-enforcement-portal-and-jurisdiction-packs">Law-enforcement Portal and Jurisdiction Packs</a></h3>
 <ul>

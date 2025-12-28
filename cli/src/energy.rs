@@ -89,7 +89,7 @@ impl EnergyCmd {
                 )))
                 .arg(ArgSpec::Positional(PositionalSpec::new(
                     "price_per_kwh",
-                    "Price per kWh (in CT microunits)",
+                    "Price per kWh (in BLOCK microunits)",
                 )))
                 .arg(ArgSpec::Option(
                     OptionSpec::new(
@@ -113,7 +113,7 @@ impl EnergyCmd {
                     "Owner account identifier",
                 )))
                 .arg(ArgSpec::Option(
-                    OptionSpec::new("stake", "stake", "Stake/bond amount in CT").default("1000"),
+                    OptionSpec::new("stake", "stake", "Stake/bond amount in BLOCK").default("1000"),
                 ))
                 .arg(ArgSpec::Option(
                     OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
@@ -716,7 +716,7 @@ fn print_receipts_response(body: &str, json: bool) {
             .get("price_paid")
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
-        format!("{seller} -> {buyer} {kwh}kWh price={price}ct")
+        format!("{seller} -> {buyer} {kwh}kWh price={price} BLOCK")
     });
 }
 

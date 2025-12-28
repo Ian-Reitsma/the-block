@@ -145,7 +145,7 @@ Ed25519_Sign(
       "price_per_kwh": 5000,
       "reputation_score": 0.92,
       "reputation_confidence": 0.88,
-      "staked_ct": 500000,
+      "staked": 500000,
       "total_delivered_kwh": 5400000,
       "last_settlement": 1702944000,
       "slash_history": []
@@ -172,7 +172,7 @@ Ed25519_Sign(
   "capacity_kwh": 1000000,
   "available_kwh": 800000,
   "price_per_kwh": 5000,
-  "staked_ct": 500000,
+  "staked": 500000,
   "total_delivered_kwh": 5400000,
   "status": "active",
   "reputation": {
@@ -197,7 +197,7 @@ Ed25519_Sign(
   "slash_history": [
     {
       "reason": "meter_fraud",
-      "amount_slashed_ct": 10000,
+      "amount_slashed": 10000,
       "slashed_at": 1702900000,
       "disputed": false
     }
@@ -242,7 +242,7 @@ GET /energy/credits?provider_id=provider_usa_001&status=pending&limit=50
   ],
   "next_cursor": "0x5f7a...",
   "total_pending_kwh": 5200000,
-  "total_pending_ct": 26000000
+  "total_pending": 26000000
 }
 ```
 
@@ -344,7 +344,7 @@ GET /energy/credits?provider_id=provider_usa_001&status=pending&limit=50
     { ... }
   ],
   "pending_count": 3,
-  "total_slashed_ct": 45000
+  "total_slashed": 45000
 }
 ```
 

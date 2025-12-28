@@ -22,8 +22,8 @@ pub const MAX_RECEIPT_BYTES_PER_BLOCK: usize = 10_000_000;
 /// Maximum length for string fields (contract_id, provider, etc.)
 pub const MAX_STRING_FIELD_LENGTH: usize = 256;
 
-/// Minimum payment amount to emit a receipt (spam protection)
-pub const MIN_PAYMENT_FOR_RECEIPT_CT: u64 = 1;
+/// Minimum BLOCK payment amount to emit a receipt (spam protection)
+pub const MIN_PAYMENT_FOR_RECEIPT: u64 = 1;
 
 /// Receipt-level validation error
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

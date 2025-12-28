@@ -65,7 +65,7 @@ static DNS_METRICS: Lazy<Mutex<VecDeque<DnsMetricEvent>>> =
 struct DynamicReservePricingConfig {
     /// Enable dynamic reserve pricing
     enabled: bool,
-    /// Base reserve price in CT (default 1000)
+    /// Base reserve price in BLOCK (default 1000)
     base_reserve: u64,
     /// Length sensitivity factor (default 0.1 = 10% per character)
     length_sensitivity: f64,
@@ -147,7 +147,7 @@ fn compute_dynamic_reserve_price(domain: &str, prior_auction: Option<&DomainAuct
     // Combine all factors
     let final_price = base * length_multiplier * history_multiplier;
 
-    // Round and ensure minimum of 1 CT
+    // Round and ensure minimum of 1 BLOCK
     final_price.round().max(1.0) as u64
 }
 
@@ -3205,7 +3205,7 @@ mod tests {
 
         // List without specifying min_bid - should use computed reserve
         // "xyz.block" = 9 chars -> length_multiplier = 1.0 - 0.1 * (9-3) = 0.4
-        // Expected: 1000 * 0.4 = 400 CT
+        // Expected: 1000 * 0.4 = 400 BLOCK
         let listing = list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             // min_bid NOT specified - should default to dynamic reserve
@@ -3219,7 +3219,7 @@ mod tests {
         assert_eq!(
             auction["min_bid"].as_u64(),
             Some(400),
-            "Should use dynamic reserve (9-char domain \"xyz.block\": 400 CT)"
+            "Should use dynamic reserve (9-char domain \"xyz.block\": 400 BLOCK)"
         );
 
         clear_domain_state(domain);

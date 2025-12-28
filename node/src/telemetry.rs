@@ -1512,7 +1512,7 @@ pub static PROOF_REBATES_CLAIMED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
 pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "proof_rebates_amount_total",
-        "Total CT awarded via proof rebates",
+        "Total BLOCK awarded via proof rebates",
     )
     .unwrap_or_else(|e| panic!("counter proof rebates amount: {e}"));
     REGISTRY
@@ -1524,7 +1524,7 @@ pub static PROOF_REBATES_AMOUNT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
 pub static PROOF_REBATES_PENDING_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
     let g = IntGauge::new(
         "proof_rebates_pending_total",
-        "Pending CT rebates awaiting claim",
+        "Pending BLOCK rebates awaiting claim",
     )
     .unwrap_or_else(|e| panic!("gauge proof rebates pending: {e}"));
     REGISTRY

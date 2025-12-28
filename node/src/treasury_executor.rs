@@ -163,7 +163,7 @@ fn signer_closure(
             })?;
         if available_consumer < total_consumer {
             return Err(TreasuryExecutorError::cancelled(
-                "insufficient treasury CT balance",
+                "insufficient treasury BLOCK balance",
             ));
         }
         let tx_hash = hex::encode(signed.id());

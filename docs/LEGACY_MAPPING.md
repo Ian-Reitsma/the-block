@@ -20,7 +20,7 @@ This index records where every pre-consolidation document landed. Each bullet li
 - `docs/service_badge.md`, `docs/le_portal.md`, `docs/probe.md` → [`Auxiliary Services`](architecture.md#auxiliary-services)
 
 ## Economics and Governance (`docs/economics_and_governance.md`)
-- `docs/economics.md`, `docs/inflation.md`, `docs/tokens.md`, `docs/fee_rebates.md`, `docs/fees.md`, `docs/settlement_switch.md`, `docs/settlement_audit.md` → [`CT Supply`, `Fee Lanes`, and `Settlement`](economics_and_governance.md#ct-supply-and-sub-ledgers)
+- `docs/economics.md`, `docs/inflation.md`, `docs/tokens.md`, `docs/fee_rebates.md`, `docs/fees.md`, `docs/settlement_switch.md`, `docs/settlement_audit.md` → [`BLOCK Supply`, `Fee Lanes`, and `Settlement`](economics_and_governance.md#block-supply-and-sub-ledgers)
 - `docs/treasury.md`, `docs/ledger_invariants.md`, `docs/service_badge.md` → [`Treasury`, `Service Badges`, and `Ledger Invariants`](economics_and_governance.md#treasury-and-disbursements)
 - `docs/governance.md`, `docs/governance_params.md`, `docs/governance_release.md`, `docs/governance_rollback.md`, `docs/governance_ui.md`, `docs/commit_reveal.md`, `docs/system_changes.md`, `docs/audit_handbook.md`, `docs/risk_register.md` → [`Proposal Lifecycle`, `Governance Parameters`, and `Risk Controls`](economics_and_governance.md#proposal-lifecycle)
 

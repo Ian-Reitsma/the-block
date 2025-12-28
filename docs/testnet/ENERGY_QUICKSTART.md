@@ -66,7 +66,7 @@ Compare the output to `contract-cli energy market --provider-id energy-0x00 --ve
 ```bash
 contract-cli energy settle energy-0x00 500 --meter-hash e3c3... --buyer acct_demo_consumer
 ```
-The RPC verifies the credit, applies treasury/slashing math, and emits an `EnergyReceipt` anchored inside the CT ledger snapshot. Re-run `contract-cli energy market` to confirm the credit decreased and the receipt shows up in the `receipts` array. Capture receipts for explorers with:
+The RPC verifies the credit, applies treasury/slashing math, and emits an `EnergyReceipt` anchored inside the BLOCK ledger snapshot. Re-run `contract-cli energy market` to confirm the credit decreased and the receipt shows up in the `receipts` array. Capture receipts for explorers with:
 ```bash
 jq '.receipts' /tmp/energy_snapshot.json > explorer/fixtures/energy_receipts.json
 ```

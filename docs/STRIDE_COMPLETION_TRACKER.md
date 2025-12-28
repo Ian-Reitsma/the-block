@@ -84,7 +84,7 @@ This document tracks the completion of three critical workstreams required for m
 - [ ] Rollback scenario: execute → detect issue → rollback → compensate
 - [ ] DAG dependency: submit A, submit B(deps=[A]), verify B waits for A
 - [ ] Backlog stress: 500 disbursements, verify batching and no stalls
-- [ ] Settlement audit: verify CT conservation across treasury operations
+- [ ] Settlement audit: verify BLOCK conservation across treasury operations
 
 ---
 

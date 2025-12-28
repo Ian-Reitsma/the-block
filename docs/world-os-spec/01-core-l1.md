@@ -4,14 +4,14 @@
 ### Canonical Modules
 - `node/src/consensus/` — PoW driver (`pow.rs`), PoH tick generator (`poh.rs`), fork-choice hints, and QUIC handshake policy (`transport_quic.rs`).
 - `node/src/blockchain/` — Block processing pipeline, inter-shard fork choice, macro-block checkpoints, and difficulty retunes. `process.rs` is the entry point invoked by RPC and CLI handlers.
-- `ledger/` — Token registry plus CT emission math. `ledger/src/token.rs` exposes `TokenRegistry` and `Emission` used when assembling coinbase outputs.
+- `ledger/` — Token registry plus BLOCK emission math. `ledger/src/token.rs` exposes `TokenRegistry` and `Emission` used when assembling coinbase outputs.
 - `state/` — sled-backed trie providing Merkle proofs for consensus snapshots.
 
 ### State Structures & Storage Keys
 | Structure | Definition | Storage |
 | --- | --- | --- |
-| `consensus::pow::BlockHeader` | Header template with PoH checkpoints, CT base fee, VDF commitments, and `l2_roots`. | Serialized into `block_binary.rs` and persisted under the `blocks` column family in `node/src/storage`. |
-| `blockchain::snapshot::SnapshotManager` | Persists state/ledger snapshots to `state/snapshots/<height>` alongside diff files. Keeps consumer/industrial CT balances plus nonces per account. | Filesystem snapshots + sled column families keyed by account hash. |
+| `consensus::pow::BlockHeader` | Header template with PoH checkpoints, BLOCK base fee, VDF commitments, and `l2_roots`. | Serialized into `block_binary.rs` and persisted under the `blocks` column family in `node/src/storage`. |
+| `blockchain::snapshot::SnapshotManager` | Persists state/ledger snapshots to `state/snapshots/<height>` alongside diff files. Keeps consumer/industrial BLOCK balances plus nonces per account. | Filesystem snapshots + sled column families keyed by account hash. |
 | `ledger::shard::ShardState` | Shard IDs + state roots. | Stored per `shard:{id}` column family key `state`. |
 
 ### RPC & CLI Surfaces
@@ -29,7 +29,7 @@
 1. Gossip (`node/src/gossip`) propagates candidate blocks + transactions using adaptive fanout from AGENTS spec.
 2. `consensus::pow::Miner::mine` seals blocks with base fee + PoH checkpoint hash.
 3. `blockchain::process::apply_block` mutates sled-backed account trie, snapshotting via `SnapshotManager` once `interval` ticks elapse.
-4. Coinbase assembly (`node/src/treasury_executor.rs`) credits CT to miners plus subsidy buckets (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`).
+4. Coinbase assembly (`node/src/treasury_executor.rs`) credits BLOCK to miners plus subsidy buckets (`STORAGE_SUB`, `READ_SUB`, `COMPUTE_SUB`).
 5. Macro-block checkpoints (`node/src/blockchain/macro_block.rs`) anchor shard roots + proof receipts for light-clients.
 
 ## 2. Sharding Implementation
@@ -50,7 +50,7 @@
 ### RPC
 - `node/src/rpc/shards.rs` (generated via `rpc/state_stream.rs`) — Allows clients to subscribe to shard roots; used by `contract-cli light follow-shard`.
 - `node/src/rpc/storage.rs::manifest_summaries` — surfaces storage manifests along with coding algorithm selection; indirectly documents which shards hold data.
-- `node/src/rpc/ledger.rs::shard_balances` — exposes per-shard CT balances for auditing.
+- `node/src/rpc/ledger.rs::shard_balances` — exposes per-shard BLOCK balances for auditing.
 
 ### Cross-Shard Settlement
 1. Each shard emits `ShardState` root + pending message commitments.
@@ -68,7 +68,7 @@
 | Item | Description |
 | --- | --- |
 | `FeeLane` | Enum defined in `node/src/transaction.rs`, values `Consumer`, `Industrial`, `Governance`, plus read receipts. Used in mempool + settlement. |
-| `TreasurySchedule` | In `node/src/treasury_executor.rs`, enumerates CT disbursement schedule stored in sled tree `treasury:schedules`. |
+| `TreasurySchedule` | In `node/src/treasury_executor.rs`, enumerates BLOCK disbursement schedule stored in sled tree `treasury:schedules`. |
 | `SubsidyLedger` | Maintained in `node/src/ledger_binary.rs`, keyed by `subsidy:<bucket>` (STORAGE/READ/COMPUTE). |
 
 ### RPC/CLI
@@ -80,7 +80,7 @@
 1. Transactions include `FeeLane` + desired tip. `node/src/mempool` orders by lane-specific QoS windows.
 2. Consensus block assembly merges lanes until QoS budget is met.
 3. `node/src/transaction/fees.rs` calculates burn + distribution; ledger updates are mirrored in `state::MerkleTrie`.
-4. Treasury executor receives 5% cut (configurable via governance). `ledger` updates minted CT and subsidy buckets recorded in `metrics-aggregator` via gauges `ledger_subsidy_bucket_total`.
+4. Treasury executor receives 5% cut (configurable via governance). `ledger` updates minted BLOCK and subsidy buckets recorded in `metrics-aggregator` via gauges `ledger_subsidy_bucket_total`.
 5. RPC surfaces final balances via `ledger.balance` and `governance.treasury_status`. CLI/lite clients rely on the same endpoints.
 
 ## References & Tests

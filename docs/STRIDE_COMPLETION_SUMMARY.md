@@ -12,7 +12,7 @@
 
 1. **✅ `node/src/telemetry/treasury.rs`** (207 lines)
    - 7 metrics counters: disbursements by status, execution errors, dependency failures
-   - 4 gauges: balance (CT/IT), backlog by status
+   - 4 gauges: balance (BLOCK/IT), backlog by status
    - 2 histograms: execution lag, executor tick duration
    - Public API for metric emission
    - Status and error reason label constants
@@ -109,7 +109,7 @@
      - Telemetry (7 metrics)
      - Grafana dashboard (6 panels, alerts)
      - Integration tests (20+ cases)
-     - Settlement audit (CT conservation)
+     - Settlement audit (BLOCK conservation)
      - Replay & determinism
    - Stride 2 (Energy): 10 subsections with 75+ checkpoints
      - Governance payloads

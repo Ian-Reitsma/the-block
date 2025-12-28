@@ -63,7 +63,7 @@ pub fn setup() -> Result<Parameters, Groth16Error> {
     Groth16Bn256::setup(circuit, &mut thread_rng())
 }
 
-/// Produce a proof that the total minted CT does not exceed `bound`.
+/// Produce a proof that the total minted BLOCK does not exceed `bound`.
 /// Returns an error if the cap is violated.
 pub fn prove(params: &Parameters, minted: u64, bound: u64) -> Result<InflationProof, &'static str> {
     if minted > bound {

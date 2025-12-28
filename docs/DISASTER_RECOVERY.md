@@ -381,7 +381,7 @@ If using PostgreSQL for governance data:
 
 ```bash
 # Promote standby to primary
-pg_ctl promote -D /var/lib/postgresql/14/governance
+pgl promote -D /var/lib/postgresql/14/governance
 
 # Update application config
 sed -i 's/postgres-primary/postgres-standby1/' /etc/the-block/the-block.toml

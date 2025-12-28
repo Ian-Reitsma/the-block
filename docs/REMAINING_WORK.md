@@ -48,7 +48,7 @@
       "targets": ["treasury_balance"],
       "type": "graph",
       "time_range": "7d",
-      "description": "Treasury CT and IT balance over time"
+      "description": "Treasury BLOCK and IT balance over time"
     },
     {
       "title": "Executor Health",
@@ -411,7 +411,7 @@ cargo test -p the_block --test settlement_audit --release -- --nocapture
 
 ### Interpreting Results
 
-[Explanation of CT conservation, rounding errors, deduplication]
+[Explanation of BLOCK conservation, rounding errors, deduplication]
 ```
 
 **Verification**:

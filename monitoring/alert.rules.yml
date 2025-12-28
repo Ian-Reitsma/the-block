@@ -48,12 +48,12 @@ groups:
         annotations:
           summary: "Explorer advertising payouts stale for {{ $labels.role }}"
       - alert: RentEscrowLockedSpike
-        expr: increase(rent_escrow_locked_ct_total[10m]) > 1e6
+        expr: increase(rent_escrow_locked_total[10m]) > 1e6
         for: 10m
         labels:
           severity: warn
         annotations:
-          summary: "Rent escrow locked CT spiking"
+          summary: "Rent escrow locked BLOCK spiking"
       - alert: TlsEnvWarningBurst
         expr: sum by (prefix, code)(increase(tls_env_warning_total[5m])) > 0
         for: 5m

@@ -175,144 +175,551 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="operations"><a class="header" href="#operations">Operations</a></h1>
-<p>This guide replaces the scattered <code>docs/operators/**</code>, <code>docs/monitoring*.md</code>, <code>docs/runbook.md</code>, and similar files. Use it when running production nodes, gateways, metrics stacks, or chaos drills.</p>
-<h2 id="system-requirements"><a class="header" href="#system-requirements">System Requirements</a></h2>
+                        <h1 id="operations-runbooks-fast-mainnet"><a class="header" href="#operations-runbooks-fast-mainnet">Operations Runbooks: Fast-Mainnet</a></h1>
+<p><strong>Purpose</strong>: Step-by-step troubleshooting guides for operational issues<br />
+<strong>Audience</strong>: Site Reliability Engineers, Launch Operations Team<br />
+<strong>Related</strong>: <code>docs/OBSERVABILITY_MAP.md</code> (mapping questions to metrics)</p>
+<hr />
+<h2 id="treasury-stuck"><a class="header" href="#treasury-stuck">Treasury Stuck</a></h2>
+<h3 id="symptoms"><a class="header" href="#symptoms">Symptoms</a></h3>
 <ul>
-<li>Rust 1.86+, <code>cargo-nextest</code>, <code>cargo-fuzz</code> (nightly), Python 3.12.3 (virtualenv), Node 18+ for dashboards. <code>scripts/bootstrap.sh</code>/<code>.ps1</code> installs everything plus <code>patchelf</code> on Linux.</li>
-<li>Storage engines via SimpleDb: in-house (default), RocksDB (feature-gated), and memory (for lightweight builds). Sled is used for dedicated subsystems (for example, governance) via the <code>sled/</code> crate. Provision SSDs and enable <code>storage_engine::KeyValue::flush_wal</code> watchers to keep WAL sizes bounded.</li>
-<li>Network: QUIC-ready NICs with low jitter; TLS certificates derive directly from node keys so no external PKI is needed.</li>
+<li><input disabled="" type="checkbox"/>
+<code>treasury_disbursement_backlog &gt; 50</code> for 2+ epochs</li>
+<li><input disabled="" type="checkbox"/>
+<code>treasury_disbursement_lag_seconds_p95 &gt; 300</code></li>
+<li><input disabled="" type="checkbox"/>
+Executor reports <code>last_error != null</code></li>
+<li><input disabled="" type="checkbox"/>
+Stale disbursements (created_at &gt; 3 days ago, still Queued)</li>
+<li><input disabled="" type="checkbox"/>
+No state transitions occurring</li>
 </ul>
-<h2 id="bootstrap-and-configuration"><a class="header" href="#bootstrap-and-configuration">Bootstrap and Configuration</a></h2>
+<h3 id="diagnosis"><a class="header" href="#diagnosis">Diagnosis</a></h3>
+<p><strong>Step 1</strong>: Check executor health</p>
+<pre><code class="language-bash">contract-cli gov treasury balance | jq .executor
+# Look for:
+#   last_error: string (should be null)
+#   last_success_at: recent timestamp
+#   pending_matured: count of ready-to-execute
+#   lease_holder: node_a (should be active node)
+#   lease_expires_at: future timestamp
+</code></pre>
+<p><strong>Step 2</strong>: List stuck disbursements</p>
+<pre><code class="language-bash">echo "=== Disbursements stuck for &gt;1 hour ==="
+contract-cli gov treasury list --limit 200 --status queued | jq \
+  '.disbursements[] | select(.created_at &lt; (now - 3600)) | {id, created_at, updated_at}'
+
+echo "=== Count stuck disbursements ==="
+contract-cli gov treasury list --limit 200 --status queued | jq \
+  '.disbursements | length'
+</code></pre>
+<p><strong>Step 3</strong>: Check for dependency failures</p>
+<pre><code class="language-bash">echo "=== Queued disbursements with dependencies ==="
+contract-cli gov treasury list --status queued --limit 50 | while read id; do
+  deps=$(contract-cli gov treasury show --id "$id" | jq '.proposal.deps')
+  if [ "$deps" != "[]" ]; then
+    echo "ID $id depends on: $deps"
+    # Check if dependencies are satisfied
+    echo "$deps" | jq '.[]' | while read dep_id; do
+      state=$(contract-cli gov treasury show --id "$dep_id" | jq -r '.status.state')
+      echo "  ↳ Dependency $dep_id: $state"
+    done
+  fi
+done
+</code></pre>
+<p><strong>Step 4</strong>: Inspect error logs</p>
+<pre><code class="language-bash">echo "=== Recent treasury executor errors ==="
+grep "treasury_executor\|DisbursementError" /var/log/node/*.log \
+  | grep -E "ERROR|WARN" \
+  | tail -50
+
+echo "=== Executor tick duration ==="
+prometheus_query 'histogram_quantile(0.99, treasury_executor_tick_duration_seconds_bucket)'
+
+echo "=== Execution error rate ==="
+prometheus_query 'rate(treasury_execution_errors_total[5m])'
+</code></pre>
+<p><strong>Step 5</strong>: Check treasury balance</p>
+<pre><code class="language-bash">contract-cli gov treasury balance | jq '{balance}'
+
+# If insufficient, show what's waiting to execute
+echo "=== Pending disbursements (sum of amounts) ==="
+contract-cli gov treasury list --status queued --limit 200 | jq \
+  '.disbursements | map(.amount) | add'
+</code></pre>
+<h3 id="resolution-paths"><a class="header" href="#resolution-paths">Resolution Paths</a></h3>
+<h4 id="path-a-dependency-issue"><a class="header" href="#path-a-dependency-issue"><strong>Path A: Dependency Issue</strong></a></h4>
+<p><strong>Indicators</strong>: Dependencies in wrong state</p>
+<pre><code class="language-bash"># List dependencies and their states
+contract-cli gov treasury show --id &lt;STUCK_ID&gt; | jq '{id: .id, deps: .proposal.deps}'
+
+# For each dependency, check state
+for dep_id in $(contract-cli gov treasury show --id &lt;STUCK_ID&gt; | jq -r '.proposal.deps[]'); do
+  state=$(contract-cli gov treasury show --id "$dep_id" | jq -r '.status.state')
+  echo "Dependency $dep_id: $state"
+  
+  if [ "$state" = "rolled_back" ]; then
+    echo "  ✗ Dependency failed. Cancelling dependent..."
+    # Cancel the stuck disbursement
+    contract-cli gov treasury rollback --id &lt;STUCK_ID&gt; \
+      --reason "Dependency $dep_id was rolled back"
+  fi
+done
+</code></pre>
+<h4 id="path-b-insufficient-funds"><a class="header" href="#path-b-insufficient-funds"><strong>Path B: Insufficient Funds</strong></a></h4>
+<p><strong>Indicators</strong>: <code>treasury_execution_errors_total{reason="insufficient_funds"}</code> increasing</p>
+<pre><code class="language-bash"># Check current balance
+current=$(contract-cli gov treasury balance | jq .balance)
+pending=$(contract-cli gov treasury list --status queued | jq '[.disbursements[].amount] | add')
+
+echo "Current balance: $current BLOCK"
+echo "Pending disbursements: $pending BLOCK"
+
+if [ $current -lt $pending ]; then
+  echo "INSUFFICIENT FUNDS"
+  echo "Wait for accruals: watch -n 30 'contract-cli gov treasury balance | jq .balance'"
+  echo "OR request governance approval for fund allocation"
+fi
+</code></pre>
+<h4 id="path-c-executor-error"><a class="header" href="#path-c-executor-error"><strong>Path C: Executor Error</strong></a></h4>
+<p><strong>Indicators</strong>: <code>last_error != null</code>, executor not progressing</p>
+<pre><code class="language-bash"># Get the exact error
+error=$(contract-cli gov treasury balance | jq -r '.executor.last_error')
+echo "Executor error: $error"
+
+# Common errors and fixes:
+case "$error" in
+  "ledger_unavailable")
+    echo "Ledger connection lost. Check: systemctl status ledger-node"
+    ;;
+  "consensus_timeout")
+    echo "Consensus stalled. Check: contract-cli node consensus --status"
+    ;;
+  "dependency_cycle_detected")
+    echo "Circular dependency found. Review recent disbursement submissions."
+    ;;
+  *)
+    echo "Unknown error. Check logs: tail -100 /var/log/node/*.log"
+    ;;
+esac
+
+# Restart executor
+echo "Attempting executor restart..."
+sudo systemctl restart the-block
+
+# Monitor recovery
+echo "Monitoring backlog recovery..."
+watch -n 5 'contract-cli gov treasury balance | jq .executor.last_error'
+</code></pre>
+<h4 id="path-d-data-corruption"><a class="header" href="#path-d-data-corruption"><strong>Path D: Data Corruption</strong></a></h4>
+<p><strong>Indicators</strong>: Multiple disbursements stuck with inconsistent states</p>
+<pre><code class="language-bash"># Snapshot current state
+contract-cli gov treasury list --limit 500 &gt; /tmp/disburse_snapshot_$(date +%s).json
+grep "treasury_executor" /var/log/node/*.log &gt; /tmp/executor_logs_$(date +%s).txt
+
+# Contact operations with:
+echo "Send to ops team:"
+echo "  - /tmp/disburse_snapshot_*.json"
+echo "  - /tmp/executor_logs_*.txt"
+echo "  - prometheus_dump.json (from curl http://localhost:9090/api/v1/query_range?...)"
+echo "  - Describe when issue started"
+</code></pre>
+<h3 id="alert-thresholds"><a class="header" href="#alert-thresholds">Alert Thresholds</a></h3>
+<p><strong>CRITICAL</strong> (Page on-call):</p>
+<pre><code class="language-promql"># Backlog accumulating
+treasury_disbursement_backlog &gt; 100 for 3 epochs
+
+# Executor failing
+rate(treasury_execution_errors_total[5m]) &gt; 1
+
+# No progress for extended period
+increase(governance_disbursements_total{status="finalized"}[10m]) == 0
+</code></pre>
+<p><strong>WARNING</strong> (Create ticket):</p>
+<pre><code class="language-promql"># High latency
+histogram_quantile(0.95, treasury_disbursement_lag_seconds_bucket) &gt; 600
+
+# Moderate backlog
+treasury_disbursement_backlog &gt; 50 for 2 epochs
+</code></pre>
+<hr />
+<h2 id="energy-stalled"><a class="header" href="#energy-stalled">Energy Stalled</a></h2>
+<h3 id="symptoms-1"><a class="header" href="#symptoms-1">Symptoms</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>oracle_latency_seconds_p95 &gt; 10</code></li>
+<li><input disabled="" type="checkbox"/>
+<code>energy_signature_verification_failures_total</code> increasing rapidly (&gt; 1/min)</li>
+<li><input disabled="" type="checkbox"/>
+<code>energy_pending_credits_total</code> not decreasing</li>
+<li><input disabled="" type="checkbox"/>
+Provider readings not settling</li>
+<li><input disabled="" type="checkbox"/>
+Disputes backlog increasing</li>
+</ul>
+<h3 id="diagnosis-1"><a class="header" href="#diagnosis-1">Diagnosis</a></h3>
+<p><strong>Step 1</strong>: Check oracle latency</p>
+<pre><code class="language-bash">echo "=== Oracle latency distribution ==="
+prometheus_query 'histogram_quantile(0.50, oracle_latency_seconds_bucket)'
+prometheus_query 'histogram_quantile(0.95, oracle_latency_seconds_bucket)'
+prometheus_query 'histogram_quantile(0.99, oracle_latency_seconds_bucket)'
+
+echo "=== Oracle process status ==="
+sudo systemctl status energy-oracle
+grep oracle_latency /var/log/oracle/*.log | tail -20
+</code></pre>
+<p><strong>Step 2</strong>: Check signature verification failures</p>
+<pre><code class="language-bash">echo "=== Signature failure rate ==="
+prometheus_query 'rate(energy_signature_verification_failures_total[5m])'
+
+echo "=== Recent verification failures ==="
+grep "signature_verification_failed\|SignatureInvalid" /var/log/node/*.log | tail -30
+
+echo "=== Breakdown by reason ==="
+for reason in invalid_format verification_failed key_not_found scheme_unsupported; do
+  count=$(prometheus_query "energy_signature_verification_failures_total{reason=\"$reason\"}" | jq '.data.result[0].value[1]')
+  echo "  $reason: $count"
+done
+</code></pre>
+<p><strong>Step 3</strong>: Check meter reading accumulation</p>
+<pre><code class="language-bash">echo "=== Pending credits (kWh) ==="
+contract-cli energy credits list --status pending --limit 50 | jq \
+  '.credits | {total_kwh: map(.amount_kwh) | add, count: length}'
+
+echo "=== Credits by provider ==="
+contract-cli energy credits list --status pending --limit 200 | jq \
+  '.credits | group_by(.provider_id) | map({provider: .[0].provider_id, count: length, total_kwh: map(.amount_kwh) | add})'
+</code></pre>
+<p><strong>Step 4</strong>: Check for timestamp issues</p>
+<pre><code class="language-bash">echo "=== Timestamp skew errors ==="
+grep "timestamp_skew\|TimestampSkew" /var/log/node/*.log | wc -l
+
+echo "=== System clock status ==="
+timedatectl
+ntpq -p
+
+echo "=== Provider clock differences ==="
+for provider in $(contract-cli energy market | jq -r '.providers[].provider_id' | head -10); do
+  last_reading=$(contract-cli energy provider show "$provider" | jq .last_settlement)
+  echo "$provider: $last_reading"
+done
+</code></pre>
+<p><strong>Step 5</strong>: Check provider status</p>
+<pre><code class="language-bash">echo "=== Inactive providers ==="
+contract-cli energy market | jq '.providers[] | select(.status != "active") | {provider_id, status, reputation_score}'
+
+echo "=== Providers with poor reputation ==="
+contract-cli energy market | jq '.providers[] | select(.reputation.composite_score &lt; 0.5) | {provider_id, score: .reputation.composite_score}'
+</code></pre>
+<h3 id="resolution-paths-1"><a class="header" href="#resolution-paths-1">Resolution Paths</a></h3>
+<h4 id="path-a-oracle-latency-high"><a class="header" href="#path-a-oracle-latency-high"><strong>Path A: Oracle Latency High</strong></a></h4>
+<p><strong>Indicators</strong>: p95 latency &gt; 10 seconds</p>
+<pre><code class="language-bash"># Check oracle CPU and memory
+ps aux | grep oracle
+top -p $(pgrep -f oracle)
+
+# Check oracle queue depth
+grep "pending_verifications\|queue_depth" /var/log/oracle/*.log | tail -10
+
+# Scale oracle if needed (multiple instances)
+echo "Consider: kubectl scale deployment energy-oracle --replicas=3"
+
+# Monitor improvement
+watch -n 5 'prometheus_query "histogram_quantile(0.95, oracle_latency_seconds_bucket)"'
+</code></pre>
+<h4 id="path-b-signature-verification-failures"><a class="header" href="#path-b-signature-verification-failures"><strong>Path B: Signature Verification Failures</strong></a></h4>
+<p><strong>Indicators</strong>: Failures &gt; 1/min, reason = "verification_failed" or "invalid_format"</p>
+<pre><code class="language-bash"># Check provider keys
+echo "=== Checking oracle key manager ==="
+contract-cli energy oracle keys status
+
+# Verify provider public keys in registry
+for provider in $(contract-cli energy market | jq -r '.providers[].provider_id' | head -5); do
+  key=$(contract-cli energy provider show "$provider" | jq .public_key)
+  echo "$provider: $key"
+done
+
+# Test a signature manually
+echo "=== Testing signature generation ==="
+cat &gt; /tmp/test_sig.py &lt;&lt; 'EOF'
+import ed25519, struct, base64, time
+
+provider_id = "provider_usa_001"
+meter = "meter_001"
+total_kwh = 1500000
+timestamp = int(time.time())
+nonce = 12345
+
+# Build message
+message = (
+    provider_id.encode() +
+    meter.encode() +
+    struct.pack('&lt;Q', total_kwh) +
+    struct.pack('&lt;Q', timestamp) +
+    struct.pack('&lt;Q', nonce)
+)
+
+# Test signature
+signing_key = ed25519.SigningKey(base64.b64decode("&lt;PRIVATE_KEY&gt;"))
+signature = signing_key.sign(message).signature
+print(f"Signature: {base64.b64encode(signature)}")
+EOF
+python /tmp/test_sig.py
+</code></pre>
+<h4 id="path-c-timestamp-skew"><a class="header" href="#path-c-timestamp-skew"><strong>Path C: Timestamp Skew</strong></a></h4>
+<p><strong>Indicators</strong>: "timestamp_skew" errors in logs</p>
+<pre><code class="language-bash"># Check system clock on provider and oracle
+echo "=== Provider nodes ==="
+for node in provider_node_1 provider_node_2 oracle_node; do
+  echo "$node:"
+  ssh "$node" 'date; timedatectl'
+done
+
+# Fix time drift
+echo "Syncing clocks with NTP..."
+sudo ntpdate -u ntp.ubuntu.com  # or your NTP server
+
+# Verify sync
+timedatectl
+for node in provider_node_1 provider_node_2; do
+  ssh "$node" 'timedatectl'
+done
+
+# Monitor recovery
+watch -n 10 'grep timestamp_skew /var/log/node/*.log | tail -5'
+</code></pre>
+<h4 id="path-d-provider-reputation-degradation"><a class="header" href="#path-d-provider-reputation-degradation"><strong>Path D: Provider Reputation Degradation</strong></a></h4>
+<p><strong>Indicators</strong>: Multiple providers with score &lt; 0.5</p>
+<pre><code class="language-bash"># Check what caused reputation drops
+echo "=== Recent disputes ==="
+contract-cli energy disputes list --limit 20
+
+# Check slashing events
+echo "=== Recent slashing ==="
+prometheus_query 'rate(energy_slashing_total[24h])' | jq '.data.result[] | {provider, reason: .metric.reason, rate: .value}'
+
+# Review evidence
+for dispute_id in $(contract-cli energy disputes list --status resolved | jq -r '.disputes[].dispute_id' | head -5); do
+  echo "Dispute $dispute_id:"
+  contract-cli energy disputes show --id "$dispute_id"
+done
+</code></pre>
+<h3 id="alert-thresholds-1"><a class="header" href="#alert-thresholds-1">Alert Thresholds</a></h3>
+<p><strong>CRITICAL</strong> (Page on-call):</p>
+<pre><code class="language-promql"># Oracle broken
+oracle_latency_seconds_p95 &gt; 30
+energy_signature_verification_failures_total &gt; 10
+
+# Settlement stalled
+increase(energy_settlements_total[10m]) == 0
+
+# Dispute backlog critical
+energy_active_disputes_total &gt; 50
+</code></pre>
+<p><strong>WARNING</strong> (Create ticket):</p>
+<pre><code class="language-promql">oracle_latency_seconds_p95 &gt; 10
+rate(energy_signature_verification_failures_total[5m]) &gt; 1
+energy_active_disputes_total &gt; 20
+</code></pre>
+<hr />
+<h2 id="receipts-flatlining"><a class="header" href="#receipts-flatlining">Receipts Flatlining</a></h2>
+<h3 id="symptoms-2"><a class="header" href="#symptoms-2">Symptoms</a></h3>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<code>receipt_emitted_total</code> flat or decreasing for 5+ blocks</li>
+<li><input disabled="" type="checkbox"/>
+One or more markets (storage, compute, energy, ad) not emitting</li>
+<li><input disabled="" type="checkbox"/>
+<code>receipt_validation_errors_total</code> increasing</li>
+<li><input disabled="" type="checkbox"/>
+Explorer receipt tables not updating</li>
+</ul>
+<h3 id="diagnosis-2"><a class="header" href="#diagnosis-2">Diagnosis</a></h3>
+<p><strong>Step 1</strong>: Check emission rates by market</p>
+<pre><code class="language-bash">echo "=== Receipt emission rate (1m) ==="
+prometheus_query 'rate(receipt_emitted_total[1m])' | jq '.data.result[] | {market: .metric.market, rate: .value[1]}'
+
+echo "=== Markets with no emissions (last 10 blocks) ==="
+prometheus_query 'increase(receipt_emitted_total[10m]) == 0' | jq '.data.result[].metric'
+</code></pre>
+<p><strong>Step 2</strong>: Check validation errors</p>
+<pre><code class="language-bash">echo "=== Validation error rate ==="
+prometheus_query 'rate(receipt_validation_errors_total[5m])'
+
+echo "=== Error breakdown by reason ==="
+for reason in schema_mismatch duplicate_detection signature_invalid; do
+  count=$(prometheus_query "receipt_validation_errors_total{reason=\"$reason\"}" | jq '.data.result[0].value[1]')
+  echo "  $reason: $count"
+done
+</code></pre>
+<p><strong>Step 3</strong>: Per-market diagnostics</p>
+<pre><code class="language-bash"># Storage market
+echo "=== Storage market ==="
+contract-cli receipts stats --market storage
+grep storage /var/log/node/receipts.log | tail -20
+
+# Compute market
+echo "=== Compute market ==="
+contract-cli receipts stats --market compute
+grep compute /var/log/node/receipts.log | tail -20
+
+# Energy market
+echo "=== Energy market ==="
+contract-cli receipts stats --market energy
+grep energy /var/log/node/receipts.log | tail -20
+
+# Ad market
+echo "=== Ad market ==="
+contract-cli receipts stats --market ad
+grep ad /var/log/node/receipts.log | tail -20
+</code></pre>
+<p><strong>Step 4</strong>: Check block height and progression</p>
+<pre><code class="language-bash">echo "=== Current block ==="
+contract-cli node status | jq '.current_block_height'
+
+echo "=== Block progression (last 50 blocks) ==="
+prometheus_query 'increase(block_height_total[50m])'
+
+echo "=== Consensus status ==="
+contract-cli node consensus --status
+</code></pre>
+<h3 id="resolution"><a class="header" href="#resolution">Resolution</a></h3>
+<p><strong>For stalled markets</strong>:</p>
+<pre><code class="language-bash"># Restart receipt emitter
+sudo systemctl restart receipt-emitter
+
+# Monitor recovery
+watch -n 5 'contract-cli receipts stats --market storage'
+
+# If persists, check market-specific service
+for market in storage compute energy ad; do
+  sudo systemctl status "${market}-market"
+done
+</code></pre>
+<p><strong>For validation errors</strong>:</p>
+<pre><code class="language-bash"># Clear validation state (if safe)
+contract-cli receipts reset-validation-state
+
+# Re-validate last N blocks
+contract-cli receipts validate --from-block $((
+  $(contract-cli node status | jq .current_block_height) - 100
+))
+
+# Monitor
+watch -n 10 'prometheus_query "receipt_validation_errors_total"'
+</code></pre>
+<hr />
+<h2 id="explorer-treasury-schema-migration"><a class="header" href="#explorer-treasury-schema-migration">Explorer Treasury Schema Migration</a></h2>
+<p>Run this playbook whenever the explorer SQLite database still contains the legacy <code>amount</code>/<code>amount_it</code> columns in <code>treasury_disbursements</code>.</p>
 <ol>
-<li>Clone the repo, run <code>scripts/bootstrap.sh</code>, and copy <code>.env.example</code> → <code>.env</code> for node defaults.</li>
-<li><code>just lint</code>, <code>just fmt</code>, <code>just test-fast</code> before coding; <code>just test-full</code> mirrors CI.</li>
-<li>Node configuration flows through <code>node/.env</code>, CLI flags, or env vars prefixed with <code>TB_*</code> (see <code>node/src/config.rs</code>). <code>config/</code> holds policy baselines.</li>
-<li>Use <code>scripts/bootstrap_ps1</code> on Windows/WSL; the runtime works cross-platform and telemetry pipes remain identical.</li>
+<li><strong>Stop explorer</strong> so the migration can take an exclusive lock on the DB file.</li>
+<li>Run the helper (defaults to <code>explorer.db</code> in the current directory):
+<pre><code class="language-bash">cargo run -p explorer --bin explorer-migrate-treasury -- /var/lib/explorer/explorer.db
+</code></pre>
+The tool applies the three <code>ALTER TABLE</code> statements (<code>ADD COLUMN status_payload</code>, <code>RENAME COLUMN amount TO amount</code>, <code>DROP COLUMN amount_it</code>). Statements that have already landed are reported as <code>skipped</code>.</li>
+<li>Restart explorer, then validate <code>/governance/treasury/disbursements</code> and the treasury dashboards before announcing completion.</li>
 </ol>
-<h2 id="building-and-testing"><a class="header" href="#building-and-testing">Building and Testing</a></h2>
-<ul>
-<li><code>cargo build -p the_block --release</code> builds the node; <code>cargo build -p cli --bin tb-cli</code> compiles the CLI.</li>
-<li><code>cargo nextest run --all-features</code> exercises the multi-crate workspace with the telemetry feature enabled.</li>
-<li>Python demo: <code>python demo.py</code> wires the PyO3 module from <code>node/src/py.rs</code> for deterministic replay tests.</li>
-</ul>
-<h2 id="running-a-node"><a class="header" href="#running-a-node">Running a Node</a></h2>
-<ul>
-<li><code>tb-cli node start --config config/node.toml</code> (or <code>just node</code>) spawns the daemon with gateway, RPC, gossip, and compute/storage workers enabled.</li>
-<li>Gateway hosting toggles: <code>--gateway-http</code>, <code>--range-boost</code>, <code>--mobile-cache</code>. DNS publishing requires the <code>.block</code> registry key configured via <code>TB_GATEWAY_ZONE</code> env vars.</li>
-<li>Mesh + overlay migration: run <code>scripts/migrate_overlay_store.rs</code> when upgrading peer stores; reference <code>docs/architecture.md#overlay-and-peer-persistence</code> for background.</li>
-</ul>
-<h2 id="telemetry-wiring"><a class="header" href="#telemetry-wiring">Telemetry Wiring</a></h2>
-<ul>
-<li>Enable telemetry via <code>--telemetry</code> or <code>TB_ENABLE_TELEMETRY=1</code>. Metrics flow into the in-process registry (<code>node/src/telemetry.rs</code>) and are exposed on the <code>/metrics</code> HTTP endpoint.</li>
-<li>TLS warning sink: export <code>TB_HTTP_TLS</code>/<code>TB_AGGREGATOR_TLS</code> or rely on bundled roots; warnings stream to the aggregator and dashboards.</li>
-<li>Wrapper telemetry tracks runtime/transport/storage/coding metadata and enforces governance overrides; CLI: <code>tb-cli telemetry wrappers</code>.</li>
-</ul>
-<h2 id="metrics-aggregator-ops"><a class="header" href="#metrics-aggregator-ops">Metrics Aggregator Ops</a></h2>
-<ul>
-<li><code>metrics-aggregator</code> runs as its own binary; configure via env (<code>TB_AGGREGATOR_*</code>). It ingests node metrics, replicates them, archives snapshots (optional S3), and exposes admin endpoints for bridge remediation and TLS warning acknowledgements.</li>
-<li>Bridge remediation constants (<code>BRIDGE_REMEDIATION_*</code>) now reference <code>docs/operations.md#bridge-liquidity-remediation</code>; update dashboards accordingly.</li>
-<li>Set <code>TB_METRICS_ARCHIVE</code> to append raw JSON into a log for offline audit.</li>
-</ul>
-<h2 id="monitoring-and-dashboards"><a class="header" href="#monitoring-and-dashboards">Monitoring and Dashboards</a></h2>
-<ul>
-<li>Grafana/Prometheus configs live under <code>monitoring/</code>. Install with <code>npm ci --prefix monitoring &amp;&amp; make monitor</code> to render dashboards.</li>
-<li>Dashboards include compute-market fairness, gossip fanout, gateway pacing, telemetry anomalies, bridge liquidity, SLA enforcement, ANN diagnostics, and badge distributions. JSON is committed (e.g., <code>monitoring/compute_market_dashboard.json</code>).</li>
-<li>The dashboard README moved here; use <code>docs/apis_and_tooling.md#metrics-and-telemetry-apis</code> for endpoint paths.</li>
-</ul>
-<h2 id="energy-market-operations"><a class="header" href="#energy-market-operations">Energy Market Operations</a></h2>
-<ul>
-<li><strong>Scope</strong> — Everything is first-party: <code>crates/energy-market</code> (providers/credits/receipts + metrics), <code>node/src/energy.rs</code> (sled store + treasury hooks), <code>node/src/rpc/energy.rs</code> (JSON-RPC), <code>cli/src/energy.rs</code> (operator commands), <code>crates/oracle-adapter</code> (ingest client), and <code>services/mock-energy-oracle</code> (World OS drill). No third-party RPC stacks or DBs.</li>
-<li><strong>State &amp; backups</strong> — The market uses <code>SimpleDb::open_named(names::ENERGY_MARKET, path)</code> and serializes the entire <code>EnergyMarket</code> struct (providers, credits, receipts) after every mutation. <code>path</code> defaults to <code>energy_market/</code> but can be overridden with <code>TB_ENERGY_MARKET_DIR</code>. Snapshot the directory with the same fsync+rename guarantees as other <code>SimpleDb</code> stores; keep it in your backup/DR rotation alongside consensus/governance sleds.</li>
-<li><strong>Bootstrap script</strong> — <code>scripts/deploy-worldos-testnet.sh</code> builds the node with <code>--features worldos-testnet</code>, starts it with <code>--chain worldos-energy --validator</code>, launches the mock oracle (<code>cargo run --release</code> inside <code>services/mock-energy-oracle</code>), and (if <code>docker/telemetry-stack.yml</code> exists) spins up Grafana/Prometheus. This is the canonical energy drill; pair it with <code>docs/testnet/ENERGY_QUICKSTART.md</code> for CLI/RPC steps.</li>
-<li><strong>RPC/CLI usage</strong> — Operators interact through <code>tb-cli energy register|market|settle|submit-reading</code>, which sends the same JSON the RPC expects. The endpoints (<code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, <code>energy.settle</code>) inherit mutual-TLS, <code>TB_RPC_AUTH_TOKEN</code>, and rate-limit policy from the RPC server. Always log snapshots via <code>tb-cli energy market --verbose &gt; energy_snapshot.json</code> before/after maintenance.</li>
-<li><strong>Governance params</strong> — <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code> live in the shared governance store (<code>governance/src/params.rs</code>). Proposals update them, runtime hooks call <code>node::energy::set_governance_params</code>, and the sled DB is re-snapshotted. Track activations/rollbacks with <code>tb-cli gov param history</code> or explorer timelines. Upcoming work (batch vs real-time settlement payloads, dependency validation, rollback audits) is tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>.</li>
-<li><strong>Provider trust roots</strong> — Define oracle keys in <code>config/default.toml</code> via the <code>energy.provider_keys</code> array (<code>{ provider_id, public_key_hex }</code> entries). Reloads hot-swap the verifier registry through <code>node::energy::configure_provider_keys</code>, so rotating/revoking keys never requires a restart.</li>
-<li><strong>Telemetry &amp; dashboards</strong> — Metrics include <code>energy_providers_count</code>, <code>energy_avg_price</code>, <code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_signature_failure_total{provider,reason}</code>, <code>energy_provider_fulfillment_ms</code>, and <code>oracle_reading_latency_seconds</code>. Health checks emit logs when pending credits exceed safe thresholds or settlements stall. Update Grafana dashboards to show provider counts, pending credits, slash totals, oracle latency, and settlement rate; alert when latency &gt; SLO, slash spikes, or settlement throughput drops.</li>
-<li><strong>Oracle hygiene</strong> — Production adapters must enforce the in-tree Ed25519 verification (<code>crates/oracle-adapter</code>), source keys from secure env/keystores, redact secrets from logs, and honour RPC rate limits. The mock oracle service (<code>services/mock-energy-oracle</code>, HTTP endpoints <code>/meter/:id/reading</code> and <code>/meter/:id/submit</code>) is for dev/testnet only.</li>
-<li><strong>Dispute workflow</strong> — Until dedicated <code>energy.dispute</code>/<code>energy.receipts.list</code> endpoints ship, disputes run through governance: capture the suspect <code>meter_hash</code> + provider ID via <code>energy.market_state</code>, submit a <code>gov param update</code> (tighten slashing rate or pause settlement), and document rollback steps. Keep explorers/CLI in sync so operators can see activation/rollback history.</li>
-<li><strong>Snapshot/restore drills</strong> — Practice quiescing the node, copying <code>TB_ENERGY_MARKET_DIR</code>, and restoring it on staging nodes. Mirror the SimpleDb snapshot/restore drills described earlier so operators can rehearse schema migrations or recovery from corruption. Integration tests for backward-compatibility live under <code>node/tests/gov_param_wiring.rs</code>; extend them when modifying the schema.</li>
-</ul>
-<h2 id="chaos-and-fault-drills"><a class="header" href="#chaos-and-fault-drills">Chaos and Fault Drills</a></h2>
-<ul>
-<li>Gossip chaos: <code>tests/net_gossip.rs</code> exercises packet loss/jitter; ensure convergence through tie-break rules and inspect <code>partition_watch</code> metrics.</li>
-<li>QUIC chaos: <code>node/tests/net_quic.rs</code> captures retransmit counters and handshake distributions; aggregator <code>/chaos</code> endpoints record incidents.</li>
-<li>Disk-full and repair: <code>node/tests/storage_repair.rs</code> simulates storage failures; use <code>tb-cli storage repair</code> and monitor <code>STORAGE_*</code> metrics.</li>
-<li>Range-boost drills: toggle <code>TB_PARTITION_TAG</code>, adjust mesh peers, and verify recovery with <code>tb-cli mesh status</code>.</li>
-</ul>
-<h2 id="probe-cli-and-diagnostics"><a class="header" href="#probe-cli-and-diagnostics">Probe CLI and Diagnostics</a></h2>
-<ul>
-<li><code>crates/probe</code> provides synthetic health checks: <code>probe ping-rpc</code>, <code>probe gossip-check</code>, <code>probe mine-one</code>, <code>probe tip</code>. Flags: <code>--timeout</code>, <code>--expect</code>, <code>--prom</code> for Prometheus output.</li>
-<li>Diagnostics harness: <code>tb-cli diagnostics range-boost</code>, <code>tb-cli diagnostics gossip</code>, <code>tb-cli diagnostics tls</code> expose cached stats for on-call triage.</li>
-<li>AI diagnostics toggles live in governance params; metrics and CLI output share the same flag.</li>
-</ul>
-<h2 id="deployment-and-release"><a class="header" href="#deployment-and-release">Deployment and Release</a></h2>
-<ul>
-<li>Build provenance lives in <code>node/src/provenance.rs</code> and <code>docs/security_and_privacy.md#release-provenance</code>. Release gating requires deterministic hashes and signatures listed in <code>config/release_signers.txt</code> or env overrides.</li>
-<li><code>cargo vendor</code> snapshots and <code>provenance.json</code>/<code>checksums.txt</code> block tagging unless the dependency-registry audit passes (<code>just dependency-audit</code>).</li>
-<li>Upgrades: follow <code>tb-cli gov release approve</code>, ensure metrics dashboards show <code>release_attestation_*</code>, and leverage the built-in rollback windows.</li>
-</ul>
-<h2 id="incident-response"><a class="header" href="#incident-response">Incident Response</a></h2>
-<ul>
-<li>Runbook coverage: bridge liquidity remediation, DHT recovery, gateway flush, snapshot repair. Each subsection lives below for quick linking.</li>
-<li><strong>Bridge Liquidity Remediation</strong> – aggregator dispatch endpoints <code>/remediation/bridge/*</code> plus dashboards (<strong>Bridge Remediation</strong> row) keep quorum on pending actions. Operators must acknowledge via CLI + aggregator ack endpoints.</li>
-<li><strong>DHT / Gossip Recovery</strong> – purge peer DBs (<code>simple_db::names::OVERLAY</code>), reseed via bootstrap peers, run <code>provision_overlay_store</code> helper, monitor <code>partition_watch</code> metrics.</li>
-<li><strong>Gateway Flush</strong> – use <code>tb-cli gateway mobile-cache flush</code> and <code>tb-cli read-acks export</code> before restarts.</li>
-</ul>
-<h2 id="storage-snapshots-and-wal-management"><a class="header" href="#storage-snapshots-and-wal-management">Storage, Snapshots, and WAL Management</a></h2>
-<ul>
-<li>Snapshots: <code>tb-cli snapshots create --path &lt;dir&gt;</code> writes fsync’d temp files before atomic rename. Legacy dumps stay until the new snapshot lands.</li>
-<li>WAL hygiene: <code>SimpleDb::flush_wal</code> runs before snapshots; set <code>TB_SIMPLE_DB_LIMIT_BYTES</code> to guard disk usage.</li>
-<li>Repair: <code>tb-cli storage repair --manifest &lt;file&gt;</code> reissues pulls, rebuilds Lagrange-coded shards, and flags under-replicated providers.</li>
-</ul>
-<h2 id="backup-and-restore-path-reference"><a class="header" href="#backup-and-restore-path-reference">Backup and Restore Path Reference</a></h2>
-<p>The directories below map directly onto the SimpleDb column families listed in <code>docs/system_reference.md#appendix-c--simpledb-column-family-and-prefix-map</code>, so operators can tie on-disk artifacts back to the logical subsystems referenced throughout the system reference.</p>
-<div class="table-wrapper"><table><thead><tr><th>Subsystem</th><th>Default path</th><th>Env/flag</th><th>Notes</th></tr></thead><tbody>
-<tr><td>Overlay peer store</td><td><code>~/.the_block/overlay/overlay_peers.json</code></td><td><code>TB_OVERLAY_DB_PATH</code></td><td>JSON list of peers + last-seen timestamps (<code>p2p_overlay</code>).</td></tr>
-<tr><td>Gossip/QUIC peer caches</td><td><code>~/.the_block/peer_db</code> / <code>peer_db_quic</code></td><td><code>TB_PEER_DB_PATH</code>, <code>TB_QUIC_PEER_DB_PATH</code>, <code>TB_PEER_KEY_HISTORY_PATH</code>, <code>TB_CHUNK_DB_PATH</code></td><td>Keys, reputation history, and chunk dedup stores from <code>node/src/net/peer.rs</code>.</td></tr>
-<tr><td>DNS auctions</td><td><code>dns_db</code></td><td><code>TB_DNS_DB_PATH</code></td><td>SimpleDb backing auctions, stakes, and ownership.</td></tr>
-<tr><td>Gateway read receipts</td><td><code>gateway_receipts</code></td><td><code>TB_GATEWAY_RECEIPTS</code></td><td>Hourly CBOR batches + Merkle roots; archive before purging.</td></tr>
-<tr><td>Mobile cache</td><td><code>mobile_cache.db</code></td><td><code>TB_MOBILE_CACHE_DB</code>, <code>TB_MOBILE_CACHE_KEY_HEX</code></td><td>ChaCha20-Poly1305 encrypted sled.</td></tr>
-<tr><td>Storage pipeline</td><td><code>blobstore/</code></td><td><code>TB_STORAGE_PIPELINE_DIR</code></td><td>Holds manifests, rent-escrow records, and provider overrides.</td></tr>
-<tr><td>Storage market contracts</td><td><code>storage_market/</code></td><td><code>TB_STORAGE_MARKET_DIR</code></td><td>Sled tree (<code>market/contracts</code>) plus importer checkpoints.</td></tr>
-<tr><td>Compute scheduler</td><td><code>~/.the_block/compute/{pending,cancel,reputation}</code></td><td><code>TB_PENDING_PATH</code>, <code>TB_CANCEL_PATH</code>, <code>TB_REPUTATION_DB_PATH</code></td><td>Pending job queue, cancellation log, and reputation DB.</td></tr>
-<tr><td>Bridge sled</td><td><code>bridge_db/</code></td><td><code>TB_BRIDGE_DB_PATH</code>, <code>TB_BRIDGE_SLED_PATH</code></td><td>Persisted headers, withdrawals, and duty logs.</td></tr>
-<tr><td>Light-client proofs</td><td><code>proof_tracker</code></td><td><code>TB_PROOF_TRACKER_PATH</code> (implied)</td><td>Path is displayed by <code>tb-cli light-client rebate-status</code>; back it up with explorer data.</td></tr>
-<tr><td>LE portal</td><td><code>./le_portal</code></td><td>CLI <code>--base</code></td><td><code>le_requests.log</code>, <code>le_actions.log</code>, <code>le_evidence.log</code>, <code>warrant_canary.log</code>, plus <code>evidence/</code> blob files.</td></tr>
+<hr />
+<h2 id="settlement-audit"><a class="header" href="#settlement-audit">Settlement Audit</a></h2>
+<h3 id="how-to-run"><a class="header" href="#how-to-run">How to Run</a></h3>
+<pre><code class="language-bash"># Standard settlement audit
+cargo test -p the_block --test settlement_audit --release -- --nocapture
+
+# With specific options
+STARTING_EPOCH=0 ENDING_EPOCH=1000 cargo test \
+  -p the_block --test settlement_audit --release -- --nocapture
+
+# Verbose output
+RUST_LOG=debug cargo test -p the_block --test settlement_audit --release -- --nocapture
+</code></pre>
+<h3 id="interpreting-results"><a class="header" href="#interpreting-results">Interpreting Results</a></h3>
+<p><strong>Successful audit</strong>:</p>
+<pre><code>test settlement_audit ... ok
+
+Ledger conservation verified:
+  Initial balance: 10,000,000 BLOCK
+  Accruals: 1,500,000 BLOCK
+  Executed disbursements: 2,000,000 BLOCK
+  Final balance: 9,500,000 BLOCK
+</code></pre>
+<p><strong>Failed audit</strong> (example):</p>
+<pre><code>test settlement_audit ... FAILED
+
+Assertion failed:
+  Expected balance: 9,500,000 BLOCK
+  Actual balance: 9,300,000 BLOCK
+  Discrepancy: 200,000 BLOCK (2.1%)
+
+Investigation:
+  1. Find missing disbursement: ID 4521
+  2. Check status: Executed but not credited
+  3. Verify: Receipt exists? Yes. Target account? Valid.
+  4. Root cause: Ledger index out of sync
+</code></pre>
+<h3 id="troubleshooting"><a class="header" href="#troubleshooting">Troubleshooting</a></h3>
+<p><strong>If audit fails</strong>:</p>
+<pre><code class="language-bash"># Get detailed logs
+cargo test -p the_block --test settlement_audit --release -- --nocapture --test-threads=1 2&gt;&amp;1 | tee settlement_audit.log
+
+# Extract specific disbursement details
+grep "Disbursement 4521" settlement_audit.log
+
+# Check ledger state
+contract-cli node ledger inspect --account treasury_account_id
+
+# Verify receipts associated with missing disbursement
+grep "disbursement_id.*4521" /var/log/node/*.log
+</code></pre>
+<hr />
+<h2 id="helper-functions"><a class="header" href="#helper-functions">Helper Functions</a></h2>
+<h3 id="prometheus_query"><a class="header" href="#prometheus_query">prometheus_query()</a></h3>
+<p><strong>Purpose</strong>: Query Prometheus for metric values</p>
+<p><strong>Usage</strong>:</p>
+<pre><code class="language-bash">prometheus_query 'up{instance="localhost:9090"}'
+prometheus_query 'histogram_quantile(0.95, request_duration_seconds_bucket)'
+</code></pre>
+<p><strong>Implementation</strong>:</p>
+<pre><code class="language-bash">prometheus_query() {
+  local query="$1"
+  local url="${PROMETHEUS_URL:-http://localhost:9090}"
+  curl -s "${url}/api/v1/query" \
+    --data-urlencode "query=${query}" | \
+    jq -r '.data.result[0].value[1] // "no data"'
+}
+</code></pre>
+<p><strong>Configuration</strong>:</p>
+<pre><code class="language-bash">export PROMETHEUS_URL="http://prometheus.infra.internal:9090"
+</code></pre>
+<hr />
+<h2 id="slo-definitions"><a class="header" href="#slo-definitions">SLO Definitions</a></h2>
+<h3 id="treasury-system"><a class="header" href="#treasury-system">Treasury System</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Target</th><th>Alert Threshold</th></tr></thead><tbody>
+<tr><td>Availability</td><td>99.95%</td><td>Errors &gt; 0.1% for 5 min</td></tr>
+<tr><td>Execution Latency p95</td><td>&lt; 300s</td><td>&gt; 600s for 10 min</td></tr>
+<tr><td>Error Rate</td><td>&lt; 0.1%</td><td>&gt; 1 error/sec</td></tr>
+<tr><td>Queue Depth</td><td>&lt; 100</td><td>&gt; 100 for 3 epochs</td></tr>
 </tbody></table>
 </div>
-<p>Backups should snapshot these directories before upgrades. Restores require stopping the node, restoring the directory, and restarting with the same <code>TB_*</code> overrides to avoid partial migrations.</p>
-<h2 id="network-recovery-and-chaos"><a class="header" href="#network-recovery-and-chaos">Network Recovery and Chaos</a></h2>
-<ul>
-<li>Chaos harness: <code>docs/architecture.md#telemetry-and-instrumentation</code> + <code>monitoring/grafana/...</code> capture WAN-scale drills. Use <code>tests/net_gossip.rs</code> fixtures with injected loss/latency before rolling changes.</li>
-<li>Partition drills: toggle <code>TB_PARTITION_TAG</code>, observe <code>partition_watch</code> alerts, ensure quorum recovers, document remediation in telemetry dashboards.</li>
-<li>QUIC chaos: <code>node/tests/net_quic.rs</code> and aggregator <code>/chaos</code> endpoints record retransmit counters and handshake distributions.</li>
-</ul>
-<h2 id="range-boost-and-localnet-operations"><a class="header" href="#range-boost-and-localnet-operations">Range Boost and LocalNet Operations</a></h2>
-<ul>
-<li>Enable with <code>--range-boost</code> or <code>TB_RANGE_BOOST=1</code>. Peers are configured via <code>TB_MESH_STATIC_PEERS</code> (comma-separated <code>host:port</code> list). Diagnostics: <code>tb-cli mesh status</code>, <code>tb-cli diagnostics range-boost</code>, metrics <code>RANGE_BOOST_*</code>.</li>
-<li>Forwarder control: set <code>TB_RANGE_BOOST=0</code> (or remove <code>--range-boost</code>) then restart to pause deliveries while keeping the queue on disk. <code>node/src/range_boost/mod.rs::set_enabled(false)</code> drains the forwarder gracefully; re-enable to resume.</li>
-<li>Queue handling:
-<ol>
-<li>Before reseeding peers, disable range boost and wait for <code>range_boost_queue_depth</code> to hit zero.</li>
-<li>Adjust <code>TB_MESH_STATIC_PEERS</code> / mesh discovery, then re-enable and confirm <code>range_boost_forwarder_fail_total</code> stays flat.</li>
-<li>For forced drains, delete the persisted queue directory under <code>~/.the_block/range_boost</code> (only after confirming backups) and restart.</li>
-</ol>
-</li>
-<li>Chaos drills can simulate failures with <code>FaultMode::{ForceDisabled,ForceNoPeers,ForceEncode,ForceIo}</code> (see <code>node/src/range_boost/mod.rs</code>). Build-time toggles wire these modes into diagnostic RPCs; use them to validate monitoring before production changes.</li>
-</ul>
-<h2 id="simulation-and-replay"><a class="header" href="#simulation-and-replay">Simulation and Replay</a></h2>
-<ul>
-<li>Use <code>sim/</code>, <code>examples/</code>, and <code>tests/</code> harnesses to rehearse dependency swaps, storage migrations, and governance policy changes. Replay harnesses guarantee byte-identical results across CPU architectures.</li>
-<li>Chaos + replay logs feed both the aggregator and <code>docs/developer_handbook.md#simulation-and-chaos</code> for developer workflows.</li>
-</ul>
-<h2 id="operator-checklist"><a class="header" href="#operator-checklist">Operator Checklist</a></h2>
-<ul>
-<li>Keep <code>scripts/pre-commit.sample</code> installed to enforce fmt/lint.</li>
-<li>Regenerate dependency inventories whenever <code>Cargo.lock</code> changes.</li>
-<li>Run settlement audits and badge/SLA telemetry before and after upgrades.</li>
-<li>Document incidents in the aggregator’s <code>/audit</code> endpoints and link to the relevant sections above for forensics.</li>
-</ul>
+<h3 id="energy-system"><a class="header" href="#energy-system">Energy System</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Target</th><th>Alert Threshold</th></tr></thead><tbody>
+<tr><td>Oracle Latency p95</td><td>&lt; 5s</td><td>&gt; 10s for 5 min</td></tr>
+<tr><td>Signature Validation</td><td>&gt; 99.9%</td><td>&gt; 1 failure/min</td></tr>
+<tr><td>Settlement Rate</td><td>&gt; 95%</td><td>&lt; 90% for 10 min</td></tr>
+<tr><td>Dispute Resolution</td><td>&lt; 1 hour</td><td>Unresolved &gt; 2 hours</td></tr>
+</tbody></table>
+</div>
+<h3 id="receipts-system"><a class="header" href="#receipts-system">Receipts System</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Target</th><th>Alert Threshold</th></tr></thead><tbody>
+<tr><td>Emission Rate</td><td>All markets</td><td>Any market = 0 for 5 blocks</td></tr>
+<tr><td>Validation Success</td><td>&gt; 99.99%</td><td>&lt; 99% for 10 min</td></tr>
+<tr><td>Storage</td><td>All receipts</td><td>Storage &gt; 1 week</td></tr>
+<tr><td>Query Latency p99</td><td>&lt; 100ms</td><td>&gt; 500ms for 5 min</td></tr>
+</tbody></table>
+</div>
+<hr />
+<p><strong>Last Updated</strong>: 2025-12-19<br />
+<strong>Next Review</strong>: 2025-12-26<br />
+<strong>Maintainer</strong>: Operations Team</p>
 
                     </main>
 

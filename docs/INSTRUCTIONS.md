@@ -66,7 +66,7 @@ pub struct YourMarketReceipt {
     /// Units of work (bytes, compute units, kWh, impressions)
     pub units: u64,
 
-    /// Payment in consumer tokens (CT)
+    /// Payment through the consumer lane (BLOCK)
     pub payment: u64,
 
     /// Block height when settled
@@ -300,9 +300,9 @@ pub static RECEIPTS_YOUR_MARKET_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 });
 
 pub static RECEIPT_SETTLEMENT_YOUR_MARKET: Lazy<Gauge> = Lazy::new(|| {
-    foundation_telemetry::register_gauge!(
-        "receipt_settlement_your_market_ct",
-        "Total your market receipt settlement (CT) in current block"
+foundation_telemetry::register_gauge!(
+        "receipt_settlement_your_market",
+        "Total your market receipt settlement (BLOCK) in current block"
     )
     .unwrap_or_else(|_| Gauge::placeholder())
 });
@@ -318,12 +318,12 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     let mut your_market_settlement = 0.0;
 
     for receipt in receipts {
-        let settlement_ct = receipt.settlement_amount() as f64;
+        let settlement = receipt.settlement_amount() as f64;
         match receipt {
             // ... existing cases ...
             Receipt::YourMarket(_) => {
                 your_market_count += 1;
-                your_market_settlement += settlement_ct;
+                your_market_settlement += settlement;
                 RECEIPTS_YOUR_MARKET.inc();
             }
         }
@@ -859,7 +859,7 @@ pub fn settle(&mut self, proof: &Proof) -> Result<(), Error> {
 Example:
 
 ```rust
-const MIN_PAYMENT_FOR_RECEIPT: u64 = 1000; // 0.001 CT
+const MIN_PAYMENT_FOR_RECEIPT: u64 = 1000; // 0.001 BLOCK
 
 pub fn settle(&mut self, id: &str) -> Result<(), Error> {
     let payment = self.calculate_payment(id)?;

@@ -53,7 +53,7 @@ enum Commands {
     },
     /// Sign a message using a mock hardware wallet.
     SignHw { message: String },
-    /// Stake CT for a service role. Remote signers submit `signers[]` plus a
+    /// Stake BLOCK for a service role. Remote signers submit `signers[]` plus a
     /// `threshold` field so the staking RPC can validate multi-party
     /// approvals.
     StakeRole {
@@ -166,7 +166,7 @@ fn build_command() -> CliCommand {
             CommandBuilder::new(
                 CommandId("wallet.stake_role"),
                 "stake-role",
-                "Stake CT for a service role",
+                "Stake BLOCK for a service role",
             )
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "role",

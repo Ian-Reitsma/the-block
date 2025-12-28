@@ -102,10 +102,10 @@ RECEIPTS_COMPUTE_PER_BLOCK    // Compute receipts in current block
 RECEIPTS_ENERGY_PER_BLOCK     // Energy receipts in current block
 RECEIPTS_AD_PER_BLOCK         // Ad receipts in current block
 RECEIPT_BYTES_PER_BLOCK       // Total serialized bytes (gauge)
-RECEIPT_SETTLEMENT_STORAGE    // Storage settlement CT (gauge)
-RECEIPT_SETTLEMENT_COMPUTE    // Compute settlement CT (gauge)
-RECEIPT_SETTLEMENT_ENERGY     // Energy settlement CT (gauge)
-RECEIPT_SETTLEMENT_AD         // Ad settlement CT (gauge)
+RECEIPT_SETTLEMENT_STORAGE    // Storage settlement BLOCK (gauge)
+RECEIPT_SETTLEMENT_COMPUTE    // Compute settlement BLOCK (gauge)
+RECEIPT_SETTLEMENT_ENERGY     // Energy settlement BLOCK (gauge)
+RECEIPT_SETTLEMENT_AD         // Ad settlement BLOCK (gauge)
 METRICS_DERIVATION_DURATION_MS // Histogram for metrics calculation
 ```
 

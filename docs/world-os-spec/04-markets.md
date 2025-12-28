@@ -11,13 +11,13 @@
 | Item | Description |
 | --- | --- |
 | `ad_market::Placement` | Contains ANN embedding hash, reward multiplier, TTL, jurisdiction tags. Stored in sled tree `ad:placements`. |
-| `ad_market::Bid` | Price-per-attention delta with CT deposit/backing. Stored in `ad:bids`. |
+| `ad_market::Bid` | Price-per-attention delta with BLOCK deposit/backing. Stored in `ad:bids`. |
 | `ad_market::Settlement` | Records deliveries and payouts (see `cli/src/explorer.rs` logging). |
 
 ### Flow
-1. Advertisers submit ANN bids using CLI/RPC. `ad_market` stores bids, calculates EWMA pricing, and reserves CT deposit.
+1. Advertisers submit ANN bids using CLI/RPC. `ad_market` stores bids, calculates EWMA pricing, and reserves BLOCK deposit.
 2. Range Boost / LocalNet surfaces request placements; matches resolved against ANN embeddings.
-3. Deliveries generate `ad_market::Settlement` records. Treasury debit occurs automatically (CT 95% to provider, 5% to treasury) following the same basis as compute storage flows.
+3. Deliveries generate `ad_market::Settlement` records. Treasury debit occurs automatically (BLOCK 95% to provider, 5% to treasury) following the same basis as compute storage flows.
 4. RPC `ad.market_state` returns backlog, price bands, and settlement counts; dashboards consume this for the “Markets” page.
 
 ## 2. Storage Market (recap)

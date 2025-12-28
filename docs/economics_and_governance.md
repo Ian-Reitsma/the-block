@@ -2,25 +2,25 @@
 
 > **Plain-Language Overview**
 >
-> **BLOCK is the single token.** Everything in The Block settles in BLOCK — payments, rewards, fees, treasury disbursements. There's no second currency. Some telemetry fields still end in `_ct`; treat those as BLOCK-denominated gauges until the rename completes.
+> **BLOCK is the single token.** Everything in The Block settles in BLOCK — payments, rewards, fees, treasury disbursements. There's no second currency. Some telemetry fields still end in ``; treat those as BLOCK-denominated gauges until the rename completes.
 >
-> **How CT moves around:**
+> **How BLOCK moves around:**
 > | Flow | What Happens |
 > |------|--------------|
-> | **Mining** | New CT is minted in each block's "coinbase" (the first transaction) |
-> | **Subsidies** | Part of that coinbase goes to storage/compute/bandwidth providers (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`) |
-> | **Fees** | Users pay CT for transactions; fees are split between validators and treasury |
+> | **Mining** | New BLOCK is minted in each block's "coinbase" (the first transaction) |
+> | **Subsidies** | Part of that coinbase goes to storage/compute/bandwidth providers (`STORAGE_SUB`, `READ_SUB`, `COMPUTE_SUB`) |
+> | **Fees** | Users pay BLOCK for transactions; fees are split between validators and treasury |
 > | **Rebates** | Users may receive "rebates" — ledger entries that reduce future costs (not separate tokens) |
 > | **Treasury** | Community fund; disbursements require governance votes |
->
-> **Governance in a nutshell:** CT holders vote on proposals. Proposals can change parameters (like fee floors), allocate treasury funds, or upgrade the network. There's a timelock between approval and activation to allow for rollbacks if something goes wrong.
+> 
+> **Governance in a nutshell:** BLOCK holders vote on proposals. Proposals can change parameters (like fee floors), allocate treasury funds, or upgrade the network. There's a timelock between approval and activation to allow for rollbacks if something goes wrong.
 
-Everything settles in CT. Consumer workloads, industrial compute/storage, and governance treasury actions all share the same ledger so explorers/CLI/telemetry never disagree.
+Everything settles in BLOCK. Consumer workloads, industrial compute/storage, and governance treasury actions all share the same ledger so explorers/CLI/telemetry never disagree.
 
-## CT Supply and Sub-Ledgers
-- Coinbases embed `STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT` fields (see `node/src/blockchain/block_binary.rs`). Each bucket mints CT but is accounted separately for policy analysis.
+## BLOCK Supply and Sub-Ledgers
+- Coinbases embed `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB` fields (see `node/src/blockchain/block_binary.rs`). Each bucket mints BLOCK but is accounted separately for policy analysis.
 - Industrial workload gauges (`industrial_backlog`, `industrial_utilization`) flow from storage/compute telemetry into `Block::industrial_subsidies()`.
-- Personal rebates are ledger entries only. They auto-apply to the submitter’s own write traffic before dipping into transferable CT and never circulate.
+- Personal rebates are ledger entries only. They auto-apply to the submitter’s own write traffic before dipping into transferable BLOCK and never circulate.
 
 ## Network-Driven BLOCK Issuance
 
@@ -55,22 +55,22 @@ control decisions and progress toward the live network with no manual tuning.
 The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_controller_gain`, `min_annual_issuance_block`, and `max_annual_issuance_block`. These still exist for backward compatibility with tooling, but they are no longer the primary monetary policy. Any proposal that touches those fields must explicitly justify how it keeps the network-driven issuance formula aligned; otherwise the docs and `NetworkIssuanceController` are treated as the source of truth.
 
 ## Energy Market Economics
-- **Single-token model** — Energy payouts settle in CT just like storage/compute. Credits (`EnergyCredit`) and receipts (`EnergyReceipt`) are internal ledger objects stored in `SimpleDb::open_named(names::ENERGY_MARKET, …)`; settlement burns meter credits, decrements provider capacity, and records `EnergyReceipt { buyer, seller, kwh_delivered, price_paid, treasury_fee, slash_applied }`.
+- **Single-token model** — Energy payouts settle in BLOCK just like storage/compute. Credits (`EnergyCredit`) and receipts (`EnergyReceipt`) are internal ledger objects stored in `SimpleDb::open_named(names::ENERGY_MARKET, …)`; settlement burns meter credits, decrements provider capacity, and records `EnergyReceipt { buyer, seller, kwh_delivered, price_paid, treasury_fee, slash_applied }`.
 - **Treasury integration** — `node::energy::settle_energy_delivery` forwards `treasury_fee + slash_applied` to `NODE_GOV_STORE.record_treasury_accrual`, so explorer/CLI treasury views capture energy fees without extra plumbing. Governance proposals can earmark these accruals like any other treasury inflow.
 - **Governance parameters** — `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps` live in the shared `governance` crate (`ParamKey::EnergyMinStake`, etc.). Proposals use the same `ParamSpec` flow as other knobs; once activated, `node::energy::set_governance_params` updates the runtime config and snapshots the energy sled DB. Outstanding work adds new payloads (batch vs real-time settlement, dependency graph validation) tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`.
 - **Oracle economics** — Meter readings produce `EnergyCredit` entries keyed by the reading hash (BLAKE3 over provider, meter, readings, timestamp, signature). Credits expire after `energy_oracle_timeout_blocks`; stale readings cannot be settled and must be re-issued. `energy.submit_reading` RPC will soon enforce signature validation and multi-reading attestations, with slashing telemetry + dispute RPCs covering bad actors.
 - **CLI/RPC visibility** — `contract-cli energy market --verbose` and `energy.market_state` expose provider capacity, price, stake, outstanding credits, and receipts so explorers can mirror the same tables. Upcoming explorer work adds energy provider tables, receipt timelines, and slash summaries (see `AGENTS.md` tasks).
-- **Dispute flow** — Until dedicated dispute RPCs land, governance proposals (e.g., temporarily raising `energy_slashing_rate_bps` for a provider, pausing settlement) act as the economic kill switch. Once the dispute endpoints ship they will create ledger anchors referencing disputed meter hashes while preserving CT accounting invariants.
+- **Dispute flow** — Until dedicated dispute RPCs land, governance proposals (e.g., temporarily raising `energy_slashing_rate_bps` for a provider, pausing settlement) act as the economic kill switch. Once the dispute endpoints ship they will create ledger anchors referencing disputed meter hashes while preserving BLOCK accounting invariants.
 
 ## Multipliers and Emissions
 
-> **Plain English:** The network automatically adjusts how much CT goes to different services based on usage. If storage usage is low, storage rewards increase to attract providers. If usage is high, rewards dampen to avoid overpaying.
+> **Plain English:** The network automatically adjusts how much BLOCK goes to different services based on usage. If storage usage is low, storage rewards increase to attract providers. If usage is high, rewards dampen to avoid overpaying.
 >
 > **Symbol guide:**
 > | Symbol | Meaning |
 > |--------|---------|
 > | `phi_x` | Policy knob for this service (set by governance) |
-> | `I_target` | Target CT issuance per year |
+> | `I_target` | Target BLOCK issuance per year |
 > | `S` | Share allocated to this service type |
 > | `U_x` | Real usage this epoch |
 > | `epoch_secs` | How long an epoch lasts |
@@ -112,7 +112,7 @@ The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_
 
 ## Treasury and Disbursements
 
-> **Plain English:** The treasury is the community fund. Moving CT out of it requires a governance vote. Here's the timeline:
+> **Plain English:** The treasury is the community fund. Moving BLOCK out of it requires a governance vote. Here's the timeline:
 >
 > ```
 > ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌────────────┐    ┌──────────┐    ┌───────────┐
@@ -124,17 +124,17 @@ The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_
 >                                                            └────────────┘
 > ```
 >
-> - **Draft**: Someone writes a JSON payload describing where CT should go
+> - **Draft**: Someone writes a JSON payload describing where BLOCK should go
 > - **Voting**: Bicameral vote (Operators + Builders houses)
 > - **Queued**: Passed the vote, waiting for activation
 > - **Timelocked**: Waiting period before execution (allows for emergencies)
-> - **Executed**: CT actually moves
+> - **Executed**: BLOCK actually moves
 > - **Finalized**: Done, recorded in ledger
 > - **Rolled Back**: Something went wrong; compensation entry created
 
 - Governance proposals now carry explicit treasury-disbursement payloads in addition to param updates. Each disbursement advances through the canonical state machine: **draft → voting → queued → timelocked → executed → finalized/rolled-back**. Drafts are local JSON payloads (stored under `examples/governance/`) validated with `foundation_serialization` schemas before the proposer signs and submits. Voting/timelock rules piggyback on the bicameral governance machinery (see `governance/src/bicameral.rs`), so disbursements inherit quorum, snapshot, and activation semantics.
 - Once a disbursement proposal passes, `GovStore` persists the queued entry in sled and snapshots the activation epoch + prior rollbacks to `provenance.json` using first-party encoding (Option A from the task brief). The rollback window remains **block-height bounded** via `governance::store::ROLLBACK_WINDOW_EPOCHS`, guaranteeing deterministic replay on both x86_64 and AArch64.
-- Executions emit CT receipts inside the consolidated ledger—no new token types—and every transition (queued, timelocked, executed, rollback) records a ledger journal entry so the explorer and CLI timelines never diverge. Rollbacks simply mark the disbursement as `RolledBack { rolled_back_at, reason }` and append a compensating ledger entry; finalized executions capture the `tx_hash`, execution height, and attested receipt bundle.
+- Executions emit BLOCK receipts inside the consolidated ledger—no new token types—and every transition (queued, timelocked, executed, rollback) records a ledger journal entry so the explorer and CLI timelines never diverge. Rollbacks simply mark the disbursement as `RolledBack { rolled_back_at, reason }` and append a compensating ledger entry; finalized executions capture the `tx_hash`, execution height, and attested receipt bundle.
 - Metrics wiring tracks both balances and pipeline health: `treasury_balance`, `treasury_disbursement_backlog`, and `governance_disbursements_total{status}`. The metrics aggregator exposes `/treasury/summary` and `/governance/disbursements` so dashboards can chart backlog age, quorum wait time, and execution throughput alongside existing treasury gauges. Explorer timelines render the same data (proposal metadata, vote outcomes, timelock window, execution tx, affected accounts, receipts, and rollback annotations).
 - **Implementation checklist (AGENTS.md §15.A)** — The governance crate, CLI, explorer, and telemetry stack must:
   1. Extend DAG schemas with multi-stage approvals and attested release bundles (`governance/`, `node/src/governance`, `cli/src/governance`, explorer dashboards).

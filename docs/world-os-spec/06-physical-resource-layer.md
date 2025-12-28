@@ -1,7 +1,7 @@
 # Physical Resource Layer Specification
 
 ## Purpose
-Extend the unified CT economic engine to measurable physical resources (energy, bandwidth, hardware). The implementation mirrors existing storage/compute markets and uses the new `crates/energy-market` + `crates/oracle-adapter` scaffolding introduced in Step 2. Everything routes through first-party serialization, telemetry, and governance stacks.
+Extend the unified BLOCK economic engine to measurable physical resources (energy, bandwidth, hardware). The implementation mirrors existing storage/compute markets and uses the new `crates/energy-market` + `crates/oracle-adapter` scaffolding introduced in Step 2. Everything routes through first-party serialization, telemetry, and governance stacks.
 
 ## Physical Resource Layer Architecture
 ### Resource Types
@@ -30,7 +30,7 @@ Extend the unified CT economic engine to measurable physical resources (energy, 
 ## Settlement Flow (Energy Vertical)
 1. Provider calls `register_energy_provider` via CLI/RPC. Node persists provider entry, meter address, stake, and jurisdiction data.
 2. Oracle adapter fetches signed readings and submits them through RPC `energy.submit_reading`, which validates signature + timestamp.
-3. Consumers run `contract-cli energy settle` referencing provider ID + kWh consumed. Node verifies latest readings, computes price (`price_per_kwh` × amount), applies jurisdiction fee, transfers CT (95% provider, 5% treasury), emits `EnergyReceipt`.
+3. Consumers run `contract-cli energy settle` referencing provider ID + kWh consumed. Node verifies latest readings, computes price (`price_per_kwh` × amount), applies jurisdiction fee, transfers BLOCK (95% provider, 5% treasury), emits `EnergyReceipt`.
 4. EWMA reputation updated via `update_energy_provider_ewma`. Telemetry counters `energy_providers_count`, `energy_kwh_traded_total`, and histograms `oracle_reading_latency_seconds` updated for dashboards.
 5. Governance monitors `energy_market_health` (see Step 3.7) to trigger parameter tweaks.
 

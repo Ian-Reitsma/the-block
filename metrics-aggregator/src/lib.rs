@@ -246,7 +246,7 @@ const METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL: &str = "explorer_compute_sla
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
-const METRIC_TREASURY_AMOUNT_CT: &str = "treasury_disbursement_amount";
+const METRIC_TREASURY_AMOUNT: &str = "treasury_disbursement_amount";
 const METRIC_TREASURY_SNAPSHOT_AGE: &str = "treasury_disbursement_snapshot_age_seconds";
 const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
     "treasury_disbursement_scheduled_oldest_age_seconds";
@@ -3274,8 +3274,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         .expect("register treasury_disbursement_count");
     let treasury_disbursement_amount = GaugeVec::new(
         Opts::new(
-            METRIC_TREASURY_AMOUNT_CT,
-            "Treasury disbursement CT totals grouped by status",
+            METRIC_TREASURY_AMOUNT,
+            "Treasury disbursement BLOCK totals grouped by status",
         ),
         &["status"],
     );
@@ -3312,14 +3312,14 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         .expect("register treasury_executor_lease_released");
     let treasury_balance_current = Gauge::new(
         METRIC_TREASURY_BALANCE_CURRENT,
-        "Current treasury balance in CT",
+        "Current treasury balance in BLOCK",
     );
     registry
         .register(Box::new(treasury_balance_current.clone()))
         .expect("register treasury_balance_current");
     let treasury_balance_last_delta = Gauge::new(
         METRIC_TREASURY_BALANCE_LAST_DELTA,
-        "Most recent treasury balance delta in CT",
+        "Most recent treasury balance delta in BLOCK",
     );
     registry
         .register(Box::new(treasury_balance_last_delta.clone()))
@@ -3425,7 +3425,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let explorer_block_payout_read_total = CounterVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL,
-            "Read subsidy CT routed to each role from finalized blocks",
+            "Read subsidy BLOCK routed to each role from finalized blocks",
         ),
         &LABEL_ROLE,
     )
@@ -3440,7 +3440,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let explorer_block_payout_ad_total = CounterVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
-            "Advertising CT routed to each role from finalized blocks",
+            "Advertising BLOCK routed to each role from finalized blocks",
         ),
         &LABEL_ROLE,
     )

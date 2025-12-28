@@ -159,7 +159,7 @@ impl ProofTracker {
         }
     }
 
-    /// Record `proofs` delivered by `id`, crediting `amount` CT micro-rebates.
+    /// Record `proofs` delivered by `id`, crediting `amount` BLOCK micro-rebates.
     /// Returns the amount actually recorded (0 if suppressed).
     pub fn record(&mut self, id: &[u8], proofs: u64, amount: u64) -> u64 {
         if proofs == 0 || amount == 0 {

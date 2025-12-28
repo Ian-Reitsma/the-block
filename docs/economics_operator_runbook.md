@@ -37,7 +37,7 @@ This runbook provides emergency procedures and operational guidance for The Bloc
 - Target: 5% annual inflation (500 bps)
 - Convergence: Within ±1% (100 bps) after 30 epochs (~1 hour)
 - Adjustment mechanism: Proportional feedback controller (k=0.10)
-- Issuance bounds: 100M - 1B CT per year
+- Issuance bounds: 100M - 1B BLOCK per year
 
 **Layer 2: Subsidy Allocation**
 - Reallocation frequency: Every epoch
@@ -86,7 +86,7 @@ This runbook provides emergency procedures and operational guidance for The Bloc
 **Symptoms:**
 ```
 economics_inflation_error_bps > 200 for 15+ epochs
-economics_annual_issuance_ct increasing rapidly
+economics_annual_issuance_block increasing rapidly
 ```
 
 **Immediate Actions:**
@@ -98,7 +98,7 @@ economics_annual_issuance_ct increasing rapidly
    ```bash
    grep "Execute economic control laws" <node-logs> | tail -20
    ```
-3. Check for unexpected CT minting:
+3. Check for unexpected BLOCK minting:
    ```bash
    contract-cli explorer blocks --tail 100 | grep coinbase
    ```
@@ -109,7 +109,7 @@ economics_annual_issuance_ct increasing rapidly
 |-------|-----------|-----|
 | Supply calculation error | `emission_consumer` drifting | File governance proposal to reset circulating supply snapshot |
 | Controller gain too low | Inflation error persistent | Increase `inflation_controller_gain` via governance (default: 100 millis → try 150) |
-| Max issuance hit | `economics_annual_issuance_ct` == `max_annual_issuance_ct` | Raise `max_annual_issuance_ct` via governance |
+| Max issuance hit | `economics_annual_issuance_block` == `max_annual_issuance_block` | Raise `max_annual_issuance_block` via governance |
 | Non-epoch minting | Extra coinbase payouts | Emergency: Hard fork to fix minting bug |
 
 **Recovery Time:** 30-60 epochs (~1-2 hours) with controller gain adjustment
@@ -295,7 +295,7 @@ economics_provider_margin{market="compute"} < 0 for 30+ epochs
 **Inflation Health:**
 ```promql
 abs(economics_inflation_error_bps) / 100  # % deviation
-rate(economics_annual_issuance_ct[1h])    # Issuance trend
+rate(economics_annual_issuance_block[1h])    # Issuance trend
 ```
 
 **Subsidy Stability:**
@@ -328,7 +328,7 @@ abs(economics_treasury_contribution_bps - 1000) / 100  # Target deviation
 ### Control Laws Not Executing
 
 **Symptoms:**
-- `economics_annual_issuance_ct` not updating
+- `economics_annual_issuance_block` not updating
 - Telemetry stale for multiple epochs
 
 **Diagnosis:**
@@ -433,14 +433,14 @@ grep "from_governance_params" <node-logs> | tail -1
 **Procedure:**
 1. **Calculate required injection:**
    ```
-   needed_ct = (target_payout - current_payout) * provider_count * epochs
+   needed = (target_payout - current_payout) * provider_count * epochs
    ```
 
 2. **Treasury disbursement:**
    ```bash
    contract-cli gov disburse propose \
      --recipient <market_subsidy_pool> \
-     --amount <needed_ct> \
+     --amount <needed> \
      --justification "Emergency: Compute market collapse"
    ```
 
@@ -479,7 +479,7 @@ grep "from_governance_params" <node-logs> | tail -1
 
 **Inflation Controller:**
 - `controller_gain` ↑ → faster convergence, more oscillation
-- `min/max_annual_issuance_ct` → hard bounds, prevents runaway
+- `min/max_annual_issuance_block` → hard bounds, prevents runaway
 
 **Subsidy Allocator:**
 - `temperature` ↑ → sharper allocation, faster swings

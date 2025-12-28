@@ -1,8 +1,8 @@
-# Single Token Migration: CT Suffix Removal
+# Single Token Migration: BLOCK Suffix Removal
 
 ## Overview
 
-This document tracks the migration from a dual-token model (Consumer Token CT / Industrial Token IT) to a single BLOCK token model. The primary task is removing all `_ct` suffixes from field names throughout the codebase.
+This document tracks the migration from a dual-token model (Consumer Token BLOCK / Industrial Token IT) to a single BLOCK token model. The primary task is removing all `_ct` suffixes from field names throughout the codebase.
 
 **Key Principles:**
 - Drop `_ct` suffix entirely - do NOT replace with `_block`
@@ -200,7 +200,7 @@ proof_rebate_ct → proof_rebate
 
 ### 18. Telemetry Metric Renames
 
-- `BASE_REWARD_CT` → `BASE_REWARD`, metric name `base_reward_ct` → `base_reward`
+- `BASE_REWARD_CT` → `BASE_REWARD`, metric name `base_reward` → `base_reward`
 - `DNS_AUCTION_SETTLEMENT_CT` → `DNS_AUCTION_SETTLEMENT`, metric name `dns_auction_settlement_ct` → `dns_auction_settlement`
 - `DNS_STAKE_LOCKED_CT` → `DNS_STAKE_LOCKED`, metric name `dns_stake_locked_ct` → `dns_stake_locked`
 - Receipt settlement metrics renamed: `receipt_settlement_*_ct` → `receipt_settlement_*` for storage, compute, energy, ad markets

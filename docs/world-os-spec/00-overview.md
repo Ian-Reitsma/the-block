@@ -17,7 +17,7 @@ World OS layers civic-scale services on top of the existing The-Block kernel. Th
 
 ## Architecture Snapshot
 - **Execution surface** — `node/src/consensus`, `node/src/blockchain`, `node/src/transaction`, and `ledger/` remain the canonical block/state machines. The PoH tick generator (`node/src/poh.rs`) feeds the fork-choice logic in `node/src/blockchain/process.rs`.
-- **Mempool + fee lanes** — `node/src/mempool` maintains CT-fee, industrial, and governance lanes. Fee accounting uses `node/src/fee` helpers along with the shared `FeeLane` enum in `node/src/transaction.rs`.
+- **Mempool + fee lanes** — `node/src/mempool` maintains BLOCK-fee, industrial, and governance lanes. Fee accounting uses `node/src/fee` helpers along with the shared `FeeLane` enum in `node/src/transaction.rs`.
 - **Markets** — `storage_market/` persists replica incentives via the sled-backed engine, `node/src/compute_market/*` orchestrates lane-aware job matching, and `crates/ad_market` exposes ANN/ad slots across CLI/RPC.
 - **Governance** — `governance/` hosts the sled-backed `GovStore`. RPC endpoints live in `node/src/rpc/governance.rs` and propagate to CLI subcommands under `cli/src/governance.rs`. Treasury distribution uses the executor in `node/src/treasury_executor.rs` and ledger coinbase helpers in `ledger/`.
 - **Telemetry** — The metrics stack wires `foundation_metrics` gauges inside each subsystem and publishes dashboards through `metrics-aggregator/` and `monitoring/`. Every new surface (energy, oracle) must export counters via the same registry.

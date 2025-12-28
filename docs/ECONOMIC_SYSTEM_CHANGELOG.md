@@ -8,7 +8,7 @@ The Block's economic system has undergone a complete transformation to implement
 
 ### 1. Total Supply Cap: 40 Million BLOCK
 
-**Previous:** 20 trillion CT (Consumer Token) + 20 trillion IT (Industrial Token)
+**Previous:** 20 trillion BLOCK (consumer lane share) + 20 trillion IT (industrial lane share, legacy label)
 **New:** 40 million BLOCK (single unified token)
 
 **Rationale:** Similar to Bitcoin's 21M cap, this creates scarcity and predictable supply economics. The 40M cap is enforced at the protocol level and can never be exceeded.
@@ -19,20 +19,20 @@ The Block's economic system has undergone a complete transformation to implement
 
 ### 2. Single Token System (BLOCK)
 
-**Previous:** Dual token system with CT (Consumer) and IT (Industrial) tokens
+**Previous:** Dual ledger with consumer and industrial lanes (historically called BLOCK/IT)
 **New:** Single BLOCK token for all transactions, rewards, and economic activity
 
 **Changes:**
 - Removed all `emission_industrial`, `block_reward_industrial`, `macro_acc_industrial` fields
 - Consolidated all rewards into single `emission` and `block_reward` fields
-- All documentation and code now references "BLOCK" instead of "CT" or "Consumer Token"
+- All documentation and code now references BLOCK; legacy BLOCK/IT labels appear only in migration notes or historical metrics
 
 **Migration:** Legacy chain data automatically migrates by summing consumer + industrial balances
 
 **Files Changed:**
 - `node/src/lib.rs` - Blockchain struct fields consolidated
 - `node/src/ledger_binary.rs` - Serialization with backward compatibility
-- All economics modules renamed CT→BLOCK
+- All economics modules renamed BLOCK→BLOCK
 
 ### 3. Network-Driven Issuance Formula
 
@@ -96,7 +96,7 @@ decay = (MAX_SUPPLY_BLOCK - total_emission) / MAX_SUPPLY_BLOCK
 ### 4. Telemetry & Monitoring
 
 All economics metrics updated to reflect BLOCK token:
-- `economics_annual_issuance_block` (was `economics_annual_issuance_ct`)
+- `economics_annual_issuance_block` (was `economics_annual_issuance_block`)
 - Metrics now show formula-driven issuance, not target convergence
 - Dashboard updated to show network activity factors
 
@@ -169,7 +169,7 @@ All 3 integration tests passing with new economics:
 ### For Application Developers
 
 **Token References:**
-- Replace "CT" with "BLOCK" in all UIs
+- Replace "BLOCK" with "BLOCK" in all UIs
 - Update token decimals/display if needed
 - No API changes required - token amounts remain u64
 

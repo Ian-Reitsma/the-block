@@ -44,7 +44,7 @@ fn node_treasury_accrual_flow() -> Result<()> {
     assert!(history
         .iter()
         .any(|snap| matches!(snap.event, TreasuryBalanceEventKind::Cancelled)));
-    // Rollbacks credit the treasury (docs/economics_and_governance.md#ct-supply-and-sub-ledgers).
+    // Rollbacks credit the treasury (docs/economics_and_governance.md#block-supply-and-sub-ledgers).
     assert_eq!(history.last().map(|snap| snap.balance).unwrap(), 64);
     Ok(())
 }

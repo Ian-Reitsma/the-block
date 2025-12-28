@@ -55,8 +55,8 @@ The receipt system is **fully integrated and production-ready**. All components 
 - ✅ Per-block gauges:
   - `RECEIPTS_STORAGE_PER_BLOCK`, etc.
 - ✅ Settlement amount tracking:
-  - `RECEIPT_SETTLEMENT_STORAGE_CT`, etc.
-- ✅ Treasury balance exports in the metrics aggregator now write the `delta` field exclusively; `_ct` aliases were removed so CLI dumps and dashboards must emit the updated field name.
+  - `RECEIPT_SETTLEMENT_STORAGE`, etc.
+- ✅ Treasury balance exports in the metrics aggregator now write the `delta` field exclusively; `` aliases were removed so CLI dumps and dashboards must emit the updated field name.
 - ✅ Serialization size: `RECEIPT_BYTES_TOTAL`
 - ✅ Module exported in `node/src/telemetry.rs`
 - ✅ `record_receipts()` function called during block processing
@@ -98,7 +98,7 @@ Receipt::Ad(AdReceipt {
     campaign_id: record.campaign_id.clone(),
     publisher: record.host_addr.clone(),
     impressions: record.impressions,
-    spend: record.total_ct,
+    spend: record.total,
     block_height: index,  // ✅ Current block height
     conversions: record.conversions,
 })
@@ -385,11 +385,11 @@ receipts_compute_per_block
 receipts_energy_per_block
 receipts_ad_per_block
 
-# Settlement amounts (CT)
-receipt_settlement_storage_ct
-receipt_settlement_compute_ct
-receipt_settlement_energy_ct
-receipt_settlement_ad_ct
+# Settlement amounts (BLOCK)
+receipt_settlement_storage
+receipt_settlement_compute
+receipt_settlement_energy
+receipt_settlement_ad
 
 # Receipt serialization size
 receipt_bytes_total

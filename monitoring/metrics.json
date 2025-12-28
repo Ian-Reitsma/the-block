@@ -193,7 +193,7 @@
       "deprecated": false,
       "description": "base reward after logistic factor",
       "labels": [],
-      "name": "base_reward_ct"
+      "name": "base_reward"
     },
     {
       "deprecated": false,
@@ -203,7 +203,7 @@
     },
     {
       "deprecated": false,
-      "description": "Read subsidy CT routed to each role from finalized blocks",
+      "description": "Read subsidy BLOCK routed to each role from finalized blocks",
       "labels": [
         "role"
       ],
@@ -211,7 +211,7 @@
     },
     {
       "deprecated": false,
-      "description": "Advertising CT routed to each role from finalized blocks",
+      "description": "Advertising BLOCK routed to each role from finalized blocks",
       "labels": [
         "role"
       ],
@@ -604,7 +604,7 @@
     },
     {
       "deprecated": false,
-      "description": "Aggregated CT amount for treasury disbursements by status",
+      "description": "Aggregated BLOCK amount for treasury disbursements by status",
       "labels": [
         "status"
       ],
@@ -1246,21 +1246,21 @@
     },
     {
       "deprecated": false,
-      "description": "Total CT burned from rent escrow",
+      "description": "Total BLOCK burned from rent escrow",
       "labels": [],
-      "name": "rent_escrow_burned_ct_total"
+      "name": "rent_escrow_burned_total"
     },
     {
       "deprecated": false,
-      "description": "Total CT locked in rent escrow",
+      "description": "Total BLOCK locked in rent escrow",
       "labels": [],
-      "name": "rent_escrow_locked_ct_total"
+      "name": "rent_escrow_locked_total"
     },
     {
       "deprecated": false,
-      "description": "Total CT refunded from rent escrow",
+      "description": "Total BLOCK refunded from rent escrow",
       "labels": [],
-      "name": "rent_escrow_refunded_ct_total"
+      "name": "rent_escrow_refunded_total"
     },
     {
       "deprecated": false,
@@ -1440,9 +1440,9 @@
     },
     {
       "deprecated": false,
-      "description": "Total CT burned from slashing penalties",
+      "description": "Total BLOCK burned from slashing penalties",
       "labels": [],
-      "name": "slashing_burn_ct_total"
+      "name": "slashing_burn_total"
     },
     {
       "deprecated": false,

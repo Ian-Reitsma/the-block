@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Simple devnet faucet dispensing CT.
+# Simple devnet faucet dispensing BLOCK (uses the legacy `--ct` flag).
 # Usage: devnet_faucet.sh <to_address> [amount_nct]
 set -euo pipefail
 TO="$1"

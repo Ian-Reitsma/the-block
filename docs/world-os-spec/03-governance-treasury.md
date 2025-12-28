@@ -13,7 +13,7 @@
 | `governance::store::GovStore` | `governance/src/store.rs` | sled database (`governance.db/`) storing proposals, votes, executor leases, treasury snapshots, release DAG, DID revocations. Keys follow prefixes `proposal:<id>`, `vote:<proposal_id>:<badge_id>`, `treasury:intent:<nonce>`. |
 | `governance::Proposal` | `governance/src/proposals.rs` | Contains proposal metadata, payload (param updates, runtime/transport/storage policies, release approvals). Serialized via `foundation_serialization`. |
 | `governance::Vote` | `governance/src/proposals.rs` | Records badge ID, chamber (Operator/Builder), choice, signature. Stored under `vote:` prefix. |
-| `governance::treasury::TreasuryDisbursement` | `governance/src/treasury.rs` | Amounts + destination accounts derived from CT subsidy ledger. Settled by `TreasuryExecutor`. |
+| `governance::treasury::TreasuryDisbursement` | `governance/src/treasury.rs` | Amounts + destination accounts derived from BLOCK subsidy ledger. Settled by `TreasuryExecutor`. |
 | `governance::store::TreasuryExecutorSnapshot` | Captures executor lease + nonce, visible via RPC for monitoring. |
 
 ## 3. RPC & CLI
@@ -37,7 +37,7 @@
 ## 5. Treasury Flow
 - Income: BLOCK from base fee burns diverted to treasury per `node/src/treasury_executor.rs`. Balances are tracked as a single BLOCK ledger (see `governance::store::TreasuryBalances`).
 - Outgoing: Approved disbursements specify `account_id`, `amount`, `memo`. Executor enforces `nonce_floor` guard and logs to `treasury_balances` history for explorer consumption.
-- Coinbase integration: `node/src/treasury_executor.rs` hooks into block production so minted CT honors the latest governance-selected treasury split.
+- Coinbase integration: `node/src/treasury_executor.rs` hooks into block production so minted BLOCK honors the latest governance-selected treasury split.
 
 ## 6. Governance + Energy Market Integration Hooks
 - **Proposal Type Extension** — Add `ProposalPayload::UpdateEnergyMarketParams` to `governance/src/proposals.rs` once energy crate lands. Documented in `06-physical-resource-layer.md`.

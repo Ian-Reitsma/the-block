@@ -3,7 +3,7 @@
 //! This server exposes zero-fee static file hosting backed by blob storage
 //! along with optional dynamic endpoints powered by WASM. Every response
 //! records a `ReadAck` that gateways later batch and anchor on-chain to claim
-//! CT subsidies.
+//! BLOCK subsidies.
 
 #![deny(warnings)]
 

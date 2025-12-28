@@ -329,7 +329,7 @@ pub struct TreasuryDisbursement {
 
 You have a **civic-grade L1 blockchain** with:
 
-1. **Dual-token economics** (Consumer CT + Industrial IT)
+1. **Dual-token economics** (Consumer BLOCK + Industrial IT)
 2. **Governance treasury** with proposal-based disbursements
 3. **Energy market** with oracle-verified credits
 4. **DEX** for token swaps

@@ -220,7 +220,10 @@ def keypair_demo() -> bytes:
 
 def fee_demo() -> None:
     """Show fee split and error handling."""
-    explain("Exploring fee selectors; The-Block splits fees across two token pools")
+    explain(
+        "Exploring fee selectors; The-Block routes fees through consumer and "
+        "industrial lanes but settles everything in BLOCK"
+    )
     for sel in (0, 1, 2):
         for fee in (0, 1, 9, MAX_FEE):
             fc, fi = the_block.fee_decompose(sel, fee)
@@ -271,9 +274,9 @@ def transaction_errors(bc: the_block.Blockchain, priv: bytes) -> None:
     explain("Nonce is like a check number: use each once and in order")
     next_nonce = 1
     routes = {
-        100: "all fee to consumer token",
-        0: "all fee to industrial token",
-        50: "fee split between tokens",
+        100: "all fee to the consumer lane (BLOCK)",
+        0: "all fee to the industrial lane (BLOCK)",
+        50: "fee split across both lanes (BLOCK)",
     }
     for sel, note in routes.items():
         payload = the_block.RawTxPayload(
@@ -368,7 +371,7 @@ def emission_cap_demo(bc: the_block.Blockchain, accounts: list[str]) -> None:
 
 
 def fee_split_demo() -> None:
-    """Show fee splitting between CT and IT."""
+    """Show fee splitting between BLOCK (consumer) and IT."""
     explain("Demonstrating fee splitting via pct")
     payload = the_block.RawTxPayload(
         from_="alice",

@@ -176,20 +176,36 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="overview"><a class="header" href="#overview">Overview</a></h1>
-<p>The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into CT rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in <code>main</code>, not a roadmap.</p>
+<blockquote>
+<p><strong>If You're Brand New to Blockchains</strong></p>
+<p>Before diving in, here are three concepts you'll see everywhere:</p>
+<div class="table-wrapper"><table><thead><tr><th>Concept</th><th>Plain English</th></tr></thead><tbody>
+<tr><td><strong>Block</strong></td><td>A page in a shared ledger. Every ~1 second, a new page is added containing recent transactions. Once added, it can't be changed.</td></tr>
+<tr><td><strong>Consensus</strong></td><td>How nodes (computers running the software) agree on which page is next. This prevents anyone from cheating or rewriting history.</td></tr>
+<tr><td><strong>BLOCK</strong></td><td>The single currency that moves through the system. You can send it, receive it, pay for services, or earn it by contributing.</td></tr>
+</tbody></table>
+</div>
+<p><strong>Reading this doc:</strong> If you want to know <em>what lives where</em> in the codebase, read this. If you want <em>wire-level technical details</em>, read <a href="architecture.html"><code>docs/architecture.md</code></a>.</p>
+</blockquote>
+<p>The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in <code>main</code>, not a roadmap.</p>
+<blockquote>
+<p><strong>Legacy labels:</strong> Internal metrics now publish names such as <code>STORAGE_SUB</code>, <code>READ_SUB</code>, and <code>COMPUTE_SUB</code>; the <code>_CT</code> suffix has been retired, so treat those bucket metrics as the authoritative BLOCK denominators.</p>
+</blockquote>
 <h2 id="mission"><a class="header" href="#mission">Mission</a></h2>
 <ul>
 <li>Operate a one-second base layer that notarizes micro-shard roots while keeping the L1 deterministic and audit-friendly.</li>
-<li>Pay operators for real service (<code>STORAGE_SUB_CT</code>, <code>READ_SUB_CT</code>, <code>COMPUTE_SUB_CT</code>) instead of speculative gas schedules.</li>
+<li>Pay operators for real service (<code>STORAGE_SUB</code>, <code>READ_SUB</code>, <code>COMPUTE_SUB</code>) instead of speculative gas schedules.</li>
 <li>Treat governance as an engineering surface: the same crate powers the node, CLI, explorer, and telemetry so proposals, fee-floor policies, and service-badge status never drift.</li>
 <li>Ship first-party clients: the in-house HTTP/TLS stack (<code>crates/httpd</code> + <code>crates/transport</code>) fronts every RPC, gateway, and gossip surface, and dependency pivots move through governance before they land in production.</li>
+<li>Automate readiness via the Launch Governor: a streak-based autopilot (<code>node/src/launch_governor</code>) watches chain/DNS (and soon economics/market) telemetry, records signed decisions, and flips runtime gates so testnet/mainnet transitions stay auditable.</li>
 </ul>
 <h2 id="responsibility-domains"><a class="header" href="#responsibility-domains">Responsibility Domains</a></h2>
-<div class="table-wrapper"><table><thead><tr><th>Domain</th><th>Repository roots</th><th>In-flight scope</th></tr></thead><tbody>
-<tr><td>Consensus &amp; Ledger</td><td><code>node/src/consensus</code>, <code>node/src/blockchain</code>, <code>bridges</code>, <code>ledger</code>, <code>poh</code></td><td>Hybrid PoW/PoS leader schedule, macro-block checkpoints, Kalman retarget, ledger invariants, bridge proofs.</td></tr>
-<tr><td>Serialization &amp; Tooling</td><td><code>crates/foundation_serialization</code>, <code>crates/codec</code>, <code>docs/spec/*.json</code></td><td>Canonical binary layout, cross-language vectors, CLI/SDK adapters.</td></tr>
-<tr><td>Cryptography &amp; Identity</td><td><code>crypto</code>, <code>crates/crypto_suite</code>, <code>node/src/identity</code>, <code>dkg</code>, <code>zkp</code>, <code>remote_signer</code></td><td>Hash/signature primitives, DKG, commit–reveal, identity registries, PQ hooks.</td></tr>
-<tr><td>Core Tooling &amp; UX</td><td><code>cli</code>, <code>gateway</code>, <code>explorer</code>, <code>metrics-aggregator</code>, <code>monitoring</code>, <code>docs/apis_and_tooling.md</code></td><td>RPC &amp; CLI surfaces, gateways, dashboards, probe CLI, release tooling.</td></tr>
+<div class="table-wrapper"><table><thead><tr><th>Domain</th><th>What It Does (Plain English)</th><th>Repository roots</th><th>In-flight scope</th></tr></thead><tbody>
+<tr><td><strong>Consensus &amp; Ledger</strong></td><td>Decides which transactions "really happened" and in what order. Makes sure everyone agrees on the same history.</td><td><code>node/src/consensus</code>, <code>node/src/blockchain</code>, <code>bridges</code>, <code>ledger</code>, <code>poh</code></td><td>Hybrid PoW/PoS leader schedule, macro-block checkpoints, Kalman retarget, ledger invariants, bridge proofs.</td></tr>
+<tr><td><strong>Serialization &amp; Tooling</strong></td><td>Agrees on a specific binary format so nodes written in different languages still understand each other.</td><td><code>crates/foundation_serialization</code>, <code>crates/codec</code>, <code>docs/spec/*.json</code></td><td>Canonical binary layout, cross-language vectors, CLI/SDK adapters.</td></tr>
+<tr><td><strong>Cryptography &amp; Identity</strong></td><td>Makes sure signatures can't be faked and identities can be updated or revoked. Handles keys and proofs.</td><td><code>crypto</code>, <code>crates/crypto_suite</code>, <code>node/src/identity</code>, <code>dkg</code>, <code>zkp</code>, <code>remote_signer</code></td><td>Hash/signature primitives, DKG, commit–reveal, identity registries, PQ hooks.</td></tr>
+<tr><td><strong>Core Tooling &amp; UX</strong></td><td>The command-line app (<code>contract-cli</code>), dashboards, and explorer that people actually touch.</td><td><code>cli</code>, <code>gateway</code>, <code>explorer</code>, <code>metrics-aggregator</code>, <code>monitoring</code>, <code>docs/apis_and_tooling.md</code></td><td>RPC &amp; CLI surfaces, gateways, dashboards, probe CLI, release tooling.</td></tr>
+<tr><td><strong>Launch Governor &amp; Autopilot</strong></td><td>Automates readiness transitions (operational, DNS, upcoming economics/market gates) and publishes signed intent snapshots, watching the <code>economics_epoch_*</code> gauges plus <code>economics_block_reward_per_block</code> before promoting reward gates.</td><td><code>node/src/launch_governor</code>, <code>node/src/governor_snapshot.rs</code>, <code>docs/architecture.md#launch-governor</code>, <code>docs/operations.md#launch-governor-operations</code></td><td>Streak-tuned gating, decision signing, economics/market gates in backlog.</td></tr>
 </tbody></table>
 </div>
 <h2 id="design-pillars"><a class="header" href="#design-pillars">Design Pillars</a></h2>
@@ -200,18 +216,32 @@
 </tbody></table>
 </div>
 <h2 id="end-to-end-flow"><a class="header" href="#end-to-end-flow">End-to-End Flow</a></h2>
+<p><strong>Story Example: Alice uploads a file</strong></p>
+<p>Imagine Alice wants to store a file on The Block. Here's what happens step by step:</p>
 <ol>
-<li><strong>Ingress</strong> – Gateways accept blobs and RPCs over the in-house <code>httpd</code> router, encrypt/store via <code>node/src/storage</code> and <code>storage_market</code> receipts, and emit signed <code>ReadAck</code> acknowledgements.</li>
-<li><strong>Mempool &amp; Scheduling</strong> – <code>node/src/mempool</code> feeds the multi-lane scheduler (<code>node/src/scheduler.rs</code>) that batches consumer/industrial traffic, applies fee-floor policy, and records QoS counters.</li>
-<li><strong>Consensus</strong> – The hybrid PoW/PoS engine (<code>node/src/consensus</code>) enforces macro-block checkpoints, PoH ticks, VDF randomness, and difficulty retune while gossip/range-boost propagate blocks.</li>
-<li><strong>Rewarding &amp; Treasury</strong> – Subsidy accounting, service-badge tracking, treasury streaming, and governance DAG state live in <code>node/src/governance</code> and the shared <code>governance</code> crate; snapshots stream through CLI, explorer, aggregates, and telemetry.</li>
-<li><strong>Observability &amp; Audits</strong> – Runtime telemetry (<code>node/src/telemetry.rs</code>), the metrics aggregator, dashboards under <code>monitoring/</code>, and runbooks in <code>docs/operations.md</code> keep operators in sync with governance hooks and incident tooling.</li>
+<li>Alice's wallet app sends a "store this file" request to a gateway node</li>
+<li>The gateway encrypts the file and creates a transaction</li>
+<li>The transaction enters the mempool (waiting room)</li>
+<li>A miner includes it in the next block</li>
+<li>The block is validated and propagated to all nodes</li>
+<li>Alice's BLOCK balance decreases; the storage provider's balance increases</li>
+<li>Alice can now see the transaction in the explorer or CLI</li>
 </ol>
+<p><strong>Technical Breakdown:</strong></p>
+<div class="table-wrapper"><table><thead><tr><th>Step</th><th>What Happens</th><th>Code Module</th></tr></thead><tbody>
+<tr><td>1. <strong>Ingress</strong></td><td>Gateways accept blobs and RPCs over the in-house <code>httpd</code> router, encrypt/store via <code>node/src/storage</code> and <code>storage_market</code> receipts, and emit signed <code>ReadAck</code> acknowledgements.</td><td><code>node/src/gateway</code>, <code>gateway/</code></td></tr>
+<tr><td>2. <strong>Mempool</strong></td><td>Transaction enters the waiting room where fee-floor policy determines priority.</td><td><code>node/src/mempool</code></td></tr>
+<tr><td>3. <strong>Scheduling</strong></td><td>The multi-lane scheduler batches consumer/industrial traffic, applies fee-floor policy, and records QoS counters.</td><td><code>node/src/scheduler.rs</code></td></tr>
+<tr><td>4. <strong>Consensus</strong></td><td>The hybrid PoW/PoS engine enforces macro-block checkpoints, PoH ticks, VDF randomness, and difficulty retune while gossip/range-boost propagate blocks.</td><td><code>node/src/consensus</code></td></tr>
+<tr><td>5. <strong>Rewarding</strong></td><td>Subsidy accounting, service-badge tracking, treasury streaming, and governance DAG state are updated; BLOCK moves between accounts.</td><td><code>node/src/governance</code>, <code>governance/</code></td></tr>
+<tr><td>6. <strong>Observability</strong></td><td>Runtime telemetry, metrics aggregator, and dashboards reflect the new state.</td><td><code>node/src/telemetry.rs</code>, <code>metrics-aggregator/</code>, <code>monitoring/</code></td></tr>
+</tbody></table>
+</div>
 <h2 id="repository-layout-live-tree"><a class="header" href="#repository-layout-live-tree">Repository Layout (live tree)</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Path</th><th>Highlights</th></tr></thead><tbody>
 <tr><td><code>node/</code></td><td>Full node, gateway stack, compute/storage/bridge/mempool modules, RPC server.</td></tr>
 <tr><td><code>crates/</code></td><td>First-party libraries: transport, HTTP, serialization, overlay, runtime, coding/erasure, wallet SDKs.</td></tr>
-<tr><td><code>cli/</code></td><td><code>tb-cli</code> binary with governance, bridge, wallet, identity, compute, telemetry, and remediation commands.</td></tr>
+<tr><td><code>cli/</code></td><td><code>contract-cli</code> binary with governance, bridge, wallet, identity, compute, telemetry, and remediation commands.</td></tr>
 <tr><td><code>metrics-aggregator/</code></td><td>Aggregates Prometheus-style metrics, publishes dashboards, verifies TLS &amp; governance state.</td></tr>
 <tr><td><code>monitoring/</code></td><td>Grafana/Prometheus templates and scripts (build via <code>npm ci --prefix monitoring</code>).</td></tr>
 <tr><td><code>storage_market/</code>, <code>dex/</code>, <code>bridges/</code>, <code>gateway/</code></td><td>Dedicated crates for specialized subsystems referenced throughout the docs.</td></tr>
@@ -219,10 +249,20 @@
 </tbody></table>
 </div>
 <h2 id="energy-market-snapshot"><a class="header" href="#energy-market-snapshot">Energy Market Snapshot</a></h2>
+<p><strong>How It Feels to a Human:</strong></p>
+<p>As an energy provider, you register once, then your smart meter sends signed readings to the network. These readings turn into "credits" (promises of energy). When customers use your energy, those credits become "receipts" (proof of delivery). If someone says "this reading looks wrong," they can file a dispute — a special record that triggers review.</p>
+<p><strong>Example Flow:</strong></p>
+<ol>
+<li>Provider registers with capacity: 10,000 kWh, price: 50 BLOCK per kWh</li>
+<li>Smart meter reading: 1,000 kWh delivered → creates an <code>EnergyCredit</code></li>
+<li>Customer settles 500 kWh → creates an <code>EnergyReceipt</code> (with treasury fee deducted)</li>
+<li>Provider receives BLOCK in their account</li>
+</ol>
+<p><strong>Technical Details:</strong></p>
 <ul>
 <li><strong>Code surface</strong> — <code>crates/energy-market</code> implements providers, credits, receipts, and telemetry; <code>node/src/energy.rs</code> persists them in sled (<code>SimpleDb::open_named(names::ENERGY_MARKET, …)</code>), applies governance hooks, and exposes health checks. RPC handlers live in <code>node/src/rpc/energy.rs</code>, the CLI entry point is <code>cli/src/energy.rs</code>, and oracle ingestion goes through <code>crates/oracle-adapter</code> plus the <code>services/mock-energy-oracle</code> binary used by the World OS drill.</li>
 <li><strong>State &amp; persistence</strong> — Energy state is serialized with <code>foundation_serialization::binary::{encode,decode}</code> and stored wherever <code>TB_ENERGY_MARKET_DIR</code> points (default <code>energy_market/</code>). Snapshots occur after every mutation, mirroring the fsync+rename workflow the rest of <code>SimpleDb</code> uses so restarts replay identical providers/credits/receipts. Governance parameters (<code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, <code>energy_slashing_rate_bps</code>) share the same proposal pipeline as other params; once a proposal activates, <code>node::energy::set_governance_params</code> updates the runtime config and re-snapshots the sled DB.</li>
-<li><strong>RPC &amp; CLI</strong> — The JSON-RPC namespace exposes <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, and <code>energy.settle</code>. Requests use the exact schema documented in <code>docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts</code>, including the shared <code>MeterReadingPayload</code> used by oracle adapters, CLI tooling, and explorers. <code>tb-cli energy</code> prints tabular output by default, toggles JSON via <code>--verbose</code>/<code>--format json</code>, and pipes raw payloads to automation without diverging from the node schema.</li>
+<li><strong>RPC &amp; CLI</strong> — The JSON-RPC namespace exposes <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, and <code>energy.settle</code>. Requests use the exact schema documented in <code>docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts</code>, including the shared <code>MeterReadingPayload</code> used by oracle adapters, CLI tooling, and explorers. <code>contract-cli energy</code> prints tabular output by default, toggles JSON via <code>--verbose</code>/<code>--format json</code>, and pipes raw payloads to automation without diverging from the node schema.</li>
 <li><strong>Observability &amp; operations</strong> — Runtime metrics include gauges (<code>energy_providers_count</code>, <code>energy_avg_price</code>), counters (<code>energy_kwh_traded_total</code>, <code>energy_settlements_total{provider}</code>, <code>energy_signature_failure_total{provider,reason}</code>), and histograms (<code>energy_provider_fulfillment_ms</code>, <code>oracle_reading_latency_seconds</code>). <code>node::energy::check_energy_market_health</code> logs warnings when pending credits pile up or settlements stall. <code>docs/testnet/ENERGY_QUICKSTART.md</code> plus <code>scripts/deploy-worldos-testnet.sh</code> describe the canonical bootstrap procedure (node + mock oracle + telemetry stack); <code>docs/operations.md#energy-market-operations</code> extends the runbook with backup, dispute, and alerting guidance.</li>
 <li><strong>Security &amp; governance alignment</strong> — The outstanding work (oracle signature enforcement, dispute RPCs, explorer timelines, QUIC chaos drills, sled snapshot drills, release-provenance gates) is tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code> and summarized in <code>AGENTS.md</code>. <code>docs/security_and_privacy.md#energy-oracle-safety</code> documents key hygiene, secret sourcing, and telemetry redaction requirements for oracle adapters.</li>
 </ul>
@@ -234,17 +274,64 @@
 <li>Keep dependency policy artifacts (<code>docs/dependency_inventory*.json</code>) up to date via <code>cargo run -p dependency_registry</code> or <code>just dependency-audit</code>.</li>
 <li>Wire telemetry locally: <code>metrics-aggregator</code>, <code>monitoring/</code>, and <code>crates/probe</code> exercise the same endpoints operators rely on.</li>
 </ol>
+<h2 id="quick-glossary"><a class="header" href="#quick-glossary">Quick Glossary</a></h2>
+<p>Terms you'll encounter in architecture docs:</p>
+<div class="table-wrapper"><table><thead><tr><th>Term</th><th>Plain English</th><th>Code/Docs Reference</th></tr></thead><tbody>
+<tr><td><strong>SNARK receipts</strong></td><td>Small cryptographic proofs that heavy computations were done correctly. Instead of re-running a job, validators just check the proof.</td><td><code>node/src/compute_market</code>, <a href="architecture.html#compute-marketplace"><code>architecture.md#compute-marketplace</code></a></td></tr>
+<tr><td><strong>LocalNet</strong></td><td>A local mesh of nearby devices relaying data to each other. Provides instant starts and low latency for video/downloads/games.</td><td><code>node/src/localnet</code>, <a href="architecture.html#localnet-and-range-boost"><code>architecture.md#localnet-and-range-boost</code></a></td></tr>
+<tr><td><strong>Range Boost</strong></td><td>Extended wireless/mesh nodes providing coverage over longer distances. Store-and-forward for rural or spotty areas.</td><td><code>node/src/range_boost</code>, <a href="architecture.html#localnet-and-range-boost"><code>architecture.md#localnet-and-range-boost</code></a></td></tr>
+<tr><td><strong>Mobile cache</strong></td><td>Encrypted on-device cache for offline operation. State syncs once you're back online.</td><td><code>gateway/</code>, <code>node/src/gateway</code></td></tr>
+<tr><td><strong>Light client</strong></td><td>A lightweight client that follows the chain using proofs without storing everything. Good for phones and browsers.</td><td><a href="architecture.html#gateway-and-client-access"><code>architecture.md#gateway-and-client-access</code></a></td></tr>
+<tr><td><strong>Macro-block</strong></td><td>A periodic checkpoint (every N blocks) that makes syncing faster. Contains per-shard state roots.</td><td><a href="architecture.html#ledger-and-consensus"><code>architecture.md#ledger-and-consensus</code></a></td></tr>
+<tr><td><strong>Service badge</strong></td><td>A status mark in the ledger showing a node has been "good enough" recently (uptime, service quality). Affects voting weight.</td><td><code>node/src/service_badge.rs</code>, <a href="economics_and_governance.html"><code>economics_and_governance.md</code></a></td></tr>
+<tr><td><strong>Treasury disbursement</strong></td><td>Moving BLOCK from the community fund to a destination. Requires governance votes and a timelock period.</td><td><code>governance/src/treasury.rs</code>, <a href="economics_and_governance.html"><code>economics_and_governance.md</code></a></td></tr>
+</tbody></table>
+</div>
 <h2 id="document-map"><a class="header" href="#document-map">Document Map</a></h2>
 <p>All remaining detail sits in six focused guides:</p>
 <ul>
 <li><a href="architecture.html"><code>docs/architecture.md</code></a> — ledger, networking, storage, compute, bridges, gateway, telemetry.</li>
-<li><a href="economics_and_governance.html"><code>docs/economics_and_governance.md</code></a> — CT supply, fees, treasury, proposals, service badges, kill switches.</li>
+<li><a href="architecture.html#launch-governor"><code>docs/architecture.md#launch-governor</code></a> — autopilot design, gate signals, env vars, and RPCs.</li>
+<li><a href="economics_and_governance.html"><code>docs/economics_and_governance.md</code></a> — BLOCK supply, fees, treasury, proposals, service badges, kill switches.</li>
 <li><a href="operations.html"><code>docs/operations.md</code></a> — bootstrap, deployments, telemetry wiring, dashboards, runbooks, chaos &amp; recovery.</li>
 <li><a href="security_and_privacy.html"><code>docs/security_and_privacy.md</code></a> — threat modelling, cryptography, remote signer flows, jurisdiction policy packs, LE portal, supply-chain controls.</li>
 <li><a href="developer_handbook.html"><code>docs/developer_handbook.md</code></a> — environment setup, coding standards, testing/fuzzing, simulation, dependency policy, tooling.</li>
 <li><a href="apis_and_tooling.html"><code>docs/apis_and_tooling.md</code></a> — JSON-RPC, CLI, gateway HTTP &amp; DNS, explorer, probe CLI, metrics endpoints, schema references.</li>
+<li><a href="subsystem_atlas.html"><code>docs/subsystem_atlas.md</code></a> — workspace atlas + node subsystem index that maps every directory/file to plain-English context so newcomers know where to start.</li>
+<li><strong>🆕 <a href="../RECEIPT_INTEGRATION_INDEX.html"><code>RECEIPT_INTEGRATION_INDEX.md</code></a> — Receipt integration guide</strong>: Market audit trails, consensus validation, telemetry system, metrics derivation. See this for the complete receipt integration status, implementation guides, and next steps (December 2025).</li>
 </ul>
 <p>For historical breadcrumbs the removed per-subsystem files now redirect through <a href="LEGACY_MAPPING.html"><code>docs/LEGACY_MAPPING.md</code></a>.</p>
+<h3 id="owner-routing"><a class="header" href="#owner-routing">Owner routing</a></h3>
+<p>Tag the following owners whenever you touch the listed scope. These handles map directly to reviewer groups in GitHub/Gerrit and keep the Document Map actionable:</p>
+<div class="table-wrapper"><table><thead><tr><th>Area</th><th>Owners to tag</th><th>Canonical paths</th><th>Critical dependencies</th></tr></thead><tbody>
+<tr><td>Ad + Targeting Platform</td><td><code>@ad-market</code> (primary), <code>@gov-core</code>, <code>@gateway-stack</code>, <code>@telemetry-ops</code></td><td><code>crates/ad_market/**</code>, <code>node/src/{ad_policy_snapshot.rs,ad_readiness.rs,localnet,range_boost,gateway/dns.rs,rpc/ad_market.rs}</code>, <code>node/tests/ad_market_rpc.rs</code>, <code>cli/src/{ad_market.rs,gov.rs,explorer.rs}</code>, <code>metrics-aggregator/**</code>, <code>monitoring/**</code></td><td>Range Boost + LocalNet presence proofs, <code>.block</code> DNS/auction feeds, privacy budget manager, <code>/wrappers</code> + Grafana dashboards, governance-configured selector registries</td></tr>
+</tbody></table>
+</div>
+<ul>
+<li><strong>Spec circulation log</strong> — The ad-market blueprint captured in <code>docs/architecture.md#ad-marketplace</code>, <code>docs/system_reference.md#appendix-a-·-rpc-method-index</code>, <code>docs/operations.md#ad-market-operations</code>, and <code>docs/security_and_privacy.md#privacy-layers</code> was circulated to <code>@ad-market</code>, <code>@gov-core</code>, <code>@gateway-stack</code>, and <code>@telemetry-ops</code> (Document Map owners above) for ACK on 2024-05-25. Implementation owners should now unblock the code/CLI/RPC backlog in <code>AGENTS.md §15.K</code>, referencing this spec and citing doc PRs in every code review.</li>
+<li><strong>Docs parity watch</strong> — <code>@docs-core</code> + subsystem owners must keep <code>README.md</code>, this overview, <code>docs/developer_handbook.md</code>, and <code>docs/apis_and_tooling.md</code> aligned whenever selectors, presence proofs, or telemetry knobs evolve (see <code>AGENTS.md §15.L</code>). Call out any lagging doc delta in PR descriptions until parity is restored.</li>
+</ul>
+<h2 id="execution-backlog--ownership-handoff"><a class="header" href="#execution-backlog--ownership-handoff">Execution Backlog &amp; Ownership Handoff</a></h2>
+<p>Engineering work proceeds against the backlog enumerated in <code>AGENTS.md §§0.6, 15.A–15.J</code>. Each subsection is mapped to canonical file paths and telemetry hooks so ownership is explicit:</p>
+<ul>
+<li><strong>Spec &amp; Quality guardrails</strong> — All teams must prove spec/implementation alignment (<code>AGENTS.md:93-101</code>) before writing code. File doc diffs first, cite the Document Map owner, and attach the standard test cadence transcript (<code>just lint</code>, <code>just fmt</code>, <code>just test-fast</code>, tiered <code>just test-full</code>, <code>cargo test -p the_block --test replay</code>, settlement audit, <code>scripts/fuzz_coverage.sh</code>) to every review. Observability for new surfaces must route through <code>node/src/telemetry</code>, <code>metrics-aggregator/</code>, and <code>monitoring/</code>, with <code>/wrappers</code> documentation updates in <code>docs/operations.md</code>.</li>
+<li><strong>Governance + treasury</strong> — Governance, ledger, CLI, explorer, and telemetry artifacts need multi-stage treasury approvals, attested release bundles, disbursement lag/failure metrics, and deterministic replay coverage. Work-in-progress lives in <code>governance/</code>, <code>node/src/governance</code>, <code>node/src/treasury_executor.rs</code>, <code>cli/src/governance</code>, <code>docs/economics_and_governance.md</code>, and <code>docs/operations.md</code>.</li>
+<li><strong>Compute-market SLA controls</strong> — <code>node/src/compute_market/**</code>, <code>monitoring/</code>, and explorer dashboards must implement SLA slashing, fairness windows, deterministic receipt replays, and operator remediation tooling. Documentation resides in <code>docs/architecture.md#compute-marketplace</code>.</li>
+<li><strong>Networking + range-boost reliability</strong> — <code>node/src/net</code>, <code>node/src/p2p</code>, <code>range_boost/</code>, <code>crates/transport</code>, and <code>metrics-aggregator/</code> must support WAN-scale QUIC chaos drills with runbooks documented in <code>docs/architecture.md#networking-and-propagation</code> and <code>docs/operations.md#bootstrap-and-configuration</code>.</li>
+<li><strong>Wallet/remote signer UX</strong> — <code>cli/src/wallet</code>, <code>node/src/identity</code>, <code>remote_signer/</code>, and <code>tests/remote_signer_*.rs</code> are responsible for batched signer discovery, telemetry, and LE portal updates mirrored into <code>docs/security_and_privacy.md</code> and <code>docs/apis_and_tooling.md</code>.</li>
+<li><strong>Bridges + DEX</strong> — <code>bridges/</code>, <code>dex/</code>, explorer timelines, and <code>docs/architecture.md#token-bridges</code>/<code>#dex-and-trust-lines</code> must cover signer-set payloads, telemetry pipelines, proofs, and release-verifier workflows documented under <code>docs/security_and_privacy.md#release-provenance-and-supply-chain</code>.</li>
+<li><strong>Storage + dependency drills</strong> — <code>node/src/simple_db</code>, <code>storage/</code>, <code>storage_market/</code>, <code>coding/</code>, and CI harnesses inside <code>scripts/</code>/<code>formal/</code> run snapshot/restore drills, dependency fault simulations, and ledger parity checks. Procedures live in <code>docs/operations.md#storage-and-state</code>.</li>
+<li><strong>Energy governance/interfaces</strong> — <code>governance/</code>, <code>node/src/energy.rs</code>, <code>cli/src/energy.rs</code>, <code>crates/energy-market</code>, <code>crates/oracle-adapter</code>, and <code>services/mock-energy-oracle</code> need production-grade oracle verification, governance payloads (batch vs real-time), schema-aligned CLI workflows, telemetry dashboards, CI gates, and runbooks per <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>, <code>docs/economics_and_governance.md</code>, <code>docs/operations.md#energy-market-operations</code>, <code>docs/security_and_privacy.md#energy-oracle-safety</code>, and <code>docs/testnet/ENERGY_QUICKSTART.md</code>.</li>
+<li><strong>Docs &amp; onboarding parity</strong> — Track outstanding README/overview/handbook/API diffs inside <code>AGENTS.md §15.L</code> and close them in the same PRs that modify code. mdBook (<code>docs/</code>) is the spec: run <code>mdbook build docs</code> before submitting doc changes and reject reviews that change behaviour without touching the docs listed above.</li>
+</ul>
+<p>Every TODO added to the codebase must be mirrored into <code>AGENTS.md §15</code> with a pointer back to the files above so the backlog remains synchronized across documentation, telemetry, and implementation.</p>
+<h3 id="ad--targeting-readiness-checklist"><a class="header" href="#ad--targeting-readiness-checklist">Ad + Targeting readiness checklist</a></h3>
+<ul>
+<li><strong>When to run</strong> — Any PR that touches <code>crates/ad_market</code>, <code>node/src/rpc/ad_market.rs</code>, <code>node/src/{ad_policy_snapshot.rs,ad_readiness.rs,localnet,range_boost,gateway/dns.rs,read_receipt.rs,service_badge.rs}</code>, <code>cli/src/{ad_market.rs,gov.rs,explorer.rs}</code>, <code>metrics-aggregator/**</code>, or <code>monitoring/**</code>.</li>
+<li><strong>Commands (attach transcripts/CI links)</strong> — <code>just lint</code>, <code>just fmt</code>, <code>just test-fast</code>, <code>just test-full</code>, <code>cargo test -p the_block --test replay</code>, <code>cargo test -p the_block --test settlement_audit --release</code>, and <code>scripts/fuzz_coverage.sh</code>. Record the fuzz <code>.profraw</code> summary alongside the console logs so reviewers can verify the guardrail cited in <code>AGENTS.md §0.6</code>.</li>
+<li><strong>Telemetry proof</strong> — When selector, privacy, or readiness metrics change, run <code>npm ci --prefix monitoring &amp;&amp; make monitor</code>, capture the before/after Grafana JSON diff or screenshot for the <code>Ad Market Readiness</code> dashboard, and note the refreshed <code>/wrappers</code> payload hash exported by <code>metrics-aggregator</code>.</li>
+<li><strong>Skipped steps</strong> — If an owner-approved skip is required (for example, <code>just test-full</code> unhealthy in CI), document the approver and reason directly in the PR description and mirror it in the worklog so governance reviewers can see the exception trail.</li>
+</ul>
 
                     </main>
 

@@ -104,7 +104,7 @@ Added structured logging to all drain operations:
 6. **Receipt Drain Operations** - Operations/sec rate
 7. **Pending Receipts by Market** - Depth gauge for each market
 8. **Cumulative Receipts by Market** - Total receipts over time
-9. **Settlement Volume by Market (CT)** - Token settlement amounts
+9. **Settlement Volume by Market (BLOCK)** - Token settlement amounts
 10. **Receipt Throughput** - Receipts/minute rate by market
 
 **Alerts Configured:**
@@ -471,10 +471,10 @@ test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured
 | `receipts_energy_per_block` | IntGauge | Energy receipts in current block |
 | `receipts_ad_per_block` | IntGauge | Ad receipts in current block |
 | `receipt_bytes_per_block` | IntGauge | Serialized receipt bytes |
-| `receipt_settlement_storage_ct` | Gauge | Storage settlement amount (CT) |
-| `receipt_settlement_compute_ct` | Gauge | Compute settlement amount (CT) |
-| `receipt_settlement_energy_ct` | Gauge | Energy settlement amount (CT) |
-| `receipt_settlement_ad_ct` | Gauge | Ad settlement amount (CT) |
+| `receipt_settlement_storage` | Gauge | Storage settlement amount (BLOCK) |
+| `receipt_settlement_compute` | Gauge | Compute settlement amount (BLOCK) |
+| `receipt_settlement_energy` | Gauge | Energy settlement amount (BLOCK) |
+| `receipt_settlement_ad` | Gauge | Ad settlement amount (BLOCK) |
 | `receipt_encoding_failures_total` | Counter | **CRITICAL** - Should be 0 |
 | `receipt_validation_failures_total` | Counter | Malformed receipts detected |
 | `receipt_decoding_failures_total` | Counter | Block read failures |

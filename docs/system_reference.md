@@ -67,7 +67,7 @@ Never reorder or remove fields; instead add new suffix fields and bump the hash 
 ### 2.1 Account abstraction specifics
 
 - Handle registry (`node/src/identity/handle_registry.rs`) replaces the former `account_abstraction.md`: handles normalize via NFKC, reject `sys/` & `admin/` prefixes, and require strictly increasing nonces. Records are stored under `simple_db::names::IDENTITY_HANDLES`.
-- Fee hooks (`node/src/fees.rs`, `node/src/fee/policy.rs`) enforce percentile‑based fee floors per lane. Wallets and RPC clients read `FeeLane` metadata to decide whether to dip into rebates before CT.
+- Fee hooks (`node/src/fees.rs`, `node/src/fee/policy.rs`) enforce percentile‑based fee floors per lane. Wallets and RPC clients read `FeeLane` metadata to decide whether to dip into rebates before BLOCK.
 - When submitting transactions:
   - Signature threshold vs signer set is checked before admission; failing multisig payloads are staged in `pending_multisig`.
   - Session keys (account‑level) live in sled with expiration timestamps so headless clients can register ephemeral signing keys.
@@ -82,7 +82,7 @@ next = max(prev + Δ, 1)
 ```
 
 - `TARGET_GAS_PER_BLOCK = 1_000_000`.
-- `Δ` is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑CT per byte).
+- `Δ` is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑BLOCK per byte).
 - Telemetry: `base_fee` gauge plus `mempool_fee_floor_*` histograms show nudges per block. `node/tests/base_fee.rs` exercises the path.
 
 ### 2.3 QoS accounting, TTL math, and RPC surfaces
@@ -90,7 +90,7 @@ next = max(prev + Δ, 1)
 - Admission + per‑sender limits (`node/src/mempool/admission.rs`): `AdmissionState::reserve_sender` tracks outstanding slots keyed by `(sender, lane)`. Defaults:
   - `max_pending_per_account = 16` (overrideable via `contract-cli node mempool set-cap` or `TB_MEMPOOL_ACCOUNT_CAP`).
   - `max_mempool_size_{consumer,industrial} = 1_024` entries each.
-  - `min_fee_per_byte_{consumer,industrial}` defaults to 1 µCT/byte but is immediately clamped to the rolling floor.
+  - `min_fee_per_byte_{consumer,industrial}` defaults to 1 µBLOCK/byte but is immediately clamped to the rolling floor.
 - Rolling floor: every admitted transaction records its `fee_per_byte`. The percentile window is configured by governance (`fee_floor_window`, `fee_floor_percentile`) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post `mempool.qos_event` we log overrides (`FEE_FLOOR_WARNING_TOTAL` / `FEE_FLOOR_OVERRIDE_TOTAL`).
 - TTL ordering: `MempoolEntry::expires_at = timestamp_millis + (tx_ttl * 1000)` (`node/src/lib.rs:806–834`). `mempool_cmp` sorts by:
   1. `tip / serialized_size` (descending),
@@ -114,13 +114,13 @@ next = max(prev + Δ, 1)
 
 #### `mempool.stats` payload
 
-RPC `mempool.stats` (`node/src/rpc/mod.rs:1445`) reads the current lane snapshot without mutating the pool. Each field is in milliseconds or micro‑CT as noted below.
+RPC `mempool.stats` (`node/src/rpc/mod.rs:1445`) reads the current lane snapshot without mutating the pool. Each field is in milliseconds or micro‑BLOCK as noted below.
 
 | Field | Meaning |
 | --- | --- |
 | `size` | Number of entries in the requested lane. |
 | `age_p50` / `age_p95` | Milliseconds since admission (median / 95th percentile). |
-| `fee_p50` / `fee_p90` | Raw `tip` percentiles (µCT). Divide by serialized size for fee per byte. |
+| `fee_p50` / `fee_p90` | Raw `tip` percentiles (µBLOCK). Divide by serialized size for fee per byte. |
 | `fee_floor` | Current percentile floor after min‑fee clamps. |
 
 Example:
@@ -264,7 +264,7 @@ When consumer latency jumps above `comfort_threshold_p90` (governance parameter)
   - Success ➜ increment `proof_successes`, no slashing.
   - Failure ➜ deduct `min(price_per_block, deposit)` and increment `proof_failures`.
 - CLI/RPC:
-  - `storage_market.provider_balances`, `storage_market.audit_log`, and explorer views show deposits, accrued CT, and slashes.
+  - `storage_market.provider_balances`, `storage_market.audit_log`, and explorer views show deposits, accrued BLOCK, and slashes.
 
 ### 5.4 SimpleDb keyspaces
 
@@ -290,8 +290,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 ### 5.7 Rent escrow, releases, and proofs
 
 - `RentEscrow` (`node/src/storage/fs.rs`) persists deposits in `SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)`. API summary:
-  - `lock(id, depositor, amount, expiry)` writes a record and increments `RENT_ESCROW_LOCKED_CT_TOTAL`.
-  - `release(id)` removes the record, refunds 90 % to the depositor, burns 10 % (tracked via `RENT_ESCROW_REFUNDED_CT_TOTAL`/`RENT_ESCROW_BURNED_CT_TOTAL`), and returns `(account, refund, burn)`.
+- `lock(id, depositor, amount, expiry)` writes a record and increments `RENT_ESCROW_LOCKED_TOTAL`.
+- `release(id)` removes the record, refunds 90 % to the depositor, burns 10 % (tracked via `RENT_ESCROW_REFUNDED_TOTAL`/`RENT_ESCROW_BURNED_TOTAL`), and returns `(account, refund, burn)`.
   - `purge_expired(now)` sweeps stale locks and emits identical telemetry. Expiry checks happen before every rent escrow lookup so operators only need to call it when clocks skew.
 - Receipts tie escrows to manifests: `storage::pipeline` pre-funds rent via escrow IDs, and the settlement engine drops a receipt only when both manifest and escrow landed on disk. Explorer endpoints display the rent escrow balance alongside the `StoreReceipt`.
 
@@ -333,9 +333,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - Settlement engine (`node/src/compute_market/settlement.rs`) maintains:
   - `SettleMode` (`DryRun`, `Armed`, `Real`) toggled via governance or CLI.
   - `SlaRecord { job_id, provider, buyer, provider_bond, consumer_bond, deadline, scheduled_at, proofs: Vec<ProofBundle> }`.
-  - `SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned_ct, refunded_ct, proofs }`.
+  - `SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned, refunded, proofs }`.
 - Automation:
-  - Violations call `SlaOutcome::Violated { reason, automated }`, burn the lesser of the bond and configured slash amount (`COMPUTE_SLA_AUTOMATED_SLASH_TOTAL`, `SLASHING_BURN_CT_TOTAL`).
+- Violations call `SlaOutcome::Violated { reason, automated }`, burn the lesser of the bond and configured slash amount (`COMPUTE_SLA_AUTOMATED_SLASH_TOTAL`, `SLASHING_BURN_TOTAL`).
   - Dashboards plot `COMPUTE_SLA_PENDING_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL`, and `COMPUTE_SLA_NEXT_DEADLINE_TS`.
 - Operator workflow:
   1. Arm settlement via `compute_arm_real` RPC, wait for the `activate_at` block height, then advance to `SettleMode::Real`.
@@ -403,8 +403,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - Constant-product pools live in `dex/src/amm.rs`.
 - Share minting:
   - First LP: `share = sqrt(ct * it)`.
-  - Subsequent LPs: `share = min(total_shares * ct / reserve_ct, total_shares * it / reserve_it)`.
-- Swaps preserve `k = reserve_ct * reserve_it`; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.
+  - Subsequent LPs: `share = min(total_shares * ct / reserve, total_shares * it / reserve_it)`.
+- Swaps preserve `k = reserve * reserve_it`; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.
 
 ### 7.2 Trust-line routing
 
@@ -488,7 +488,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - `node/src/gateway/dns.rs` maintains auctions (`DomainAuctionRecord`) and stakes (`StakeEscrowRecord`) under `SimpleDb::open_named(names::GATEWAY_DNS, path)`.
 - Auction lifecycle:
   1. Seller lists via `contract-cli gateway domain list <domain> <min_bid> --seller <acct> ...`.
-  2. Bidders lock stake references (`register_stake`) and submit bids (`contract-cli gateway domain bid ... --stake-ref ref1`). Bids must exceed both `min_bid_ct` and previous `highest_bid`.
+  2. Bidders lock stake references (`register_stake`) and submit bids (`contract-cli gateway domain bid ... --stake-ref ref1`). Bids must exceed both `min_bid` and previous `highest_bid`.
   3. Seller (or governance) completes the sale (`contract-cli gateway domain complete`) once `end_ts` passes; ledger events (`LedgerEventRecord`) debit bidders, credit seller/royalty/treasury, and refund unused stake.
   4. If no bids, `cancel` reopens the domain.
 - Escrow bookkeeping handles stake reuse, lock/unlock flows, and ledger references for audit reports.
@@ -514,7 +514,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - CLI runbook:
   1. `contract-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600` (custom script) polls the RPC `gateway.reads_since`.
   2. `contract-cli gateway mobile-cache flush` before maintenance to force anchors.
-  3. Inspect anchors via `compute_market.recent_roots` to ensure READ_SUB_CT credits landed.
+  3. Inspect anchors via `compute_market.recent_roots` to ensure READ_SUB credits landed.
 
 ### 9.3 Mobile gateway cache
 
@@ -575,9 +575,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 ### 10.2 Fee rebates
 
-- Rebates are ledger entries keyed to sender accounts. `node/src/fees/mod.rs` charges consumer traffic by applying rebates first; `FeeLane::Industrial` bypasses rebates and bills direct CT.
+- Rebates are ledger entries keyed to sender accounts. `node/src/fees/mod.rs` charges consumer traffic by applying rebates first; `FeeLane::Industrial` bypasses rebates and bills direct BLOCK.
 - RPC: `peer.rebate_status`, `peer.rebate_claim`. CLI: `contract-cli fees status`, `contract-cli fees claim`.
-- Ordering: when submitting a transaction `submit_tx` calculates `total_consumer = amount_consumer + fee`, subtracts available rebate credits, and only then debits CT.
+- Ordering: when submitting a transaction `submit_tx` calculates `total_consumer = amount_consumer + fee`, subtracts available rebate credits, and only then debits BLOCK.
 
 ### 10.3 Governance parameters
 
@@ -731,8 +731,8 @@ See Appendix B for detailed metric descriptions. Key highlights:
 
 | Metric | Meaning | Labels | Units | Suggested alert |
 | --- | --- | --- | --- | --- |
-| `base_fee` | Current per-byte base fee | n/a | micro‑CT | Alert if `>10x` baseline for >5 min (congestion). |
-| `mempool_fee_floor_{consumer,industrial}` | Rolling fee floors | lane | micro‑CT | Alert if consumer floor moves >50 % in <60 s (possible spam). |
+| `base_fee` | Current per-byte base fee | n/a | micro‑BLOCK | Alert if `>10x` baseline for >5 min (congestion). |
+| `mempool_fee_floor_{consumer,industrial}` | Rolling fee floors | lane | micro‑BLOCK | Alert if consumer floor moves >50 % in <60 s (possible spam). |
 | `MEMPOOL_EVICTIONS_TOTAL` | Evicted tx count | lane | count | Alert if derivative spikes unexpectedly. |
 | `PARTITION_EVENTS_TOTAL` | Partition incidents | n/a | count | Alert on increments; cross‑link to runbook. |
 | `QUIC_HANDSHAKE_FAIL_TOTAL` | Failed QUIC handshakes | peer,reason | count | Alert on surge for specific provider. |
@@ -740,7 +740,7 @@ See Appendix B for detailed metric descriptions. Key highlights:
 | `MOBILE_CACHE_*` | Cache hits/misses/sweeps | action | count | Alert on sustained misses and queue overflows. |
 | `COMPUTE_SLA_VIOLATIONS_TOTAL` | SLA breaches | reason | count | Alert >0 while in `SettleMode::Real`. |
 | `BRIDGE_CHALLENGE_TOTAL` | Bridge challenges | asset | count | Alert if >0 without operator action. |
-| `TREASURY_BALANCE_CT` | Treasury CT balance | n/a | CT | Alert if drops >X% per day outside scheduled disbursements. |
+| `TREASURY_BALANCE` | Treasury BLOCK balance | n/a | BLOCK | Alert if drops >X% per day outside scheduled disbursements. |
 | `WRAPPER_DEPENDENCY_POLICY_VIOLATION` | Dependency drift | wrapper | count | Alert immediately; governance override required. |
 
 ### 13.2 Probe CLI cookbook
@@ -770,7 +770,7 @@ Pair probes with dashboards (see `monitoring/README.md`) and aggregator targets 
 
 ### Appendix A · RPC Method Index
 
-_All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house `httpd` router. Every request must carry `{"jsonrpc":"2.0","id":<id>,"method":...,"params":...}`; responses mirror the standard result/error envelope. Objects below list field names, types, and whether they are optional (`?`). Unless noted otherwise, numeric fee values are expressed in micro-CT and heights/epochs use unsigned 64-bit integers._
+_All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house `httpd` router. Every request must carry `{"jsonrpc":"2.0","id":<id>,"method":...,"params":...}`; responses mirror the standard result/error envelope. Objects below list field names, types, and whether they are optional (`?`). Unless noted otherwise, numeric fee values are expressed in micro-BLOCK and heights/epochs use unsigned 64-bit integers._
 
 #### ad_market.* (`node/src/rpc/ad_market.rs`)
 **Objects**
@@ -782,10 +782,10 @@ _All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house `httpd` router. E
 - `DistributionPolicy`: `{viewer_percent, host_percent, hardware_percent, verifier_percent}` (unchanged) but now annotated in responses with `selector_overrides?` whenever governance sets selector-specific payouts.
 - `CohortPriceSnapshot`: `{key:CohortKeyV2, price_per_mib_usd_micros, selector_budget:Vec<SelectorBidSpec>, target_utilization_ppm, observed_utilization_ppm, privacy_budget_remaining_ppm}`.
 - `BudgetSnapshot`: `{generated_at_micros,u64, config:BudgetBrokerConfig, privacy_budget:{total_ppm,u32, remaining_ppm,u32}, campaigns:[{id, kappa,f64, epoch_spend_total_usd_micros, remaining_usd_micros, selector_budget:Vec<SelectorBidSpec>, cohorts[CohortKeyV2]}], uplift?:{selector:String, holdout_fraction_bps,u16, estimated_roas,f64}[]}`.
-- `ReadinessSnapshot`: `{ready,bool, window_secs,u32, unique_viewers,u64, host_count,u64, provider_count,u64, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, segments:{domain_tier->{supply_ppm, readiness_score}, interest_tag->{supply_ppm, readiness_score}, presence_bucket->{freshness_histogram, ready_slots}}, privacy_budget:{remaining_ppm,u32, denied:int}, uplift_summary:{selector:String, holdout_fraction_bps,u16, delta_ctr_ppm,i64}, distribution?}`.
+- `ReadinessSnapshot`: `{ready,bool, window_secs,u32, unique_viewers,u64, host_count,u64, provider_count,u64, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, segments:{domain_tier->{supply_ppm, readiness_score}, interest_tag->{supply_ppm, readiness_score}, presence_bucket->{freshness_histogram, ready_slots}}, privacy_budget:{remaining_ppm,u32, denied:int}, uplift_summary:{selector:String, holdout_fraction_bps,u16, deltar_ppm,i64}, distribution?}`.
 - `PolicySnapshot`: stored in `node/ad_policy_snapshot.rs`; serialized as `{epoch,u64, cohort_schema_version,u16, selector_weights[], governance_hash}`.
-- `CampaignRegistration`: payload accepted by `ad_market::campaign_from_value`. Schema: `{id,String, advertiser_account,String, creatives[], metadata, selector_budget:Vec<SelectorBidSpec>, interest_tags:Vec<InterestTagId>, badges:Vec<BadgeId>, presence_filters?:{allow?:PresenceBucketSpec[], deny?:PresenceBucketSpec[]}, domain_filters?:{include?:DomainTier[], exclude?:DomainTier[]}, conversion_value_rules?:{currency_code?,"USD" default, default_value_usd_micros?, value_ct?, attribution_window_secs?, selector_weights?:[{selector_id, weight_ppm,u32}]}}`.
-- `ConversionRecord`: `{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, value_ct?, currency_code?, attribution_window_secs?, selector_weights?:[{selector_id,String, value_weight_ppm,u32}], occurred_at_micros?}`. Requires `Authorization: Advertiser <account>:<token>`; token hash stored under `metadata["conversion_token_hash"]`.
+- `CampaignRegistration`: payload accepted by `ad_market::campaign_from_value`. Schema: `{id,String, advertiser_account,String, creatives[], metadata, selector_budget:Vec<SelectorBidSpec>, interest_tags:Vec<InterestTagId>, badges:Vec<BadgeId>, presence_filters?:{allow?:PresenceBucketSpec[], deny?:PresenceBucketSpec[]}, domain_filters?:{include?:DomainTier[], exclude?:DomainTier[]}, conversion_value_rules?:{currency_code?,"USD" default, default_value_usd_micros?, value?, attribution_window_secs?, selector_weights?:[{selector_id, weight_ppm,u32}]}}`.
+- `ConversionRecord`: `{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, value?, currency_code?, attribution_window_secs?, selector_weights?:[{selector_id,String, value_weight_ppm,u32}], occurred_at_micros?}`. Requires `Authorization: Advertiser <account>:<token>`; token hash stored under `metadata["conversion_token_hash"]`.
 - `PresenceCohortSummary`: `{bucket:PresenceBucket, ready_slots,u64, privacy_guardrail:String, selector_prices:Vec<SelectorBidSpec>}` returned by `ad_market.list_presence_cohorts`.
 
 **Common errors**: `-32602` invalid params, `-32603` internal/disabled, `-32000` duplicate campaign, `-32001` unknown campaign, `-32002` unknown creative, `-32030..-32033` advertiser auth failures.
@@ -846,9 +846,9 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
-| `bridge.relayer_status` | `RelayerStatusRequest` | `RelayerInfo {relayer,bond_ct,pending_rewards_ct,duty_state}` | bridge error codes |
+| `bridge.relayer_status` | `RelayerStatusRequest` | `RelayerInfo {relayer,bond,pending_rewards,duty_state}` | bridge error codes |
 | `bridge.bond_relayer` | `BondRelayerRequest` | `{status:"ok"}` | `-32014` insufficient bond, storage errors |
-| `bridge.claim_rewards` | `ClaimRewardsRequest` | `{claimed_ct, pending_ct}` | `-32015/-32017` reward validation errors |
+| `bridge.claim_rewards` | `ClaimRewardsRequest` | `{claimed, pending}` | `-32015/-32017` reward validation errors |
 | `bridge.verify_deposit` | `VerifyDepositRequest` | `DepositReceipt` (+ emission details) when proof checks succeed | proof errors `-32002`, replay `-32006`, storage `-32013` |
 | `bridge.request_withdrawal` | `RequestWithdrawalRequest` | `PendingWithdrawalInfo` plus commitment hash | duplicates `-32007`, insufficient bond `-32014` |
 | `bridge.challenge_withdrawal` | `ChallengeWithdrawalRequest` | `{status:"ok", challenge:ChallengeRecord}` | `-32008` missing withdrawal, `-32009` already challenged |
@@ -861,7 +861,7 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | `bridge.reward_accruals` | `RewardAccrualsRequest` | `{items:[RewardAccrualRecord], next_cursor?}` | none |
 | `bridge.settlement_log` | `SettlementLogRequest` | `{items:[SettlementRecord], next_cursor?}` | none |
 | `bridge.dispute_audit` | `DisputeAuditRequest` | `{items:[DisputeAuditRecord], next_cursor?}` | none |
-| `bridge.relayer_accounting` | `RelayerAccountingRequest` | `{relayer, stake_ct, duty_totals, slash_totals}` | none |
+| `bridge.relayer_accounting` | `RelayerAccountingRequest` | `{relayer, stake, duty_totals, slash_totals}` | none |
 | `bridge.duty_log` | `DutyLogRequest` | `{items:[DutyRecord], next_cursor?}` | none |
 | `bridge.deposit_history` | `DepositHistoryRequest` | `{items:[DepositReceipt], next_cursor?}` | none |
 | `bridge.slash_log` | `SlashLogRequest` | `{items:[SlashRecord], next_cursor?}` | none |
@@ -869,19 +869,19 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | `bridge.configure_asset` | `ConfigureAssetRequest` | `{status:"ok"}` after writing channel config | governance rejects via bridge error codes |
 
 #### Domain registry and gateway surfaces (`node/src/gateway/dns.rs`, `node/src/service_badge.rs`, `node/src/gateway/mobile_cache.rs`)
-DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auctions/stakes use sled-backed objects `{domain, owner, reserve_ct, bidders[], expires_at}`.
+DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auctions/stakes use sled-backed objects `{domain, owner, reserve, bidders[], expires_at}`.
 
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
 | `dns.publish_record` | `DnsRecord` JSON (TXT + proof metadata) | `{status:"ok", record_hash}` | schema validation errors surfaced via `gateway::dns::Error` codes (forwarded via `rpc_error`) |
-| `dns.list_for_sale` | `{domain,reserve_ct, ttl_blocks}` | `{status:"ok"}` once sale is staged | same as above |
-| `dns.place_bid` | `{domain,bid_ct,bidder}` | `{status:"ok", leading_bid}` | bidding window/price errors via dns error codes |
+| `dns.list_for_sale` | `{domain,reserve, ttl_blocks}` | `{status:"ok"}` once sale is staged | same as above |
+| `dns.place_bid` | `{domain,bid,bidder}` | `{status:"ok", leading_bid}` | bidding window/price errors via dns error codes |
 | `dns.complete_sale` | `{domain}` | `{status:"ok", new_owner}` | `not_found`, `auction_open` style dns errors |
 | `dns.cancel_sale` | `{domain}` | `{status:"ok"}` | dns errors |
-| `dns.register_stake` | `{domain,stake_ct}` | `{status:"ok", stake_id}` | dns errors |
+| `dns.register_stake` | `{domain,stake}` | `{status:"ok", stake_id}` | dns errors |
 | `dns.withdraw_stake` | `{stake_id}` | `{status:"ok"}` | dns errors |
-| `dns.stake_status` | `{stake_id?}` | `{stakes:[{domain, owner, stake_ct, expires_at}]}` or single entry when ID supplied | dns errors |
-| `dns.auctions` | `{domain?}` filter | `{auctions:[{domain,status,reserve_ct,bids,closes_at}]}` | dns errors |
+| `dns.stake_status` | `{stake_id?}` | `{stakes:[{domain, owner, stake, expires_at}]}` or single entry when ID supplied | dns errors |
+| `dns.auctions` | `{domain?}` filter | `{auctions:[{domain,status,reserve,bids,closes_at}]}` | dns errors |
 | `gateway.policy` | `{}` or filters (`region?`) | Current gateway policy JSON (rate limits, read-ack requirements, privacy toggles) | none |
 | `gateway.reads_since` | `{since_ms}` | `{count, buckets:[{ts_ms,count}]}` built from read-ack batches | none |
 | `gateway.venue_status` | `{venue_id}` | `{status:"ok", crowd_size, last_seen}` from `service_badge::venue_status_detail` | `-32602` missing venue_id |
@@ -909,7 +909,7 @@ DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auct
 | `compute_market.scheduler_stats` | none | Raw scheduler view (per-lane queues, fairness windows) | none |
 | `compute_market.scheduler_metrics` | none | `scheduler::Metrics` structure (latency, starvation counters, lane deadlines) | none |
 | `compute_market.recent_roots` | `{n?}` | Latest `n` micro-shard roots used for receipts | none |
-| `compute_market.provider_balances` | none | `{providers:[{id, pending_ct, settled_ct, sla_bond_ct}]}` | none |
+| `compute_market.provider_balances` | none | `{providers:[{id, pending, settled, sla_bond}]}` | none |
 | `compute_market.audit` | none | Extended audit log incl. fairness window snapshots, outstanding SLA records | `MarketError` codes |
 
 #### Configuration and consensus
@@ -917,7 +917,7 @@ DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auct
 | --- | --- | --- | --- |
 | `config.reload` | `{compaction_secs?, sample_rate_ppm?}` | `{status:"ok", sample_rate_ppm, compaction_secs}` and updates telemetry config | none (values sanitized) |
 | `consensus.difficulty` | `{window?}` | Returns difficulty window stats (EMA short/med/long, next target) | none |
-| `consensus.pos.register` | `{validator, stake_ct, proof}` | `{status:"ok"}` once validator registered | PoS errors (`-32060` range) |
+| `consensus.pos.register` | `{validator, stake, proof}` | `{status:"ok"}` once validator registered | PoS errors (`-32060` range) |
 | `consensus.pos.bond` | `{validator, stake_delta}` | `{status:"ok"}` | same |
 | `consensus.pos.unbond` | `{validator, amount}` | `{status:"ok"}` after queueing unbond | same |
 | `consensus.pos.slash` | `{validator, reason, proof}` | `{status:"ok"}` after slash recorded | same |
@@ -946,7 +946,7 @@ DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auct
 | --- | --- | --- | --- |
 | `light.headers` | `{from_height, count}` | `{headers:[{height,header_fields...}]}` chunked for device syncing | none |
 | `light.latest_header` | none | `{height, header}` for best tip | none |
-| `light_client.rebate_status` | `{device_id}` | `{pending_ct, claimed_ct, last_claim_ts, proofs[]}` | `-32030` unauthorized when device not registered |
+| `light_client.rebate_status` | `{device_id}` | `{pending, claimed, last_claim_ts, proofs[]}` | `-32030` unauthorized when device not registered |
 | `light_client.rebate_history` | `{device_id, limit?, cursor?}` | `{items:[{epoch,ct,receipt_hash}], next_cursor?}` | same as above |
 | `state_stream.subscribe` | WebSocket upgrade, no body | Streams `{height, root, accounts_changed, proofs}` batches | HTTP 429 when subscriber cap reached |
 
@@ -999,8 +999,8 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 #### Peer rebate, rent escrow, scheduler and storage helpers
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
-| `peer.rebate_status` | `{peer_id}` | `{pending_ct, claimed_ct, receipts[]}` | invalid ID |
-| `peer.rebate_claim` | `{peer_id}` | `{status:"ok", claimed_ct}` once receipts consumed | invalid ID |
+| `peer.rebate_status` | `{peer_id}` | `{pending, claimed, receipts[]}` | invalid ID |
+| `peer.rebate_claim` | `{peer_id}` | `{status:"ok", claimed}` once receipts consumed | invalid ID |
 | `rent.escrow.balance` | `{provider}` | `{balance, locked_until}` from `RentEscrow` sled | none |
 | `scheduler.stats` | none | Scheduler debug payload `{lanes:[{lane, queued, fairness_deadline_ms, slice_quota}], starvation_counters}` | none |
 
@@ -1013,7 +1013,7 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | `gov_params` | `{epoch?}` | `{params}` snapshot from `GOV_PARAMS` | none |
 | `gov_rollback_last` / `gov_rollback` | `{epoch}` / `{proposal_id, epoch}` | `{status:"ok"}` after reverting governance store | `-32043` rollback guardrails |
 | `gov.release_signers` | none | `{signers:[{name,pubkey}]} ` | none |
-| `gov.treasury.balance` | none | `{ct, industrial_ct, usd_estimate}` from treasury sled | none |
+| `gov.treasury.balance` | none | `{ct, industrial, usd_estimate}` from treasury sled | none |
 | `gov.treasury.balance_history` | `{start?, end?}` | `{entries:[{epoch,ct}], next_cursor?}` | none |
 | `gov.treasury.disbursements` | `{limit?, cursor?}` | `{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}` | none |
 | `service_badge_issue` | `{subject, badge}` (requires signer badge header) | `{status:"ok"}` and records issuance | `-32602` invalid payload, `-32050` when badge invalid |
@@ -1057,8 +1057,8 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
 | `submit_tx` | `{tx}` hex-encoded `SignedTransaction` plus optional `{max_fee, tip}` overrides | `{status:"ok"}` when enqueued; `{status:"error", error}` when mempool rejects | `-32602` malformed hex/transaction, propagation errors as strings |
-| `price_board_get` | `{lane}` | `{lane, base_fee, tip_histogram:[{percentile, tip_micro_ct}]}` mirroring `node/src/fees.rs` board | none |
-| `industrial` | none | `{backlog_bytes, utilization_ppm, multiplier}` from subsidy governor gauges (see § CT subsidy) | none |
+| `price_board_get` | `{lane}` | `{lane, base_fee, tip_histogram:[{percentile, tip_micro}]}` mirroring `node/src/fees.rs` board | none |
+| `industrial` | none | `{backlog_bytes, utilization_ppm, multiplier}` from subsidy governor gauges (see § BLOCK subsidy) | none |
 | `inflation.params` | none | `{emission_curve:{start_height,end_height,rate}, decay_factor, treasury_split}` read from `docs/economics_and_governance.md` constants | none |
 
 #### Staking / PoS helpers (`node/src/rpc/pos.rs`)
@@ -1074,7 +1074,7 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | `storage.manifests` | `{limit?}` | `{manifests:[{object_id, provider_id, shares, retention_blocks, status}]}` limited to latest `limit` entries | none |
 | `storage_provider_profiles` | none | `{providers:[{id, capacity_bytes, maintenance, uptime_ppm}]}` | none |
 | `storage_provider_set_maintenance` | `{provider, maintenance:bool}` | `{status:"ok"}` after toggling provider availability | `-32030` unknown provider |
-| `storage_incentives` | none | `{rent_escrow:{credits_ct, debits_ct}, rebate_rates:{lane, ppm}}` | none |
+| `storage_incentives` | none | `{rent_escrow:{credits, debits}, rebate_rates:{lane, ppm}}` | none |
  
 Storage challenges now expect `chunk_data` (hex-encoded bytes for the challenged chunk) and `proof` (hex-encoded `MerkleProof.path`) so providers must present the actual content that links back to `storage_root`.
 
@@ -1097,7 +1097,7 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `balance_overflow_reject_total` | IntCounter | – | count | Transactions rejected due to balance overflow |
 | `banned_peers_total` | IntGauge | – | count | Total peers currently banned |
 | `base_fee` | IntGauge | – | unitless | current base fee |
-| `base_reward_ct` | IntGauge | – | CT | base reward after logistic factor |
+| `base_reward` | IntGauge | – | BLOCK | base reward after logistic factor |
 | `block_apply_fail_total` | IntCounter | – | count | Blocks that failed atomic application |
 | `block_mined_total` | IntCounter | – | count | Total mined blocks |
 | `build_provenance_invalid_total` | IntCounter | – | count | Build provenance checks that failed |
@@ -1194,9 +1194,9 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `price_weight_applied_total` | IntCounter | – | count | Total price entries adjusted by reputation weight |
 | `priority_boost_total` | IntCounter | – | count | Jobs whose priority was boosted due to aging |
 | `privacy_sanitization_total` | IntCounter | – | count | Total sanitized payloads |
-| `proof_rebates_amount_total` | IntCounter | – | CT | Total CT awarded via proof rebates |
+| `proof_rebates_amount_total` | IntCounter | – | BLOCK | Total BLOCK awarded via proof rebates |
 | `proof_rebates_claimed_total` | IntCounter | – | count | Total proof rebate claims |
-| `proof_rebates_pending_total` | IntGauge | – | CT | Pending CT rebates awaiting claim |
+| `proof_rebates_pending_total` | IntGauge | – | BLOCK | Pending BLOCK rebates awaiting claim |
 | `quic_bytes_recv_total` | IntCounter | – | bytes | Total bytes received over QUIC |
 | `quic_bytes_sent_total` | IntCounter | – | bytes | Total bytes sent over QUIC |
 | `quic_conn_latency_seconds` | Histogram | – | seconds | QUIC connection handshake latency |
@@ -1219,9 +1219,9 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `remote_signer_latency_seconds` | Histogram | – | seconds | Remote signer latency |
 | `remote_signer_request_total` | IntCounter | – | count | Total remote signer requests |
 | `remote_signer_success_total` | IntCounter | – | count | Successful remote signer responses |
-| `rent_escrow_burned_ct_total` | IntCounter | – | CT | Total CT burned from rent escrow |
-| `rent_escrow_locked_ct_total` | IntGauge | – | CT | Total CT locked in rent escrow |
-| `rent_escrow_refunded_ct_total` | IntCounter | – | CT | Total CT refunded from rent escrow |
+| `rent_escrow_burned_total` | IntCounter | – | BLOCK | Total BLOCK burned from rent escrow |
+| `rent_escrow_locked_total` | IntGauge | – | BLOCK | Total BLOCK locked in rent escrow |
+| `rent_escrow_refunded_total` | IntCounter | – | BLOCK | Total BLOCK refunded from rent escrow |
 | `reputation_gossip_fail_total` | IntCounter | – | count | Reputation updates that failed verification or were stale |
 | `reputation_gossip_latency_seconds` | Histogram | – | seconds | Propagation latency for reputation updates |
 | `retrieval_failure_total` | IntCounter | – | count | Total failed proof-of-retrievability challenges |
@@ -1249,7 +1249,7 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `shielded_pool_size` | IntGauge | – | unitless | Number of pending shielded nullifiers |
 | `shielded_tx_total` | IntCounter | – | count | Total shielded transactions accepted |
 | `sigverify_ops_total` | IntCounter | – | count | Total number of signature verifications measured via perf counters |
-| `slashing_burn_ct_total` | IntCounter | – | CT | Total CT burned from slashing penalties |
+| `slashing_burn_total` | IntCounter | – | BLOCK | Total BLOCK burned from slashing penalties |
 | `snapshot_created_total` | IntCounter | – | count | Total snapshots created |
 | `snapshot_duration_seconds` | Histogram | – | seconds | Snapshot operation duration |
 | `snapshot_fail_total` | IntCounter | – | ratio | Total snapshot operation failures |
@@ -1308,7 +1308,7 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | --- | --- | --- |
 | `default` | Legacy chain state (fallback). | `chain`, `accounts`. |
 | `bridge` | Bridge headers, pending withdrawals. | `header:<height>`, `withdrawal:<commitment>`. |
-| `compute_settlement` | Settlement engine state (balances, audit log). | `ledger_ct`, `ledger_it`, `sla_queue`, `sla_history`. |
+| `compute_settlement` | Settlement engine state (balances, audit log). | `ledger`, `ledger_it`, `sla_queue`, `sla_history`. |
 | `dex_storage` | Order book, trades, escrow locks, AMM pools. | `book`, `trade:*`, `escrow`, `amm/<pool_id>`. |
 | `gateway_dns` | Domain auctions, stakes, ownership. | `auction:<domain>`, `stake:<ref>`, `ownership:<domain>`. |
 | `gateway_ad_readiness` | Readiness snapshots for ad flows. | `snapshot:<epoch>`. |
@@ -1350,7 +1350,7 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 | `fairshare_global_max_ppm` | 250 000 | QoS cap per account in parts‑per‑million. |
 | `burst_refill_rate_per_s_ppm` | 500 000 (≈30 tx/min) | Token bucket refill rate. |
 | `beta_storage_sub`, `gamma_read_sub`, `kappa_cpu_sub`, `lambda_bytes_out_sub` | 50/20/10/5 | Subsidy multipliers (basis points). |
-| `read_subsidy_*_percent` | Derived defaults | Split READ_SUB_CT across viewer/host/hardware/verifier/liquidity. |
+| `read_subsidy_*_percent` | Derived defaults | Split `READ_SUB` across viewer/host/hardware/verifier/liquidity. |
 | `kill_switch_subsidy_reduction` | 0 | Emergency knob to damp multipliers. |
 | `miner_reward_logistic_target`, `logistic_slope_milli`, `miner_hysteresis` | 100 / ~230 / 10 | Shape of logistic emission curve. |
 | `badge_expiry_secs`, `badge_issue/revoke_uptime_percent` | 30 days / 99 % / 95 % | Service badge policy. |
@@ -1382,7 +1382,7 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 ### Appendix H · AMM & HTLC Math Reference
 
 - AMM invariants:
-  - `k = reserve_ct * reserve_it`.
+  - `k = reserve * reserve_it`.
   - Share minting uses geometric mean for first LP; later LPs mint shares proportional to contributions.
   - No fee term yet; add `fee_bps` multiplier before recomputing `k` if needed.
 - HTLC scripts:

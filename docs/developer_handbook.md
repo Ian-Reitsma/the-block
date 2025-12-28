@@ -9,17 +9,17 @@ If you're new to blockchain development, here's a quick reference:
 | Concept | Plain English | Code/Docs |
 |---------|---------------|-----------|
 | **Block** | A batch of transactions bundled together and added to the chain every ~1 second | `node/src/blockchain`, [`architecture.md#ledger-and-consensus`](architecture.md#ledger-and-consensus) |
-| **Transaction** | A signed message (transfer CT, store data, run compute, etc.) | `node/src/transaction.rs`, [`architecture.md#transaction-and-execution-pipeline`](architecture.md#transaction-and-execution-pipeline) |
+| **Transaction** | A signed message (transfer BLOCK, store data, run compute, etc.) | `node/src/transaction.rs`, [`architecture.md#transaction-and-execution-pipeline`](architecture.md#transaction-and-execution-pipeline) |
 | **Mempool** | The "waiting room" for transactions before they're included in a block | `node/src/mempool`, [`architecture.md#mempool-admission-and-eviction`](architecture.md#mempool-admission-and-eviction) |
 | **Fee lane** | Priority tier (consumer, industrial, priority, treasury) affecting which transactions get included first | `node/src/fee`, [`economics_and_governance.md#fee-lanes-and-rebates`](economics_and_governance.md#fee-lanes-and-rebates) |
-| **Subsidy bucket** | How new CT is allocated (storage, read, compute rewards) | `node/src/blockchain/block_binary.rs`, [`economics_and_governance.md#ct-supply-and-sub-ledgers`](economics_and_governance.md#ct-supply-and-sub-ledgers) |
+| **Subsidy bucket** | How new BLOCK is allocated (storage, read, compute rewards) | `node/src/blockchain/block_binary.rs`, [`economics_and_governance.md#block-supply-and-sub-ledgers`](economics_and_governance.md#block-supply-and-sub-ledgers) |
 | **Proposal** | A governance request to change parameters or spend treasury funds | `governance/src/proposals.rs`, [`economics_and_governance.md#proposal-lifecycle`](economics_and_governance.md#proposal-lifecycle) |
 | **Macro-block** | Periodic checkpoint summarizing state for faster syncing | `node/src/macro_block.rs`, [`architecture.md#macro-blocks-and-finality`](architecture.md#macro-blocks-and-finality) |
 | **SNARK** | Small proof that computation was done correctly (without re-running it) | `node/src/compute_market/snark.rs`, [`architecture.md#compute-marketplace`](architecture.md#compute-marketplace) |
 | **Bridge** | Mechanism for moving assets between blockchains | `bridges/`, [`architecture.md#token-bridges`](architecture.md#token-bridges) |
 | **Trust line** | Credit relationship between parties for DEX trading | `dex/`, [`architecture.md#dex-and-trust-lines`](architecture.md#dex-and-trust-lines) |
 | **Read acknowledgement** | Proof that data was served to a client | `node/src/gateway/read_receipt.rs`, [`architecture.md#read-receipts`](architecture.md#read-receipts) |
-| **Treasury disbursement** | Moving CT from community fund (requires governance vote) | `governance/src/treasury.rs`, [`economics_and_governance.md#treasury-and-disbursements`](economics_and_governance.md#treasury-and-disbursements) |
+| **Treasury disbursement** | Moving BLOCK from community fund (requires governance vote) | `governance/src/treasury.rs`, [`economics_and_governance.md#treasury-and-disbursements`](economics_and_governance.md#treasury-and-disbursements) |
 | **SimpleDb** | Our key-value store with crash-safe writes (atomic rename) | `node/src/simple_db.rs`, [`operations.md`](operations.md) |
 | **Wrapper telemetry** | Metrics about which runtime/transport/storage providers are active | `node/src/telemetry.rs`, [`architecture.md#telemetry-and-instrumentation`](architecture.md#telemetry-and-instrumentation) |
 
@@ -63,7 +63,7 @@ If you're new to blockchain development, here's a quick reference:
 > |-----------|--------------|-------------|
 > | **Unit tests** | Test individual functions in isolation | `just test-fast` — always before commits |
 > | **Replay tests** | Re-run historical blocks to verify determinism (same input = same output, even on different CPUs) | `cargo test -p the_block --test replay` — when touching consensus/ledger |
-> | **Settlement audit** | Double-entry accounting check — ensures CT doesn't magically appear or disappear | `cargo test -p the_block --test settlement_audit --release` — when touching economics |
+> | **Settlement audit** | Double-entry accounting check — ensures BLOCK doesn't magically appear or disappear | `cargo test -p the_block --test settlement_audit --release` — when touching economics |
 > | **Fuzzing** | Throws random inputs at the code to find edge cases | `scripts/fuzz_coverage.sh` — for critical paths |
 > | **Chaos tests** | Simulate failures (packet loss, disk full, network partition) | Specific test files — when touching networking/storage |
 

@@ -45,7 +45,7 @@ BLOCK is the single currency that powers everything on The Block. Think of it li
 | **Dave** | Operates a smart meter that reports energy usage | Earns BLOCK for verified energy readings via the energy market |
 | **Eve** | Wants to run a machine-learning model | Pays BLOCK to Carol's compute; gets results back |
 
-**Note on Legacy Code:** You may see references to "CT" or "Consumer Token" in older code/docs - these now refer to BLOCK. The dual-token system (CT/IT) has been consolidated into a single BLOCK token.
+**Note on Legacy Code:** Replace any lingering references to the legacy consumer-token label with BLOCK so the docs reflect the single-token reality. Fields/metrics that still use `_ct` suffixes remain BLOCK-denominated ledger labels until the rename completes.
 
 ### Why "Self-Contained" Matters
 
@@ -78,7 +78,7 @@ Most blockchains focus only on sending money around. The Block goes further - it
 Instead of paying these providers per request with transaction fees (which gets expensive fast), The Block pays them automatically when new blocks are mined - similar to how Bitcoin pays miners, but for many types of useful work.
 
 ### For Developers: Design Pillars
-- **Reward verifiable service:** storage/compute/bandwidth subsidies (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`) are minted directly in each coinbase instead of billing per request. This eliminates micro-transaction overhead and makes services economically viable.
+- **Reward verifiable service:** storage/compute/bandwidth subsidies (`STORAGE_SUB`, `READ_SUB`, `COMPUTE_SUB`) are minted directly in each coinbase instead of billing per request. This eliminates micro-transaction overhead and makes services economically viable.
 
 - **Formula-driven monetary policy:** block rewards come from a single network-activity formula shared by the node, CLI, explorer, and telemetry (`docs/economics_and_governance.md#network-driven-block-issuance`). Governance can adjust smoothing bounds and baselines, but there are no hidden constants or manual issuance tweaks.
   The same telemetry counters (`economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, `economics_epoch_treasury_inflow_block`, plus `economics_block_reward_per_block`) feed Launch Governor's autopilot so testnet/mainnet promotions happen when throughput, volume, and treasury inflow all meet policy thresholds.
@@ -199,7 +199,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 
 Everything is kept in sync with `mdbook`; CI blocks merges if documentation drifts from the implementation.
 
-> **Note:** The canonical currency name is **BLOCK** and every user-facing surface should use BLOCK, but the ledger still exposes legacy `_ct` gauge/field names (e.g., `STORAGE_SUB_CT`). Treat those identifiers as BLOCK-denominated ledgers until all telemetry is migrated.
+> **Note:** The canonical currency name is **BLOCK** and every user-facing surface should use BLOCK; the ledger now exposes BLOCK-denominated buckets such as `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB`. The historical `_ct` suffix is retired, so rely on these names for current metrics.
 
 ---
 
@@ -221,7 +221,7 @@ If you're completely new to blockchains, here's the recommended reading path:
 1. **This README** — You're here! Get the big picture.
 2. **[`docs/overview.md`](docs/overview.md)** — Learn what lives where in the codebase.
 3. **[`docs/architecture.md`](docs/architecture.md)** — Start with "Ledger and Consensus" and "Transaction and Execution Pipeline" sections.
-4. **[`docs/economics_and_governance.md`](docs/economics_and_governance.md)** — Understand how CT flows and how decisions get made.
+4. **[`docs/economics_and_governance.md`](docs/economics_and_governance.md)** — Understand how BLOCK flows and how decisions get made.
 5. **[`docs/developer_handbook.md#environment-setup`](docs/developer_handbook.md#environment-setup)** — Set up your dev environment.
 6. **[`AGENTS.md`](AGENTS.md)** — The contributor bible. Read once, work like you wrote it.
 
