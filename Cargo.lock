@@ -164,6 +164,7 @@ dependencies = [
  "crypto_suite",
  "pqcrypto-dilithium",
  "sys",
+ "testkit",
 ]
 
 [[package]]
