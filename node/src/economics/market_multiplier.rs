@@ -131,14 +131,16 @@ impl MarketMultiplierController {
         let m_u = 1.0 + params.util_responsiveness * util_gap;
 
         // Cost-coverage multiplier: m^(c) = 1 + k_c × ((c × (1 + m_target)) / p - 1)
-        let m_c = if metric.effective_payout_block > 0.0 && metric.average_cost_block > 0.0 {
+        // With protection against extreme values from near-zero payouts
+        let m_c = if metric.effective_payout_block > 0.001 && metric.average_cost_block >= 0.0 {
             let m_target = (params.margin_target_bps as f64) / 10_000.0;
             let cost_with_margin = metric.average_cost_block * (1.0 + m_target);
-            let coverage_ratio = cost_with_margin / metric.effective_payout_block;
+            // Clamp coverage_ratio to prevent extreme multipliers from tiny payouts
+            let coverage_ratio = (cost_with_margin / metric.effective_payout_block).clamp(0.1, 10.0);
             let coverage_gap = coverage_ratio - 1.0;
             1.0 + params.cost_responsiveness * coverage_gap
         } else {
-            // No cost data → use utilization only
+            // No cost data or near-zero payout → use utilization only
             1.0
         };
 

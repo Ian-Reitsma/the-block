@@ -48,7 +48,7 @@
       "targets": ["treasury_balance"],
       "type": "graph",
       "time_range": "7d",
-      "description": "Treasury BLOCK and IT balance over time"
+      "description": "Treasury BLOCK balance over time"
     },
     {
       "title": "Executor Health",

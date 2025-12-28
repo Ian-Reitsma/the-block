@@ -12,7 +12,7 @@
 
 1. **✅ `node/src/telemetry/treasury.rs`** (207 lines)
    - 7 metrics counters: disbursements by status, execution errors, dependency failures
-   - 4 gauges: balance (BLOCK/IT), backlog by status
+   - 4 gauges: balance (BLOCK), backlog by status
    - 2 histograms: execution lag, executor tick duration
    - Public API for metric emission
    - Status and error reason label constants

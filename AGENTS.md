@@ -1168,7 +1168,7 @@ A trait-based, multi-provider signature verification system for energy market or
   - **Status**: ✅ Resolved — RPC now calls `GovStore::advance_disbursement_status`, enforcing vote windows and timelocks before execution.
 
 - `node/src/rpc/treasury.rs:621`: `rollback_disbursement()` has TODO: "Create compensating ledger entry if it was already executed"`
-  - **Status**: ✅ Resolved — `GovStore::cancel_disbursement` now differentiates cancellations vs rollbacks and records positive BLOCK/IT deltas when undoing an executed payout.
+  - **Status**: ✅ Resolved — `GovStore::cancel_disbursement` now differentiates cancellations vs rollbacks and records positive BLOCK deltas when undoing an executed payout.
 
 #### Missing Store Methods
 The following methods were referenced in early drafts but don't exist in `governance/src/store.rs`:

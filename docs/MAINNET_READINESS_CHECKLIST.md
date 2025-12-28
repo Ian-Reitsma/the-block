@@ -147,7 +147,7 @@ prometheus_query 'treasury_balance' # Should return data
   - [ ] "Queue Depth by Status" (current backlog)
   - [ ] "Execution Errors" (error types and count)
   - [ ] "Execution Lag" (queued-to-executed histogram)
-  - [ ] "Balance Trend" (BLOCK/IT over time)
+  - [ ] "Balance Trend" (BLOCK over time)
   - [ ] "Executor Health" (tick duration, success rate)
 - [ ] All panels use correct metric names
 - [ ] Alert thresholds configured:
@@ -452,7 +452,7 @@ grep -c "\[\] " docs/operations.md | head  # Checklists for each runbook
 ### 3.4 Metrics-Aggregator Endpoints
 
 - [ ] `/treasury/summary` returns:
-  - [ ] Current balance (BLOCK, IT)
+  - [ ] Current balance (BLOCK)
   - [ ] Backlog by status
   - [ ] Recent errors
   - [ ] Executor status

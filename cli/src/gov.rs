@@ -1894,7 +1894,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                     rollback_window_epochs: 1,
                 },
                 disbursement: governance::DisbursementDetails {
-                    destination: "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".to_string(),
+                    destination: "tb1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".to_string(),
                     amount: 100000000,
                     memo: "Example disbursement memo".to_string(),
                     scheduled_epoch: 180000,
