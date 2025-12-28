@@ -44,7 +44,7 @@ fn eviction_panic_rolls_back() {
     let dir = temp_dir("evict_panic");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
     bc.max_mempool_size_consumer = 1;
-    bc.add_account("a".into(), 10_000, 0).unwrap();
+    bc.add_account("a".into(), 100_000, 0).unwrap();
     bc.add_account("b".into(), 0, 0).unwrap();
     bc.mine_block("a").unwrap();
 

@@ -147,30 +147,34 @@ extract_errors() {
     echo "═══════════════════════════════════════════════════════════════" >> "$error_file"
 
     # Extract test failures with context
-    grep -n "^test .* \.\.\. FAILED" "$log_file" | while IFS=: read -r line_num test_line; do
-        echo "" >> "$error_file"
-        echo "───────────────────────────────────────────────────────────────" >> "$error_file"
-        echo "FAILED TEST at line $line_num in log:" >> "$error_file"
-        echo "───────────────────────────────────────────────────────────────" >> "$error_file"
-        echo "$test_line" >> "$error_file"
-        echo "" >> "$error_file"
+    # Look for failures section and extract failed test names
+    if grep -q "^failures:" "$log_file"; then
+        awk '/^failures:/{flag=1; next} /^test result:/{flag=0} flag && /^[[:space:]]+[a-zA-Z_]/ {print}' "$log_file" | while read -r test_name; do
+            test_name=$(echo "$test_name" | xargs)  # trim whitespace
+            [[ -z "$test_name" ]] && continue
 
-        # Extract test name
-        test_name=$(echo "$test_line" | sed -E 's/^test (.*) \.\.\. FAILED$/\1/')
+            echo "" >> "$error_file"
+            echo "───────────────────────────────────────────────────────────────" >> "$error_file"
+            echo "FAILED TEST: $test_name" >> "$error_file"
+            echo "───────────────────────────────────────────────────────────────" >> "$error_file"
+            echo "" >> "$error_file"
 
-        # Find the failure details in the failures section
-        echo "FAILURE DETAILS:" >> "$error_file"
-        # Look for the test name in the failures section (usually at the bottom)
-        grep -A 20 "^---- $test_name stdout ----" "$log_file" >> "$error_file" 2>/dev/null || echo "  (Details not found in log)" >> "$error_file"
+            # Find the failure details in the failures section
+            echo "FAILURE DETAILS:" >> "$error_file"
+            # Look for the test name in the failures section
+            grep -A 20 "^---- $test_name stdout ----" "$log_file" >> "$error_file" 2>/dev/null || echo "  (Details not found in log)" >> "$error_file"
 
-        echo "" >> "$error_file"
-        echo "HOW TO DEBUG:" >> "$error_file"
-        echo "  1. Run the specific test: cargo test $test_name -- --nocapture" >> "$error_file"
-        echo "  2. Check the assertion or panic message above" >> "$error_file"
-        echo "  3. Add println! debugging to see intermediate values" >> "$error_file"
-        echo "  4. Check if test fixtures or data need updating" >> "$error_file"
-        echo "" >> "$error_file"
-    done || echo "No test failures found" >> "$error_file"
+            echo "" >> "$error_file"
+            echo "HOW TO DEBUG:" >> "$error_file"
+            echo "  1. Run the specific test: cargo test $test_name -- --nocapture" >> "$error_file"
+            echo "  2. Check the assertion or panic message above" >> "$error_file"
+            echo "  3. Add println! debugging to see intermediate values" >> "$error_file"
+            echo "  4. Check if test fixtures or data need updating" >> "$error_file"
+            echo "" >> "$error_file"
+        done
+    else
+        echo "No test failures found" >> "$error_file"
+    fi
 
     echo "" >> "$error_file"
     echo "═══════════════════════════════════════════════════════════════" >> "$error_file"
@@ -180,7 +184,9 @@ extract_errors() {
     # Count issues
     error_count=$(grep -c "^error\[E[0-9]*\]:" "$log_file" || echo "0")
     warning_count=$(grep -c "^warning:" "$log_file" || echo "0")
-    failure_count=$(grep -c "^test .* \.\.\. FAILED" "$log_file" || echo "0")
+    # Extract failure count from "test result:" line (e.g., "test result: FAILED. 0 passed; 1 failed")
+    failure_count=$(grep "^test result:" "$log_file" | sed -n 's/.*; \([0-9]\+\) failed.*/\1/p' || echo "0")
+    [[ -z "$failure_count" ]] && failure_count="0"
 
     echo "" >> "$error_file"
     echo "Total Errors:   $error_count" >> "$error_file"
@@ -230,9 +236,13 @@ echo ""
 
 # Show quick summary from error log
 if [[ -f "$ERROR_LOG" ]]; then
-    error_count=$(grep "^Total Errors:" "$ERROR_LOG" | awk '{print $3}')
-    warning_count=$(grep "^Total Warnings:" "$ERROR_LOG" | awk '{print $3}')
-    failure_count=$(grep "^Total Failures:" "$ERROR_LOG" | awk '{print $3}')
+    error_count=$(grep "^Total Errors:" "$ERROR_LOG" | awk '{print $3}' || echo "0")
+    warning_count=$(grep "^Total Warnings:" "$ERROR_LOG" | awk '{print $3}' || echo "0")
+    failure_count=$(grep "^Total Failures:" "$ERROR_LOG" | awk '{print $3}' || echo "0")
+
+    [[ -z "$error_count" ]] && error_count="0"
+    [[ -z "$warning_count" ]] && warning_count="0"
+    [[ -z "$failure_count" ]] && failure_count="0"
 
     echo -e "${BLUE}SUMMARY:${NC}"
     echo -e "  Errors:   ${RED}$error_count${NC}"
@@ -240,9 +250,9 @@ if [[ -f "$ERROR_LOG" ]]; then
     echo -e "  Failures: ${RED}$failure_count${NC}"
     echo ""
 
-    if [[ "$error_count" -eq 0 && "$failure_count" -eq 0 ]]; then
+    if [[ "${error_count:-0}" -eq 0 && "${failure_count:-0}" -eq 0 ]]; then
         echo -e "${GREEN}✓ All tests passed!${NC}"
-        if [[ "$warning_count" -gt 0 ]]; then
+        if [[ "${warning_count:-0}" -gt 0 ]]; then
             echo -e "${YELLOW}  (But there are $warning_count warnings to review)${NC}"
         fi
     else
