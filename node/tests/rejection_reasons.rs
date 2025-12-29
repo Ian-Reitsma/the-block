@@ -43,8 +43,8 @@ fn invalid_selector_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_invalid_selector");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1, 255);
     #[cfg(feature = "telemetry")]
@@ -110,7 +110,7 @@ fn drop_not_found_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_drop_not_found");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
     #[cfg(feature = "telemetry")]
     {
         telemetry::TX_REJECTED_TOTAL.reset();

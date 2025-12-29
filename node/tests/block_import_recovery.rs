@@ -77,6 +77,6 @@ fn recovers_from_crash_during_import() {
     }
     // reopen
     let bc2 = Blockchain::open(&path).expect("reopen blockchain");
-    assert_eq!(bc2.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc2.accounts["alice"].balance.amount, 100);
     assert!(bc2.accounts.get("bob").is_none());
 }

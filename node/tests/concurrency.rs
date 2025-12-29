@@ -43,9 +43,9 @@ fn concurrent_duplicate_submission() {
     let bc = Arc::new(RwLock::new(Blockchain::new(dir.path().to_str().unwrap())));
     bc.write()
         .unwrap()
-        .add_account("alice".into(), 10_000, 0)
+        .add_account("alice".into(), 10_000)
         .unwrap();
-    bc.write().unwrap().add_account("bob".into(), 0, 0).unwrap();
+    bc.write().unwrap().add_account("bob".into(), 0).unwrap();
     bc.write().unwrap().mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
@@ -77,7 +77,7 @@ fn cross_thread_fuzz() {
         let name = format!("acc{i}");
         bc.write()
             .unwrap()
-            .add_account(name.clone(), 10_000, 10_000)
+            .add_account(name.clone(), 20_000)
             .unwrap();
         let (sk, _pk) = generate_keypair();
         keys.push((name, sk));
@@ -171,8 +171,8 @@ fn cap_race_respects_limit() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 32;
     bc.max_pending_per_account = 64;
-    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 1_000_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
@@ -204,8 +204,8 @@ fn flood_mempool_never_over_cap() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 16;
     bc.max_pending_per_account = 64;
-    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 1_000_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
@@ -242,8 +242,8 @@ fn admit_and_mine_never_over_cap() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 16;
     bc.max_pending_per_account = 64;
-    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 1_000_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));

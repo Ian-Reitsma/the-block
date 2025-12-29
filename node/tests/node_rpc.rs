@@ -202,7 +202,7 @@ fn rpc_smoke() {
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
-            guard.add_account("alice".to_string(), 42, 0).unwrap();
+            guard.add_account("alice".to_string(), 42).unwrap();
         }
         Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
         let mining = Arc::new(AtomicBool::new(false));
@@ -301,7 +301,7 @@ fn rpc_nonce_replay_rejected() {
     {
         let mut guard = bc.lock().expect("bc lock");
         guard
-            .add_account("miner".to_string(), 0, 0)
+            .add_account("miner".to_string(), 0)
             .expect("add miner");
     }
     let handles_dir = dir.path().join("handles");
@@ -423,7 +423,7 @@ fn rpc_light_client_rebate_history() {
         {
             let mut guard = bc.lock().unwrap();
             guard
-                .add_account("miner".to_string(), 0, 0)
+                .add_account("miner".to_string(), 0)
                 .expect("add miner");
             guard.record_proof_relay(b"relay", 5);
             guard.mine_block("miner").expect("mine block");
@@ -504,9 +504,9 @@ fn rpc_concurrent_controls() {
         {
             let mut guard = bc.lock().unwrap();
             guard
-                .add_account("alice".to_string(), 1_000_000, 0)
+                .add_account("alice".to_string(), 1_000_000)
                 .unwrap();
-            guard.add_account("bob".to_string(), 0, 0).unwrap();
+            guard.add_account("bob".to_string(), 0).unwrap();
             guard.mine_block("alice").unwrap();
         }
         let mining = Arc::new(AtomicBool::new(false));

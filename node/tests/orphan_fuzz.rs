@@ -51,10 +51,10 @@ tb_prop_test!(orphan_counter_never_exceeds_mempool, |runner| {
             let mut bc = Blockchain::new(dir.path().to_str().unwrap());
             bc.min_fee_per_byte_consumer = 0;
             bc.min_fee_per_byte_industrial = 0;
-            bc.add_account("sink".into(), 0, 0).unwrap();
+            bc.add_account("sink".into(), 0).unwrap();
             for i in 0..ACCOUNTS {
                 let name = format!("acc{i}");
-                bc.add_account(name.clone(), 1_000_000, 0).unwrap();
+                bc.add_account(name.clone(), 1_000_000).unwrap();
                 let (sk, _pk) = generate_keypair();
                 let tx = build_signed_tx(&sk, &name, "sink", 1, 0, 1_000, 1);
                 bc.submit_transaction(tx).unwrap();

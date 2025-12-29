@@ -28,8 +28,8 @@ fn prepare_purge_inputs(prefix: &str) -> (TempDir, Blockchain, Vec<u8>) {
     bc.min_fee_per_byte_consumer = 0;
     bc.min_fee_per_byte_industrial = 0;
     bc.base_fee = 0;
-    bc.add_account("a".into(), 10, 10).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.add_account("a".into(), 20).unwrap();
+    bc.add_account("b".into(), 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "a".into(),
@@ -53,7 +53,7 @@ fn prepare_purge_inputs(prefix: &str) -> (TempDir, Blockchain, Vec<u8>) {
 
 #[cfg(feature = "telemetry")]
 fn submit_orphan_tx(bc: &mut Blockchain) {
-    bc.add_account("c".into(), 10, 10).unwrap();
+    bc.add_account("c".into(), 20).unwrap();
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "c".into(),

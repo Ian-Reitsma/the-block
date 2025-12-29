@@ -36,8 +36,8 @@ fn build_signed_tx(
 fn rejects_industrial_when_consumer_fees_high() {
     let dir = tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("a".into(), 0, 2_000).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.add_account("a".into(), 2_000).unwrap();
+    bc.add_account("b".into(), 0).unwrap();
     bc.comfort_threshold_p90 = 10;
     for _ in 0..50 {
         policy::record_consumer_fee(20);

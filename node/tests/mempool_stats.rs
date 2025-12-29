@@ -47,8 +47,8 @@ fn mempool_stats_rpc() {
         let expected_floor;
         {
             let mut guard = bc.lock().unwrap();
-            guard.add_account("alice".into(), 1000, 0).unwrap();
-            guard.add_account("bob".into(), 0, 0).unwrap();
+            guard.add_account("alice".into(), 1000).unwrap();
+            guard.add_account("bob".into(), 0).unwrap();
             let (sk, _) = generate_keypair();
             for i in 0..2 {
                 let payload = RawTxPayload {

@@ -129,9 +129,9 @@ fn ledger_settlement_updates_balances() {
 
     // NOTE: Tests run in sandbox mode by default - balances don't change
     let guard = chain.lock().unwrap();
-    assert_eq!(guard.accounts["bidder-ledger"].balance.consumer, 10_000);
-    assert_eq!(guard.accounts["seller-ledger"].balance.consumer, 500);
-    assert_eq!(guard.accounts["treasury"].balance.consumer, 0);
+    assert_eq!(guard.accounts["bidder-ledger"].balance.amount, 10_000);
+    assert_eq!(guard.accounts["seller-ledger"].balance.amount, 500);
+    assert_eq!(guard.accounts["treasury"].balance.amount, 0);
     drop(guard);
 
     let history = history_for(domain);
@@ -213,10 +213,10 @@ fn losing_bidder_keeps_balance_and_unlocked_stake() {
 
     // NOTE: Sandbox mode - balances remain unchanged
     let guard = chain.lock().unwrap();
-    assert_eq!(guard.accounts["bidder-low"].balance.consumer, 5_000);
-    assert_eq!(guard.accounts["bidder-high"].balance.consumer, 5_000);
-    assert_eq!(guard.accounts["seller-loss"].balance.consumer, 200);
-    assert_eq!(guard.accounts["treasury"].balance.consumer, 0);
+    assert_eq!(guard.accounts["bidder-low"].balance.amount, 5_000);
+    assert_eq!(guard.accounts["bidder-high"].balance.amount, 5_000);
+    assert_eq!(guard.accounts["seller-loss"].balance.amount, 200);
+    assert_eq!(guard.accounts["treasury"].balance.amount, 0);
     drop(guard);
 
     let snapshot = stake_snapshot("stake-low").expect("stake-low snapshot");
@@ -254,8 +254,8 @@ fn stake_registration_and_withdrawal_moves_funds() {
     {
         // NOTE: Sandbox mode - balances remain unchanged
         let guard = chain.lock().unwrap();
-        assert_eq!(guard.accounts["stake-owner"].balance.consumer, 10_000);
-        assert_eq!(guard.accounts["treasury"].balance.consumer, 0);
+        assert_eq!(guard.accounts["stake-owner"].balance.amount, 10_000);
+        assert_eq!(guard.accounts["treasury"].balance.amount, 0);
     }
 
     withdraw_stake(&json_map(vec![
@@ -268,7 +268,7 @@ fn stake_registration_and_withdrawal_moves_funds() {
     {
         // NOTE: Sandbox mode - balances remain unchanged
         let guard = chain.lock().unwrap();
-        assert_eq!(guard.accounts["stake-owner"].balance.consumer, 10_000);
+        assert_eq!(guard.accounts["stake-owner"].balance.amount, 10_000);
     }
 
     let snapshot = stake_snapshot("stake-ledger").expect("stake snapshot");
@@ -386,7 +386,7 @@ fn stake_ledger_events_are_persisted() {
     {
         let guard = chain.lock().unwrap();
         assert_eq!(
-            guard.accounts["stake-ledger-events"].balance.consumer,
+            guard.accounts["stake-ledger-events"].balance.amount,
             5_000
         );
     }
@@ -442,7 +442,7 @@ fn cancelling_auction_releases_locked_stake() {
 
     // NOTE: Sandbox mode - balances remain unchanged
     let guard = chain.lock().unwrap();
-    assert_eq!(guard.accounts["bidder-cancel"].balance.consumer, 4_000);
+    assert_eq!(guard.accounts["bidder-cancel"].balance.amount, 4_000);
     drop(guard);
 
     let auction_view = auctions(&json_map(vec![(

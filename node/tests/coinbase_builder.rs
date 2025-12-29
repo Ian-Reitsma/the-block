@@ -7,7 +7,7 @@ mod util;
 fn coinbase_tip_defaults_to_zero() {
     let dir = util::temp::temp_dir("coinbase_tip");
     let mut bc = Blockchain::new(dir.path().to_str().expect("path"));
-    bc.add_account("miner".into(), 0, 0).expect("add miner");
+    bc.add_account("miner".into(), 0).expect("add miner");
 
     let block = bc.mine_block("miner").expect("mine block");
     assert_eq!(block.transactions[0].tip, 0);
@@ -17,7 +17,7 @@ fn coinbase_tip_defaults_to_zero() {
 fn coinbase_claims_proof_rebates() {
     let dir = util::temp::temp_dir("coinbase_rebates");
     let mut bc = Blockchain::new(dir.path().to_str().expect("path"));
-    bc.add_account("miner".into(), 0, 0).expect("add miner");
+    bc.add_account("miner".into(), 0).expect("add miner");
 
     let relayer_id = b"relay";
     bc.record_proof_relay(relayer_id, 3);

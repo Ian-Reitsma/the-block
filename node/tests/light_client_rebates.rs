@@ -20,7 +20,7 @@ fn rebate_persistence_across_restart() {
     let path = dir.path().to_str().expect("path");
     {
         let mut bc = Blockchain::new(path);
-        bc.add_account("miner".into(), 0, 0).expect("add miner");
+        bc.add_account("miner".into(), 0).expect("add miner");
         bc.record_proof_relay(b"relay", 4);
         let block = bc.mine_block("miner").expect("mine block");
         assert_eq!(block.proof_rebate, TokenAmount::new(4));
@@ -44,7 +44,7 @@ fn rebate_rollback_restores_pending_balances() {
     let dir = util::temp::temp_dir("rebate_reorg_state");
     let path = dir.path().to_str().expect("path");
     let mut bc = Blockchain::new(path);
-    bc.add_account("miner".into(), 0, 0).expect("add miner");
+    bc.add_account("miner".into(), 0).expect("add miner");
     bc.record_proof_relay(b"relay", 6);
     let block = bc.mine_block("miner").expect("mine block");
     assert_eq!(block.proof_rebate, TokenAmount::new(6));

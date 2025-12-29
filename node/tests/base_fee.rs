@@ -23,8 +23,8 @@ fn adjusts_base_fee_and_rejects_underpriced() {
     let (sk, _pk) = generate_keypair();
     let mut bc = Blockchain::default();
     bc.base_fee = 100;
-    bc.add_account("a".into(), 10_000_000, 0).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.add_account("a".into(), 10_000_000).unwrap();
+    bc.add_account("b".into(), 0).unwrap();
     bc.max_pending_per_account = 100;
     // submit 20 txs with high fee to drive base fee up
     for n in 1..=20 {

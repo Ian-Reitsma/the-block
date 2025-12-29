@@ -65,7 +65,7 @@ fn rejects_nonce_gap() {
 
     let res = validate_and_apply(&bc, &block);
     assert!(matches!(res, Err(TxAdmissionError::NonceGap)));
-    assert_eq!(bc.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc.accounts["alice"].balance.amount, 100);
 }
 
 #[test]
@@ -115,6 +115,6 @@ fn rollback_on_mid_block_panic() {
     }));
     assert!(res.is_err());
     // state unchanged
-    assert_eq!(bc.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc.accounts["alice"].balance.amount, 100);
     assert!(!bc.accounts.contains_key("bob"));
 }

@@ -39,8 +39,8 @@ fn eviction_keeps_high_fee() {
     let dir = temp_dir("mp_evict");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 1;
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 10_000, 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 10_000).unwrap();
     let (ska, _) = generate_keypair();
     let (skb, _) = generate_keypair();
     let low = build_signed_tx(&ska, "alice", "bob", 1000, 1);
@@ -56,9 +56,9 @@ fn block_sorts_by_fee() {
     init();
     let dir = temp_dir("mp_sort");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("miner".into(), 0, 0).unwrap();
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 10_000, 0).unwrap();
+    bc.add_account("miner".into(), 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 10_000).unwrap();
     let (ska, _) = generate_keypair();
     let (skb, _) = generate_keypair();
     let low = build_signed_tx(&ska, "alice", "miner", 1000, 1);

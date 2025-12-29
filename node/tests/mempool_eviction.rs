@@ -36,9 +36,9 @@ fn eviction_records_hash_and_releases_slot() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 1;
     bc.max_pending_per_account = 1;
-    bc.add_account("miner".into(), 0, 0).unwrap();
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 10_000, 0).unwrap();
+    bc.add_account("miner".into(), 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 10_000).unwrap();
     let (sk_a, _) = generate_keypair();
     let (sk_b, _) = generate_keypair();
 

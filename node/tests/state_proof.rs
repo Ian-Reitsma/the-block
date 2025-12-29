@@ -19,15 +19,14 @@ fn account_proof_roundtrip() {
     let dir = temp_dir("proof_db");
     let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
     bc.recompute_difficulty();
-    bc.add_account("alice".into(), 10, 0).unwrap();
-    bc.add_account("bob".into(), 5, 0).unwrap();
+    bc.add_account("alice".into(), 10).unwrap();
+    bc.add_account("bob".into(), 5).unwrap();
     bc.mine_block("miner").unwrap();
     let (root, proof) = bc.account_proof("alice".into()).unwrap();
     let acc = bc.accounts.get("alice").unwrap();
     let mut h = Hasher::new();
     h.update("alice".as_bytes());
-    h.update(&acc.balance.consumer.to_le_bytes());
-    h.update(&acc.balance.industrial.to_le_bytes());
+    h.update(&acc.balance.amount.to_le_bytes());
     h.update(&acc.nonce.to_le_bytes());
     let mut leaf = *h.finalize().as_bytes();
     for (sib_hex, is_left) in proof {

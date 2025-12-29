@@ -142,7 +142,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
     bc.params.read_subsidy_verifier_percent = 10;
     bc.params.read_subsidy_liquidity_percent = 10;
     bc.recompute_difficulty();
-    bc.add_account("miner".into(), 0, 0).expect("miner account");
+    bc.add_account("miner".into(), 0).expect("miner account");
 
     let ack = build_signed_ack(450, "example.com", "edge-1");
     bc.submit_read_ack(ack.clone()).expect("ack accepted");

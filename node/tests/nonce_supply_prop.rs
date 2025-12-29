@@ -18,8 +18,8 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             let dir = temp_dir("nonce_supply_prop_empty");
             let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
             bc.recompute_difficulty();
-            bc.add_account("a".into(), 0, 0).unwrap();
-            bc.add_account("b".into(), 0, 0).unwrap();
+            bc.add_account("a".into(), 0).unwrap();
+            bc.add_account("b".into(), 0).unwrap();
             let (sk, _pk) = generate_keypair();
             bc.mine_block("a").unwrap();
             let payload = RawTxPayload {
@@ -45,8 +45,8 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             let dir = temp_dir("nonce_supply_prop");
             let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
             bc.recompute_difficulty();
-            bc.add_account("a".into(), 0, 0).unwrap();
-            bc.add_account("b".into(), 0, 0).unwrap();
+            bc.add_account("a".into(), 0).unwrap();
+            bc.add_account("b".into(), 0).unwrap();
             let (sk, _pk) = generate_keypair();
             bc.mine_block("a").unwrap();
             let mut expected_nonce = 0u64;
@@ -69,14 +69,12 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
                 bc.mine_block("a").unwrap();
                 expected_nonce += 1;
                 assert_eq!(bc.accounts.get("a").unwrap().nonce, expected_nonce);
-                let mut total_c = 0u64;
-                let mut _total_i = 0u64;
+                let mut total = 0u64;
                 for acc in bc.accounts.values() {
-                    total_c += acc.balance.consumer;
-                    _total_i += acc.balance.industrial;
+                    total += acc.balance.amount;
                 }
-                let em_c = bc.circulating_supply();
-                assert_eq!(total_c, em_c);
+                let circulating = bc.circulating_supply();
+                assert_eq!(total, circulating);
             }
         })
         .expect("register random case");

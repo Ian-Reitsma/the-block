@@ -73,13 +73,13 @@ fn block_application_is_atomic() {
 
     // Applying block with invalid tx2 should fail and leave state untouched
     assert!(validate_and_apply(&bc, &block).is_err());
-    assert_eq!(bc.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc.accounts["alice"].balance.amount, 100);
     assert!(bc.accounts.get("carol").is_none());
 
     // Remove invalid tx and reapply
     block.transactions = vec![coinbase.clone(), tx1];
     let deltas = validate_and_apply(&bc, &block).expect("valid block");
     commit(&mut bc, deltas).unwrap();
-    assert_eq!(bc.accounts["alice"].balance.consumer, 90);
-    assert_eq!(bc.accounts["bob"].balance.consumer, 10);
+    assert_eq!(bc.accounts["alice"].balance.amount, 90);
+    assert_eq!(bc.accounts["bob"].balance.amount, 10);
 }
