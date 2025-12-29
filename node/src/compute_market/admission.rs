@@ -213,23 +213,3 @@ pub fn set_fair_share_cap(v: f64) {
 pub fn set_burst_refill_rate(v: f64) {
     BURST_REFILL_RATE_MICRO.store((v * 1_000_000.0) as u64, Ordering::Relaxed);
 }
-
-/// Reserve escrow balances according to a percentage split.
-///
-/// `bal_consumer` and `bal_industrial` are debited by the consumer and
-/// industrial portions of `price` respectively. Returns the split amounts on
-/// success or an error if either balance would go negative.
-pub fn reserve(
-    bal_consumer: &mut u64,
-    bal_industrial: &mut u64,
-    price: u64,
-    fee_pct: u8,
-) -> Result<(u64, u64), &'static str> {
-    let (consumer, industrial) = crate::fee::decompose(fee_pct, price).map_err(|_| "invalid_split")?;
-    if *bal_consumer < consumer || *bal_industrial < industrial {
-        return Err("insufficient_funds");
-    }
-    *bal_consumer -= consumer;
-    *bal_industrial -= industrial;
-    Ok((consumer, industrial))
-}

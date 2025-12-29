@@ -153,17 +153,15 @@ pub fn decode_schema_version(bytes: &[u8]) -> Option<u32> {
 }
 
 fn write_account(writer: &mut Writer, account: &Account) -> EncodeResult<()> {
-    writer.write_u64(8);
+    writer.write_u64(7);
     writer.write_string("address");
     writer.write_string(&account.address);
     writer.write_string("balance");
     write_balance(writer, &account.balance)?;
     writer.write_string("nonce");
     writer.write_u64(account.nonce);
-    writer.write_string("pending_consumer");
-    writer.write_u64(account.pending_consumer);
-    writer.write_string("pending_industrial");
-    writer.write_u64(account.pending_industrial);
+    writer.write_string("pending_amount");
+    writer.write_u64(account.pending_amount);
     writer.write_string("pending_nonce");
     writer.write_u64(account.pending_nonce);
     writer.write_string("pending_nonces");
@@ -179,23 +177,26 @@ fn read_account(reader: &mut Reader<'_>) -> binary_struct::Result<Account> {
     let mut address = None;
     let mut balance = None;
     let mut nonce = None;
-    let mut pending_consumer = None;
-    let mut pending_industrial = None;
+    let mut pending_amount = None;
+    let mut pending_consumer_legacy = None;
+    let mut pending_industrial_legacy = None;
     let mut pending_nonce = None;
     let mut pending_nonces = None;
     let mut sessions = None;
 
-    decode_struct(reader, Some(8), |key, reader| match key {
+    decode_struct(reader, None, |key, reader| match key {
         "address" => assign_once(&mut address, reader.read_string()?, "address"),
         "balance" => assign_once(&mut balance, read_balance(reader)?, "balance"),
         "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
+        "pending_amount" => assign_once(&mut pending_amount, reader.read_u64()?, "pending_amount"),
+        // Legacy fields for backward compatibility
         "pending_consumer" => assign_once(
-            &mut pending_consumer,
+            &mut pending_consumer_legacy,
             reader.read_u64()?,
             "pending_consumer",
         ),
         "pending_industrial" => assign_once(
-            &mut pending_industrial,
+            &mut pending_industrial_legacy,
             reader.read_u64()?,
             "pending_industrial",
         ),
@@ -213,15 +214,21 @@ fn read_account(reader: &mut Reader<'_>) -> binary_struct::Result<Account> {
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
+    // Compute pending_amount from legacy fields if new field not present
+    let final_pending_amount = pending_amount.or_else(|| {
+        match (pending_consumer_legacy, pending_industrial_legacy) {
+            (Some(c), Some(i)) => Some(c + i),
+            _ => None,
+        }
+    }).unwrap_or_default();
+
     Ok(Account {
         address: address.ok_or(DecodeError::MissingField("address"))?,
         balance: balance.unwrap_or(TokenBalance {
-            consumer: 0,
-            industrial: 0,
+            amount: 0,
         }),
         nonce: nonce.unwrap_or_default(),
-        pending_consumer: pending_consumer.unwrap_or_default(),
-        pending_industrial: pending_industrial.unwrap_or_default(),
+        pending_amount: final_pending_amount,
         pending_nonce: pending_nonce.unwrap_or_default(),
         pending_nonces: pending_nonces.unwrap_or_default().into_iter().collect(),
         sessions: sessions.unwrap_or_default(),
@@ -229,27 +236,36 @@ fn read_account(reader: &mut Reader<'_>) -> binary_struct::Result<Account> {
 }
 
 fn write_balance(writer: &mut Writer, balance: &TokenBalance) -> EncodeResult<()> {
-    writer.write_u64(2);
-    writer.write_string("consumer");
-    writer.write_u64(balance.consumer);
-    writer.write_string("industrial");
-    writer.write_u64(balance.industrial);
+    writer.write_u64(1);
+    writer.write_string("amount");
+    writer.write_u64(balance.amount);
     Ok(())
 }
 
 fn read_balance(reader: &mut Reader<'_>) -> binary_struct::Result<TokenBalance> {
-    let mut consumer = None;
-    let mut industrial = None;
+    let mut amount = None;
+    let mut consumer_legacy = None;
+    let mut industrial_legacy = None;
 
-    decode_struct(reader, Some(2), |key, reader| match key {
-        "consumer" => assign_once(&mut consumer, reader.read_u64()?, "consumer"),
-        "industrial" => assign_once(&mut industrial, reader.read_u64()?, "industrial"),
+    // Accept 1 field (new format) or 2 fields (legacy format) for backward compatibility
+    decode_struct(reader, None, |key, reader| match key {
+        "amount" => assign_once(&mut amount, reader.read_u64()?, "amount"),
+        // Legacy fields for backward compatibility
+        "consumer" => assign_once(&mut consumer_legacy, reader.read_u64()?, "consumer"),
+        "industrial" => assign_once(&mut industrial_legacy, reader.read_u64()?, "industrial"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
+    // If reading legacy format, sum consumer + industrial
+    let final_amount = amount.or_else(|| {
+        match (consumer_legacy, industrial_legacy) {
+            (Some(c), Some(i)) => Some(c + i),
+            _ => None,
+        }
+    }).unwrap_or_default();
+
     Ok(TokenBalance {
-        consumer: consumer.unwrap_or_default(),
-        industrial: industrial.unwrap_or_default(),
+        amount: final_amount,
     })
 }
 
@@ -1090,17 +1106,15 @@ fn read_market_metrics(reader: &mut Reader<'_>) -> binary_struct::Result<economi
 }
 
 fn write_macro_block(writer: &mut Writer, block: &MacroBlock) -> EncodeResult<()> {
-    writer.write_u64(6);
+    writer.write_u64(4);
     writer.write_string("height");
     writer.write_u64(block.height);
     writer.write_string("shard_heights");
     write_u64_map(writer, &block.shard_heights)?;
     writer.write_string("shard_roots");
     write_root_map(writer, &block.shard_roots)?;
-    writer.write_string("reward_consumer");
-    writer.write_u64(block.reward_consumer);
-    writer.write_string("reward_industrial");
-    writer.write_u64(block.reward_industrial);
+    writer.write_string("total_reward");
+    writer.write_u64(block.total_reward);
     writer.write_string("queue_root");
     write_fixed(writer, &block.queue_root);
     Ok(())
@@ -1110,22 +1124,14 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
     let mut height = None;
     let mut shard_heights = None;
     let mut shard_roots = None;
-    let mut reward_consumer = None;
-    let mut reward_industrial = None;
+    let mut total_reward = None;
     let mut queue_root = None;
 
-    decode_struct(reader, Some(6), |key, reader| match key {
+    decode_struct(reader, Some(4), |key, reader| match key {
         "height" => assign_once(&mut height, reader.read_u64()?, "height"),
         "shard_heights" => assign_once(&mut shard_heights, read_u64_map(reader)?, "shard_heights"),
         "shard_roots" => assign_once(&mut shard_roots, read_root_map(reader)?, "shard_roots"),
-        "reward_consumer" => {
-            assign_once(&mut reward_consumer, reader.read_u64()?, "reward_consumer")
-        }
-        "reward_industrial" => assign_once(
-            &mut reward_industrial,
-            reader.read_u64()?,
-            "reward_industrial",
-        ),
+        "total_reward" => assign_once(&mut total_reward, reader.read_u64()?, "total_reward"),
         "queue_root" => assign_once(&mut queue_root, read_fixed(reader)?, "queue_root"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
@@ -1134,8 +1140,7 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
         height: height.unwrap_or_default(),
         shard_heights: shard_heights.unwrap_or_default(),
         shard_roots: shard_roots.unwrap_or_default(),
-        reward_consumer: reward_consumer.unwrap_or_default(),
-        reward_industrial: reward_industrial.unwrap_or_default(),
+        total_reward: total_reward.unwrap_or_default(),
         queue_root: queue_root.unwrap_or([0; 32]),
     })
 }
@@ -1382,12 +1387,10 @@ mod tests {
         let account = Account {
             address: "alice".into(),
             balance: TokenBalance {
-                consumer: 10,
-                industrial: 20,
+                amount: 30,  // 10+20 in single BLOCK token
             },
             nonce: 3,
-            pending_consumer: 4,
-            pending_industrial: 5,
+            pending_amount: 9,  // 4+5 in single BLOCK token
             pending_nonce: 6,
             pending_nonces: [1, 2, 3].into_iter().collect(),
             sessions: vec![SessionPolicy {
@@ -1418,12 +1421,10 @@ mod tests {
         let account = Account {
             address: "alice".into(),
             balance: TokenBalance {
-                consumer: 1,
-                industrial: 2,
+                amount: 3,  // 1+2 in single BLOCK token
             },
             nonce: 3,
-            pending_consumer: 4,
-            pending_industrial: 5,
+            pending_amount: 9,  // 4+5 in single BLOCK token
             pending_nonce: 6,
             pending_nonces: HashSet::from([1, 2, 3]),
             sessions: vec![],
@@ -1490,12 +1491,10 @@ mod tests {
         let account = Account {
             address: "alice".into(),
             balance: TokenBalance {
-                consumer: 1,
-                industrial: 2,
+                amount: 3,  // 1+2 in single BLOCK token
             },
             nonce: 3,
-            pending_consumer: 4,
-            pending_industrial: 5,
+            pending_amount: 9,  // 4+5 in single BLOCK token
             pending_nonce: 6,
             pending_nonces: HashSet::from([1, 2, 3]),
             sessions: vec![],

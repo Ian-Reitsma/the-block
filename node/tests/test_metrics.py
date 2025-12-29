@@ -21,9 +21,9 @@ def test_purge_loop_metrics(tmp_path):
         pytest.skip("telemetry not enabled")
     os.environ["TB_PURGE_LOOP_SECS"] = "1"
     bc = the_block.Blockchain.with_difficulty(str(tmp_path), 1)
-    bc.add_account("alice", 10_000, 0)
-    bc.add_account("bob", 0, 0)
-    bc.add_account("carol", 10_000, 0)
+    bc.add_account("alice", 10_000)
+    bc.add_account("bob", 0)
+    bc.add_account("carol", 10_000)
     bc.tx_ttl = 1
 
     priv_a, _ = the_block.generate_keypair()

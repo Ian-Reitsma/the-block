@@ -522,12 +522,10 @@ impl BlockchainLedger {
         Account {
             address: address.to_string(),
             balance: TokenBalance {
-                consumer: 0,
-                industrial: 0,
+                amount: 0,
             },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
@@ -569,18 +567,18 @@ impl DomainLedger for BlockchainLedger {
 
             match command.kind() {
                 LedgerBatchKind::Debit => {
-                    if entry.balance.consumer < command.amount() {
+                    if entry.balance.amount < command.amount() {
                         return Err(AuctionError::BidInsufficientStake);
                     }
-                    entry.balance.consumer -= command.amount();
+                    entry.balance.amount -= command.amount();
                 }
                 LedgerBatchKind::Credit => {
-                    entry.balance.consumer =
-                        entry.balance.consumer.saturating_add(command.amount());
+                    entry.balance.amount =
+                        entry.balance.amount.saturating_add(command.amount());
                 }
                 LedgerBatchKind::CreditTreasury => {
-                    entry.balance.consumer =
-                        entry.balance.consumer.saturating_add(command.amount());
+                    entry.balance.amount =
+                        entry.balance.amount.saturating_add(command.amount());
                 }
             }
             let _ = command.memo();
@@ -2735,12 +2733,10 @@ mod tests {
                     Account {
                         address: (*address).to_string(),
                         balance: TokenBalance {
-                            consumer: *balance,
-                            industrial: 0,
+                            amount: *balance,
                         },
                         nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
+                        pending_amount: 0,
                         pending_nonce: 0,
                         pending_nonces: HashSet::new(),
                         sessions: Vec::new(),
@@ -2753,12 +2749,10 @@ mod tests {
                 .or_insert(Account {
                     address: "treasury".to_string(),
                     balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
+                        amount: 0,
                     },
                     nonce: 0,
-                    pending_consumer: 0,
-                    pending_industrial: 0,
+                    pending_amount: 0,
                     pending_nonce: 0,
                     pending_nonces: HashSet::new(),
                     sessions: Vec::new(),

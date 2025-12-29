@@ -2,8 +2,10 @@
 use the_block::compute_market::{
     courier, scheduler,
     scheduler::{CancelReason, Capability, Priority},
+    settlement::{Settlement, SettleMode},
     Job, Market, Offer, Workload,
 };
+use sys::tempfile::tempdir;
 
 fn sample_offer_job(id: &str) -> (Offer, Job) {
     let offer = Offer {
@@ -34,6 +36,8 @@ fn sample_offer_job(id: &str) -> (Offer, Job) {
 
 #[test]
 fn cancel_releases_resources() {
+    let dir = tempdir().unwrap();
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     scheduler::reset_for_test();
     let (offer, job) = sample_offer_job("j1");
     let mut m = Market::new();
@@ -47,6 +51,8 @@ fn cancel_releases_resources() {
 
 #[test]
 fn cancel_after_completion_noop() {
+    let dir = tempdir().unwrap();
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     scheduler::reset_for_test();
     let (offer, job) = sample_offer_job("j2");
     let mut m = Market::new();

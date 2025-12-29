@@ -15,12 +15,10 @@ fn block_application_is_atomic() {
         Account {
             address: "alice".into(),
             balance: TokenBalance {
-                consumer: 100,
-                industrial: 0,
+                amount: 100,
             },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: std::collections::HashSet::new(),
             sessions: Vec::new(),
@@ -31,12 +29,10 @@ fn block_application_is_atomic() {
         Account {
             address: "bob".into(),
             balance: TokenBalance {
-                consumer: 0,
-                industrial: 0,
+                amount: 0,
             },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: std::collections::HashSet::new(),
             sessions: Vec::new(),

@@ -1226,18 +1226,13 @@ fn dispatch(
             if let Some(acct) = guard.accounts.get(addr) {
                 json_map(vec![
                     (
-                        "consumer",
-                        Value::Number(Number::from(acct.balance.consumer)),
-                    ),
-                    (
-                        "industrial",
-                        Value::Number(Number::from(acct.balance.industrial)),
+                        "amount",
+                        Value::Number(Number::from(acct.balance.amount)),
                     ),
                 ])
             } else {
                 json_map(vec![
-                    ("consumer", Value::Number(Number::from(0))),
-                    ("industrial", Value::Number(Number::from(0))),
+                    ("amount", Value::Number(Number::from(0))),
                 ])
             }
         }

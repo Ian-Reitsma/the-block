@@ -29,9 +29,9 @@ fn rejects_overflow_and_pct() {
 fn admission_and_block_accounting() {
     let dir = temp_dir("fee_split_chain");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("miner".into(), 0, 0).unwrap();
-    bc.add_account("alice".into(), 100, 100).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("miner".into(), 0).unwrap();
+    bc.add_account("alice".into(), 200).unwrap();  // Single BLOCK token (100+100)
+    bc.add_account("bob".into(), 0).unwrap();
     bc.min_fee_per_byte_consumer = 0;
     bc.base_fee = 0;
     let (sk, _pk) = generate_keypair();
@@ -48,12 +48,9 @@ fn admission_and_block_accounting() {
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     bc.submit_transaction(tx).unwrap();
     let alice = bc.accounts.get("alice").unwrap();
-    assert_eq!(alice.pending_consumer, 4);
-    assert_eq!(alice.pending_industrial, 6);
+    assert_eq!(alice.pending_amount, 10); // Total fee (4+6) in single BLOCK token
     bc.mine_block("miner").unwrap();
     let alice = bc.accounts.get("alice").unwrap();
-    assert_eq!(alice.pending_consumer, 0);
-    assert_eq!(alice.pending_industrial, 0);
-    assert_eq!(alice.balance.consumer, 96); // 100 - 4
-    assert_eq!(alice.balance.industrial, 94); // 100 - 6
+    assert_eq!(alice.pending_amount, 0);
+    assert_eq!(alice.balance.amount, 190); // 200 - 10
 }

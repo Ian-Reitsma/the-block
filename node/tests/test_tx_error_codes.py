@@ -13,7 +13,7 @@ def make_chain(tmp_path):
 
 def trigger_unknown_sender(tmp_path):
     bc = make_chain(tmp_path)
-    bc.add_account("alice", 0, 0)
+    bc.add_account("alice", 0)
     priv, _ = the_block.generate_keypair()
     payload = the_block.RawTxPayload(
         from_="ghost",
@@ -32,7 +32,7 @@ def trigger_unknown_sender(tmp_path):
 def trigger_insufficient_balance(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 0, 0)
+    bc.add_account("alice", 0)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -50,7 +50,7 @@ def trigger_insufficient_balance(tmp_path):
 def trigger_nonce_gap(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -68,7 +68,7 @@ def trigger_nonce_gap(tmp_path):
 def trigger_invalid_selector(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -86,7 +86,7 @@ def trigger_invalid_selector(tmp_path):
 def trigger_bad_signature(tmp_path):
     bc = make_chain(tmp_path)
     priv, pub = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -105,7 +105,7 @@ def trigger_bad_signature(tmp_path):
 def trigger_duplicate(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -128,7 +128,7 @@ def trigger_not_found(tmp_path):
 
 def trigger_balance_overflow(tmp_path):
     bc = make_chain(tmp_path)
-    bc.add_account("alice", 2**64 - 1, 0)
+    bc.add_account("alice", 2**64 - 1)
     priv, _ = the_block.generate_keypair()
     payload1 = the_block.RawTxPayload(
         from_="alice",
@@ -159,7 +159,7 @@ def trigger_balance_overflow(tmp_path):
 def trigger_fee_too_large(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -178,7 +178,7 @@ def trigger_fee_overflow(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
     max_u64 = (1 << 64) - 1
-    bc.add_account("alice", max_u64, 0)
+    bc.add_account("alice", max_u64)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -198,7 +198,7 @@ def trigger_fee_too_low(tmp_path):
     bc.min_fee_per_byte_consumer = 1
     bc.min_fee_per_byte_industrial = 1
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -217,7 +217,7 @@ def trigger_mempool_full(tmp_path):
     bc = make_chain(tmp_path)
     bc.max_mempool_size_consumer = 0
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -235,7 +235,7 @@ def trigger_mempool_full(tmp_path):
 def trigger_lock_poisoned(tmp_path):
     bc = make_chain(tmp_path)
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload = the_block.RawTxPayload(
         from_="alice",
         to="alice",
@@ -255,7 +255,7 @@ def trigger_pending_limit(tmp_path):
     bc = make_chain(tmp_path)
     bc.max_pending_per_account = 1
     priv, _ = the_block.generate_keypair()
-    bc.add_account("alice", 10, 0)
+    bc.add_account("alice", 10)
     payload1 = the_block.RawTxPayload(
         from_="alice",
         to="alice",

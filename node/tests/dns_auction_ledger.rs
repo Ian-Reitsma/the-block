@@ -27,12 +27,10 @@ fn account(address: &str, consumer_balance: u64) -> Account {
     Account {
         address: address.to_string(),
         balance: TokenBalance {
-            consumer: consumer_balance,
-            industrial: 0,
+            amount: consumer_balance,
         },
         nonce: 0,
-        pending_consumer: 0,
-        pending_industrial: 0,
+        pending_amount: 0,
         pending_nonce: 0,
         pending_nonces: HashSet::new(),
         sessions: Vec::new(),

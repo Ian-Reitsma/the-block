@@ -27,12 +27,10 @@ fn default_account(address: String) -> Account {
     Account {
         address,
         balance: TokenBalance {
-            consumer: 0,
-            industrial: 0,
+            amount: 0,
         },
         nonce: 0,
-        pending_consumer: 0,
-        pending_industrial: 0,
+        pending_amount: 0,
         pending_nonce: 0,
         pending_nonces: HashSet::new(),
         sessions: Vec::new(),
@@ -103,22 +101,20 @@ pub fn validate_and_apply(
                 Ordering::Greater => return Err(TxAdmissionError::NonceGap),
                 Ordering::Equal => {}
             }
-            let total_c = tx.payload.amount_consumer + fee_c;
-            let total_i = tx.payload.amount_industrial + fee_i;
-            if sender.balance.consumer < total_c || sender.balance.industrial < total_i {
+            // Total BLOCK tokens: amount (both lanes) + fees
+            let total_amount = tx.payload.amount_consumer + tx.payload.amount_industrial + fee_c + fee_i;
+            if sender.balance.amount < total_amount {
                 #[cfg(feature = "telemetry")]
                 BLOCK_APPLY_FAIL_TOTAL.inc();
                 return Err(TxAdmissionError::InsufficientBalance);
             }
-            sender.balance.consumer -= total_c;
-            sender.balance.industrial -= total_i;
+            sender.balance.amount -= total_amount;
             sender.nonce = tx.payload.nonce;
             touched.insert(sender_key);
         }
         let recv_key = tx.payload.to.clone();
         let recv = ensure_account_mut(&mut accounts, &chain.accounts, &recv_key);
-        recv.balance.consumer += tx.payload.amount_consumer;
-        recv.balance.industrial += tx.payload.amount_industrial;
+        recv.balance.amount += tx.payload.amount_consumer + tx.payload.amount_industrial;
         touched.insert(recv_key);
     }
     let mut deltas = Vec::new();
@@ -263,8 +259,9 @@ pub(crate) fn shard_state_root(
         .filter(|(addr, _)| address::shard_id(addr) == shard)
     {
         let mut data = Vec::new();
-        data.extend_from_slice(&acc.balance.consumer.to_le_bytes());
-        data.extend_from_slice(&acc.balance.industrial.to_le_bytes());
+        // Write amount in first field, 0 in second for backward compat during migration
+        data.extend_from_slice(&acc.balance.amount.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
         data.extend_from_slice(&acc.nonce.to_le_bytes());
         trie.insert(addr.as_bytes(), &data);
     }

@@ -359,10 +359,11 @@ mod tests {
 
         // Requires Operator role, but only has Executor
         let result = ctx.authorize(&auth, Role::Operator);
-        assert!(matches!(
-            result,
-            Err(AuthError::InsufficientPrivilege { .. })
-        ));
+        assert!(
+            matches!(result, Err(AuthError::InsufficientPrivilege { .. })),
+            "Expected InsufficientPrivilege error but got: {:?}",
+            result
+        );
     }
 
     #[test]

@@ -74,12 +74,12 @@ fn balance_overflow_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_balance_overflow");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("alice".into(), u64::MAX, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), u64::MAX).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     // create pending reservation near limit to force overflow
     {
         let acc = bc.accounts.get_mut("alice").unwrap();
-        acc.pending_consumer = u64::MAX - 1;
+        acc.pending_amount = u64::MAX - 1;
     }
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1, 1, 100);

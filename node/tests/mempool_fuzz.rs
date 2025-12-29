@@ -42,6 +42,14 @@ fn build_signed_tx(
 #[test]
 fn fuzz_mempool_random_fees_nonces() {
     init();
+
+    // Disable verbose logging for high-volume fuzz test
+    #[cfg(feature = "telemetry")]
+    {
+        the_block::telemetry::set_log_enabled("mempool", false);
+        the_block::telemetry::set_log_enabled("storage", false);
+    }
+
     const THREADS: usize = 32;
     const TOTAL_ITERS: usize = 10_000;
 
@@ -49,13 +57,13 @@ fn fuzz_mempool_random_fees_nonces() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 128;
     bc.max_pending_per_account = 128;
-    bc.add_account("sink".into(), 0, 0).unwrap();
+    bc.add_account("sink".into(), 0).unwrap();
 
     let mut accounts = Vec::new();
     let mut nonces = Vec::new();
     for i in 0..THREADS {
         let name = format!("acct{i}");
-        bc.add_account(name.clone(), 1_000_000, 0).unwrap();
+        bc.add_account(name.clone(), 1_000_000).unwrap();
         let (sk, _pk) = generate_keypair();
         accounts.push((name, sk));
         nonces.push(AtomicU64::new(0));

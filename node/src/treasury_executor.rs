@@ -109,17 +109,17 @@ fn signer_closure(
                 .accounts
                 .get(&treasury_account)
                 .ok_or_else(|| TreasuryExecutorError::Signing("treasury account missing".into()))?;
-            let available_consumer = account
+            let available_amount = account
                 .balance
-                .consumer
-                .saturating_sub(account.pending_consumer);
+                .amount
+                .saturating_sub(account.pending_amount);
             let candidate = next_available_nonce(account);
             let floor = nonce_floor.load(Ordering::SeqCst);
             (
                 guard.base_fee,
                 candidate.max(floor.saturating_add(1)),
                 guard.min_fee_per_byte_consumer,
-                available_consumer,
+                available_amount,
             )
         };
 

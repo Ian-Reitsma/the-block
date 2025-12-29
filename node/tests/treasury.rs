@@ -92,12 +92,10 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
             Account {
                 address: "treasury".into(),
                 balance: TokenBalance {
-                    consumer: 5_000,
-                    industrial: 5_000,
+                    amount: 10_000,
                 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),

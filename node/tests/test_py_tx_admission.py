@@ -27,8 +27,8 @@ def test_unknown_sender(tmp_path):
 
 def test_nonce_gap(tmp_path):
     bc = make_bc(tmp_path / "nonce")
-    bc.add_account("miner", 10_000, 0)
-    bc.add_account("alice", 0, 0)
+    bc.add_account("miner", 10_000)
+    bc.add_account("alice", 0)
     priv, _ = the_block.generate_keypair()
     payload = the_block.RawTxPayload(
         from_="miner",
@@ -47,8 +47,8 @@ def test_nonce_gap(tmp_path):
 
 def test_insufficient_balance(tmp_path):
     bc = make_bc(tmp_path / "bal")
-    bc.add_account("miner", 1, 0)
-    bc.add_account("alice", 0, 0)
+    bc.add_account("miner", 1)
+    bc.add_account("alice", 0)
     priv, _ = the_block.generate_keypair()
     payload = the_block.RawTxPayload(
         from_="miner",

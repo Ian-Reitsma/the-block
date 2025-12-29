@@ -4,8 +4,8 @@ use the_block::{generate_keypair, Blockchain, FeeLane, RawTxPayload, TxAdmission
 fn main() {
     let (sk, _pk) = generate_keypair();
     let mut chain = Blockchain::default();
-    chain.add_account("spam".into(), 1_000_000, 0).unwrap();
-    chain.add_account("miner".into(), 0, 0).unwrap();
+    chain.add_account("spam".into(), 1_000_000).unwrap();
+    chain.add_account("miner".into(), 0).unwrap();
 
     chain.set_fee_floor_policy(32, 95);
 

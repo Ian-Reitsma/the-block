@@ -37,12 +37,10 @@ fn recovers_from_crash_during_import() {
             Account {
                 address: "alice".into(),
                 balance: TokenBalance {
-                    consumer: 100,
-                    industrial: 0,
+                    amount: 100,
                 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),

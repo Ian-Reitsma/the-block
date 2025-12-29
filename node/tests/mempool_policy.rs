@@ -31,6 +31,9 @@ fn build_signed_tx(
     fee: u64,
     nonce: u64,
 ) -> SignedTransaction {
+    // NOTE: Post single-token migration, amount_consumer/amount_industrial represent
+    // LANE routing (not separate token types). Mining only credits consumer balance.
+    // Tests should use consumer lane only (industrial=0) unless explicitly testing industrial lane.
     let payload = RawTxPayload {
         from_: from.to_string(),
         to: to.to_string(),
@@ -53,7 +56,7 @@ fn replacement_rejected() {
     bc.add_account("alice".into(), 0, 0).unwrap();
     bc.mine_block("miner").unwrap();
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "miner", "alice", 1, 1, 1000, 1);
+    let tx = build_signed_tx(&sk, "miner", "alice", 1, 0, 1000, 1);  // industrial=0 (single token via consumer lane)
     bc.submit_transaction(tx.clone()).unwrap();
     let res = bc.submit_transaction(tx);
     assert!(matches!(res, Err(TxAdmissionError::Duplicate)));
@@ -355,7 +358,7 @@ fn admission_panic_rolls_back() {
         bc.heal_lock("alice");
         assert!(bc.mempool_consumer.is_empty());
         let acc = bc.accounts.get("alice").unwrap();
-        assert_eq!(acc.pending_consumer, 0);
+        assert_eq!(acc.pending_amount, 0);
         assert_eq!(acc.pending_nonce, 0);
         assert!(acc.pending_nonces.is_empty());
     }

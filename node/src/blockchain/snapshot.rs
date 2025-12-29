@@ -60,8 +60,7 @@ impl SnapshotManager {
 
 struct SnapshotAccount {
     address: String,
-    consumer: u64,
-    industrial: u64,
+    amount: u64,
     nonce: u64,
 }
 
@@ -95,8 +94,9 @@ fn encode_snapshot_common(height: u64, root: &str, accounts: &[SnapshotAccount])
         let address_bytes = account.address.as_bytes();
         out.extend_from_slice(&(address_bytes.len() as u32).to_le_bytes());
         out.extend_from_slice(address_bytes);
-        out.extend_from_slice(&account.consumer.to_le_bytes());
-        out.extend_from_slice(&account.industrial.to_le_bytes());
+        // Write amount in first field, 0 in second for backward compat during migration
+        out.extend_from_slice(&account.amount.to_le_bytes());
+        out.extend_from_slice(&0u64.to_le_bytes());
         out.extend_from_slice(&account.nonce.to_le_bytes());
     }
     out
@@ -161,13 +161,14 @@ fn decode_snapshot_common(bytes: &[u8]) -> std::io::Result<(u64, Vec<SnapshotAcc
         let addr_bytes = read_exact(bytes, &mut cursor, addr_len)?;
         let address = String::from_utf8(addr_bytes.to_vec())
             .map_err(|_| invalid_data("invalid utf8 in snapshot"))?;
-        let consumer = read_u64(bytes, &mut cursor)?;
-        let industrial = read_u64(bytes, &mut cursor)?;
+        let consumer_legacy = read_u64(bytes, &mut cursor)?;
+        let industrial_legacy = read_u64(bytes, &mut cursor)?;
         let nonce = read_u64(bytes, &mut cursor)?;
+        // Sum legacy consumer + industrial for single BLOCK amount
+        let amount = consumer_legacy + industrial_legacy;
         accounts.push(SnapshotAccount {
             address,
-            consumer,
-            industrial,
+            amount,
             nonce,
         });
     }
@@ -244,8 +245,9 @@ fn merkle_root(accounts: &[SnapshotAccount]) -> String {
     let mut trie = MerkleTrie::new();
     for a in accounts {
         let mut data = Vec::new();
-        data.extend_from_slice(&a.consumer.to_le_bytes());
-        data.extend_from_slice(&a.industrial.to_le_bytes());
+        // Write amount in first field, 0 in second for backward compat during migration
+        data.extend_from_slice(&a.amount.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
         data.extend_from_slice(&a.nonce.to_le_bytes());
         trie.insert(a.address.as_bytes(), &data);
     }
@@ -257,8 +259,7 @@ pub fn state_root(accounts: &HashMap<String, Account>) -> String {
         .iter()
         .map(|(addr, acc)| SnapshotAccount {
             address: addr.clone(),
-            consumer: acc.balance.consumer,
-            industrial: acc.balance.industrial,
+            amount: acc.balance.amount,
             nonce: acc.nonce,
         })
         .collect();
@@ -277,8 +278,7 @@ pub fn write_snapshot(
             .iter()
             .map(|(addr, acc)| SnapshotAccount {
                 address: addr.clone(),
-                consumer: acc.balance.consumer,
-                industrial: acc.balance.industrial,
+                amount: acc.balance.amount,
                 nonce: acc.nonce,
             })
             .collect();
@@ -334,8 +334,7 @@ pub fn write_diff(
             .iter()
             .map(|(addr, acc)| SnapshotAccount {
                 address: addr.clone(),
-                consumer: acc.balance.consumer,
-                industrial: acc.balance.industrial,
+                amount: acc.balance.amount,
                 nonce: acc.nonce,
             })
             .collect();
@@ -398,12 +397,10 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                                         Account {
                                             address: a.address,
                                             balance: TokenBalance {
-                                                consumer: a.consumer,
-                                                industrial: a.industrial,
+                                                amount: a.amount,
                                             },
                                             nonce: a.nonce,
-                                            pending_consumer: 0,
-                                            pending_industrial: 0,
+                                            pending_amount: 0,
                                             pending_nonce: 0,
                                             pending_nonces: HashSet::new(),
                                             sessions: Vec::new(),
@@ -448,12 +445,10 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                         Account {
                             address: a.address,
                             balance: TokenBalance {
-                                consumer: a.consumer,
-                                industrial: a.industrial,
+                                amount: a.amount,
                             },
                             nonce: a.nonce,
-                            pending_consumer: 0,
-                            pending_industrial: 0,
+                            pending_amount: 0,
                             pending_nonce: 0,
                             pending_nonces: HashSet::new(),
                             sessions: Vec::new(),
@@ -504,17 +499,17 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
             u64::from_le_bytes(value[16..24].try_into().map_err(|_| {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, "nonce decode")
             })?);
+        // Sum legacy consumer + industrial for single BLOCK amount
+        let amount = consumer + industrial;
         accounts.insert(
             address.clone(),
             Account {
                 address,
                 balance: crate::TokenBalance {
-                    consumer,
-                    industrial,
+                    amount,
                 },
                 nonce,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),
@@ -542,8 +537,7 @@ pub fn account_proof(
     let mut trie = MerkleTrie::new();
     for (addr, acc) in accounts {
         let mut data = Vec::new();
-        data.extend_from_slice(&acc.balance.consumer.to_le_bytes());
-        data.extend_from_slice(&acc.balance.industrial.to_le_bytes());
+        data.extend_from_slice(&acc.balance.amount.to_le_bytes());
         data.extend_from_slice(&acc.nonce.to_le_bytes());
         trie.insert(addr.as_bytes(), &data);
     }
@@ -612,11 +606,9 @@ mod tests {
         assert_eq!(root_hex, crypto_suite::hex::encode(root));
         let alice = accounts.get("alice").expect("alice present");
         assert_eq!(alice.address, "alice");
-        assert_eq!(alice.balance.consumer, 11);
-        assert_eq!(alice.balance.industrial, 7);
+        assert_eq!(alice.balance.amount, 18); // 11 + 7 from old split model
         assert_eq!(alice.nonce, 3);
-        assert_eq!(alice.pending_consumer, 0);
-        assert_eq!(alice.pending_industrial, 0);
+        assert_eq!(alice.pending_amount, 0);
         assert_eq!(alice.pending_nonce, 0);
     }
 }

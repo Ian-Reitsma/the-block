@@ -17,12 +17,10 @@ fn rejects_nonce_gap() {
         Account {
             address: "alice".into(),
             balance: TokenBalance {
-                consumer: 100,
-                industrial: 0,
+                amount: 100,
             },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
@@ -79,12 +77,10 @@ fn rollback_on_mid_block_panic() {
         Account {
             address: "alice".into(),
             balance: TokenBalance {
-                consumer: 100,
-                industrial: 0,
+                amount: 100,
             },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
