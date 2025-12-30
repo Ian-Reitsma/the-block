@@ -57,7 +57,8 @@ fn external_domain_verified() {
     let (_dir, pk_hex, _sk) = setup("example.com");
     set_allow_external(true);
     let pk_clone = pk_hex.clone();
-    set_txt_resolver(move |_| vec![pk_clone.clone()]);
+    // TXT records must be in format "tb-verification={node_id}" per DNS_VERIFICATION_PREFIX constant
+    set_txt_resolver(move |_| vec![format!("tb-verification={}", pk_clone)]);
     let mut domain = Map::new();
     domain.insert(
         "domain".to_string(),
@@ -68,6 +69,11 @@ fn external_domain_verified() {
     assert!(l["verified"].as_bool().unwrap());
     let p = gateway_policy(&lookup_req);
     assert!(matches!(p["record"], Value::String(_)));
+
+    // Comprehensive cleanup: reset all global state to prevent test pollution
+    set_allow_external(false);
+    set_txt_resolver(|_| vec![]);
+    clear_verify_cache();
 }
 
 #[testkit::tb_serial]

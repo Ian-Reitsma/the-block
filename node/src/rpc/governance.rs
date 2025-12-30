@@ -1,9 +1,10 @@
 use super::RpcError;
 use crate::governance::{
-    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
-    GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
+    decode_binary, decode_runtime_backend_policy, decode_storage_engine_policy,
+    decode_transport_provider_policy, encode_binary, GovStore, ParamKey, Params, Proposal,
+    ProposalStatus, Runtime, Vote, VoteChoice,
 };
-use foundation_serialization::{binary, Serialize};
+use foundation_serialization::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -117,17 +118,17 @@ pub fn vote_proposal(
     // ensure dependencies activated
     let tree = store.proposals();
     if let Some(raw) = tree
-        .get(binary::encode(&proposal_id).unwrap())
+        .get(encode_binary(&proposal_id).unwrap())
         .map_err(|_| RpcError::new(-32068, "storage"))?
     {
-        let prop: Proposal = binary::decode(&raw).map_err(|_| RpcError::new(-32069, "decode"))?;
+        let prop: Proposal = decode_binary(&raw).map_err(|_| RpcError::new(-32069, "decode"))?;
         for dep in &prop.deps {
             if let Some(dr) = tree
-                .get(binary::encode(dep).unwrap())
+                .get(encode_binary(dep).unwrap())
                 .map_err(|_| RpcError::new(-32068, "storage"))?
             {
                 let dp: Proposal =
-                    binary::decode(&dr).map_err(|_| RpcError::new(-32069, "decode"))?;
+                    decode_binary(&dr).map_err(|_| RpcError::new(-32069, "decode"))?;
                 if dp.status != ProposalStatus::Activated {
                     return Err(RpcError::new(-32070, "dependency not active"));
                 }
@@ -186,7 +187,7 @@ pub fn gov_list(store: &GovStore) -> Result<Vec<Proposal>, RpcError> {
     for item in store.proposals().iter() {
         // need access; make proposals() pub
         let (_, raw) = item.map_err(|_| RpcError::new(-32063, "iter"))?;
-        let p: Proposal = binary::decode(&raw).map_err(|_| RpcError::new(-32065, "decode"))?;
+        let p: Proposal = decode_binary(&raw).map_err(|_| RpcError::new(-32065, "decode"))?;
         arr.push(p);
     }
     Ok(arr)

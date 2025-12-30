@@ -84,6 +84,17 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::EnergyMinStake => 62,
         ParamKey::EnergyOracleTimeoutBlocks => 63,
         ParamKey::EnergySlashingRateBps => 64,
+        ParamKey::LaneConsumerCapacity => 65,
+        ParamKey::LaneIndustrialCapacity => 66,
+        ParamKey::LaneConsumerCongestionSensitivity => 67,
+        ParamKey::LaneIndustrialCongestionSensitivity => 68,
+        ParamKey::LaneIndustrialMinPremiumPercent => 69,
+        ParamKey::LaneTargetUtilizationPercent => 70,
+        ParamKey::LaneMarketSignalHalfLife => 71,
+        ParamKey::LaneMarketDemandMaxMultiplierPercent => 72,
+        ParamKey::LaneMarketDemandSensitivityPercent => 73,
+        ParamKey::LanePIProportionalGainPercent => 74,
+        ParamKey::LanePIIntegralGainPercent => 75,
     }
 }
 
@@ -154,6 +165,17 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         62 => ParamKey::EnergyMinStake,
         63 => ParamKey::EnergyOracleTimeoutBlocks,
         64 => ParamKey::EnergySlashingRateBps,
+        65 => ParamKey::LaneConsumerCapacity,
+        66 => ParamKey::LaneIndustrialCapacity,
+        67 => ParamKey::LaneConsumerCongestionSensitivity,
+        68 => ParamKey::LaneIndustrialCongestionSensitivity,
+        69 => ParamKey::LaneIndustrialMinPremiumPercent,
+        70 => ParamKey::LaneTargetUtilizationPercent,
+        71 => ParamKey::LaneMarketSignalHalfLife,
+        72 => ParamKey::LaneMarketDemandMaxMultiplierPercent,
+        73 => ParamKey::LaneMarketDemandSensitivityPercent,
+        74 => ParamKey::LanePIProportionalGainPercent,
+        75 => ParamKey::LanePIIntegralGainPercent,
         other => {
             return Err(codec_error(format!(
                 "binary decode: unknown ParamKey tag {other}"
@@ -841,6 +863,17 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::EnergyMinStake => "EnergyMinStake",
         ParamKey::EnergyOracleTimeoutBlocks => "EnergyOracleTimeoutBlocks",
         ParamKey::EnergySlashingRateBps => "EnergySlashingRateBps",
+        ParamKey::LaneConsumerCapacity => "LaneConsumerCapacity",
+        ParamKey::LaneIndustrialCapacity => "LaneIndustrialCapacity",
+        ParamKey::LaneConsumerCongestionSensitivity => "LaneConsumerCongestionSensitivity",
+        ParamKey::LaneIndustrialCongestionSensitivity => "LaneIndustrialCongestionSensitivity",
+        ParamKey::LaneIndustrialMinPremiumPercent => "LaneIndustrialMinPremiumPercent",
+        ParamKey::LaneTargetUtilizationPercent => "LaneTargetUtilizationPercent",
+        ParamKey::LaneMarketSignalHalfLife => "LaneMarketSignalHalfLife",
+        ParamKey::LaneMarketDemandMaxMultiplierPercent => "LaneMarketDemandMaxMultiplierPercent",
+        ParamKey::LaneMarketDemandSensitivityPercent => "LaneMarketDemandSensitivityPercent",
+        ParamKey::LanePIProportionalGainPercent => "LanePIProportionalGainPercent",
+        ParamKey::LanePIIntegralGainPercent => "LanePIIntegralGainPercent",
     }
 }
 

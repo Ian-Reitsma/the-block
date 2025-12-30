@@ -484,6 +484,29 @@ pub struct Params {
     pub tariff_min_bps: i64,
     #[serde(default = "default_tariff_max_bps")]
     pub tariff_max_bps: i64,
+    // Lane-based dynamic pricing parameters
+    #[serde(default = "default_lane_consumer_capacity")]
+    pub lane_consumer_capacity: i64,
+    #[serde(default = "default_lane_industrial_capacity")]
+    pub lane_industrial_capacity: i64,
+    #[serde(default = "default_lane_consumer_congestion_sensitivity")]
+    pub lane_consumer_congestion_sensitivity: i64,
+    #[serde(default = "default_lane_industrial_congestion_sensitivity")]
+    pub lane_industrial_congestion_sensitivity: i64,
+    #[serde(default = "default_lane_industrial_min_premium_percent")]
+    pub lane_industrial_min_premium_percent: i64,
+    #[serde(default = "default_lane_target_utilization_percent")]
+    pub lane_target_utilization_percent: i64,
+    #[serde(default = "default_lane_market_signal_half_life")]
+    pub lane_market_signal_half_life: i64,
+    #[serde(default = "default_lane_market_demand_max_multiplier_percent")]
+    pub lane_market_demand_max_multiplier_percent: i64,
+    #[serde(default = "default_lane_market_demand_sensitivity_percent")]
+    pub lane_market_demand_sensitivity_percent: i64,
+    #[serde(default = "default_lane_pi_proportional_gain_percent")]
+    pub lane_pi_proportional_gain_percent: i64,
+    #[serde(default = "default_lane_pi_integral_gain_percent")]
+    pub lane_pi_integral_gain_percent: i64,
 }
 
 impl Default for Params {
@@ -608,6 +631,18 @@ impl Default for Params {
             tariff_drift_rate: default_tariff_drift_rate(),
             tariff_min_bps: default_tariff_min_bps(),
             tariff_max_bps: default_tariff_max_bps(),
+            // Lane-based dynamic pricing
+            lane_consumer_capacity: default_lane_consumer_capacity(),
+            lane_industrial_capacity: default_lane_industrial_capacity(),
+            lane_consumer_congestion_sensitivity: default_lane_consumer_congestion_sensitivity(),
+            lane_industrial_congestion_sensitivity: default_lane_industrial_congestion_sensitivity(),
+            lane_industrial_min_premium_percent: default_lane_industrial_min_premium_percent(),
+            lane_target_utilization_percent: default_lane_target_utilization_percent(),
+            lane_market_signal_half_life: default_lane_market_signal_half_life(),
+            lane_market_demand_max_multiplier_percent: default_lane_market_demand_max_multiplier_percent(),
+            lane_market_demand_sensitivity_percent: default_lane_market_demand_sensitivity_percent(),
+            lane_pi_proportional_gain_percent: default_lane_pi_proportional_gain_percent(),
+            lane_pi_integral_gain_percent: default_lane_pi_integral_gain_percent(),
         }
     }
 }
@@ -1265,6 +1300,50 @@ impl Params {
                 .get("tariff_max_bps")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_tariff_max_bps),
+            lane_consumer_capacity: obj
+                .get("lane_consumer_capacity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_consumer_capacity),
+            lane_industrial_capacity: obj
+                .get("lane_industrial_capacity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_industrial_capacity),
+            lane_consumer_congestion_sensitivity: obj
+                .get("lane_consumer_congestion_sensitivity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_consumer_congestion_sensitivity),
+            lane_industrial_congestion_sensitivity: obj
+                .get("lane_industrial_congestion_sensitivity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_industrial_congestion_sensitivity),
+            lane_industrial_min_premium_percent: obj
+                .get("lane_industrial_min_premium_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_industrial_min_premium_percent),
+            lane_target_utilization_percent: obj
+                .get("lane_target_utilization_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_target_utilization_percent),
+            lane_market_signal_half_life: obj
+                .get("lane_market_signal_half_life")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_market_signal_half_life),
+            lane_market_demand_max_multiplier_percent: obj
+                .get("lane_market_demand_max_multiplier_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_market_demand_max_multiplier_percent),
+            lane_market_demand_sensitivity_percent: obj
+                .get("lane_market_demand_sensitivity_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_market_demand_sensitivity_percent),
+            lane_pi_proportional_gain_percent: obj
+                .get("lane_pi_proportional_gain_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_pi_proportional_gain_percent),
+            lane_pi_integral_gain_percent: obj
+                .get("lane_pi_integral_gain_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_pi_integral_gain_percent),
         };
         Ok(params)
     }
@@ -1503,6 +1582,41 @@ const fn default_tariff_min_bps() -> i64 {
 }
 const fn default_tariff_max_bps() -> i64 {
     200 // 2%
+}
+
+// Lane-based dynamic pricing defaults
+const fn default_lane_consumer_capacity() -> i64 {
+    1000 // Consumer lane: 1000 tx per block
+}
+const fn default_lane_industrial_capacity() -> i64 {
+    500 // Industrial lane: 500 tx per block (lower capacity, higher priority)
+}
+const fn default_lane_consumer_congestion_sensitivity() -> i64 {
+    300 // k = 3.0 (moderate congestion response)
+}
+const fn default_lane_industrial_congestion_sensitivity() -> i64 {
+    500 // k = 5.0 (aggressive congestion response for priority lane)
+}
+const fn default_lane_industrial_min_premium_percent() -> i64 {
+    50 // Industrial must be ≥ 150% of consumer fee (50% premium)
+}
+const fn default_lane_target_utilization_percent() -> i64 {
+    70 // Target 70% utilization for PI controller
+}
+const fn default_lane_market_signal_half_life() -> i64 {
+    50 // 50 blocks (~10 min) EMA smoothing
+}
+const fn default_lane_market_demand_max_multiplier_percent() -> i64 {
+    300 // Max 4x multiplier at full demand (3 + 1 = 4x)
+}
+const fn default_lane_market_demand_sensitivity_percent() -> i64 {
+    200 // β = 2.0 (exponential curvature)
+}
+const fn default_lane_pi_proportional_gain_percent() -> i64 {
+    10 // Kp = 0.1 (proportional gain)
+}
+const fn default_lane_pi_integral_gain_percent() -> i64 {
+    1 // Ki = 0.01 (integral gain)
 }
 
 fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {

@@ -37,6 +37,8 @@ static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
 static ALLOW_EXTERNAL: AtomicBool = AtomicBool::new(false);
 static DISABLE_VERIFY: AtomicBool = AtomicBool::new(false);
 const VERIFY_TTL: Duration = Duration::from_secs(3600);
+/// DNS TXT record verification prefix - external domains must have TXT record: "tb-verification={node_id}"
+const DNS_VERIFICATION_PREFIX: &str = "tb-verification=";
 static REHEARSAL: AtomicBool = AtomicBool::new(true);
 
 type TxtResolver = Box<dyn Fn(&str) -> Vec<String> + Send + Sync>;
@@ -2616,7 +2618,7 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
         let resolver = TXT_RESOLVER.lock().unwrap();
         resolver(domain)
     };
-    let needle = format!("tb-verification={}", node_id);
+    let needle = format!("{}{}", DNS_VERIFICATION_PREFIX, node_id);
     let ok = txts.iter().any(|t| t.contains(&needle));
     VERIFY_CACHE.lock().unwrap().insert(key, (ok, now));
     record_txt_result(ok);

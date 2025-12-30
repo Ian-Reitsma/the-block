@@ -1,5 +1,6 @@
 pub mod bicameral;
 mod codec;
+pub use codec::{decode_binary, encode_binary};
 pub mod controller;
 pub mod inflation_cap;
 mod kalman;
@@ -126,4 +127,27 @@ pub enum ParamKey {
     EnergyMinStake,
     EnergyOracleTimeoutBlocks,
     EnergySlashingRateBps,
+    // Lane-based dynamic pricing parameters
+    /// Consumer lane maximum transactions per block (service capacity μ)
+    LaneConsumerCapacity,
+    /// Industrial lane maximum transactions per block (service capacity μ)
+    LaneIndustrialCapacity,
+    /// Consumer lane congestion sensitivity parameter k
+    LaneConsumerCongestionSensitivity,
+    /// Industrial lane congestion sensitivity parameter k
+    LaneIndustrialCongestionSensitivity,
+    /// Minimum industrial/consumer fee ratio (e.g., 50 = 50% premium)
+    LaneIndustrialMinPremiumPercent,
+    /// Target lane utilization for PI control (e.g., 70 = 70%)
+    LaneTargetUtilizationPercent,
+    /// Market signal EMA half-life in blocks
+    LaneMarketSignalHalfLife,
+    /// Market demand multiplier maximum (e.g., 300 = 3x multiplier)
+    LaneMarketDemandMaxMultiplierPercent,
+    /// Market demand sensitivity (exponential curvature, e.g., 200 = 2.0)
+    LaneMarketDemandSensitivityPercent,
+    /// PI controller proportional gain Kp (e.g., 10 = 0.1)
+    LanePIProportionalGainPercent,
+    /// PI controller integral gain Ki (e.g., 1 = 0.01)
+    LanePIIntegralGainPercent,
 }

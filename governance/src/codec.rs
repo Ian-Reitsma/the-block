@@ -642,18 +642,35 @@ impl BinaryCodec for Proposal {
     }
 
     fn decode(reader: &mut BinaryReader<'_>) -> Result<Self> {
+        let id = u64::decode(reader).map_err(|e| {
+            eprintln!("[PROPOSAL_DECODE_ERR] id: {:?}", e);
+            e
+        })?;
+        let key = ParamKey::decode(reader).map_err(|e| {
+            eprintln!("[PROPOSAL_DECODE_ERR] key (id={}): {:?}", id, e);
+            e
+        })?;
+        let new_value = i64::decode(reader)?;
+        let min = i64::decode(reader)?;
+        let max = i64::decode(reader)?;
+        let proposer = String::decode(reader)?;
+        let created_epoch = u64::decode(reader)?;
+        let vote_deadline_epoch = u64::decode(reader)?;
+        let activation_epoch = Option::<u64>::decode(reader)?;
+        let status = ProposalStatus::decode(reader)?;
+        let deps = Vec::<u64>::decode(reader)?;
         Ok(Self {
-            id: u64::decode(reader)?,
-            key: ParamKey::decode(reader)?,
-            new_value: i64::decode(reader)?,
-            min: i64::decode(reader)?,
-            max: i64::decode(reader)?,
-            proposer: String::decode(reader)?,
-            created_epoch: u64::decode(reader)?,
-            vote_deadline_epoch: u64::decode(reader)?,
-            activation_epoch: Option::<u64>::decode(reader)?,
-            status: ProposalStatus::decode(reader)?,
-            deps: Vec::<u64>::decode(reader)?,
+            id,
+            key,
+            new_value,
+            min,
+            max,
+            proposer,
+            created_epoch,
+            vote_deadline_epoch,
+            activation_epoch,
+            status,
+            deps,
         })
     }
 }

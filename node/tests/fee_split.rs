@@ -34,6 +34,8 @@ fn admission_and_block_accounting() {
     bc.add_account("bob".into(), 0).unwrap();
     bc.min_fee_per_byte_consumer = 0;
     bc.base_fee = 0;
+    // Update dynamic pricing engine to allow zero fees for test
+    bc.set_lane_base_fees(0, 0);
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "alice".into(),
@@ -46,7 +48,10 @@ fn admission_and_block_accounting() {
         memo: Vec::new(),
     };
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
-    bc.submit_transaction(tx).unwrap();
+    match bc.submit_transaction(tx) {
+        Ok(_) => {},
+        Err(e) => panic!("Transaction submission failed: {:?}", e),
+    }
     let alice = bc.accounts.get("alice").unwrap();
     assert_eq!(alice.pending_amount, 10); // Total fee (4+6) in single BLOCK token
     bc.mine_block("miner").unwrap();

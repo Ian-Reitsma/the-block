@@ -211,6 +211,7 @@ pub use constants::{
 };
 pub mod fee;
 pub mod fees;
+pub use fees::lane_pricing::LanePricingEngine;
 pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
@@ -601,10 +602,10 @@ pub struct Block {
     pub nonce: u64,
     pub hash: String,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Canonical consumer reward recorded in the header. Must match tx[0].
+    /// Canonical consumer LANE amount from coinbase tx[0] (P2P transactions, slow, lower fees). Combined with coinbase_industrial for total miner reward.
     pub coinbase_block: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Canonical industrial reward recorded in the header. Must match tx[0].
+    /// Canonical industrial LANE amount from coinbase tx[0] (market operations, fast, higher fees). Combined with coinbase_block for total miner reward.
     pub coinbase_industrial: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Subsidy minted for storage operations in this block
@@ -869,6 +870,8 @@ pub struct Blockchain {
     pub base_fee: u64,
     /// Governance-controlled economic parameters
     pub params: Params,
+    /// Dynamic lane-based pricing engine for consumer/industrial fee calculation
+    lane_pricing_engine: Mutex<LanePricingEngine>,
     pub beta_storage_sub_raw: i64,
     pub gamma_read_sub_raw: i64,
     pub kappa_cpu_sub_raw: i64,
@@ -1087,7 +1090,14 @@ impl Default for Blockchain {
             badge_tracker: ServiceBadgeTracker::new(),
             config: NodeConfig::default(),
             base_fee: 1,
-            params,
+            params: params.clone(),
+            lane_pricing_engine: Mutex::new(LanePricingEngine::new(
+                1, // base_consumer_fee
+                2, // base_industrial_fee (2x consumer)
+                params.lane_consumer_capacity as f64,
+                params.lane_industrial_capacity as f64,
+                params.lane_target_utilization_percent as f64 / 100.0,
+            )),
             beta_storage_sub_raw: 50,
             gamma_read_sub_raw: 20,
             kappa_cpu_sub_raw: 10,
@@ -1191,6 +1201,13 @@ impl Blockchain {
 
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+
+    /// Set base fees for dynamic lane pricing engine (primarily for testing).
+    pub fn set_lane_base_fees(&self, consumer: u64, industrial: u64) {
+        if let Ok(mut engine) = self.lane_pricing_engine.lock() {
+            engine.set_base_fees(consumer, industrial);
+        }
     }
 
     pub fn register_receipt_providers(
@@ -3107,9 +3124,23 @@ impl Blockchain {
             }
             TxAdmissionError::LockPoisoned
         })?;
-        let lane_min = match lane {
-            FeeLane::Consumer => self.min_fee_per_byte_consumer,
-            FeeLane::Industrial => self.min_fee_per_byte_industrial,
+        let lane_min = {
+            // Use static fee fields if explicitly set (for testing), otherwise use dynamic pricing
+            let static_min = match lane {
+                FeeLane::Consumer => self.min_fee_per_byte_consumer,
+                FeeLane::Industrial => self.min_fee_per_byte_industrial,
+            };
+            // If static fee is explicitly set to non-1 (either 0 for tests or higher), use it
+            // Otherwise use dynamic pricing from the engine
+            if static_min != 1 {
+                static_min
+            } else {
+                let engine = self.lane_pricing_engine.lock().unwrap_or_else(|e| e.into_inner());
+                match lane {
+                    FeeLane::Consumer => engine.consumer_fee_per_byte(),
+                    FeeLane::Industrial => engine.industrial_fee_per_byte(),
+                }
+            }
         };
         let floor = {
             let guard = self.admission_guard(lane);
@@ -4940,6 +4971,21 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+
+                // Update dynamic pricing engine with new block data
+                let mut consumer_count = 0u64;
+                let mut industrial_count = 0u64;
+                for tx in block.transactions.iter().skip(1) {
+                    // Skip coinbase (first tx)
+                    match tx.lane {
+                        FeeLane::Consumer => consumer_count += 1,
+                        FeeLane::Industrial => industrial_count += 1,
+                    }
+                }
+                if let Ok(mut engine) = self.lane_pricing_engine.lock() {
+                    engine.update_block(consumer_count, industrial_count);
+                }
+
                 #[cfg(feature = "telemetry")]
                 {
                     // Use cached serialized receipts for telemetry (avoid third encoding)

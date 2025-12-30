@@ -36,6 +36,8 @@ fn eviction_records_hash_and_releases_slot() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 1;
     bc.max_pending_per_account = 1;
+    // Disable dynamic fee floor (0th percentile = no floor) to test eviction logic without fee validation
+    bc.set_fee_floor_policy(1, 0);
     bc.add_account("miner".into(), 0).unwrap();
     bc.add_account("alice".into(), 10_000).unwrap();
     bc.add_account("bob".into(), 10_000).unwrap();

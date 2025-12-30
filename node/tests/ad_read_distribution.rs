@@ -129,8 +129,12 @@ fn floor_breakdown(total: u64) -> ResourceFloorBreakdown {
     }
 }
 
-#[test]
+#[testkit::tb_serial]
 fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
+    // Reset any environment variables that might affect ReadAck processing
+    std::env::remove_var("TB_GATEWAY_RECEIPTS");
+    std::env::remove_var("TB_DNS_DB_PATH");
+
     let dir = tempdir().expect("temp dir");
     let chain_path = dir.path().join("chain");
     let mut bc = Blockchain::new(chain_path.to_str().expect("path"));
@@ -204,13 +208,13 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         .get_account_balance(&viewer_addr)
         .expect("viewer balance");
     assert_eq!(
-        viewer_balance.consumer,
+        viewer_balance.amount,
         block.read_sub_viewer.value() + block.ad_viewer.value()
     );
 
     let host_balance = bc.get_account_balance(&host_addr).expect("host balance");
     assert_eq!(
-        host_balance.consumer,
+        host_balance.amount,
         block.read_sub_host.value() + block.ad_host.value()
     );
 
@@ -218,7 +222,7 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         .get_account_balance(&hardware_addr)
         .expect("hardware balance");
     assert_eq!(
-        hardware_balance.consumer,
+        hardware_balance.amount,
         block.read_sub_hardware.value() + block.ad_hardware.value()
     );
 
@@ -226,14 +230,14 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         .get_account_balance(&verifier_addr)
         .expect("verifier balance");
     assert_eq!(
-        verifier_balance.consumer,
+        verifier_balance.amount,
         block.read_sub_verifier.value() + block.ad_verifier.value()
     );
 
     let liquidity_balance = bc
         .get_account_balance(liquidity_addr)
         .expect("liquidity balance");
-    assert_eq!(liquidity_balance.consumer, block.read_sub_liquidity.value());
+    assert_eq!(liquidity_balance.amount, block.read_sub_liquidity.value());
 
     assert_eq!(block.receipts.len(), 1);
     match &block.receipts[0] {

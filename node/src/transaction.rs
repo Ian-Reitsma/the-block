@@ -178,7 +178,9 @@ impl Default for FeeLane {
 pub struct RawTxPayload {
     pub from_: String,
     pub to: String,
+    /// Amount routed through consumer LANE (P2P transactions, slow, lower fees). Total transfer = amount_consumer + amount_industrial.
     pub amount_consumer: u64,
+    /// Amount routed through industrial LANE (market operations, fast, higher fees). Total transfer = amount_consumer + amount_industrial.
     pub amount_industrial: u64,
     pub fee: u64,
     pub pct: u8,

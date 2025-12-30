@@ -74,6 +74,8 @@ fn ordering_stable_after_heap_rebuild() {
     bc.tx_ttl = 100;
     bc.base_fee = 0;
     bc.min_fee_per_byte_consumer = 0;
+    // Disable dynamic fee floor (0th percentile = no floor) to test pure ordering logic without fee validation
+    bc.set_fee_floor_policy(1, 0);
     bc.add_account("sink".into(), 0).unwrap();
     for acct in ["a", "b", "c", "d", "e"] {
         bc.add_account(acct.into(), 100_000).unwrap();  // Sufficient BLOCK for test transactions
