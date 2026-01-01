@@ -26,9 +26,7 @@ pub struct StateDelta {
 fn default_account(address: String) -> Account {
     Account {
         address,
-        balance: TokenBalance {
-            amount: 0,
-        },
+        balance: TokenBalance { amount: 0 },
         nonce: 0,
         pending_amount: 0,
         pending_nonce: 0,
@@ -102,7 +100,8 @@ pub fn validate_and_apply(
                 Ordering::Equal => {}
             }
             // Total BLOCK tokens: amount (both lanes) + fees
-            let total_amount = tx.payload.amount_consumer + tx.payload.amount_industrial + fee_c + fee_i;
+            let total_amount =
+                tx.payload.amount_consumer + tx.payload.amount_industrial + fee_c + fee_i;
             if sender.balance.amount < total_amount {
                 #[cfg(feature = "telemetry")]
                 BLOCK_APPLY_FAIL_TOTAL.inc();

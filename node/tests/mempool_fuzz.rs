@@ -139,7 +139,10 @@ fn adaptive_test_params(threads: usize) -> (usize, usize) {
         }
     }
 
-    eprintln!("Benchmarking concurrent performance ({} threads)...", threads);
+    eprintln!(
+        "Benchmarking concurrent performance ({} threads)...",
+        threads
+    );
     let (txs_per_sec, recommended_batch) = benchmark_concurrent_performance(threads);
 
     eprintln!(
@@ -290,8 +293,7 @@ fn fuzz_mempool_random_fees_nonces() {
     );
     eprintln!(
         "  Confidence score: {:.2}",
-        (evictions as f64 / MEMPOOL_SIZE as f64)
-            * (total_accepted as f64 / total_submitted as f64)
+        (evictions as f64 / MEMPOOL_SIZE as f64) * (total_accepted as f64 / total_submitted as f64)
     );
     assert!(guard.mempool_consumer.len() <= guard.max_mempool_size_consumer);
 

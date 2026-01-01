@@ -396,9 +396,7 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                                         a.address.clone(),
                                         Account {
                                             address: a.address,
-                                            balance: TokenBalance {
-                                                amount: a.amount,
-                                            },
+                                            balance: TokenBalance { amount: a.amount },
                                             nonce: a.nonce,
                                             pending_amount: 0,
                                             pending_nonce: 0,
@@ -444,9 +442,7 @@ pub fn load_latest(base: &str) -> std::io::Result<Option<(u64, HashMap<String, A
                         a.address.clone(),
                         Account {
                             address: a.address,
-                            balance: TokenBalance {
-                                amount: a.amount,
-                            },
+                            balance: TokenBalance { amount: a.amount },
                             nonce: a.nonce,
                             pending_amount: 0,
                             pending_nonce: 0,
@@ -505,9 +501,7 @@ pub fn load_file(path: &str) -> std::io::Result<(u64, HashMap<String, Account>, 
             address.clone(),
             Account {
                 address,
-                balance: crate::TokenBalance {
-                    amount,
-                },
+                balance: crate::TokenBalance { amount },
                 nonce,
                 pending_amount: 0,
                 pending_nonce: 0,

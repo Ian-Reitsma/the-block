@@ -2703,8 +2703,8 @@ impl Explorer {
 
     pub fn settlement_balances(&self) -> DbResult<Vec<ProviderSettlementRecord>> {
         let conn = self.conn()?;
-        let mut stmt =
-            conn.prepare("SELECT provider, consumer, industrial, updated_at FROM compute_settlement")?;
+        let mut stmt = conn
+            .prepare("SELECT provider, consumer, industrial, updated_at FROM compute_settlement")?;
         let rows = stmt.query_map(params![], |row| {
             let consumer: i64 = row.get(1)?;
             let industrial: i64 = row.get(2)?;

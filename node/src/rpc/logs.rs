@@ -177,19 +177,25 @@ mod store {
 
     pub async fn run_tail(mut ws: ServerStream, cfg: TailConfig) {
         let mut last_id = cfg.filter.after_id.unwrap_or(0);
+        let mut sent_any = false;
         loop {
             let mut filter = cfg.filter.clone();
             if last_id > 0 {
                 filter.after_id = Some(last_id);
             }
             match search_logs(&cfg.db, &filter) {
-                Ok(entries) if entries.is_empty() => {}
+                Ok(entries) if entries.is_empty() => {
+                    if !sent_any && ws.send(WsMessage::Text("[]".into())).await.is_err() {
+                        break;
+                    }
+                }
                 Ok(entries) => {
                     last_id = entries.last().and_then(|row| row.id).unwrap_or(last_id);
                     if let Ok(body) = json::to_string(&entries) {
                         if ws.send(WsMessage::Text(body)).await.is_err() {
                             break;
                         }
+                        sent_any = true;
                     }
                 }
                 Err(err) => {
@@ -198,6 +204,7 @@ mod store {
                     if ws.send(WsMessage::Text(response)).await.is_err() {
                         break;
                     }
+                    sent_any = true;
                 }
             }
             runtime::sleep(cfg.interval).await;

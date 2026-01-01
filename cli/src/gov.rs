@@ -1034,10 +1034,8 @@ impl GovTreasuryCmd {
                 query.destination = take_string(sub_matches, "destination");
                 query.min_epoch = parse_u64(take_string(sub_matches, "min-epoch"), "min-epoch")?;
                 query.max_epoch = parse_u64(take_string(sub_matches, "max-epoch"), "max-epoch")?;
-                query.min_amount =
-                    parse_u64(take_string(sub_matches, "min-amount"), "min-amount")?;
-                query.max_amount =
-                    parse_u64(take_string(sub_matches, "max-amount"), "max-amount")?;
+                query.min_amount = parse_u64(take_string(sub_matches, "min-amount"), "min-amount")?;
+                query.max_amount = parse_u64(take_string(sub_matches, "max-amount"), "max-amount")?;
                 query.min_created_at =
                     parse_u64(take_string(sub_matches, "min-created-at"), "min-created-at")?;
                 query.max_created_at =

@@ -12,6 +12,12 @@ use util::timeout::expect_timeout;
 
 mod util;
 
+fn peer_label(pk: &[u8; 32]) -> String {
+    net::overlay_peer_from_bytes(pk)
+        .map(|p| net::overlay_peer_to_base58(&p))
+        .unwrap_or_else(|_| crypto_suite::hex::encode(pk))
+}
+
 fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
@@ -95,8 +101,8 @@ fn peer_key_rotate() {
         let sig = sk.sign(&new_pk);
         let body = format!(
         "{{\"method\":\"net.key_rotate\",\"params\":{{\"peer_id\":\"{}\",\"new_key\":\"{}\",\"signature\":\"{}\"}}}}",
-        crypto_suite::hex::encode(pk),
-        crypto_suite::hex::encode(new_pk),
+        peer_label(&pk),
+        peer_label(&new_pk),
         crypto_suite::hex::encode(sig.to_bytes()),
     );
         let res = rpc(&addr, &body).await;
@@ -105,7 +111,7 @@ fn peer_key_rotate() {
         // old key rejected
         let body_old = format!(
             "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
-            crypto_suite::hex::encode(pk)
+            peer_label(&pk)
         );
         let val = rpc(&addr, &body_old).await;
         assert!(val.get("error").is_some());
@@ -113,7 +119,7 @@ fn peer_key_rotate() {
         // new key retains metrics
         let body_new = format!(
             "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
-            crypto_suite::hex::encode(new_pk)
+            peer_label(&new_pk)
         );
         let val = rpc(&addr, &body_new).await;
         assert_eq!(val["result"]["requests"].as_u64().unwrap(), 1);

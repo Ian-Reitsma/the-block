@@ -14,9 +14,7 @@ fn block_application_is_atomic() {
         "alice".into(),
         Account {
             address: "alice".into(),
-            balance: TokenBalance {
-                amount: 100,
-            },
+            balance: TokenBalance { amount: 100 },
             nonce: 0,
             pending_amount: 0,
             pending_nonce: 0,
@@ -28,9 +26,7 @@ fn block_application_is_atomic() {
         "bob".into(),
         Account {
             address: "bob".into(),
-            balance: TokenBalance {
-                amount: 0,
-            },
+            balance: TokenBalance { amount: 0 },
             nonce: 0,
             pending_amount: 0,
             pending_nonce: 0,

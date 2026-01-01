@@ -437,6 +437,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 ### Gossip Relay
 - `node/src/gossip/relay.rs` implements TTL-bound dedup, shard-aware peer sets, and latency + reputation scoring. Fanout metrics live in `node/src/telemetry.rs` (`GOSSIP_*` series) and the relay persists shard membership so partitions recover quickly.
 - Range-boost deliveries and ANN payloads register as gossip hops, keeping mesh telemetry side-by-side with QUIC counts.
+- P2P rate limiting clamps request volume with a configurable window: `TB_P2P_RATE_WINDOW_SECS` (default 1s) controls how long counts accumulate before reset, pairing with `TB_P2P_MAX_PER_SEC`/`TB_P2P_MAX_BYTES_PER_SEC` to keep abusive peers from starving the network. Operators can widen the window for incident drills or lock it down during attacks.
 
 ### QUIC Transport
 - The in-house transport crate (`crates/transport`) abstracts Quinn and s2n providers. `node/src/net/quic.rs` publishes diag snapshots through RPC/CLI (`contract-cli net quic-stats`).

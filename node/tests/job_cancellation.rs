@@ -1,11 +1,11 @@
 #![cfg(feature = "integration-tests")]
+use sys::tempfile::tempdir;
 use the_block::compute_market::{
     courier, scheduler,
     scheduler::{CancelReason, Capability, Priority},
-    settlement::{Settlement, SettleMode},
+    settlement::{SettleMode, Settlement},
     Job, Market, Offer, Workload,
 };
-use sys::tempfile::tempdir;
 
 fn sample_offer_job(id: &str) -> (Offer, Job) {
     let offer = Offer {

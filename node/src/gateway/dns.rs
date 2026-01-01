@@ -523,9 +523,7 @@ impl BlockchainLedger {
     fn blank_account(address: &str) -> Account {
         Account {
             address: address.to_string(),
-            balance: TokenBalance {
-                amount: 0,
-            },
+            balance: TokenBalance { amount: 0 },
             nonce: 0,
             pending_amount: 0,
             pending_nonce: 0,
@@ -575,12 +573,10 @@ impl DomainLedger for BlockchainLedger {
                     entry.balance.amount -= command.amount();
                 }
                 LedgerBatchKind::Credit => {
-                    entry.balance.amount =
-                        entry.balance.amount.saturating_add(command.amount());
+                    entry.balance.amount = entry.balance.amount.saturating_add(command.amount());
                 }
                 LedgerBatchKind::CreditTreasury => {
-                    entry.balance.amount =
-                        entry.balance.amount.saturating_add(command.amount());
+                    entry.balance.amount = entry.balance.amount.saturating_add(command.amount());
                 }
             }
             let _ = command.memo();
@@ -2740,9 +2736,7 @@ mod tests {
                     (*address).to_string(),
                     Account {
                         address: (*address).to_string(),
-                        balance: TokenBalance {
-                            amount: *balance,
-                        },
+                        balance: TokenBalance { amount: *balance },
                         nonce: 0,
                         pending_amount: 0,
                         pending_nonce: 0,
@@ -2756,9 +2750,7 @@ mod tests {
                 .entry("treasury".to_string())
                 .or_insert(Account {
                     address: "treasury".to_string(),
-                    balance: TokenBalance {
-                        amount: 0,
-                    },
+                    balance: TokenBalance { amount: 0 },
                     nonce: 0,
                     pending_amount: 0,
                     pending_nonce: 0,

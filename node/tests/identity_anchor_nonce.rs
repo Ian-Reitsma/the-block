@@ -69,7 +69,7 @@ fn build_request(id: u64, params: Value) -> Value {
 #[testkit::tb_serial]
 fn identity_anchor_nonces_are_scoped_per_address() {
     runtime::block_on(async {
-    let dir = tempdir().expect("tempdir");
+        let dir = tempdir().expect("tempdir");
         let chain_path = dir.path().join("chain");
         let bc = Arc::new(Mutex::new(Blockchain::new(
             chain_path.to_str().expect("chain path"),
@@ -80,7 +80,10 @@ fn identity_anchor_nonces_are_scoped_per_address() {
         let runtime_cfg = fuzz_runtime_config();
         let nonces = Arc::new(Mutex::new(HashSet::new()));
         let handles = Arc::new(Mutex::new(HandleRegistry::open(
-            dir.path().join("handles.db").to_str().expect("handles path"),
+            dir.path()
+                .join("handles.db")
+                .to_str()
+                .expect("handles path"),
         )));
         let dids = Arc::new(Mutex::new(DidRegistry::open(&did_db_path)));
 

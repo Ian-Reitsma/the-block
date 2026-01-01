@@ -532,7 +532,10 @@ mod tests {
         };
 
         let reward = controller.compute_block_reward(&metrics);
-        assert_eq!(reward, 0, "Zero expected_total_blocks should return 0 reward");
+        assert_eq!(
+            reward, 0,
+            "Zero expected_total_blocks should return 0 reward"
+        );
     }
 
     #[test]

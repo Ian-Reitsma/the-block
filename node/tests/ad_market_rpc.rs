@@ -26,13 +26,13 @@ use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use rand::rngs::StdRng;
 #[cfg(all(feature = "telemetry", feature = "python-bindings"))]
-use std::{env, path::Path, process::Command};
-#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
-use the_block::serve_metrics_with_shutdown;
-#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 use std::io::{Read, Write};
 #[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 use std::net::TcpStream;
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use std::{env, path::Path, process::Command};
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use the_block::serve_metrics_with_shutdown;
 use the_block::{
     ad_readiness::{AdReadinessConfig, AdReadinessHandle},
     identity::{handle_registry::HandleRegistry, DidRegistry},

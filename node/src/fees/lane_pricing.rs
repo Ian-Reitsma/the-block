@@ -77,7 +77,7 @@
 //!
 //! This stabilizes long-term utilization around target levels.
 
-use super::congestion::{DualLaneCongestion, CongestionReport};
+use super::congestion::{CongestionReport, DualLaneCongestion};
 use super::market_signals::{Market, MarketSignalAggregator};
 
 /// Comprehensive lane pricing engine.
@@ -173,7 +173,9 @@ impl PIController {
 
         // Update integral with anti-windup
         self.integral += error;
-        self.integral = self.integral.clamp(-self.integral_limit, self.integral_limit);
+        self.integral = self
+            .integral
+            .clamp(-self.integral_limit, self.integral_limit);
 
         // Compute control signal
         let control = self.kp * error + self.ki * self.integral;
@@ -259,14 +261,19 @@ impl LanePricingEngine {
     /// Called after each block to update congestion metrics and adaptive adjustments.
     pub fn update_block(&mut self, consumer_tx_count: u64, industrial_tx_count: u64) {
         // Update congestion tracking
-        self.congestion.update_both(consumer_tx_count, industrial_tx_count);
+        self.congestion
+            .update_both(consumer_tx_count, industrial_tx_count);
 
         // Update adaptive adjustments using PI control
         let consumer_util = self.congestion.consumer.utilization();
         let industrial_util = self.congestion.industrial.utilization();
 
-        self.consumer_adjustment = self.consumer_pi.update(self.target_utilization, consumer_util);
-        self.industrial_adjustment = self.industrial_pi.update(self.target_utilization, industrial_util);
+        self.consumer_adjustment = self
+            .consumer_pi
+            .update(self.target_utilization, consumer_util);
+        self.industrial_adjustment = self
+            .industrial_pi
+            .update(self.target_utilization, industrial_util);
     }
 
     /// Update market signal for industrial lane pricing.
@@ -279,7 +286,8 @@ impl LanePricingEngine {
         volume: u64,
         utilization: f64,
     ) {
-        self.market_signals.update_market(market, clearing_price, volume, utilization);
+        self.market_signals
+            .update_market(market, clearing_price, volume, utilization);
     }
 
     /// Compute current consumer lane fee per byte.
@@ -442,7 +450,7 @@ mod tests {
             1000, // consumer base
             1500, // industrial base
             100.0, 100.0, // capacities
-            0.7, // target util
+            0.7,   // target util
         );
 
         // Even with equal congestion and zero market demand

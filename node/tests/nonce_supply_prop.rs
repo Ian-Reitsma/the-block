@@ -26,7 +26,7 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
                 from_: "a".into(),
                 to: "b".into(),
                 amount_consumer: 1,
-                amount_industrial: 0,  // Single token via consumer lane only
+                amount_industrial: 0, // Single token via consumer lane only
                 fee: 1000,
                 pct: 100,
                 nonce: 1,
@@ -53,7 +53,7 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             let rounds = rng.range_usize(1..=8);
             for _ in 0..rounds {
                 let consumer = rng.range_u64(0..=50) % 5;
-                let industrial = 0;  // Single token via consumer lane only
+                let industrial = 0; // Single token via consumer lane only
                 let payload = RawTxPayload {
                     from_: "a".into(),
                     to: "b".into(),

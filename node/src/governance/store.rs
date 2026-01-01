@@ -1296,7 +1296,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::LaneIndustrialMinPremiumPercent => "lane_industrial_min_premium_percent",
         ParamKey::LaneTargetUtilizationPercent => "lane_target_utilization_percent",
         ParamKey::LaneMarketSignalHalfLife => "lane_market_signal_half_life",
-        ParamKey::LaneMarketDemandMaxMultiplierPercent => "lane_market_demand_max_multiplier_percent",
+        ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+            "lane_market_demand_max_multiplier_percent"
+        }
         ParamKey::LaneMarketDemandSensitivityPercent => "lane_market_demand_sensitivity_percent",
         ParamKey::LanePIProportionalGainPercent => "lane_pi_proportional_gain_percent",
         ParamKey::LanePIIntegralGainPercent => "lane_pi_integral_gain_percent",
@@ -2979,15 +2981,33 @@ impl GovStore {
                                 ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
                                 ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
                                 ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
-                                ParamKey::LaneConsumerCongestionSensitivity => params.lane_consumer_congestion_sensitivity,
-                                ParamKey::LaneIndustrialCongestionSensitivity => params.lane_industrial_congestion_sensitivity,
-                                ParamKey::LaneIndustrialMinPremiumPercent => params.lane_industrial_min_premium_percent,
-                                ParamKey::LaneTargetUtilizationPercent => params.lane_target_utilization_percent,
-                                ParamKey::LaneMarketSignalHalfLife => params.lane_market_signal_half_life,
-                                ParamKey::LaneMarketDemandMaxMultiplierPercent => params.lane_market_demand_max_multiplier_percent,
-                                ParamKey::LaneMarketDemandSensitivityPercent => params.lane_market_demand_sensitivity_percent,
-                                ParamKey::LanePIProportionalGainPercent => params.lane_pi_proportional_gain_percent,
-                                ParamKey::LanePIIntegralGainPercent => params.lane_pi_integral_gain_percent,
+                                ParamKey::LaneConsumerCongestionSensitivity => {
+                                    params.lane_consumer_congestion_sensitivity
+                                }
+                                ParamKey::LaneIndustrialCongestionSensitivity => {
+                                    params.lane_industrial_congestion_sensitivity
+                                }
+                                ParamKey::LaneIndustrialMinPremiumPercent => {
+                                    params.lane_industrial_min_premium_percent
+                                }
+                                ParamKey::LaneTargetUtilizationPercent => {
+                                    params.lane_target_utilization_percent
+                                }
+                                ParamKey::LaneMarketSignalHalfLife => {
+                                    params.lane_market_signal_half_life
+                                }
+                                ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+                                    params.lane_market_demand_max_multiplier_percent
+                                }
+                                ParamKey::LaneMarketDemandSensitivityPercent => {
+                                    params.lane_market_demand_sensitivity_percent
+                                }
+                                ParamKey::LanePIProportionalGainPercent => {
+                                    params.lane_pi_proportional_gain_percent
+                                }
+                                ParamKey::LanePIIntegralGainPercent => {
+                                    params.lane_pi_integral_gain_percent
+                                }
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -3226,13 +3246,23 @@ impl GovStore {
                 ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
                 ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
                 ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
-                ParamKey::LaneConsumerCongestionSensitivity => params.lane_consumer_congestion_sensitivity,
-                ParamKey::LaneIndustrialCongestionSensitivity => params.lane_industrial_congestion_sensitivity,
-                ParamKey::LaneIndustrialMinPremiumPercent => params.lane_industrial_min_premium_percent,
+                ParamKey::LaneConsumerCongestionSensitivity => {
+                    params.lane_consumer_congestion_sensitivity
+                }
+                ParamKey::LaneIndustrialCongestionSensitivity => {
+                    params.lane_industrial_congestion_sensitivity
+                }
+                ParamKey::LaneIndustrialMinPremiumPercent => {
+                    params.lane_industrial_min_premium_percent
+                }
                 ParamKey::LaneTargetUtilizationPercent => params.lane_target_utilization_percent,
                 ParamKey::LaneMarketSignalHalfLife => params.lane_market_signal_half_life,
-                ParamKey::LaneMarketDemandMaxMultiplierPercent => params.lane_market_demand_max_multiplier_percent,
-                ParamKey::LaneMarketDemandSensitivityPercent => params.lane_market_demand_sensitivity_percent,
+                ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+                    params.lane_market_demand_max_multiplier_percent
+                }
+                ParamKey::LaneMarketDemandSensitivityPercent => {
+                    params.lane_market_demand_sensitivity_percent
+                }
                 ParamKey::LanePIProportionalGainPercent => params.lane_pi_proportional_gain_percent,
                 ParamKey::LanePIIntegralGainPercent => params.lane_pi_integral_gain_percent,
             };
@@ -3308,13 +3338,21 @@ impl GovStore {
             ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
             ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
             ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
-            ParamKey::LaneConsumerCongestionSensitivity => params.lane_consumer_congestion_sensitivity,
-            ParamKey::LaneIndustrialCongestionSensitivity => params.lane_industrial_congestion_sensitivity,
+            ParamKey::LaneConsumerCongestionSensitivity => {
+                params.lane_consumer_congestion_sensitivity
+            }
+            ParamKey::LaneIndustrialCongestionSensitivity => {
+                params.lane_industrial_congestion_sensitivity
+            }
             ParamKey::LaneIndustrialMinPremiumPercent => params.lane_industrial_min_premium_percent,
             ParamKey::LaneTargetUtilizationPercent => params.lane_target_utilization_percent,
             ParamKey::LaneMarketSignalHalfLife => params.lane_market_signal_half_life,
-            ParamKey::LaneMarketDemandMaxMultiplierPercent => params.lane_market_demand_max_multiplier_percent,
-            ParamKey::LaneMarketDemandSensitivityPercent => params.lane_market_demand_sensitivity_percent,
+            ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+                params.lane_market_demand_max_multiplier_percent
+            }
+            ParamKey::LaneMarketDemandSensitivityPercent => {
+                params.lane_market_demand_sensitivity_percent
+            }
             ParamKey::LanePIProportionalGainPercent => params.lane_pi_proportional_gain_percent,
             ParamKey::LanePIIntegralGainPercent => params.lane_pi_integral_gain_percent,
         };

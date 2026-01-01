@@ -317,7 +317,10 @@ pub fn write_provider_balances_from_str(text: &str, out: &mut dyn Write) -> io::
                     .get("industrial")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
-                writeln!(out, "provider: {provider} consumer: {consumer} industrial: {industrial}")?;
+                writeln!(
+                    out,
+                    "provider: {provider} consumer: {consumer} industrial: {industrial}"
+                )?;
             }
         }
     }

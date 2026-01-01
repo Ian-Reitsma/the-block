@@ -179,7 +179,10 @@ pub fn replay_economics_to_height(
         }
 
         // Accumulate emissions from this block
-        let block_coinbase = block.coinbase_block.0.saturating_add(block.coinbase_industrial.0);
+        let block_coinbase = block
+            .coinbase_block
+            .0
+            .saturating_add(block.coinbase_industrial.0);
         emission = emission.saturating_add(block_coinbase);
 
         // TREASURY INFLOW: Compute deterministically from treasury_percent × coinbase
@@ -261,10 +264,10 @@ pub fn replay_economics_to_height(
                 epoch,
                 &metrics,
                 &network_activity,
-                emission,            // circulating_block
-                emission,            // total_emission
+                emission,             // circulating_block
+                emission,             // total_emission
                 epoch_non_kyc_volume, // non_kyc_volume from actual tx tracking
-                ad_spend_block,      // total_ad_spend_block from Block.ad_total_usd_micros
+                ad_spend_block,       // total_ad_spend_block from Block.ad_total_usd_micros
                 epoch_treasury_inflow,
                 &econ_params,
             );
@@ -427,11 +430,17 @@ mod tests {
 
         assert_eq!(state1.block_height, state2.block_height);
         assert_eq!(state1.block_reward_per_block, state2.block_reward_per_block);
-        assert_eq!(state1.cumulative_treasury_inflow, state2.cumulative_treasury_inflow);
+        assert_eq!(
+            state1.cumulative_treasury_inflow,
+            state2.cumulative_treasury_inflow
+        );
         assert_eq!(
             state1.cumulative_ad_spend_usd_micros,
             state2.cumulative_ad_spend_usd_micros
         );
-        assert_eq!(state1.cumulative_non_kyc_volume, state2.cumulative_non_kyc_volume);
+        assert_eq!(
+            state1.cumulative_non_kyc_volume,
+            state2.cumulative_non_kyc_volume
+        );
     }
 }

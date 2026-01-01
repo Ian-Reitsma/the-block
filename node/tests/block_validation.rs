@@ -16,9 +16,7 @@ fn rejects_nonce_gap() {
         "alice".into(),
         Account {
             address: "alice".into(),
-            balance: TokenBalance {
-                amount: 100,
-            },
+            balance: TokenBalance { amount: 100 },
             nonce: 0,
             pending_amount: 0,
             pending_nonce: 0,
@@ -76,9 +74,7 @@ fn rollback_on_mid_block_panic() {
         "alice".into(),
         Account {
             address: "alice".into(),
-            balance: TokenBalance {
-                amount: 100,
-            },
+            balance: TokenBalance { amount: 100 },
             nonce: 0,
             pending_amount: 0,
             pending_nonce: 0,

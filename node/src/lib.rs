@@ -517,11 +517,7 @@ struct Reservation<'a> {
 }
 
 impl<'a> Reservation<'a> {
-    fn new(
-        account: &'a mut Account,
-        reserve_amount: u64,
-        nonce: u64,
-    ) -> Self {
+    fn new(account: &'a mut Account, reserve_amount: u64, nonce: u64) -> Self {
         account.pending_amount += reserve_amount;
         account.pending_nonce += 1;
         account.pending_nonces.insert(nonce);
@@ -1214,14 +1210,10 @@ impl Blockchain {
         if let Ok(mut engine) = self.lane_pricing_engine.lock() {
             engine.set_base_fees(consumer, industrial);
             // Update cached fees immediately to reflect the change
-            self.cached_consumer_fee.store(
-                engine.consumer_fee_per_byte(),
-                AtomicOrdering::Relaxed,
-            );
-            self.cached_industrial_fee.store(
-                engine.industrial_fee_per_byte(),
-                AtomicOrdering::Relaxed,
-            );
+            self.cached_consumer_fee
+                .store(engine.consumer_fee_per_byte(), AtomicOrdering::Relaxed);
+            self.cached_industrial_fee
+                .store(engine.industrial_fee_per_byte(), AtomicOrdering::Relaxed);
         }
     }
 
@@ -2553,9 +2545,10 @@ impl Blockchain {
                                         {
                                             // Total BLOCK tokens: amount (both lanes) + fees
                                             let total_amount = tx.payload.amount_consumer
-                                                + tx.payload.amount_industrial + fee_c + fee_i;
-                                            if s.balance.amount < total_amount
-                                            {
+                                                + tx.payload.amount_industrial
+                                                + fee_c
+                                                + fee_i;
+                                            if s.balance.amount < total_amount {
                                                 return Err(ErrBalanceUnderflow::new_err(
                                                     "balance underflow",
                                                 ));
@@ -2569,26 +2562,19 @@ impl Blockchain {
                                 let r =
                                     bc.accounts.entry(tx.payload.to.clone()).or_insert(Account {
                                         address: tx.payload.to.clone(),
-                                        balance: TokenBalance {
-                                            amount: 0,
-                                        },
+                                        balance: TokenBalance { amount: 0 },
                                         nonce: 0,
                                         pending_amount: 0,
                                         pending_nonce: 0,
                                         pending_nonces: HashSet::new(),
                                         sessions: Vec::new(),
                                     });
-                                r.balance.amount = r
-                                    .balance
-                                    .amount
-                                    .saturating_add(tx.payload.amount_consumer + tx.payload.amount_industrial);
+                                r.balance.amount = r.balance.amount.saturating_add(
+                                    tx.payload.amount_consumer + tx.payload.amount_industrial,
+                                );
                             }
                         }
-                        bc.emission = bc
-                            .accounts
-                            .values()
-                            .map(|a| a.balance.amount)
-                            .sum::<u64>();
+                        bc.emission = bc.accounts.values().map(|a| a.balance.amount).sum::<u64>();
                     }
                 }
             }
@@ -2814,8 +2800,10 @@ impl Blockchain {
                         if let Ok((fee_consumer, fee_industrial)) =
                             crate::fee::decompose(e.tx.payload.pct, bc.base_fee + e.tx.tip)
                         {
-                            let total_amount = e.tx.payload.amount_consumer + fee_consumer
-                                + e.tx.payload.amount_industrial + fee_industrial;
+                            let total_amount = e.tx.payload.amount_consumer
+                                + fee_consumer
+                                + e.tx.payload.amount_industrial
+                                + fee_industrial;
                             acc.pending_amount += total_amount;
                             acc.pending_nonce += 1;
                             acc.pending_nonces.insert(e.tx.payload.nonce);
@@ -3012,9 +3000,7 @@ impl Blockchain {
         }
         let acc = Account {
             address: address.clone(),
-            balance: TokenBalance {
-                amount,
-            },
+            balance: TokenBalance { amount },
             nonce: 0,
             pending_amount: 0,
             pending_nonce: 0,
@@ -3376,10 +3362,10 @@ impl Blockchain {
                     ) {
                         // Total BLOCK tokens in evicted tx
                         let total_evicted = ev_entry.tx.payload.amount_consumer
-                            + ev_entry.tx.payload.amount_industrial + c + i;
-                        if acc.pending_amount < total_evicted
-                            || acc.pending_nonce == 0
-                        {
+                            + ev_entry.tx.payload.amount_industrial
+                            + c
+                            + i;
+                        if acc.pending_amount < total_evicted || acc.pending_nonce == 0 {
                             return Err(TxAdmissionError::InsufficientBalance);
                         }
                         acc.pending_amount -= total_evicted;
@@ -3568,8 +3554,7 @@ impl Blockchain {
                         return Err(TxAdmissionError::BalanceOverflow);
                     }
                 };
-                if sender.balance.amount < required_total
-                {
+                if sender.balance.amount < required_total {
                     #[cfg(feature = "telemetry")]
                     {
                         let tx_hash = tx.id();
@@ -3733,12 +3718,7 @@ impl Blockchain {
                     return Err(TxAdmissionError::PendingLimitReached);
                 }
                 {
-                    let guard = ReservationGuard::new(
-                        lock_guard,
-                        sender,
-                        total_amount,
-                        nonce,
-                    );
+                    let guard = ReservationGuard::new(lock_guard, sender, total_amount, nonce);
                     if panic_step == 1 {
                         panic!("admission panic");
                     }
@@ -3864,10 +3844,10 @@ impl Blockchain {
                 {
                     // Total BLOCK tokens: amount (both lanes) + fees
                     let total_amount = tx.payload.amount_consumer
-                        + tx.payload.amount_industrial + fee_consumer + fee_industrial;
-                    if acc.pending_amount < total_amount
-                        || acc.pending_nonce == 0
-                    {
+                        + tx.payload.amount_industrial
+                        + fee_consumer
+                        + fee_industrial;
+                    if acc.pending_amount < total_amount || acc.pending_nonce == 0 {
                         return Err(TxAdmissionError::InsufficientBalance);
                     }
                     acc.pending_amount -= total_amount;
@@ -3919,10 +3899,10 @@ impl Blockchain {
                 {
                     // Total BLOCK tokens: amount (both lanes) + fees
                     let total_amount = tx.payload.amount_consumer
-                        + tx.payload.amount_industrial + fee_consumer + fee_industrial;
-                    if acc.pending_amount < total_amount
-                        || acc.pending_nonce == 0
-                    {
+                        + tx.payload.amount_industrial
+                        + fee_consumer
+                        + fee_industrial;
+                    if acc.pending_amount < total_amount || acc.pending_nonce == 0 {
                         return Err(TxAdmissionError::InsufficientBalance);
                     }
                     acc.pending_amount -= total_amount;
@@ -4799,8 +4779,8 @@ impl Blockchain {
                         crate::fee::decompose(tx.payload.pct, block_base_fee + tx.tip)
                             .unwrap_or((0, 0));
                     // Total BLOCK tokens: amount (both lanes) + fees
-                    let total_amount = tx.payload.amount_consumer
-                        + tx.payload.amount_industrial + fee_c + fee_i;
+                    let total_amount =
+                        tx.payload.amount_consumer + tx.payload.amount_industrial + fee_c + fee_i;
                     if s.balance.amount < total_amount {
                         return Err(ErrBalanceUnderflow::new_err("balance underflow"));
                     }
@@ -4812,9 +4792,7 @@ impl Blockchain {
                 .entry(tx.payload.to.clone())
                 .or_insert(Account {
                     address: tx.payload.to.clone(),
-                    balance: TokenBalance {
-                        amount: 0,
-                    },
+                    balance: TokenBalance { amount: 0 },
                     nonce: 0,
                     pending_amount: 0,
                     pending_nonce: 0,
@@ -4827,9 +4805,7 @@ impl Blockchain {
             .entry(miner_addr.to_owned())
             .or_insert(Account {
                 address: miner_addr.to_owned(),
-                balance: TokenBalance {
-                    amount: 0,
-                },
+                balance: TokenBalance { amount: 0 },
                 nonce: 0,
                 pending_amount: 0,
                 pending_nonce: 0,
@@ -4856,9 +4832,7 @@ impl Blockchain {
             }
             let entry = shadow_accounts.entry(addr.clone()).or_insert(Account {
                 address: addr.clone(),
-                balance: TokenBalance {
-                    amount: 0,
-                },
+                balance: TokenBalance { amount: 0 },
                 nonce: 0,
                 pending_amount: 0,
                 pending_nonce: 0,
@@ -5023,14 +4997,10 @@ impl Blockchain {
                 if let Ok(mut engine) = self.lane_pricing_engine.lock() {
                     engine.update_block(consumer_count, industrial_count);
                     // Update cached fees to avoid lock contention on transaction admission
-                    self.cached_consumer_fee.store(
-                        engine.consumer_fee_per_byte(),
-                        AtomicOrdering::Relaxed,
-                    );
-                    self.cached_industrial_fee.store(
-                        engine.industrial_fee_per_byte(),
-                        AtomicOrdering::Relaxed,
-                    );
+                    self.cached_consumer_fee
+                        .store(engine.consumer_fee_per_byte(), AtomicOrdering::Relaxed);
+                    self.cached_industrial_fee
+                        .store(engine.industrial_fee_per_byte(), AtomicOrdering::Relaxed);
                 }
 
                 #[cfg(feature = "telemetry")]
@@ -5289,7 +5259,9 @@ impl Blockchain {
                                     .unwrap_or((0, 0));
                             // Total BLOCK tokens: amount (both lanes) + fees
                             let total_amount = tx.payload.amount_consumer
-                                + tx.payload.amount_industrial + fee_consumer + fee_industrial;
+                                + tx.payload.amount_industrial
+                                + fee_consumer
+                                + fee_industrial;
                             if s.balance.amount < total_amount
                                 || s.pending_amount < total_amount
                                 || s.pending_nonce == 0
@@ -5308,9 +5280,7 @@ impl Blockchain {
                         .entry(tx.payload.to.clone())
                         .or_insert(Account {
                             address: tx.payload.to.clone(),
-                            balance: TokenBalance {
-                                amount: 0,
-                            },
+                            balance: TokenBalance { amount: 0 },
                             nonce: 0,
                             pending_amount: 0,
                             pending_nonce: 0,
@@ -5350,9 +5320,7 @@ impl Blockchain {
                     .entry(miner_addr.to_owned())
                     .or_insert(Account {
                         address: miner_addr.to_owned(),
-                        balance: TokenBalance {
-                            amount: 0,
-                        },
+                        balance: TokenBalance { amount: 0 },
                         nonce: 0,
                         pending_amount: 0,
                         pending_nonce: 0,
@@ -5379,9 +5347,7 @@ impl Blockchain {
                     }
                     let entry = self.accounts.entry(addr.clone()).or_insert(Account {
                         address: addr.clone(),
-                        balance: TokenBalance {
-                            amount: 0,
-                        },
+                        balance: TokenBalance { amount: 0 },
                         nonce: 0,
                         pending_amount: 0,
                         pending_nonce: 0,
@@ -5733,7 +5699,9 @@ impl Blockchain {
                                 .unwrap_or((0, 0));
                         // Total BLOCK tokens: amount (both lanes) + fees
                         let total_amount = tx.payload.amount_consumer
-                            + tx.payload.amount_industrial + fee_consumer + fee_industrial;
+                            + tx.payload.amount_industrial
+                            + fee_consumer
+                            + fee_industrial;
                         if s.balance.amount < total_amount {
                             return Err(ErrBalanceUnderflow::new_err("balance underflow"));
                         }
@@ -5748,9 +5716,7 @@ impl Blockchain {
                     .entry(tx.payload.to.clone())
                     .or_insert(Account {
                         address: tx.payload.to.clone(),
-                        balance: TokenBalance {
-                            amount: 0,
-                        },
+                        balance: TokenBalance { amount: 0 },
                         nonce: 0,
                         pending_amount: 0,
                         pending_nonce: 0,
@@ -5803,9 +5769,7 @@ impl Blockchain {
             }
             let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
                 address: miner_addr.clone(),
-                balance: TokenBalance {
-                    amount: 0,
-                },
+                balance: TokenBalance { amount: 0 },
                 nonce: 0,
                 pending_amount: 0,
                 pending_nonce: 0,
@@ -7076,9 +7040,7 @@ mod reservation_tests {
                 let amount = rng.range_u64(0..=10_000);
                 let mut acc = Account {
                     address: "a".into(),
-                    balance: TokenBalance {
-                        amount: 0,
-                    },
+                    balance: TokenBalance { amount: 0 },
                     nonce: 0,
                     pending_amount: 0,
                     pending_nonce: 0,

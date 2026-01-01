@@ -635,12 +635,15 @@ impl Default for Params {
             lane_consumer_capacity: default_lane_consumer_capacity(),
             lane_industrial_capacity: default_lane_industrial_capacity(),
             lane_consumer_congestion_sensitivity: default_lane_consumer_congestion_sensitivity(),
-            lane_industrial_congestion_sensitivity: default_lane_industrial_congestion_sensitivity(),
+            lane_industrial_congestion_sensitivity: default_lane_industrial_congestion_sensitivity(
+            ),
             lane_industrial_min_premium_percent: default_lane_industrial_min_premium_percent(),
             lane_target_utilization_percent: default_lane_target_utilization_percent(),
             lane_market_signal_half_life: default_lane_market_signal_half_life(),
-            lane_market_demand_max_multiplier_percent: default_lane_market_demand_max_multiplier_percent(),
-            lane_market_demand_sensitivity_percent: default_lane_market_demand_sensitivity_percent(),
+            lane_market_demand_max_multiplier_percent:
+                default_lane_market_demand_max_multiplier_percent(),
+            lane_market_demand_sensitivity_percent: default_lane_market_demand_sensitivity_percent(
+            ),
             lane_pi_proportional_gain_percent: default_lane_pi_proportional_gain_percent(),
             lane_pi_integral_gain_percent: default_lane_pi_integral_gain_percent(),
         }

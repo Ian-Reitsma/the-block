@@ -379,7 +379,7 @@ impl PeerSet {
         let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
-            last: Instant::now(),
+            rate_window_start: Instant::now(),
             banned_until: None,
             shard_tokens: *P2P_SHARD_BURST as f64,
             shard_last: Instant::now(),
@@ -392,8 +392,13 @@ impl PeerSet {
                 entry.count = 0;
             }
         }
-        if entry.last.elapsed() >= Duration::from_secs(1) {
-            entry.last = Instant::now();
+        if entry
+            .rate_window_start
+            .elapsed()
+            .as_secs()
+            .ge(&P2P_RATE_WINDOW_SECS.load(Ordering::Relaxed))
+        {
+            entry.rate_window_start = Instant::now();
             entry.count = 0;
         }
         entry.count += 1;
@@ -453,7 +458,7 @@ impl PeerSet {
         let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
-            last: Instant::now(),
+            rate_window_start: Instant::now(),
             banned_until: None,
             shard_tokens: *P2P_SHARD_BURST as f64,
             shard_last: Instant::now(),
@@ -716,8 +721,7 @@ impl PeerSet {
                                 bc.chain.clone()
                             };
                             if !chain_snapshot.is_empty() {
-                                if let Ok(msg) =
-                                    Message::new(Payload::Chain(chain_snapshot), &key)
+                                if let Ok(msg) = Message::new(Payload::Chain(chain_snapshot), &key)
                                 {
                                     let _ = send_msg(peer_addr, &msg);
                                 }
@@ -730,8 +734,7 @@ impl PeerSet {
                             bc.chain.clone()
                         };
                         if !chain_snapshot.is_empty() {
-                            if let Ok(msg) =
-                                Message::new(Payload::Chain(chain_snapshot), &self.key)
+                            if let Ok(msg) = Message::new(Payload::Chain(chain_snapshot), &self.key)
                             {
                                 let _ = send_msg(peer_addr, &msg);
                             }
@@ -879,7 +882,7 @@ impl Default for PeerSet {
 
 struct PeerState {
     count: u32,
-    last: Instant,
+    rate_window_start: Instant,
     banned_until: Option<Instant>,
     shard_tokens: f64,
     shard_last: Instant,
@@ -2907,6 +2910,14 @@ static P2P_MAX_PER_SEC: Lazy<AtomicU32> = Lazy::new(|| {
     AtomicU32::new(val)
 });
 
+static P2P_RATE_WINDOW_SECS: Lazy<std::sync::atomic::AtomicU64> = Lazy::new(|| {
+    let val = std::env::var("TB_P2P_RATE_WINDOW_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    std::sync::atomic::AtomicU64::new(val)
+});
+
 static P2P_MAX_BYTES_PER_SEC: Lazy<AtomicU64> = Lazy::new(|| {
     let val = std::env::var("TB_P2P_MAX_BYTES_PER_SEC")
         .ok()
@@ -3407,6 +3418,10 @@ pub fn set_p2p_max_per_sec(v: u32) {
 
 pub fn p2p_max_per_sec() -> u32 {
     P2P_MAX_PER_SEC.load(Ordering::Relaxed)
+}
+
+pub fn set_p2p_rate_window_secs(v: u64) {
+    P2P_RATE_WINDOW_SECS.store(v, Ordering::Relaxed);
 }
 
 pub fn set_p2p_max_bytes_per_sec(v: u64) {

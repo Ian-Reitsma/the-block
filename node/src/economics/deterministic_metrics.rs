@@ -199,7 +199,7 @@ fn compute_market_metric(state: &MarketState, is_storage: bool) -> MarketMetric 
         // Compute/Energy: use default margins if no escrow data
         // These will be refined as receipt structures mature
         match state.settlement_count {
-            0 => 0.5,                                                             // Default 50%
+            0 => 0.5,                                                          // Default 50%
             count => ((state.revenue as f64 / count as f64) / 100.0).min(0.8), // Cap at 80%
         }
     } else {

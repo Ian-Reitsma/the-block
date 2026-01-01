@@ -136,7 +136,8 @@ impl MarketMultiplierController {
             let m_target = (params.margin_target_bps as f64) / 10_000.0;
             let cost_with_margin = metric.average_cost_block * (1.0 + m_target);
             // Clamp coverage_ratio to prevent extreme multipliers from tiny payouts
-            let coverage_ratio = (cost_with_margin / metric.effective_payout_block).clamp(0.1, 10.0);
+            let coverage_ratio =
+                (cost_with_margin / metric.effective_payout_block).clamp(0.1, 10.0);
             let coverage_gap = coverage_ratio - 1.0;
             1.0 + params.cost_responsiveness * coverage_gap
         } else {

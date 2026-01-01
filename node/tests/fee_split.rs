@@ -30,7 +30,7 @@ fn admission_and_block_accounting() {
     let dir = temp_dir("fee_split_chain");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.add_account("miner".into(), 0).unwrap();
-    bc.add_account("alice".into(), 200).unwrap();  // Single BLOCK token (100+100)
+    bc.add_account("alice".into(), 200).unwrap(); // Single BLOCK token (100+100)
     bc.add_account("bob".into(), 0).unwrap();
     bc.min_fee_per_byte_consumer = 0;
     bc.base_fee = 0;
@@ -49,7 +49,7 @@ fn admission_and_block_accounting() {
     };
     let tx = sign_tx(sk.to_vec(), payload).unwrap();
     match bc.submit_transaction(tx) {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => panic!("Transaction submission failed: {:?}", e),
     }
     let alice = bc.accounts.get("alice").unwrap();

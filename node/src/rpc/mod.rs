@@ -1224,16 +1224,12 @@ fn dispatch(
                 .unwrap_or("");
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(acct) = guard.accounts.get(addr) {
-                json_map(vec![
-                    (
-                        "amount",
-                        Value::Number(Number::from(acct.balance.amount)),
-                    ),
-                ])
+                json_map(vec![(
+                    "amount",
+                    Value::Number(Number::from(acct.balance.amount)),
+                )])
             } else {
-                json_map(vec![
-                    ("amount", Value::Number(Number::from(0))),
-                ])
+                json_map(vec![("amount", Value::Number(Number::from(0)))])
             }
         }
         "ledger.shard_of" => {

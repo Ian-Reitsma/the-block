@@ -215,18 +215,18 @@ fn read_account(reader: &mut Reader<'_>) -> binary_struct::Result<Account> {
     })?;
 
     // Compute pending_amount from legacy fields if new field not present
-    let final_pending_amount = pending_amount.or_else(|| {
-        match (pending_consumer_legacy, pending_industrial_legacy) {
-            (Some(c), Some(i)) => Some(c + i),
-            _ => None,
-        }
-    }).unwrap_or_default();
+    let final_pending_amount = pending_amount
+        .or_else(
+            || match (pending_consumer_legacy, pending_industrial_legacy) {
+                (Some(c), Some(i)) => Some(c + i),
+                _ => None,
+            },
+        )
+        .unwrap_or_default();
 
     Ok(Account {
         address: address.ok_or(DecodeError::MissingField("address"))?,
-        balance: balance.unwrap_or(TokenBalance {
-            amount: 0,
-        }),
+        balance: balance.unwrap_or(TokenBalance { amount: 0 }),
         nonce: nonce.unwrap_or_default(),
         pending_amount: final_pending_amount,
         pending_nonce: pending_nonce.unwrap_or_default(),
@@ -257,12 +257,12 @@ fn read_balance(reader: &mut Reader<'_>) -> binary_struct::Result<TokenBalance> 
     })?;
 
     // If reading legacy format, sum consumer + industrial
-    let final_amount = amount.or_else(|| {
-        match (consumer_legacy, industrial_legacy) {
+    let final_amount = amount
+        .or_else(|| match (consumer_legacy, industrial_legacy) {
             (Some(c), Some(i)) => Some(c + i),
             _ => None,
-        }
-    }).unwrap_or_default();
+        })
+        .unwrap_or_default();
 
     Ok(TokenBalance {
         amount: final_amount,
@@ -1387,10 +1387,10 @@ mod tests {
         let account = Account {
             address: "alice".into(),
             balance: TokenBalance {
-                amount: 30,  // 10+20 in single BLOCK token
+                amount: 30, // 10+20 in single BLOCK token
             },
             nonce: 3,
-            pending_amount: 9,  // 4+5 in single BLOCK token
+            pending_amount: 9, // 4+5 in single BLOCK token
             pending_nonce: 6,
             pending_nonces: [1, 2, 3].into_iter().collect(),
             sessions: vec![SessionPolicy {
@@ -1421,10 +1421,10 @@ mod tests {
         let account = Account {
             address: "alice".into(),
             balance: TokenBalance {
-                amount: 3,  // 1+2 in single BLOCK token
+                amount: 3, // 1+2 in single BLOCK token
             },
             nonce: 3,
-            pending_amount: 9,  // 4+5 in single BLOCK token
+            pending_amount: 9, // 4+5 in single BLOCK token
             pending_nonce: 6,
             pending_nonces: HashSet::from([1, 2, 3]),
             sessions: vec![],
@@ -1491,10 +1491,10 @@ mod tests {
         let account = Account {
             address: "alice".into(),
             balance: TokenBalance {
-                amount: 3,  // 1+2 in single BLOCK token
+                amount: 3, // 1+2 in single BLOCK token
             },
             nonce: 3,
-            pending_amount: 9,  // 4+5 in single BLOCK token
+            pending_amount: 9, // 4+5 in single BLOCK token
             pending_nonce: 6,
             pending_nonces: HashSet::from([1, 2, 3]),
             sessions: vec![],

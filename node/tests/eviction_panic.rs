@@ -30,7 +30,7 @@ fn build_signed_tx(
         from_: from.into(),
         to: to.into(),
         amount_consumer: amount,
-        amount_industrial: 0,  // Single BLOCK token via consumer lane only
+        amount_industrial: 0, // Single BLOCK token via consumer lane only
         fee,
         pct: 100,
         nonce,
@@ -49,7 +49,7 @@ fn eviction_panic_rolls_back() {
     bc.min_fee_per_byte_consumer = 0;
     bc.min_fee_per_byte_industrial = 0;
     bc.max_mempool_size_consumer = 1;
-    bc.add_account("a".into(), 100_000).unwrap();  // Single BLOCK token
+    bc.add_account("a".into(), 100_000).unwrap(); // Single BLOCK token
     bc.add_account("b".into(), 0).unwrap();
     bc.mine_block("a").unwrap();
 

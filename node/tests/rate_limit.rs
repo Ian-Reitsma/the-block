@@ -36,10 +36,10 @@ fn rate_limit_drop_records_reason() {
     // burning the full default quota. Environment variables are read once on
     // first access, so set it before instantiating any peer structures.
     std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
+    std::env::set_var("TB_P2P_RATE_WINDOW_SECS", "3600");
     the_block::net::set_p2p_max_per_sec(10);
     let peers = PeerSet::new(vec![]);
     let chain = Arc::new(Mutex::new(Blockchain::default()));
-
     let mut seed = [0u8; 32];
     thread_rng().fill_bytes(&mut seed);
     let key = SigningKey::from_bytes(&seed);
@@ -66,7 +66,7 @@ fn rate_limit_drop_records_reason() {
     peers.handle_message(msg, Some(addr), &chain);
 
     // Send enough messages to exceed the lowered rate limit (10 per sec)
-    for _ in 0..20 {
+    for _ in 0..50 {
         let msg = Message::new(Payload::Hello(vec![]), &key).expect("sign hello");
         peers.handle_message(msg, Some(addr), &chain);
     }

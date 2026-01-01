@@ -503,9 +503,7 @@ fn rpc_concurrent_controls() {
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
-            guard
-                .add_account("alice".to_string(), 1_000_000)
-                .unwrap();
+            guard.add_account("alice".to_string(), 1_000_000).unwrap();
             guard.add_account("bob".to_string(), 0).unwrap();
             guard.mine_block("alice").unwrap();
         }

@@ -148,7 +148,10 @@ fn provider_balances_response_json() -> String {
         "provider".to_string(),
         JsonValue::String("alice".to_string()),
     );
-    alice.insert("consumer".to_string(), JsonValue::Number(JsonNumber::from(42)));
+    alice.insert(
+        "consumer".to_string(),
+        JsonValue::Number(JsonNumber::from(42)),
+    );
     alice.insert(
         "industrial".to_string(),
         JsonValue::Number(JsonNumber::from(7)),
@@ -156,8 +159,14 @@ fn provider_balances_response_json() -> String {
 
     let mut bob = JsonMap::new();
     bob.insert("provider".to_string(), JsonValue::String("bob".to_string()));
-    bob.insert("consumer".to_string(), JsonValue::Number(JsonNumber::from(1)));
-    bob.insert("industrial".to_string(), JsonValue::Number(JsonNumber::from(2)));
+    bob.insert(
+        "consumer".to_string(),
+        JsonValue::Number(JsonNumber::from(1)),
+    );
+    bob.insert(
+        "industrial".to_string(),
+        JsonValue::Number(JsonNumber::from(2)),
+    );
 
     let mut providers = Vec::new();
     providers.push(JsonValue::Object(alice));

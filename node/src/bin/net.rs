@@ -911,14 +911,22 @@ fn top_level_commands() -> Vec<&'static str> {
 }
 
 fn post_json(rpc: &str, req: Value) -> Result<Value, HttpClientError> {
-    http_client::blocking_client()
+    let mut val: Value = http_client::blocking_client()
         .request(Method::Post, rpc)?
         .timeout(Duration::from_secs(5))
         .header("host", "localhost")
         .header("connection", "close")
         .json(&req)?
         .send()?
-        .json()
+        .json()?;
+    if let Some(inner) = val
+        .get("Result")
+        .or_else(|| val.get("Error"))
+        .cloned()
+    {
+        val = inner;
+    }
+    Ok(val)
 }
 
 async fn connect_peer_metrics_ws(url: &str) -> Result<ClientStream, String> {

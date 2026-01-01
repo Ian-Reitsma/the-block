@@ -36,9 +36,7 @@ fn recovers_from_crash_during_import() {
             "alice".into(),
             Account {
                 address: "alice".into(),
-                balance: TokenBalance {
-                    amount: 100,
-                },
+                balance: TokenBalance { amount: 100 },
                 nonce: 0,
                 pending_amount: 0,
                 pending_nonce: 0,

@@ -17,9 +17,7 @@ fn shard_roots_persist() {
 
     let acc1 = Account {
         address: addr1.clone(),
-        balance: TokenBalance {
-            amount: 10,
-        },
+        balance: TokenBalance { amount: 10 },
         nonce: 0,
         pending_amount: 0,
         pending_nonce: 0,
@@ -28,9 +26,7 @@ fn shard_roots_persist() {
     };
     let acc2 = Account {
         address: addr2.clone(),
-        balance: TokenBalance {
-            amount: 5,
-        },
+        balance: TokenBalance { amount: 5 },
         nonce: 0,
         pending_amount: 0,
         pending_nonce: 0,

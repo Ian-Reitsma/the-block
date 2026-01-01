@@ -91,9 +91,7 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
             "treasury".into(),
             Account {
                 address: "treasury".into(),
-                balance: TokenBalance {
-                    amount: 10_000,
-                },
+                balance: TokenBalance { amount: 10_000 },
                 nonce: 0,
                 pending_amount: 0,
                 pending_nonce: 0,

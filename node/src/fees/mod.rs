@@ -2,9 +2,9 @@
 pub mod policy;
 
 // Advanced lane-based pricing modules
-pub mod market_signals;
 pub mod congestion;
 pub mod lane_pricing;
+pub mod market_signals;
 
 /// Target gas used per block when adjusting the base fee.
 ///

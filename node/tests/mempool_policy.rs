@@ -56,7 +56,7 @@ fn replacement_rejected() {
     bc.add_account("alice".into(), 0).unwrap();
     bc.mine_block("miner").unwrap();
     let (sk, _pk) = generate_keypair();
-    let tx = build_signed_tx(&sk, "miner", "alice", 1, 0, 1000, 1);  // industrial=0 (single token via consumer lane)
+    let tx = build_signed_tx(&sk, "miner", "alice", 1, 0, 1000, 1); // industrial=0 (single token via consumer lane)
     bc.submit_transaction(tx.clone()).unwrap();
     let res = bc.submit_transaction(tx);
     assert!(matches!(res, Err(TxAdmissionError::Duplicate)));

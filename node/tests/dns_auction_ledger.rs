@@ -385,10 +385,7 @@ fn stake_ledger_events_are_persisted() {
 
     {
         let guard = chain.lock().unwrap();
-        assert_eq!(
-            guard.accounts["stake-ledger-events"].balance.amount,
-            5_000
-        );
+        assert_eq!(guard.accounts["stake-ledger-events"].balance.amount, 5_000);
     }
 
     clear_ledger_context();

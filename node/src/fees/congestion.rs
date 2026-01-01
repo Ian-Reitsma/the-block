@@ -278,7 +278,8 @@ impl DualLaneCongestion {
 
         // Compute minimum based on consumer lane
         let consumer_fee = self.consumer_fee(base_fee);
-        let min_industrial = ((consumer_fee as f64) * (1.0 + self.min_industrial_premium)).ceil() as u64;
+        let min_industrial =
+            ((consumer_fee as f64) * (1.0 + self.min_industrial_premium)).ceil() as u64;
 
         base_industrial.max(min_industrial)
     }

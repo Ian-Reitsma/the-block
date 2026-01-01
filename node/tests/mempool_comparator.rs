@@ -22,14 +22,14 @@ fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
         from_: "a".into(),
         to: "b".into(),
         amount_consumer: 1,
-        amount_industrial: 0,  // Single BLOCK token via consumer lane
+        amount_industrial: 0, // Single BLOCK token via consumer lane
         fee,
         pct: 100,
         nonce,
         memo: Vec::new(),
     };
     let mut tx = sign_tx(sk.to_vec(), payload).expect("valid key");
-    tx.tip = fee;  // Set tip for fee-per-byte comparison
+    tx.tip = fee; // Set tip for fee-per-byte comparison
     let size = binary::encode(&tx).map(|b| b.len() as u64).unwrap_or(0);
     MempoolEntry {
         tx,
@@ -78,7 +78,7 @@ fn ordering_stable_after_heap_rebuild() {
     bc.set_fee_floor_policy(1, 0);
     bc.add_account("sink".into(), 0).unwrap();
     for acct in ["a", "b", "c", "d", "e"] {
-        bc.add_account(acct.into(), 100_000).unwrap();  // Sufficient BLOCK for test transactions
+        bc.add_account(acct.into(), 100_000).unwrap(); // Sufficient BLOCK for test transactions
     }
 
     let submit = |bc: &mut Blockchain, from: &str, fee: u64| {
@@ -86,7 +86,7 @@ fn ordering_stable_after_heap_rebuild() {
             from_: from.into(),
             to: "sink".into(),
             amount_consumer: 1,
-            amount_industrial: 0,  // Single BLOCK token via consumer lane
+            amount_industrial: 0, // Single BLOCK token via consumer lane
             fee,
             pct: 100,
             nonce: 1,

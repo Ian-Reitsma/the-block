@@ -70,10 +70,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         }
         let elapsed = start.elapsed();
         if elapsed > max {
-            let heights: Vec<_> = nodes
-                .iter()
-                .map(|n| n.blockchain().block_height)
-                .collect();
+            let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
             eprintln!(
                 "chaos convergence timed out after {:?}, heights = {:?}",
                 elapsed, heights
@@ -81,10 +78,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
             return false;
         }
         if elapsed - last_report > Duration::from_secs(1) {
-            let heights: Vec<_> = nodes
-                .iter()
-                .map(|n| n.blockchain().block_height)
-                .collect();
+            let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
             eprintln!("chaos convergence progress: {:?}", heights);
             last_report = elapsed;
         }
@@ -110,8 +104,7 @@ impl TestNode {
         let key_seed = format!("chaos-{node_id}");
         // Assign a unique network key per node to avoid shared-identity rate limits.
         let prev_env = set_net_key_env(&key_path, &key_seed);
-        let bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 1)
-            .expect("open bc");
+        let bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 1).expect("open bc");
         let node = Node::new(addr, peers, bc);
         restore_net_key_env(prev_env);
         let flag = ShutdownFlag::new();
@@ -223,7 +216,12 @@ fn kill_node_recovers() {
             nodes[0].node.broadcast_chain();
             the_block::sleep(Duration::from_millis(20)).await;
         }
-        for n in nodes.iter().enumerate().filter(|(i, _)| *i != 2).map(|(_, n)| n) {
+        for n in nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 2)
+            .map(|(_, n)| n)
+        {
             n.node.discover_peers();
         }
         let active: Vec<&Node> = nodes

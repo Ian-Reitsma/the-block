@@ -116,7 +116,13 @@ impl MarketMetrics {
     ///
     /// # Returns
     /// Updated demand signal s_m(t)
-    pub fn update(&mut self, price: u64, volume: u64, utilization: f64, weights: (f64, f64, f64)) -> f64 {
+    pub fn update(
+        &mut self,
+        price: u64,
+        volume: u64,
+        utilization: f64,
+        weights: (f64, f64, f64),
+    ) -> f64 {
         let (alpha, beta, gamma) = weights;
 
         // Update EMAs

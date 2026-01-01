@@ -84,6 +84,8 @@ pub struct NodeConfig {
     pub p2p_max_per_sec: u32,
     #[serde(default = "default_p2p_max_bytes_per_sec")]
     pub p2p_max_bytes_per_sec: u64,
+    #[serde(default = "default_p2p_rate_window_secs")]
+    pub p2p_rate_window_secs: u64,
     #[serde(default = "default_provider_reputation_decay")]
     pub provider_reputation_decay: f64,
     #[serde(default = "default_provider_reputation_retention")]
@@ -145,6 +147,7 @@ impl Default for NodeConfig {
             peer_reputation_decay: default_peer_reputation_decay(),
             p2p_max_per_sec: default_p2p_max_per_sec(),
             p2p_max_bytes_per_sec: default_p2p_max_bytes_per_sec(),
+            p2p_rate_window_secs: default_p2p_rate_window_secs(),
             provider_reputation_decay: default_provider_reputation_decay(),
             provider_reputation_retention: default_provider_reputation_retention(),
             reputation_gossip: default_true(),
@@ -470,6 +473,7 @@ fn enforce_runtime_policy(allowed: &[String]) {
 pub struct RateLimitConfig {
     pub p2p_max_per_sec: u32,
     pub p2p_max_bytes_per_sec: u64,
+    pub p2p_rate_window_secs: u64,
 }
 #[derive(Clone)]
 pub struct ReputationConfig {
@@ -482,6 +486,7 @@ static RATE_LIMIT_CFG: Lazy<Arc<RwLock<RateLimitConfig>>> = Lazy::new(|| {
     Arc::new(RwLock::new(RateLimitConfig {
         p2p_max_per_sec: cfg.p2p_max_per_sec,
         p2p_max_bytes_per_sec: cfg.p2p_max_bytes_per_sec,
+        p2p_rate_window_secs: cfg.p2p_rate_window_secs,
     }))
 });
 static REPUTATION_CFG: Lazy<Arc<RwLock<ReputationConfig>>> = Lazy::new(|| {
@@ -527,6 +532,10 @@ fn default_p2p_max_per_sec() -> u32 {
 
 fn default_p2p_max_bytes_per_sec() -> u64 {
     65536
+}
+
+fn default_p2p_rate_window_secs() -> u64 {
+    1
 }
 
 fn default_provider_reputation_decay() -> f64 {
@@ -879,6 +888,7 @@ fn apply(cfg: &NodeConfig) {
         let mut rl = RATE_LIMIT_CFG.write().unwrap();
         rl.p2p_max_per_sec = cfg.p2p_max_per_sec;
         rl.p2p_max_bytes_per_sec = cfg.p2p_max_bytes_per_sec;
+        rl.p2p_rate_window_secs = cfg.p2p_rate_window_secs;
     }
     {
         let mut rep = REPUTATION_CFG.write().unwrap();
@@ -889,6 +899,7 @@ fn apply(cfg: &NodeConfig) {
     crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
     crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
+    crate::net::set_p2p_rate_window_secs(cfg.p2p_rate_window_secs);
     crate::compute_market::scheduler::set_provider_reputation_decay(cfg.provider_reputation_decay);
     crate::compute_market::scheduler::set_provider_reputation_retention(
         cfg.provider_reputation_retention,

@@ -27,7 +27,8 @@ fn rollback_conflicting_proposals() {
     )
     .unwrap_or_else(|_| panic!("propose1"));
     let id1 = p1.id;
-    gov_vote(&store, "bob".into(), id1, "yes", 0).unwrap_or_else(|e| panic!("vote1 failed: {:?}", e));
+    gov_vote(&store, "bob".into(), id1, "yes", 0)
+        .unwrap_or_else(|e| panic!("vote1 failed: {:?}", e));
     assert_eq!(
         store.tally_and_queue(id1, 1).unwrap(),
         ProposalStatus::Passed

@@ -137,6 +137,7 @@ pub struct SettlementEngineInfo {
 struct SettlementState {
     db: SimpleDb,
     base: PathBuf,
+    db_path: PathBuf,
     mode: SettleMode,
     metadata: Metadata,
     ledger: AccountLedger,
@@ -148,7 +149,7 @@ struct SettlementState {
 }
 
 impl SettlementState {
-    fn new(base: PathBuf, mut mode: SettleMode, db: SimpleDb) -> Self {
+    fn new(base: PathBuf, mut mode: SettleMode, db_path: PathBuf, db: SimpleDb) -> Self {
         let ledger = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER, AccountLedger::new);
         let stored_mode = load_or_default::<SettleMode, _>(&db, KEY_MODE, || mode);
         mode = stored_mode;
@@ -160,8 +161,9 @@ impl SettlementState {
         let sla_history =
             load_or_default::<VecDeque<SlaResolution>, _>(&db, KEY_SLA_HISTORY, VecDeque::new);
         Self {
-            db,
             base,
+            db_path,
+            db,
             mode,
             metadata,
             ledger,
@@ -245,27 +247,49 @@ impl SettlementState {
 
     fn persist_all(&mut self) {
         self.refresh_sla_metrics();
-        let mut batch = self.db.batch();
-        let mut encode = || -> io::Result<()> {
-            enqueue_value(&mut batch, KEY_LEDGER, &self.ledger)?;
-            enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
-            enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
-            enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
-            enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
-            enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
-            enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
-            enqueue_value(&mut batch, KEY_SLA_HISTORY, &self.sla_history)?;
-            Ok(())
-        };
+        let mut attempts = 0;
+        loop {
+            let mut batch = self.db.batch();
+            let mut encode = || -> io::Result<()> {
+                enqueue_value(&mut batch, KEY_LEDGER, &self.ledger)?;
+                enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
+                enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
+                enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
+                enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
+                enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
+                enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
+                enqueue_value(&mut batch, KEY_SLA_HISTORY, &self.sla_history)?;
+                Ok(())
+            };
 
-        if let Err(err) = encode().and_then(|_| self.db.write_batch(batch)) {
-            #[cfg(feature = "telemetry")]
-            {
-                error!(?err, "persist settlement state");
-            }
-            #[cfg(not(feature = "telemetry"))]
-            {
-                let _ = err;
+            match encode().and_then(|_| self.db.write_batch(batch)) {
+                Ok(_) => break,
+                Err(err) => {
+                    if err.kind() == io::ErrorKind::NotFound && attempts == 0 {
+                        // The backing directory was removed out-of-band; recreate it and retry once.
+                        let _ = fs::create_dir_all(&self.base);
+                        if let Some(parent) = self.db_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        self.db = SimpleDb::open_named(
+                            names::COMPUTE_SETTLEMENT,
+                            self.db_path.to_str().unwrap_or_else(|| {
+                                panic!("non-utf8 settlement db path: {}", self.db_path.display())
+                            }),
+                        );
+                        attempts += 1;
+                        continue;
+                    }
+                    #[cfg(feature = "telemetry")]
+                    {
+                        error!(?err, "persist settlement state");
+                    }
+                    #[cfg(not(feature = "telemetry"))]
+                    {
+                        let _ = err;
+                    }
+                    break;
+                }
             }
         }
     }
@@ -343,11 +367,7 @@ impl SettlementState {
                 match self.ledger.debit(&record.provider, record.provider_bond) {
                     Ok(_) => {
                         burned = record.provider_bond;
-                        self.record_event(
-                            &record.provider,
-                            &memo,
-                            -(record.provider_bond as i64),
-                        );
+                        self.record_event(&record.provider, &memo, -(record.provider_bond as i64));
                         #[cfg(feature = "telemetry")]
                         {
                             SLASHING_BURN_TOTAL.inc_by(burned);
@@ -524,8 +544,12 @@ impl Settlement {
         let db_path_str = db_path
             .to_str()
             .unwrap_or_else(|| panic!("non-utf8 settlement db path: {}", db_path.display()));
-        let mut state =
-            SettlementState::new(base, mode, factory(names::COMPUTE_SETTLEMENT, db_path_str));
+        let mut state = SettlementState::new(
+            base,
+            mode,
+            db_path.clone(),
+            factory(names::COMPUTE_SETTLEMENT, db_path_str),
+        );
         state.persist_all();
         state.flush();
         *settlement_state() = Some(state);

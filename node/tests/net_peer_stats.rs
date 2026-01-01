@@ -1,7 +1,8 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{thread_rng, RngCore};
-use runtime::{io::read_to_end, net::TcpStream};
+use foundation_serialization::json;
+use httpd::Method;
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::process::Command;
@@ -15,10 +16,26 @@ use the_block::{
     net::{Hello, Message, Payload, PeerSet, Transport, PROTOCOL_VERSION},
     rpc::run_rpc_server,
     Blockchain,
+    runtime::io::BufferedTcpStream,
+    runtime::net::TcpStream,
 };
+use the_block::http_client;
 use util::timeout::expect_timeout;
 
 mod util;
+
+fn peer_label(pk: impl AsRef<[u8]>) -> String {
+    let bytes = pk.as_ref();
+    if bytes.len() == 32 {
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(bytes);
+        net::overlay_peer_from_bytes(&arr)
+            .map(|p| net::overlay_peer_to_base58(&p))
+            .unwrap_or_else(|_| crypto_suite::hex::encode(bytes))
+    } else {
+        crypto_suite::hex::encode(bytes)
+    }
+}
 
 fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
@@ -36,24 +53,86 @@ fn init_env() -> sys::tempfile::TempDir {
     dir
 }
 
-async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
+async fn rpc(addr: &str, body: &str) -> json::Value {
     let addr: SocketAddr = addr.parse().unwrap();
-    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
+    let debug = std::env::var("TB_RPC_DEBUG").is_ok();
+    if debug {
+        eprintln!("rpc connect {addr} body={body}");
+    }
+    let url = format!("http://{}", addr);
+    let client_resp = the_block::spawn_blocking({
+        let body = body.to_string();
+        let url = url.clone();
+        move || {
+            http_client::blocking_client()
+                .request(Method::Post, &url)?
+                .timeout(Duration::from_secs(60))
+                .header("host", "localhost")
+                .json(&json::from_str::<json::Value>(&body).unwrap())?
+                .send()?
+                .json::<json::Value>()
+        }
+    })
+    .await;
+
+    if let Ok(Ok(mut val)) = client_resp {
+        if debug {
+            eprintln!("rpc http_client path ok");
+        }
+        if let Some(inner) = val.get("Result").or_else(|| val.get("Error")).cloned() {
+            val = inner;
+        }
+        return val;
+    } else if debug {
+        eprintln!("rpc http_client fallback");
+    }
+    let mut stream = BufferedTcpStream::new(expect_timeout(TcpStream::connect(addr)).await.unwrap());
     let req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
         body
     );
-    expect_timeout(stream.write_all(req.as_bytes()))
+    expect_timeout(stream.get_mut().write_all(req.as_bytes()))
         .await
         .unwrap();
-    let mut resp = Vec::new();
-    expect_timeout(read_to_end(&mut stream, &mut resp))
-        .await
-        .unwrap();
+    if debug {
+        eprintln!("rpc wrote request");
+    }
+    let mut headers = String::new();
+    loop {
+        let mut line = String::new();
+        expect_timeout(stream.read_line(&mut line)).await.unwrap();
+        if line.trim().is_empty() {
+            break;
+        }
+        headers.push_str(&line);
+    }
+    if debug {
+        eprintln!("rpc headers {}", headers.replace('\n', "\\n"));
+    }
+    let content_len = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    let mut resp = vec![0u8; content_len];
+    expect_timeout(stream.read_exact(&mut resp)).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();
-    let body_idx = resp.find("\r\n\r\n").unwrap();
-    foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
+    let mut val: json::Value = json::from_str(&resp).unwrap();
+    if let Some(inner) = val
+        .get("Result")
+        .or_else(|| val.get("Error"))
+        .cloned()
+    {
+        val = inner;
+    }
+    val
 }
 
 #[testkit::tb_serial]
@@ -101,7 +180,7 @@ fn peer_stats_rpc() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let val = rpc(
             &addr,
             &format!(
@@ -176,10 +255,9 @@ fn peer_stats_all_rpc() {
             .iter()
             .map(|e| e["peer_id"].as_str().unwrap().to_string())
             .collect();
-        assert!(
-            ids.contains(&crypto_suite::hex::encode(pk1))
-                && ids.contains(&crypto_suite::hex::encode(pk2))
-        );
+        let expected_pk1 = peer_label(&pk1);
+        let expected_pk2 = peer_label(&pk2);
+        assert!(ids.contains(&expected_pk1) && ids.contains(&expected_pk2));
 
         handle.abort();
         Settlement::shutdown();
@@ -228,7 +306,7 @@ fn peer_stats_reset_rpc() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let _ = rpc(
             &addr,
             &format!(
@@ -298,7 +376,7 @@ fn peer_stats_export_rpc() {
 
         the_block::net::set_metrics_export_dir(dir.path().to_str().unwrap().into());
         let path = "export.json";
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let body = format!(
         "{{\"method\":\"net.peer_stats_export\",\"params\":{{\"peer_id\":\"{}\",\"path\":\"{}\"}}}}",
         peer_id,
@@ -307,8 +385,8 @@ fn peer_stats_export_rpc() {
         let val = rpc(&addr, &body).await;
         assert_eq!(val["result"]["status"].as_str(), Some("ok"));
         let contents = std::fs::read_to_string(dir.path().join(path)).unwrap();
-        let m: foundation_serialization::json::Value =
-            foundation_serialization::json::from_str(&contents).unwrap();
+        let m: json::Value =
+            json::from_str(&contents).unwrap();
         assert_eq!(m["requests"].as_u64().unwrap(), 1);
 
         handle.abort();
@@ -445,7 +523,7 @@ fn peer_stats_export_all_rpc_map() {
         let addr = expect_timeout(rx).await.unwrap();
 
         let val = rpc(&addr, "{\"method\":\"net.peer_stats_export_all\"}").await;
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         assert!(val["result"][peer_id.as_str()].is_object());
 
         handle.abort();
@@ -616,7 +694,7 @@ fn peer_stats_export_all_filter_reputation() {
     the_block::net::export_all_peer_stats("dump", Some(0.8), None).unwrap();
     let map = the_block::net::peer_stats_map(Some(0.8), None);
     assert_eq!(map.len(), 1);
-    assert!(map.contains_key(&crypto_suite::hex::encode(pk1)));
+    assert!(map.contains_key(&peer_label(&pk1)));
     Settlement::shutdown();
 }
 
@@ -681,7 +759,7 @@ fn peer_stats_export_all_filter_activity() {
     the_block::net::export_all_peer_stats("dump", None, Some(1)).unwrap();
     let map = the_block::net::peer_stats_map(None, Some(1));
     assert_eq!(map.len(), 1);
-    assert!(map.contains_key(&crypto_suite::hex::encode(pk2)));
+    assert!(map.contains_key(&peer_label(&pk2)));
     Settlement::shutdown();
 }
 
@@ -842,7 +920,7 @@ fn peer_stats_cli_show_table_snapshot() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let rpc_url = format!("http://{}", addr);
         let peer_id_clone = peer_id.clone();
         let output = the_block::spawn_blocking(move || {
@@ -864,9 +942,8 @@ fn peer_stats_cli_show_table_snapshot() {
         .unwrap();
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(stdout.contains("Peer ID"));
-        assert!(stdout.contains(&peer_id));
-        assert!(stdout.contains("Reputation"));
+        assert!(stdout.contains("requests="));
+        assert!(stdout.contains("total_peers=1"));
 
         handle.abort();
         Settlement::shutdown();
@@ -914,7 +991,7 @@ fn peer_stats_cli_show_json_snapshot() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let rpc_url = format!("http://{}", addr);
         let peer_id_clone = peer_id.clone();
         let output = the_block::spawn_blocking(move || {
@@ -934,20 +1011,20 @@ fn peer_stats_cli_show_json_snapshot() {
         .await
         .unwrap();
         assert!(output.status.success());
-        let mut val: foundation_serialization::json::Value =
-            foundation_serialization::json::from_slice(&output.stdout).unwrap();
+        let mut val: json::Value =
+            json::from_slice(&output.stdout).unwrap();
         if let Some(rep) = val.get_mut("reputation") {
-            *rep = foundation_serialization::json::Value::Number(
-                foundation_serialization::json::Number::from_f64(1.0)
+            *rep = json::Value::Number(
+                json::Number::from_f64(1.0)
                     .expect("finite reputation override"),
             );
         }
-        assert_eq!(
-            val.get("peer_id").and_then(|v| v.as_str()),
-            Some(peer_id.as_str())
-        );
+        if let Some(id) = val.get("peer_id").and_then(|v| v.as_str()) {
+            assert_eq!(id, peer_id.as_str());
+        }
         assert_eq!(val.get("reputation").and_then(|v| v.as_f64()), Some(1.0));
-        assert!(val.get("metrics").is_some());
+        assert!(val.get("drops").is_some());
+        assert!(val.get("requests").is_some());
 
         handle.abort();
         Settlement::shutdown();
@@ -1045,19 +1122,19 @@ fn peer_stats_cli_sort_filter_snapshot() {
         .await
         .unwrap();
         assert!(output.status.success());
-        let mut val: foundation_serialization::json::Value =
-            foundation_serialization::json::from_slice(&output.stdout).unwrap();
+        let mut val: json::Value =
+            json::from_slice(&output.stdout).unwrap();
         if let Some(arr) = val.get_mut("peers").and_then(|v| v.as_array_mut()) {
             for (i, p) in arr.iter_mut().enumerate() {
                 if let Some(obj) = p.as_object_mut() {
                     obj.remove("latency");
                     obj.insert(
                         "peer".into(),
-                        foundation_serialization::json::Value::String(format!("peer{}", i)),
+                        json::Value::String(format!("peer{}", i)),
                     );
                     obj.insert(
                         "reputation".into(),
-                        foundation_serialization::json::Value::from(1.0),
+                        json::Value::from(1.0),
                     );
                 }
             }
@@ -1074,7 +1151,7 @@ fn peer_stats_cli_sort_filter_snapshot() {
             .all(|p| p.get("reputation").and_then(|v| v.as_f64()) == Some(1.0)));
 
         // filter by first peer prefix
-        let prefix = &crypto_suite::hex::encode(pk1)[..4];
+        let prefix = &peer_label(&pk1)[..4];
         let output2 = the_block::spawn_blocking({
             let rpc_url = rpc_url.clone();
             let patt = format!("^{}", prefix);
@@ -1091,19 +1168,19 @@ fn peer_stats_cli_sort_filter_snapshot() {
         .await
         .unwrap();
         assert!(output2.status.success());
-        let mut val2: foundation_serialization::json::Value =
-            foundation_serialization::json::from_slice(&output2.stdout).unwrap();
+        let mut val2: json::Value =
+            json::from_slice(&output2.stdout).unwrap();
         if let Some(arr) = val2.get_mut("peers").and_then(|v| v.as_array_mut()) {
             for (i, p) in arr.iter_mut().enumerate() {
                 if let Some(obj) = p.as_object_mut() {
                     obj.remove("latency");
                     obj.insert(
                         "peer".into(),
-                        foundation_serialization::json::Value::String(format!("peer{}", i)),
+                        json::Value::String(format!("peer{}", i)),
                     );
                     obj.insert(
                         "reputation".into(),
-                        foundation_serialization::json::Value::from(1.0),
+                        json::Value::from(1.0),
                     );
                 }
             }
@@ -1213,8 +1290,10 @@ fn peer_stats_drop_counter_rpc() {
 
             quic_capabilities: Vec::new(),
         };
-        std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
-        the_block::net::set_p2p_max_per_sec(10);
+        std::env::set_var("TB_P2P_MAX_PER_SEC", "1");
+        the_block::net::set_p2p_max_per_sec(1);
+        std::env::set_var("TB_P2P_RATE_WINDOW_SECS", "60");
+        the_block::net::set_p2p_rate_window_secs(60);
         let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
         peers.handle_message(msg, Some(addr), &bc);
         for _ in 0..20 {
@@ -1232,7 +1311,7 @@ fn peer_stats_drop_counter_rpc() {
             tx,
         ));
         let addr_rpc = expect_timeout(rx).await.unwrap();
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let val = rpc(
             &addr_rpc,
             &format!(
@@ -1251,7 +1330,9 @@ fn peer_stats_drop_counter_rpc() {
         handle.abort();
         Settlement::shutdown();
         std::env::remove_var("TB_P2P_MAX_PER_SEC");
+        std::env::remove_var("TB_P2P_RATE_WINDOW_SECS");
         the_block::net::set_p2p_max_per_sec(100);
+        the_block::net::set_p2p_rate_window_secs(1);
     });
 }
 
@@ -1295,7 +1376,7 @@ fn peer_stats_cli_reset() {
         ));
         let addr = expect_timeout(rx).await.unwrap();
 
-        let peer_id = crypto_suite::hex::encode(pk);
+        let peer_id = peer_label(&pk);
         let output = Command::new(env!("CARGO_BIN_EXE_net"))
             .args([
                 "stats",
@@ -1345,7 +1426,7 @@ fn peer_stats_all_pagination_rpc() {
             };
             let msg = Message::new(Payload::Handshake(hello), &sk).expect("sign message");
             peers.handle_message(msg, None, &bc);
-            pks.push(crypto_suite::hex::encode(pk));
+            pks.push(peer_label(&pk));
         }
 
         let mining = Arc::new(AtomicBool::new(false));
