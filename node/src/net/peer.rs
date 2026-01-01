@@ -1,5 +1,6 @@
 use super::{
-    load_net_key, overlay_peer_from_bytes, overlay_peer_to_base58, send_msg, PROTOCOL_VERSION,
+    load_net_key, overlay_peer_from_bytes, overlay_peer_to_base58, send_msg, LOCAL_FEATURES,
+    PROTOCOL_VERSION,
 };
 use crate::config::AggregatorConfig;
 #[cfg(feature = "telemetry")]
@@ -9,17 +10,17 @@ use crate::net::message::{encode_payload, Message, Payload};
 use crate::net::Bytes;
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
-use crate::p2p::handshake::Transport;
+use crate::p2p::handshake::{Hello, Transport};
 use crate::simple_db::{names, SimpleDb};
 use crate::Blockchain;
 use concurrency::{Lazy, MutexExt, OrderedMap};
-use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use foundation_serialization::{
     json::{self, Map, Value},
     Error as SerializationError,
 };
 use foundation_serialization::{Deserialize, Serialize};
-use rand::{rngs::StdRng, seq::SliceRandom};
+use rand::{rngs::OsRng, rngs::StdRng, seq::SliceRandom, RngCore};
 use runtime::net::lookup_srv;
 use runtime::sync::broadcast;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -49,6 +50,28 @@ fn sys_to_io_error(err: sys::error::SysError) -> std::io::Error {
 
 fn json_to_io_error(err: SerializationError) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, err)
+}
+
+fn local_hello_for_handshake(local_addr: Option<SocketAddr>) -> Hello {
+    let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
+    let mut nonce_bytes = [0u8; 8];
+    OsRng::default().fill_bytes(&mut nonce_bytes);
+    let nonce = u64::from_le_bytes(nonce_bytes);
+    Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: LOCAL_FEATURES,
+        agent,
+        nonce,
+        transport: Transport::Tcp,
+        gossip_addr: local_addr,
+        quic_addr: None,
+        quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
+        quic_provider: None,
+        quic_capabilities: Vec::new(),
+    }
 }
 
 use super::{
@@ -147,34 +170,59 @@ pub struct ReputationUpdate {
 }
 
 /// Thread-safe peer set used by the gossip layer.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PeerSet {
     addrs: Arc<Mutex<HashSet<SocketAddr>>>,
     authorized: Arc<Mutex<HashSet<[u8; 32]>>>,
     states: Arc<Mutex<HashMap<[u8; 32], PeerState>>>,
     transports: Arc<Mutex<HashMap<SocketAddr, Transport>>>,
     quic: Arc<Mutex<HashMap<SocketAddr, QuicEndpoint>>>,
+    peer_db_path: PathBuf,
+    quic_peer_db_path: PathBuf,
+    key: SigningKey,
+    local_addr: Option<SocketAddr>,
 }
 
 impl PeerSet {
     /// Create a new set seeded with `initial` peers and any persisted peers.
     pub fn new(initial: Vec<SocketAddr>) -> Self {
+        let key = load_net_key();
+        Self::new_with_key(initial, key)
+    }
+
+    /// Create a new set seeded with `initial` peers using the provided signing key.
+    pub fn new_with_key(initial: Vec<SocketAddr>, key: SigningKey) -> Self {
+        Self::new_with_key_and_addr(initial, key, None)
+    }
+
+    /// Create a new set with an explicit local gossip address (used for reply routing).
+    pub fn new_with_key_and_addr(
+        initial: Vec<SocketAddr>,
+        key: SigningKey,
+        local_addr: Option<SocketAddr>,
+    ) -> Self {
+        let peer_db_path = peer_db_path_from_env();
         let mut set: HashSet<_> = initial.into_iter().collect();
-        if let Ok(data) = fs::read_to_string(peer_db_path()) {
+        if let Ok(data) = fs::read_to_string(&peer_db_path) {
             for line in data.lines() {
                 if let Ok(addr) = line.trim().parse::<SocketAddr>() {
                     set.insert(addr);
                 }
             }
         }
-        persist_peers(&set);
-        let quic_map = load_quic_peers();
+        persist_peers(&peer_db_path, &set);
+        let quic_peer_db_path = quic_peer_db_path_from_env();
+        let quic_map = load_quic_peers(&quic_peer_db_path);
         Self {
             addrs: Arc::new(Mutex::new(set)),
             authorized: Arc::new(Mutex::new(HashSet::new())),
             states: Arc::new(Mutex::new(HashMap::new())),
             transports: Arc::new(Mutex::new(HashMap::new())),
             quic: Arc::new(Mutex::new(quic_map)),
+            peer_db_path,
+            quic_peer_db_path,
+            key,
+            local_addr,
         }
     }
 
@@ -182,12 +230,12 @@ impl PeerSet {
     pub fn add(&self, addr: SocketAddr) {
         let mut guard = self.addrs.guard();
         guard.insert(addr);
-        persist_peers(&guard);
+        persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.entry(addr).or_insert(Transport::Tcp);
         let q = self.quic.guard();
         if !q.contains_key(&addr) {
-            persist_quic_peers(&q);
+            persist_quic_peers(&self.quic_peer_db_path, &q);
         }
     }
 
@@ -195,7 +243,7 @@ impl PeerSet {
     pub fn remove(&self, addr: SocketAddr) {
         let mut guard = self.addrs.guard();
         guard.remove(&addr);
-        persist_peers(&guard);
+        persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.remove(&addr);
     }
@@ -204,7 +252,7 @@ impl PeerSet {
     pub fn clear(&self) {
         let mut guard = self.addrs.guard();
         guard.clear();
-        persist_peers(&guard);
+        persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.clear();
     }
@@ -288,7 +336,7 @@ impl PeerSet {
                 cert,
             },
         );
-        persist_quic_peers(&map);
+        persist_quic_peers(&self.quic_peer_db_path, &map);
     }
 
     /// Return a randomized list of peers for bootstrapping.
@@ -556,6 +604,7 @@ impl PeerSet {
 
         match msg.body {
             Payload::Handshake(hs) => {
+                let was_authorized = self.is_authorized(&peer_key);
                 if hs.proto_version != PROTOCOL_VERSION {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
                     #[cfg(feature = "telemetry")]
@@ -631,7 +680,8 @@ impl PeerSet {
                 };
                 self.authorize(peer_key);
                 record_handshake_success(&peer_key);
-                if let Some(peer_addr) = addr {
+                let peer_addr = hs.gossip_addr.or(addr);
+                if let Some(peer_addr) = peer_addr {
                     self.add(peer_addr);
                     self.map_addr(peer_addr, peer_key);
                     self.set_transport(peer_addr, hs.transport);
@@ -648,11 +698,54 @@ impl PeerSet {
                             );
                         }
                     }
+                    if !was_authorized {
+                        let key = self.key.clone();
+                        if let Ok(msg) = Message::new(
+                            Payload::Handshake(local_hello_for_handshake(self.local_addr)),
+                            &key,
+                        ) {
+                            let _ = send_msg(peer_addr, &msg);
+                        }
+                        // Give the peer time to authorize us before sending the chain snapshot.
+                        let chain = Arc::clone(chain);
+                        let key = key.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(Duration::from_millis(50));
+                            let chain_snapshot = {
+                                let bc = chain.guard();
+                                bc.chain.clone()
+                            };
+                            if !chain_snapshot.is_empty() {
+                                if let Ok(msg) =
+                                    Message::new(Payload::Chain(chain_snapshot), &key)
+                                {
+                                    let _ = send_msg(peer_addr, &msg);
+                                }
+                            }
+                        });
+                    } else {
+                        // Proactively sync already-authorized peers with the current chain state.
+                        let chain_snapshot = {
+                            let bc = chain.guard();
+                            bc.chain.clone()
+                        };
+                        if !chain_snapshot.is_empty() {
+                            if let Ok(msg) =
+                                Message::new(Payload::Chain(chain_snapshot), &self.key)
+                            {
+                                let _ = send_msg(peer_addr, &msg);
+                            }
+                        }
+                    }
                 }
             }
             Payload::Hello(addrs) => {
+                let authorized = self.is_authorized(&peer_key);
                 for a in addrs {
                     self.add(a);
+                    if authorized {
+                        self.map_addr(a, peer_key);
+                    }
                 }
             }
             Payload::Tx(tx) => {
@@ -684,7 +777,7 @@ impl PeerSet {
                         new_chain.push(block.clone());
                         if bc.import_chain(new_chain.clone()).is_ok() {
                             drop(bc);
-                            match Message::new(Payload::Chain(new_chain), &load_net_key()) {
+                            match Message::new(Payload::Chain(new_chain), &self.key) {
                                 Ok(msg) => {
                                     for p in self.list() {
                                         let _ = send_msg(p, &msg);
@@ -775,6 +868,12 @@ impl PeerSet {
                 }
             }
         }
+    }
+}
+
+impl Default for PeerSet {
+    fn default() -> Self {
+        Self::new(Vec::new())
     }
 }
 
@@ -2295,7 +2394,7 @@ pub fn record_ip_drop(ip: &SocketAddr) {
     }
 }
 
-fn peer_db_path() -> PathBuf {
+fn peer_db_path_from_env() -> PathBuf {
     std::env::var("TB_PEER_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -2703,7 +2802,7 @@ mod tests {
     }
 }
 
-fn quic_peer_db_path() -> PathBuf {
+fn quic_peer_db_path_from_env() -> PathBuf {
     std::env::var("TB_QUIC_PEER_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -2714,10 +2813,10 @@ fn quic_peer_db_path() -> PathBuf {
         })
 }
 
-fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
+fn load_quic_peers(path: &Path) -> HashMap<SocketAddr, QuicEndpoint> {
     use base64_fp::decode_standard;
     let mut map = HashMap::new();
-    if let Ok(data) = fs::read_to_string(quic_peer_db_path()) {
+    if let Ok(data) = fs::read_to_string(path) {
         for line in data.lines() {
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() == 3 {
@@ -2738,9 +2837,8 @@ fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
     map
 }
 
-fn persist_quic_peers(map: &HashMap<SocketAddr, QuicEndpoint>) {
+fn persist_quic_peers(path: &Path, map: &HashMap<SocketAddr, QuicEndpoint>) {
     use base64_fp::encode_standard;
-    let path = quic_peer_db_path();
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -2778,8 +2876,7 @@ static CHUNK_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
     Mutex::new(SimpleDb::open_named(names::NET_PEER_CHUNKS, &path_string))
 });
 
-fn persist_peers(set: &HashSet<SocketAddr>) {
-    let path = peer_db_path();
+fn persist_peers(path: &Path, set: &HashSet<SocketAddr>) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -2789,7 +2886,8 @@ fn persist_peers(set: &HashSet<SocketAddr>) {
 }
 
 pub fn known_peers() -> Vec<SocketAddr> {
-    if let Ok(data) = fs::read_to_string(peer_db_path()) {
+    let path = peer_db_path_from_env();
+    if let Ok(data) = fs::read_to_string(path) {
         data.lines().filter_map(|l| l.parse().ok()).collect()
     } else {
         Vec::new()

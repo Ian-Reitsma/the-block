@@ -76,6 +76,7 @@ fn fingerprint_mismatch_rejects_certificate() {
         agent: "test/1.0".into(),
         nonce: 0,
         transport: Transport::Quic,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: Some(advert.cert.clone()),
         quic_fingerprint: Some(Bytes::from(forged_fp.to_vec())),

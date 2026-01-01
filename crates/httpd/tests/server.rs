@@ -624,7 +624,6 @@ fn request_builder_drives_router() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn serve_plain_round_trip() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -659,7 +658,6 @@ fn serve_plain_round_trip() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn serve_tls_round_trip_without_client_auth() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -689,7 +687,6 @@ fn serve_tls_round_trip_without_client_auth() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn serve_tls_accepts_clients_with_cert() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -719,7 +716,6 @@ fn serve_tls_accepts_clients_with_cert() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn serve_tls_allows_optional_client_auth() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -753,7 +749,6 @@ fn serve_tls_allows_optional_client_auth() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn serve_tls_rejects_clients_without_cert() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -795,7 +790,6 @@ fn router_wildcard_captures_remainder() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn websocket_upgrade_accepts_and_dispatches_handler() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -852,7 +846,6 @@ Sec-WebSocket-Version: 13\r\n\r\n"
 }
 
 #[testkit::tb_serial]
-#[test]
 fn websocket_upgrade_over_tls_dispatches_handler() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {
@@ -914,7 +907,6 @@ fn websocket_upgrade_over_tls_dispatches_handler() {
 }
 
 #[testkit::tb_serial]
-#[test]
 fn websocket_upgrade_rejects_with_response() {
     block_on(async {
         let listener = match bind_runtime_listener(LOCAL_BIND_ADDR).await {

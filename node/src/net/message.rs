@@ -548,6 +548,7 @@ mod tests {
             agent: "blockd/1.0".into(),
             nonce: 42,
             transport: Transport::Tcp,
+            gossip_addr: Some(SocketAddr::from(([127, 0, 0, 1], 8000))),
             quic_addr: Some(SocketAddr::from(([127, 0, 0, 1], 9000))),
             quic_cert: Some(Bytes::from(vec![7, 7, 7])),
             quic_fingerprint: Some(Bytes::from(vec![1, 1])),

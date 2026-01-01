@@ -22,6 +22,7 @@ fn rejects_wrong_version() {
         agent: "test".into(),
         nonce: 0,
         transport: Transport::Tcp,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: None,
         quic_fingerprint: None,

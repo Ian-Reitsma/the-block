@@ -2707,6 +2707,12 @@ pub fn dns_lookup(params: &Value) -> Value {
         .get(&format!("dns_keys/{}", domain))
         .and_then(|v| String::from_utf8(v).ok())
         .unwrap_or_default();
+    if DISABLE_VERIFY.load(Ordering::Relaxed) {
+        return json_map(vec![
+            ("record", txt.map(Value::String).unwrap_or(Value::Null)),
+            ("verified", Value::Bool(true)),
+        ]);
+    }
     let verified = txt
         .as_ref()
         .map(|_| verify_txt(domain, &pk))

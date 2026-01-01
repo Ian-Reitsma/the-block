@@ -420,6 +420,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 ### P2P Handshake
 - `node/src/p2p/handshake.rs` negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the `p2p_overlay` crate with in-house and stub adapters.
 - Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.
+- Handshake hellos now carry the sender's gossip listener address; peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.
 
 ### P2P Wire Protocol
 - Message framing and compatibility shims live under `node/src/p2p/wire_binary.rs`. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.

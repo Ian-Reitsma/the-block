@@ -47,6 +47,9 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    // Remove fee floors so comfort guard behaviour is isolated from base fee gating.
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.add_account("a".into(), 2_000).unwrap();
     bc.add_account("b".into(), 0).unwrap();
     let mut rt = Runtime::new(&mut bc);

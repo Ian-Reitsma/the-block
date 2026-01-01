@@ -7,7 +7,7 @@ use foundation_serialization::binary_cursor::{Reader, Writer};
 
 use crate::p2p::handshake::{Hello, Transport};
 use crate::p2p::WireMessage;
-use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
+use crate::util::binary_struct::{self, assign_once, ensure_exhausted, DecodeError};
 
 /// Result alias for encoding helpers.
 pub type EncodeResult<T> = Result<T, EncodeError>;
@@ -163,6 +163,9 @@ pub(crate) fn write_hello(writer: &mut Writer, hello: &Hello) -> EncodeResult<()
         s.field_string("agent", &hello.agent);
         s.field_with("nonce", |w| w.write_u64(hello.nonce));
         s.field_with("transport", |w| write_transport(w, hello.transport));
+        s.field_with("gossip_addr", |w| {
+            write_option_socket_addr(w, hello.gossip_addr.as_ref())
+        });
         s.field_with("quic_addr", |w| {
             write_option_socket_addr(w, hello.quic_addr.as_ref())
         });
@@ -202,6 +205,8 @@ fn read_hello_struct(reader: &mut Reader<'_>) -> binary_struct::Result<Hello> {
     let mut agent = None;
     let mut nonce = None;
     let mut transport = None;
+    let mut gossip_addr = None;
+    let mut gossip_addr_seen = false;
     let mut quic_addr = None;
     let mut quic_addr_seen = false;
     let mut quic_cert = None;
@@ -213,13 +218,19 @@ fn read_hello_struct(reader: &mut Reader<'_>) -> binary_struct::Result<Hello> {
     let mut quic_provider_seen = false;
     let mut quic_capabilities = None;
 
-    decode_struct(reader, Some(12), |key, reader| match key {
+    let field_count = reader.read_struct_with(|key, reader| match key {
         "network_id" => assign_once(&mut network_id, read_array_u8::<4>(reader)?, "network_id"),
         "proto_version" => assign_once(&mut proto_version, reader.read_u16()?, "proto_version"),
         "feature_bits" => assign_once(&mut feature_bits, reader.read_u32()?, "feature_bits"),
         "agent" => assign_once(&mut agent, reader.read_string()?, "agent"),
         "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
         "transport" => assign_once(&mut transport, read_transport(reader)?, "transport"),
+        "gossip_addr" => assign_optional_field(
+            &mut gossip_addr_seen,
+            &mut gossip_addr,
+            reader.read_option_with(|reader| read_socket_addr(reader, "gossip_addr"))?,
+            "gossip_addr",
+        ),
         "quic_addr" => assign_optional_field(
             &mut quic_addr_seen,
             &mut quic_addr,
@@ -257,6 +268,13 @@ fn read_hello_struct(reader: &mut Reader<'_>) -> binary_struct::Result<Hello> {
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
+    if field_count != 12 && field_count != 13 {
+        return Err(DecodeError::InvalidFieldCount {
+            expected: 13,
+            actual: field_count,
+        });
+    }
+
     Ok(Hello {
         network_id: network_id.ok_or(DecodeError::MissingField("network_id"))?,
         proto_version: proto_version.ok_or(DecodeError::MissingField("proto_version"))?,
@@ -264,6 +282,7 @@ fn read_hello_struct(reader: &mut Reader<'_>) -> binary_struct::Result<Hello> {
         agent: agent.ok_or(DecodeError::MissingField("agent"))?,
         nonce: nonce.ok_or(DecodeError::MissingField("nonce"))?,
         transport: transport.ok_or(DecodeError::MissingField("transport"))?,
+        gossip_addr,
         quic_addr,
         quic_cert,
         quic_fingerprint,
@@ -459,6 +478,7 @@ mod tests {
             agent: "blockd/1.0".to_string(),
             nonce: 42,
             transport: Transport::Tcp,
+            gossip_addr: Some(SocketAddr::from(([127, 0, 0, 1], 7000))),
             quic_addr: Some(SocketAddr::from(([127, 0, 0, 1], 8080))),
             quic_cert: Some(Bytes::from(vec![1, 2, 3])),
             quic_fingerprint: None,

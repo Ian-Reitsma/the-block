@@ -36,6 +36,9 @@ fn build_signed_tx(
 fn rejects_industrial_when_consumer_fees_high() {
     let dir = tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    // Zero out fee floors so the comfort guard path (not the fee floor) drives the rejection.
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.add_account("a".into(), 2_000).unwrap();
     bc.add_account("b".into(), 0).unwrap();
     bc.comfort_threshold_p90 = 10;

@@ -149,6 +149,7 @@ mod tests {
             agent: "test".into(),
             nonce: 42,
             transport: Transport::Tcp,
+            gossip_addr: None,
             quic_addr: None,
             quic_cert: None,
             quic_fingerprint: None,

@@ -9,10 +9,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-#[cfg(feature = "python-bindings")]
-use std::io::{Read, Write};
-#[cfg(feature = "python-bindings")]
-use std::net::TcpStream;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -31,8 +27,12 @@ use foundation_serialization::json::{self as json_mod, Value};
 use rand::rngs::StdRng;
 #[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 use std::{env, path::Path, process::Command};
-#[cfg(feature = "python-bindings")]
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 use the_block::serve_metrics_with_shutdown;
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use std::io::{Read, Write};
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use std::net::TcpStream;
 use the_block::{
     ad_readiness::{AdReadinessConfig, AdReadinessHandle},
     identity::{handle_registry::HandleRegistry, DidRegistry},

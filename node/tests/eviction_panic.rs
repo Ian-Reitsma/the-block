@@ -45,6 +45,9 @@ fn eviction_panic_rolls_back() {
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("evict_panic");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    // Disable fee floors so the test exercises eviction rollback rather than fee gating.
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.max_mempool_size_consumer = 1;
     bc.add_account("a".into(), 100_000).unwrap();  // Single BLOCK token
     bc.add_account("b".into(), 0).unwrap();

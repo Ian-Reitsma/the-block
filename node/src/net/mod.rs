@@ -1633,7 +1633,7 @@ impl Node {
         set_gossip_relay(std::sync::Arc::clone(&relay));
         Self {
             addr,
-            peers: PeerSet::new(peers),
+            peers: PeerSet::new_with_key_and_addr(peers, key.clone(), Some(addr)),
             chain: Arc::new(Mutex::new(bc)),
             key,
             relay,
@@ -1758,6 +1758,7 @@ impl Node {
             agent,
             nonce,
             transport,
+            gossip_addr: Some(self.addr),
             quic_addr: self.quic_addr,
             #[cfg(feature = "quic")]
             quic_cert,

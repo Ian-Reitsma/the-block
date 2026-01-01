@@ -9,6 +9,7 @@ pub use sha512::Sha512;
 
 use core::fmt;
 use core::hash::{Hash, Hasher};
+use std::sync::{Arc, OnceLock};
 
 use rand::{CryptoRng, RngCore};
 use thiserror::Error;
@@ -33,9 +34,20 @@ pub enum SignatureError {
     KeyMismatch,
 }
 
-#[derive(Clone)]
 pub struct SigningKey {
     seed: [u8; SECRET_KEY_LENGTH],
+    expanded: Arc<OnceLock<ExpandedSecretKey>>,
+    verifying: Arc<OnceLock<VerifyingKey>>,
+}
+
+impl Clone for SigningKey {
+    fn clone(&self) -> Self {
+        Self {
+            seed: self.seed,
+            expanded: Arc::clone(&self.expanded),
+            verifying: Arc::clone(&self.verifying),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,11 +67,19 @@ impl SigningKey {
     {
         let mut seed = [0u8; SECRET_KEY_LENGTH];
         rng.fill_bytes(&mut seed);
-        Self { seed }
+        Self {
+            seed,
+            expanded: Arc::new(OnceLock::new()),
+            verifying: Arc::new(OnceLock::new()),
+        }
     }
 
     pub fn from_bytes(bytes: &[u8; SECRET_KEY_LENGTH]) -> Self {
-        Self { seed: *bytes }
+        Self {
+            seed: *bytes,
+            expanded: Arc::new(OnceLock::new()),
+            verifying: Arc::new(OnceLock::new()),
+        }
     }
 
     pub fn from_keypair_bytes(bytes: &[u8; KEYPAIR_LENGTH]) -> Result<Self, SignatureError> {
@@ -68,7 +88,11 @@ impl SigningKey {
         let mut provided_public = [0u8; PUBLIC_KEY_LENGTH];
         provided_public.copy_from_slice(&bytes[SECRET_KEY_LENGTH..]);
 
-        let signing = Self { seed };
+        let signing = Self {
+            seed,
+            expanded: Arc::new(OnceLock::new()),
+            verifying: Arc::new(OnceLock::new()),
+        };
         if signing.verifying_key().to_bytes() != provided_public {
             return Err(SignatureError::KeyMismatch);
         }
@@ -87,16 +111,27 @@ impl SigningKey {
         out
     }
 
+    fn expanded(&self) -> &ExpandedSecretKey {
+        self.expanded
+            .get_or_init(|| ExpandedSecretKey::from_seed(&self.seed))
+    }
+
+    fn verifying_cached(&self) -> &VerifyingKey {
+        self.verifying.get_or_init(|| {
+            let expanded = self.expanded();
+            VerifyingKey {
+                point: EdwardsPoint::mul_base(&expanded.scalar),
+            }
+        })
+    }
+
     pub fn verifying_key(&self) -> VerifyingKey {
-        let expanded = ExpandedSecretKey::from_seed(&self.seed);
-        VerifyingKey {
-            point: EdwardsPoint::mul_base(&expanded.scalar),
-        }
+        self.verifying_cached().clone()
     }
 
     pub fn sign(&self, message: &[u8]) -> Signature {
-        let expanded = ExpandedSecretKey::from_seed(&self.seed);
-        let public = self.verifying_key();
+        let expanded = self.expanded();
+        let public = self.verifying_cached();
 
         let r_digest = Sha512::digest_chunks(&[&expanded.prefix, message]);
         let r_scalar = Scalar::from_bytes_mod_order_wide(&r_digest);

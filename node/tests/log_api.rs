@@ -80,6 +80,7 @@ fn search_filters_and_decryption() -> Result<()> {
 #[test]
 fn tail_streams_indexed_rows() -> Result<()> {
     runtime::block_on(async {
+        let test_body = async {
         use runtime::net::{TcpListener, TcpStream};
         use runtime::ws::{self, ClientStream, Message as WsMessage};
 
@@ -226,5 +227,9 @@ fn tail_streams_indexed_rows() -> Result<()> {
         server.abort();
 
         Ok(())
+        };
+        runtime::timeout(std::time::Duration::from_secs(15), test_body)
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "tail_streams_indexed_rows timeout"))?
     })
 }
