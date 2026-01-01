@@ -186,6 +186,10 @@ impl<'a> ExecutionContext<'a> {
             let bytes = ShardState::new(shard, root).to_bytes();
             self.chain
                 .write_shard_state(shard, key, bytes, &mut self.db_deltas)?;
+            let root_key = format!("shard_root:{shard}");
+            self.chain
+                .db
+                .insert_with_delta(&root_key, root.to_vec(), &mut self.db_deltas)?;
         }
         Ok(())
     }

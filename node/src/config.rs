@@ -1011,6 +1011,12 @@ pub fn watch(dir: &str) {
         *CONFIG_DIR.write().unwrap() = dir.to_string();
     }
     crate::gossip::config::watch(dir);
+    if cfg!(test) {
+        // Tests exercise configuration reload paths explicitly; avoid spawning
+        // long-lived filesystem watchers that never shut down across property
+        // test iterations.
+        return;
+    }
     let cfg_dir = dir.to_string();
     runtime::spawn(async move {
         let path = Path::new(&cfg_dir);

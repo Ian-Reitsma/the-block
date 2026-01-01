@@ -3,6 +3,8 @@ use foundation_serialization::toml;
 use foundation_serialization::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 
+const EMBEDDED_LOCALNET_DEVICES: &str = include_str!("../../../config/localnet_devices.toml");
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[repr(u8)]
 pub enum DeviceClass {
@@ -27,9 +29,8 @@ impl ProximityTable {
     fn load() -> Self {
         let path: PathBuf =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../config/localnet_devices.toml");
-        let Ok(text) = std::fs::read_to_string(path) else {
-            return Self(HashMap::new());
-        };
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| EMBEDDED_LOCALNET_DEVICES.to_string());
         let map: HashMap<DeviceClass, Threshold> = toml::from_str(&text).unwrap_or_default();
         Self(map)
     }

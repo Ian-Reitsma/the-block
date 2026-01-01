@@ -46,6 +46,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -3137,8 +3138,32 @@ pub async fn run_rpc_server_with_market(
     let _ = ready.send(local);
 
     let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
-    let handles = Arc::new(Mutex::new(HandleRegistry::open("identity_db")));
-    let did_path = DidRegistry::default_path();
+    let identity_dir = {
+        let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+        PathBuf::from(&guard.path)
+    };
+    if !identity_dir.as_os_str().is_empty() {
+        let _ = fs::create_dir_all(&identity_dir);
+    }
+    let handle_path = if identity_dir.as_os_str().is_empty() {
+        PathBuf::from("identity_db")
+    } else {
+        identity_dir.join("identity_db")
+    };
+    let handles = Arc::new(Mutex::new(HandleRegistry::open(
+        handle_path
+            .to_str()
+            .unwrap_or_else(|| "identity_db"),
+    )));
+    let did_path = std::env::var("TB_DID_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            if identity_dir.as_os_str().is_empty() {
+                PathBuf::from("identity_did_db")
+            } else {
+                identity_dir.join("identity_did_db")
+            }
+        });
     let dids = Arc::new(Mutex::new(DidRegistry::open(&did_path)));
     let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
     let tokens_per_sec = std::env::var("TB_RPC_TOKENS_PER_SEC")

@@ -1160,13 +1160,7 @@ impl Default for Blockchain {
 
 impl Drop for Blockchain {
     fn drop(&mut self) {
-        if std::env::var("TB_PRESERVE").is_ok() {
-            return;
-        }
         crate::compute_market::settlement::Settlement::shutdown();
-        if !self.path.is_empty() {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
     }
 }
 
@@ -1192,6 +1186,18 @@ fn margin_from_totals(payout: u128, cost: u128) -> f64 {
 
 fn u128_to_f64(value: u128) -> f64 {
     value as f64
+}
+
+pub(crate) struct ChainImportState {
+    chain: Vec<Block>,
+    accounts: HashMap<String, Account>,
+    emission: u64,
+    block_height: u64,
+    recent_timestamps: VecDeque<u64>,
+    difficulty: u64,
+    retune_hint: i8,
+    reorg_hashes: Vec<String>,
+    recent_miners: VecDeque<String>,
 }
 
 impl Blockchain {
@@ -1366,7 +1372,21 @@ impl Blockchain {
     }
     /// Return the latest state root for a shard if available.
     pub fn get_shard_root(&self, shard: ShardId) -> Option<[u8; 32]> {
-        self.shard_roots.get(&shard).copied()
+        if let Some(root) = self.shard_roots.get(&shard).copied() {
+            return Some(root);
+        }
+        if let Some(bytes) = self.db.get_shard(shard, ShardState::db_key()) {
+            if let Ok(state) = ShardState::from_bytes(&bytes) {
+                return Some(state.state_root);
+            }
+        }
+        if !self.accounts.is_empty() {
+            return Some(crate::blockchain::process::shard_state_root(
+                &self.accounts,
+                shard,
+            ));
+        }
+        None
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -2451,17 +2471,68 @@ impl Blockchain {
             )
         };
 
+        let mut shard_ids = db.shard_ids();
+        if shard_ids.is_empty() {
+            let mut discovered = HashSet::new();
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if let Some(id) = name.strip_prefix("shard:") {
+                        if let Ok(id) = id.parse::<ShardId>() {
+                            discovered.insert(id);
+                        }
+                    }
+                }
+            }
+            shard_ids.extend(discovered);
+        }
+        if accounts.is_empty() && !shard_ids.is_empty() {
+            for shard in &shard_ids {
+                for key in db.shard_keys_with_prefix(*shard, "acct:") {
+                    if let Some(bytes) = db.get_shard(*shard, &key) {
+                        if let Ok(account) = ledger_binary::decode_account(&bytes) {
+                            accounts.insert(account.address.clone(), account);
+                        }
+                    }
+                }
+            }
+        }
         // Load any persisted shard state roots.
-        let shard_roots: HashMap<ShardId, [u8; 32]> = db
-            .shard_ids()
-            .into_iter()
+        let mut shard_roots: HashMap<ShardId, [u8; 32]> = shard_ids
+            .iter()
             .filter_map(|id| {
-                let bytes = db.get_shard(id, ShardState::db_key())?;
+                let bytes = db.get_shard(*id, ShardState::db_key())?;
                 ShardState::from_bytes(&bytes)
                     .ok()
-                    .map(|s| (id, s.state_root))
+                    .map(|s| (*id, s.state_root))
             })
             .collect();
+        if shard_roots.is_empty() {
+            for key in db.keys_with_prefix("shard_root:") {
+                if let Some(id) = key.strip_prefix("shard_root:") {
+                    if let Ok(id) = id.parse::<ShardId>() {
+                        if let Some(bytes) = db.get(&key) {
+                            if bytes.len() == 32 {
+                                let mut root = [0u8; 32];
+                                root.copy_from_slice(&bytes);
+                                shard_roots.insert(id, root);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if shard_roots.is_empty() && !accounts.is_empty() {
+            let mut shards = HashSet::new();
+            for addr in accounts.keys() {
+                shards.insert(address::shard_id(addr));
+            }
+            for shard in shards {
+                let root = crate::blockchain::process::shard_state_root(&accounts, shard);
+                shard_roots.insert(shard, root);
+            }
+        }
         for b in &mut chain {
             let mut fee_consumer: u128 = 0;
             let mut fee_industrial: u128 = 0;
@@ -5614,59 +5685,19 @@ impl Blockchain {
         Ok(self.is_valid_chain_rust(&self.chain))
     }
 
-    pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
-        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
-            self.chain = new_chain;
-            self.block_height = self.chain.len() as u64;
-            self.recent_timestamps.clear();
-            for b in self.chain.iter().rev().take(DIFFICULTY_WINDOW) {
-                self.recent_timestamps.push_front(b.timestamp_millis);
-            }
-            return Ok(());
-        }
-        if new_chain.len() <= self.chain.len() {
-            return Err(py_value_err("Incoming chain not longer"));
-        }
-        if !self.is_valid_chain_rust(&new_chain) {
-            return Err(py_value_err("Invalid incoming chain"));
-        }
-
-        // Replay economics from the incoming chain to get the correct economics state
-        // This is consensus-critical: we must use the chain's own economics, not local state
-        let replayed_econ = replay_economics_to_tip(&new_chain, &self.params);
-
-        let old_chain = self.chain.clone();
-        let lca = old_chain
-            .iter()
-            .zip(&new_chain)
-            .take_while(|(a, b)| a.hash == b.hash)
-            .count();
-        let depth = old_chain.len().saturating_sub(lca);
-        if depth > 0 {
-            #[cfg(feature = "telemetry")]
-            observer::record_reorg(depth as u64);
-        }
-        if depth > 0 {
-            for block in old_chain.iter().rev().take(depth) {
-                self.proof_tracker.rollback_claim(block.index);
-            }
-        }
-        self.chain.clear();
-        self.accounts.clear();
-        self.emission = 0;
-        self.block_height = 0;
-        self.economics_epoch_tx_volume_block = 0;
-        self.economics_epoch_tx_count = 0;
-        self.economics_epoch_treasury_inflow_block = 0;
-        self.economics_epoch_storage_payout_block = 0;
-        self.economics_epoch_compute_payout_block = 0;
-        self.economics_epoch_ad_payout_block = 0;
-        let mut epoch_tx_window: VecDeque<(u64, u64)> =
-            VecDeque::with_capacity(EPOCH_BLOCKS as usize + 1);
+    pub(crate) fn build_chain_import_state(
+        new_chain: Vec<Block>,
+        params: &Params,
+        replayed_econ: &ReplayedEconomicsState,
+    ) -> PyResult<ChainImportState> {
+        let mut accounts: HashMap<String, Account> = HashMap::new();
+        let mut emission = 0u64;
+        let mut block_height = 0u64;
+        let mut recent_timestamps: VecDeque<u64> =
+            VecDeque::with_capacity(DIFFICULTY_WINDOW);
+        let mut reorg_hashes: Vec<String> = Vec::with_capacity(new_chain.len());
 
         for block in &new_chain {
-            let mut block_tx_count = 0u64;
-            let mut block_tx_volume = 0u64;
             let miner_addr = block
                 .transactions
                 .first()
@@ -5675,29 +5706,11 @@ impl Blockchain {
             let mut fee_tot_consumer: u128 = 0;
             let mut fee_tot_industrial: u128 = 0;
             for tx in block.transactions.iter().skip(1) {
-                block_tx_count = block_tx_count.saturating_add(1);
-                block_tx_volume = block_tx_volume
-                    .saturating_add(tx.payload.amount_consumer)
-                    .saturating_add(tx.payload.amount_industrial)
-                    .saturating_add(tx.tip);
                 if tx.payload.from_ != "0".repeat(34) {
-                    let pk = to_array_32(&tx.public_key)
-                        .ok_or_else(|| py_value_err("Invalid pubkey in chain"))?;
-                    let vk = VerifyingKey::from_bytes(&pk)
-                        .map_err(|_| py_value_err("Invalid pubkey in chain"))?;
-                    let sig_bytes = to_array_64(&tx.signature.ed25519)
-                        .ok_or_else(|| py_value_err("Invalid signature in chain"))?;
-                    let sig = Signature::from_bytes(&sig_bytes);
-                    let mut msg = domain_tag().to_vec();
-                    msg.extend(canonical_payload_bytes(&tx.payload));
-                    if vk.verify(&msg, &sig).is_err() {
-                        return Err(py_value_err("Bad tx signature in chain"));
-                    }
-                    if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
+                    if let Some(s) = accounts.get_mut(&tx.payload.from_) {
                         let (fee_consumer, fee_industrial) =
                             crate::fee::decompose(tx.payload.pct, block.base_fee + tx.tip)
                                 .unwrap_or((0, 0));
-                        // Total BLOCK tokens: amount (both lanes) + fees
                         let total_amount = tx.payload.amount_consumer
                             + tx.payload.amount_industrial
                             + fee_consumer
@@ -5711,18 +5724,15 @@ impl Blockchain {
                         fee_tot_industrial += fee_industrial as u128;
                     }
                 }
-                let r = self
-                    .accounts
-                    .entry(tx.payload.to.clone())
-                    .or_insert(Account {
-                        address: tx.payload.to.clone(),
-                        balance: TokenBalance { amount: 0 },
-                        nonce: 0,
-                        pending_amount: 0,
-                        pending_nonce: 0,
-                        pending_nonces: HashSet::new(),
-                        sessions: Vec::new(),
-                    });
+                let r = accounts.entry(tx.payload.to.clone()).or_insert(Account {
+                    address: tx.payload.to.clone(),
+                    balance: TokenBalance { amount: 0 },
+                    nonce: 0,
+                    pending_amount: 0,
+                    pending_nonce: 0,
+                    pending_nonces: HashSet::new(),
+                    sessions: Vec::new(),
+                });
                 r.balance.amount += tx.payload.amount_consumer + tx.payload.amount_industrial;
             }
             let mut h = blake3::Hasher::new();
@@ -5742,7 +5752,6 @@ impl Blockchain {
             {
                 return Err(py_value_err("Fee mismatch"));
             }
-            // Validate read subsidy role splits
             let read_role_sum = block.read_sub_viewer.0 as u128
                 + block.read_sub_host.0 as u128
                 + block.read_sub_hardware.0 as u128
@@ -5752,8 +5761,6 @@ impl Blockchain {
                 return Err(py_value_err("Read subsidy role sum exceeds total"));
             }
             let read_miner_share = block.read_sub.0 as u128 - read_role_sum;
-            // Use REPLAYED economics from the incoming chain, not local self.block_reward
-            // This is consensus-critical: chain economics must be deterministic
             let expected_consumer = replayed_econ.block_reward_per_block as u128
                 + block.storage_sub.0 as u128
                 + read_miner_share
@@ -5767,7 +5774,7 @@ impl Blockchain {
             {
                 return Err(py_value_err("Coinbase mismatch"));
             }
-            let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
+            let miner = accounts.entry(miner_addr.clone()).or_insert(Account {
                 address: miner_addr.clone(),
                 balance: TokenBalance { amount: 0 },
                 nonce: 0,
@@ -5776,7 +5783,6 @@ impl Blockchain {
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),
             });
-            // Credit total coinbase to miner
             let coinbase_total = block.coinbase_block.0 + block.coinbase_industrial.0;
             miner.balance.amount = miner
                 .balance
@@ -5787,50 +5793,148 @@ impl Blockchain {
                 if cb.payload.amount_consumer != block.coinbase_block.0
                     || cb.payload.amount_industrial != block.coinbase_industrial.0
                 {
-                    // reject forks that tamper with recorded coinbase totals
                     return Err(py_value_err("Coinbase mismatch"));
                 }
             }
-            self.emission += block.coinbase_block.0 + block.coinbase_industrial.0;
-            self.chain.push(block.clone());
-            state::append_difficulty(
-                &std::path::Path::new(&self.path).join("diff_history"),
-                block.index,
-                block.difficulty,
-            );
-            self.reorg.record(&block.hash);
-            self.recent_timestamps.push_back(block.timestamp_millis);
-            if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
-                self.recent_timestamps.pop_front();
+            emission = emission
+                .saturating_add(block.coinbase_block.0)
+                .saturating_add(block.coinbase_industrial.0);
+            recent_timestamps.push_back(block.timestamp_millis);
+            if recent_timestamps.len() > DIFFICULTY_WINDOW {
+                recent_timestamps.pop_front();
             }
-            let last = self.chain.last().map_or(1, |b| b.difficulty);
-            let ts = self.recent_timestamps.make_contiguous();
-            let (next, hint) =
-                consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
-            self.difficulty = next;
-            self.retune_hint = hint;
-            self.block_height += 1;
-            epoch_tx_window.push_back((block_tx_count, block_tx_volume));
-            if epoch_tx_window.len() > EPOCH_BLOCKS as usize {
-                epoch_tx_window.pop_front();
+            reorg_hashes.push(block.hash.clone());
+            block_height = block_height.saturating_add(1);
+        }
+
+        let mut recent_miners: VecDeque<String> = VecDeque::with_capacity(RECENT_MINER_WINDOW);
+        for blk in new_chain.iter().rev().take(RECENT_MINER_WINDOW) {
+            if let Some(tx0) = blk.transactions.first() {
+                recent_miners.push_front(tx0.payload.to.clone());
             }
         }
 
-        let last = self.chain.last().map_or(1, |b| b.difficulty);
-        let ts = self.recent_timestamps.make_contiguous();
-        let (next, hint) =
-            consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
-        self.difficulty = next;
-        self.retune_hint = hint;
+        let (difficulty, retune_hint) = if let Some(last) = new_chain.last() {
+            let ts = recent_timestamps.make_contiguous();
+            consensus::difficulty_retune::retune(last.difficulty, ts, last.retune_hint, params)
+        } else {
+            (1, 0)
+        };
 
-        // Update economics state from the replayed chain economics (not preserved local state)
+        Ok(ChainImportState {
+            chain: new_chain,
+            accounts,
+            emission,
+            block_height,
+            recent_timestamps,
+            difficulty,
+            retune_hint,
+            reorg_hashes,
+            recent_miners,
+        })
+    }
+
+    pub(crate) fn apply_import_state(
+        &mut self,
+        state: ChainImportState,
+        replayed_econ: ReplayedEconomicsState,
+        rollback_indices: &[u64],
+    ) -> PyResult<()> {
+        if state.chain.len() <= self.chain.len() {
+            return Err(py_value_err("Incoming chain not longer"));
+        }
+        if !rollback_indices.is_empty() {
+            #[cfg(feature = "telemetry")]
+            observer::record_reorg(rollback_indices.len() as u64);
+            for index in rollback_indices {
+                self.proof_tracker.rollback_claim(*index);
+            }
+        }
+        self.chain = state.chain;
+        self.accounts = state.accounts;
+        self.emission = state.emission;
+        self.block_height = state.block_height;
+        self.recent_timestamps = state.recent_timestamps;
+        self.difficulty = state.difficulty;
+        self.retune_hint = state.retune_hint;
+        self.reorg.hashes = state.reorg_hashes;
+        self.recent_miners = state.recent_miners;
+
+        self.economics_epoch_tx_volume_block = 0;
+        self.economics_epoch_tx_count = 0;
+        self.economics_epoch_treasury_inflow_block = 0;
+        self.economics_epoch_storage_payout_block = 0;
+        self.economics_epoch_compute_payout_block = 0;
+        self.economics_epoch_ad_payout_block = 0;
+
         self.block_reward = TokenAmount::new(replayed_econ.block_reward_per_block);
         self.economics_block_reward_per_block = replayed_econ.block_reward_per_block;
         self.economics_prev_subsidy = replayed_econ.prev_subsidy;
         self.economics_prev_tariff = replayed_econ.prev_tariff;
         self.economics_prev_annual_issuance_block = replayed_econ.prev_annual_issuance;
+        self.economics_baseline_tx_count = replayed_econ.baseline_tx_count;
+        self.economics_baseline_tx_volume = replayed_econ.baseline_tx_volume;
+        self.economics_baseline_miners = replayed_econ.baseline_miners;
+
+        let diff_path = std::path::Path::new(&self.path).join("diff_history");
+        for block in &self.chain {
+            state::append_difficulty(&diff_path, block.index, block.difficulty);
+        }
 
         Ok(())
+    }
+
+    pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
+        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            self.chain = new_chain;
+            self.block_height = self.chain.len() as u64;
+            self.recent_timestamps.clear();
+            for b in self.chain.iter().rev().take(DIFFICULTY_WINDOW) {
+                self.recent_timestamps.push_front(b.timestamp_millis);
+            }
+            return Ok(());
+        }
+        if new_chain.len() <= self.chain.len() {
+            return Err(py_value_err("Incoming chain not longer"));
+        }
+        let replayed_econ = Self::validate_chain_with_params(&new_chain, &self.params)
+            .map_err(|_| py_value_err("Invalid incoming chain"))?;
+        self.import_chain_validated(new_chain, replayed_econ)
+    }
+
+    pub(crate) fn import_chain_validated(
+        &mut self,
+        new_chain: Vec<Block>,
+        replayed_econ: ReplayedEconomicsState,
+    ) -> PyResult<()> {
+        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            self.chain = new_chain;
+            self.block_height = self.chain.len() as u64;
+            self.recent_timestamps.clear();
+            for b in self.chain.iter().rev().take(DIFFICULTY_WINDOW) {
+                self.recent_timestamps.push_front(b.timestamp_millis);
+            }
+            return Ok(());
+        }
+        if new_chain.len() <= self.chain.len() {
+            return Err(py_value_err("Incoming chain not longer"));
+        }
+        let lca = self
+            .chain
+            .iter()
+            .zip(&new_chain)
+            .take_while(|(a, b)| a.hash == b.hash)
+            .count();
+        let depth = self.chain.len().saturating_sub(lca);
+        let rollback_indices: Vec<u64> = self
+            .chain
+            .iter()
+            .rev()
+            .take(depth)
+            .map(|b| b.index)
+            .collect();
+        let state = Self::build_chain_import_state(new_chain, &self.params, &replayed_econ)?;
+        self.apply_import_state(state, replayed_econ, &rollback_indices)
     }
 
     /// Return the current state root and Merkle proof for the given account.
@@ -5857,10 +5961,17 @@ impl Blockchain {
 
     #[allow(dead_code)]
     fn is_valid_chain_rust(&self, chain: &[Block]) -> bool {
+        Self::validate_chain_with_params(chain, &self.params).is_ok()
+    }
+
+    pub(crate) fn validate_chain_with_params(
+        chain: &[Block],
+        params: &Params,
+    ) -> Result<ReplayedEconomicsState, &'static str> {
         // Replay economics from genesis to validate coinbase rewards deterministically
         // This ensures two nodes seeing the same chain compute identical economics
         let replayed_econ = if !chain.is_empty() {
-            replay_economics_to_tip(chain, &self.params)
+            replay_economics_to_tip(chain, params)
         } else {
             ReplayedEconomicsState::default()
         };
@@ -5873,21 +5984,21 @@ impl Blockchain {
                 chain[i - 1].hash.clone()
             };
             if b.previous_hash != expected_prev {
-                return false;
+                return Err("invalid_previous_hash");
             }
             if b.difficulty != difficulty::expected_difficulty_from_chain(&chain[..i]) {
-                return false;
+                return Err("invalid_difficulty");
             }
             if b.transactions.is_empty() {
-                return false;
+                return Err("missing_coinbase");
             }
             if b.transactions[0].payload.from_ != "0".repeat(34) {
-                return false;
+                return Err("invalid_coinbase_sender");
             }
             if b.transactions[0].payload.amount_consumer != b.coinbase_block.0
                 || b.transactions[0].payload.amount_industrial != b.coinbase_industrial.0
             {
-                return false;
+                return Err("coinbase_mismatch");
             }
             let calc = calculate_hash(
                 b.index,
@@ -5929,13 +6040,13 @@ impl Blockchain {
                 &b.receipts,
             );
             if calc != b.hash {
-                return false;
+                return Err("hash_mismatch");
             }
             let bytes = hex_to_bytes(&b.hash);
             if leading_zero_bits(&bytes)
                 < difficulty::expected_difficulty_from_chain(&chain[..i]) as u32
             {
-                return false;
+                return Err("difficulty_mismatch");
             }
             let mut expected_nonce: HashMap<String, u64> = HashMap::new();
             let mut seen: HashSet<[u8; 32]> = HashSet::new();
@@ -5946,62 +6057,62 @@ impl Blockchain {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = match to_array_32(&tx.public_key) {
                         Some(p) => p,
-                        None => return false,
+                        None => return Err("invalid_pubkey"),
                     };
                     let vk = match VerifyingKey::from_bytes(&pk) {
                         Ok(vk) => vk,
-                        Err(_) => return false,
+                        Err(_) => return Err("invalid_pubkey"),
                     };
                     let sig_bytes = match to_array_64(&tx.signature.ed25519) {
                         Some(b) => b,
-                        None => return false,
+                        None => return Err("invalid_signature"),
                     };
                     let sig = Signature::from_bytes(&sig_bytes);
                     let mut bytes = domain_tag().to_vec();
                     bytes.extend(canonical_payload_bytes(&tx.payload));
                     if vk.verify(&bytes, &sig).is_err() {
-                        return false;
+                        return Err("signature_mismatch");
                     }
                     let entry = expected_nonce.entry(tx.payload.from_.clone()).or_insert(0);
                     *entry += 1;
                     if tx.payload.nonce != *entry {
-                        return false;
+                        return Err("nonce_mismatch");
                     }
                     if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
-                        return false;
+                        return Err("duplicate_nonce");
                     }
                 }
                 if !seen.insert(tx.id()) {
-                    return false;
+                    return Err("duplicate_tx");
                 }
                 match crate::fee::decompose(tx.payload.pct, tx.tip) {
                     Ok((fee_consumer, fee_industrial)) => {
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
                     }
-                    Err(_) => return false,
+                    Err(_) => return Err("fee_decompose_failed"),
                 }
             }
             let mut h = blake3::Hasher::new();
             let fee_consumer_u64 = match u64::try_from(fee_tot_consumer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return Err("fee_overflow"),
             };
             let fee_industrial_u64 = match u64::try_from(fee_tot_industrial) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return Err("fee_overflow"),
             };
             h.update(&fee_consumer_u64.to_le_bytes());
             h.update(&fee_industrial_u64.to_le_bytes());
             if h.finalize().to_hex().to_string() != b.fee_checksum {
-                return false;
+                return Err("fee_checksum_mismatch");
             }
             let coinbase_block_total = b.coinbase_block.0 as u128;
             let coinbase_industrial_total = b.coinbase_industrial.0 as u128;
             if coinbase_block_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
             {
-                return false;
+                return Err("fee_mismatch");
             }
             // Validate read subsidy role splits
             let read_role_sum = b.read_sub_viewer.0 as u128
@@ -6010,7 +6121,7 @@ impl Blockchain {
                 + b.read_sub_verifier.0 as u128
                 + b.read_sub_liquidity.0 as u128;
             if read_role_sum > b.read_sub.0 as u128 {
-                return false;
+                return Err("read_subsidy_split_mismatch");
             }
             let read_miner_share = b.read_sub.0 as u128 - read_role_sum;
             // Use REPLAYED economics state, not local self.block_reward
@@ -6026,10 +6137,10 @@ impl Blockchain {
             if coinbase_block_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
-                return false;
+                return Err("coinbase_mismatch");
             }
         }
-        true
+        Ok(replayed_econ)
     }
 }
 

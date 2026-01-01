@@ -149,6 +149,14 @@ struct SettlementState {
 }
 
 impl SettlementState {
+    fn ensure_storage_dirs(&self) -> io::Result<()> {
+        fs::create_dir_all(&self.base)?;
+        if let Some(parent) = self.db_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        Ok(())
+    }
+
     fn new(base: PathBuf, mut mode: SettleMode, db_path: PathBuf, db: SimpleDb) -> Self {
         let ledger = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER, AccountLedger::new);
         let stored_mode = load_or_default::<SettleMode, _>(&db, KEY_MODE, || mode);
@@ -251,6 +259,7 @@ impl SettlementState {
         loop {
             let mut batch = self.db.batch();
             let mut encode = || -> io::Result<()> {
+                self.ensure_storage_dirs()?;
                 enqueue_value(&mut batch, KEY_LEDGER, &self.ledger)?;
                 enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
                 enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
@@ -491,6 +500,7 @@ fn compute_root(ledger: &AccountLedger) -> [u8; 32] {
 }
 
 static STATE: Lazy<MutexT<Option<SettlementState>>> = Lazy::new(|| mutex(None));
+static BALANCE_SNAPSHOT: Lazy<MutexT<Vec<BalanceSnapshot>>> = Lazy::new(|| mutex(Vec::new()));
 
 fn settlement_state() -> MutexGuard<'static, Option<SettlementState>> {
     STATE.guard()
@@ -696,8 +706,15 @@ impl Settlement {
         with_state(|state| state.balance(provider))
     }
 
-    pub fn balances() -> Vec<BalanceSnapshot> {
-        with_state(|state| state.balances())
+pub fn balances() -> Vec<BalanceSnapshot> {
+        if let Ok(guard) = STATE.try_lock() {
+            if let Some(state) = guard.as_ref() {
+                let balances = state.balances();
+                *BALANCE_SNAPSHOT.guard() = balances.clone();
+                return balances;
+            }
+        }
+        BALANCE_SNAPSHOT.guard().clone()
     }
 
     pub fn engine_info() -> SettlementEngineInfo {

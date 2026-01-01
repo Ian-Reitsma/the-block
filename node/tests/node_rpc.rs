@@ -248,7 +248,11 @@ fn rpc_smoke() {
             .and_then(|r| r.get("result"))
             .or_else(|| bal.get("result"))
             .expect("balance result");
-        assert_eq!(bal_result["consumer"].as_u64().unwrap(), 42);
+        let bal_amount = bal_result
+            .get("amount")
+            .or_else(|| bal_result.get("consumer"))
+            .and_then(|v| v.as_u64());
+        assert_eq!(bal_amount, Some(42));
 
         // settlement status
         let status = rpc(&addr, r#"{"method":"settlement_status"}"#, None).await;

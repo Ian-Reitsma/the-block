@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
 use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
-use foundation_serialization::json::{Map, Number, Value};
+use foundation_serialization::json::Value;
 use std::collections::HashSet;
 use std::convert::TryInto;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
@@ -52,18 +52,6 @@ fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> Value {
     let sig = sk.sign(tx.owner_digest().as_ref());
     tx.signature = sig.to_bytes().to_vec();
     foundation_serialization::json::to_value(tx).expect("serialize anchor payload")
-}
-
-fn build_request(id: u64, params: Value) -> Value {
-    let mut root = Map::new();
-    root.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
-    root.insert("id".to_string(), Value::Number(Number::from(id)));
-    root.insert(
-        "method".to_string(),
-        Value::String("identity.anchor".to_string()),
-    );
-    root.insert("params".to_string(), params);
-    Value::Object(root)
 }
 
 #[testkit::tb_serial]

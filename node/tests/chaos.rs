@@ -82,7 +82,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
             eprintln!("chaos convergence progress: {:?}", heights);
             last_report = elapsed;
         }
-        the_block::sleep(Duration::from_millis(20)).await;
+        the_block::sleep(Duration::from_millis(100)).await;
     }
 }
 

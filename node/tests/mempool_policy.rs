@@ -52,6 +52,8 @@ fn replacement_rejected() {
     init();
     let dir = temp_dir("temp_replace");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.add_account("miner".into(), 0).unwrap();
     bc.add_account("alice".into(), 0).unwrap();
     bc.mine_block("miner").unwrap();
@@ -67,6 +69,8 @@ fn eviction_via_drop_transaction() {
     init();
     let dir = temp_dir("temp_evict");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.max_mempool_size_consumer = 1;
     bc.add_account("alice".into(), 10_000).unwrap();
     bc.add_account("bob".into(), 10_000).unwrap();

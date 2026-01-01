@@ -37,7 +37,9 @@ fn rate_limit_drop_records_reason() {
     // first access, so set it before instantiating any peer structures.
     std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
     std::env::set_var("TB_P2P_RATE_WINDOW_SECS", "3600");
+    the_block::net::set_track_drop_reasons(true);
     the_block::net::set_p2p_max_per_sec(10);
+    the_block::net::set_p2p_rate_window_secs(3600);
     let peers = PeerSet::new(vec![]);
     let chain = Arc::new(Mutex::new(Blockchain::default()));
     let mut seed = [0u8; 32];
@@ -153,6 +155,7 @@ fn evicts_least_recently_used_peer() {
 
 #[testkit::tb_serial]
 fn reputation_decreases_on_rate_limit() {
+    the_block::net::set_track_drop_reasons(true);
     let peers = PeerSet::new(vec![]);
     let chain = Arc::new(Mutex::new(Blockchain::default()));
     let mut seed = [0u8; 32];

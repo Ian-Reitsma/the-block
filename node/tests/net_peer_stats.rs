@@ -1,25 +1,25 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
-use rand::{thread_rng, RngCore};
 use foundation_serialization::json;
 use httpd::Method;
+use rand::{thread_rng, RngCore};
 use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::{atomic::AtomicBool, Arc, Barrier, Mutex};
 use std::time::Duration;
 use sys::tempfile::tempdir;
+use the_block::http_client;
 use the_block::net::{self, set_max_peer_metrics, simulate_handshake_fail, HandshakeError};
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
     generate_keypair,
     net::{Hello, Message, Payload, PeerSet, Transport, PROTOCOL_VERSION},
     rpc::run_rpc_server,
-    Blockchain,
     runtime::io::BufferedTcpStream,
     runtime::net::TcpStream,
+    Blockchain,
 };
-use the_block::http_client;
 use util::timeout::expect_timeout;
 
 mod util;
@@ -86,7 +86,8 @@ async fn rpc(addr: &str, body: &str) -> json::Value {
     } else if debug {
         eprintln!("rpc http_client fallback");
     }
-    let mut stream = BufferedTcpStream::new(expect_timeout(TcpStream::connect(addr)).await.unwrap());
+    let mut stream =
+        BufferedTcpStream::new(expect_timeout(TcpStream::connect(addr)).await.unwrap());
     let req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),
@@ -125,11 +126,7 @@ async fn rpc(addr: &str, body: &str) -> json::Value {
     expect_timeout(stream.read_exact(&mut resp)).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();
     let mut val: json::Value = json::from_str(&resp).unwrap();
-    if let Some(inner) = val
-        .get("Result")
-        .or_else(|| val.get("Error"))
-        .cloned()
-    {
+    if let Some(inner) = val.get("Result").or_else(|| val.get("Error")).cloned() {
         val = inner;
     }
     val
@@ -385,8 +382,7 @@ fn peer_stats_export_rpc() {
         let val = rpc(&addr, &body).await;
         assert_eq!(val["result"]["status"].as_str(), Some("ok"));
         let contents = std::fs::read_to_string(dir.path().join(path)).unwrap();
-        let m: json::Value =
-            json::from_str(&contents).unwrap();
+        let m: json::Value = json::from_str(&contents).unwrap();
         assert_eq!(m["requests"].as_u64().unwrap(), 1);
 
         handle.abort();
@@ -1011,12 +1007,10 @@ fn peer_stats_cli_show_json_snapshot() {
         .await
         .unwrap();
         assert!(output.status.success());
-        let mut val: json::Value =
-            json::from_slice(&output.stdout).unwrap();
+        let mut val: json::Value = json::from_slice(&output.stdout).unwrap();
         if let Some(rep) = val.get_mut("reputation") {
             *rep = json::Value::Number(
-                json::Number::from_f64(1.0)
-                    .expect("finite reputation override"),
+                json::Number::from_f64(1.0).expect("finite reputation override"),
             );
         }
         if let Some(id) = val.get("peer_id").and_then(|v| v.as_str()) {
@@ -1122,20 +1116,13 @@ fn peer_stats_cli_sort_filter_snapshot() {
         .await
         .unwrap();
         assert!(output.status.success());
-        let mut val: json::Value =
-            json::from_slice(&output.stdout).unwrap();
+        let mut val: json::Value = json::from_slice(&output.stdout).unwrap();
         if let Some(arr) = val.get_mut("peers").and_then(|v| v.as_array_mut()) {
             for (i, p) in arr.iter_mut().enumerate() {
                 if let Some(obj) = p.as_object_mut() {
                     obj.remove("latency");
-                    obj.insert(
-                        "peer".into(),
-                        json::Value::String(format!("peer{}", i)),
-                    );
-                    obj.insert(
-                        "reputation".into(),
-                        json::Value::from(1.0),
-                    );
+                    obj.insert("peer".into(), json::Value::String(format!("peer{}", i)));
+                    obj.insert("reputation".into(), json::Value::from(1.0));
                 }
             }
         }
@@ -1168,20 +1155,13 @@ fn peer_stats_cli_sort_filter_snapshot() {
         .await
         .unwrap();
         assert!(output2.status.success());
-        let mut val2: json::Value =
-            json::from_slice(&output2.stdout).unwrap();
+        let mut val2: json::Value = json::from_slice(&output2.stdout).unwrap();
         if let Some(arr) = val2.get_mut("peers").and_then(|v| v.as_array_mut()) {
             for (i, p) in arr.iter_mut().enumerate() {
                 if let Some(obj) = p.as_object_mut() {
                     obj.remove("latency");
-                    obj.insert(
-                        "peer".into(),
-                        json::Value::String(format!("peer{}", i)),
-                    );
-                    obj.insert(
-                        "reputation".into(),
-                        json::Value::from(1.0),
-                    );
+                    obj.insert("peer".into(), json::Value::String(format!("peer{}", i)));
+                    obj.insert("reputation".into(), json::Value::from(1.0));
                 }
             }
         }

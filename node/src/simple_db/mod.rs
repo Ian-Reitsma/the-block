@@ -590,6 +590,29 @@ impl SimpleDb {
             .collect()
     }
 
+    pub fn shard_keys_with_prefix(&self, shard: ShardId, prefix: &str) -> Vec<String> {
+        fn collect<E: KeyValue>(engine: &E, cf: &str, prefix: &[u8]) -> Vec<String> {
+            let mut iter = match engine.prefix_iterator(cf, prefix) {
+                Ok(iter) => iter,
+                Err(_) => return Vec::new(),
+            };
+            let mut keys = Vec::new();
+            while let Ok(Some((key, _))) = iter.next() {
+                if let Ok(s) = String::from_utf8(key) {
+                    keys.push(s);
+                }
+            }
+            keys
+        }
+
+        let cf_name = format!("shard:{shard}");
+        dispatch!(
+            &self.engine,
+            engine,
+            collect(engine, cf_name.as_str(), prefix.as_bytes())
+        )
+    }
+
     pub fn get_shard(&self, shard: ShardId, key: &str) -> Option<Vec<u8>> {
         let cf = format!("shard:{shard}");
         self.engine.get(cf.as_str(), key.as_bytes()).ok().flatten()

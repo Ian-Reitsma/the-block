@@ -17,6 +17,8 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             init();
             let dir = temp_dir("nonce_supply_prop_empty");
             let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+            bc.min_fee_per_byte_consumer = 0;
+            bc.min_fee_per_byte_industrial = 0;
             bc.recompute_difficulty();
             bc.add_account("a".into(), 0).unwrap();
             bc.add_account("b".into(), 0).unwrap();
@@ -44,6 +46,8 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             init();
             let dir = temp_dir("nonce_supply_prop");
             let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+            bc.min_fee_per_byte_consumer = 0;
+            bc.min_fee_per_byte_industrial = 0;
             bc.recompute_difficulty();
             bc.add_account("a".into(), 0).unwrap();
             bc.add_account("b".into(), 0).unwrap();

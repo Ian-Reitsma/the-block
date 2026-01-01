@@ -32,9 +32,11 @@ fn badge_status_endpoint() {
         let mut stream = expect_timeout(TcpStream::connect(addr_socket))
             .await
             .unwrap();
-        expect_timeout(stream.write_all(b"GET /badge/status HTTP/1.1\r\nHost: localhost\r\n\r\n"))
-            .await
-            .unwrap();
+        expect_timeout(stream.write_all(
+            b"GET /badge/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        ))
+        .await
+        .unwrap();
         let mut resp = Vec::new();
         expect_timeout(read_to_end(&mut stream, &mut resp))
             .await
@@ -61,9 +63,11 @@ fn badge_status_endpoint() {
         let mut stream = expect_timeout(TcpStream::connect(addr_socket))
             .await
             .unwrap();
-        expect_timeout(stream.write_all(b"GET /badge/status HTTP/1.1\r\nHost: localhost\r\n\r\n"))
-            .await
-            .unwrap();
+        expect_timeout(stream.write_all(
+            b"GET /badge/status HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        ))
+        .await
+        .unwrap();
         resp.clear();
         expect_timeout(read_to_end(&mut stream, &mut resp))
             .await

@@ -34,6 +34,8 @@ fn eviction_records_hash_and_releases_slot() {
     init();
     let dir = temp_dir("mempool_eviction");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.max_mempool_size_consumer = 1;
     bc.max_pending_per_account = 1;
     // Disable dynamic fee floor (0th percentile = no floor) to test eviction logic without fee validation

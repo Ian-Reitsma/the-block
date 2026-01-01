@@ -119,11 +119,10 @@ pub use peer::{
     recent_handshake_failures, record_request, reset_peer_metrics, rotate_peer_key,
     set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
     set_p2p_max_bytes_per_sec, set_p2p_max_per_sec, set_p2p_rate_window_secs,
-    set_peer_metrics_compress,
-    set_peer_metrics_export, set_peer_metrics_export_quota, set_peer_metrics_path,
-    set_peer_metrics_retention, set_peer_metrics_sample_rate, set_peer_reputation_decay,
-    set_track_drop_reasons, set_track_handshake_fail, throttle_peer, DropReason, HandshakeError,
-    PeerMetrics, PeerReputation, PeerSet, PeerStat,
+    set_peer_metrics_compress, set_peer_metrics_export, set_peer_metrics_export_quota,
+    set_peer_metrics_path, set_peer_metrics_retention, set_peer_metrics_sample_rate,
+    set_peer_reputation_decay, set_track_drop_reasons, set_track_handshake_fail, throttle_peer,
+    DropReason, HandshakeError, PeerMetrics, PeerReputation, PeerSet, PeerStat,
 };
 
 pub use peer::simulate_handshake_fail;
@@ -1667,6 +1666,11 @@ impl Node {
                 Ok((mut stream, addr)) => {
                     let addr = Some(addr);
                     let mut buf = Vec::new();
+                    // Listener is non-blocking; switch accepted sockets back to blocking mode
+                    // so read_to_end can wait for EOF without spurious WouldBlock errors.
+                    let _ = stream.set_nonblocking(false);
+                    // Avoid blocking indefinitely on peers that never close the socket.
+                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                     if stream.read_to_end(&mut buf).is_ok() {
                         #[cfg(feature = "telemetry")]
                         if crate::telemetry::should_log("p2p") {
@@ -1706,8 +1710,37 @@ impl Node {
 
     /// Broadcast the current chain to all known peers.
     pub fn broadcast_chain(&self) {
-        if let Ok(bc) = self.chain.lock() {
-            self.broadcast_payload(Payload::Chain(bc.chain.clone()));
+        let chain = match self.chain.lock() {
+            Ok(bc) => bc.chain.clone(),
+            Err(_) => return,
+        };
+        let msg = match self.sign_payload(Payload::Chain(chain), "broadcast_chain") {
+            Some(msg) => msg,
+            None => return,
+        };
+        let peers = self.peers.list_with_info();
+        let serialized = codec::serialize(codec::profiles::gossip::codec(), &msg)
+            .unwrap_or_default();
+        let large = serialized.len() > 1024;
+        for (addr, transport, cert) in peers {
+            if large {
+                if let Some(c) = cert.as_ref() {
+                    let _ = send_quic_msg(addr, c, &msg);
+                } else {
+                    let _ = send_msg(addr, &msg);
+                }
+            } else {
+                match transport {
+                    Transport::Tcp => {
+                        let _ = send_msg(addr, &msg);
+                    }
+                    Transport::Quic => {
+                        if let Some(c) = cert.as_ref() {
+                            let _ = send_quic_msg(addr, c, &msg);
+                        }
+                    }
+                }
+            }
         }
     }
 

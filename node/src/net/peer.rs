@@ -597,7 +597,7 @@ impl PeerSet {
                 _ => DropReason::Malformed,
             };
             record_drop(&peer_key, reason);
-            if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
+            if matches!(code, PeerErrorCode::Banned) {
                 if let Some(peer_addr) = addr {
                     let mut a = self.addrs.guard();
                     a.remove(&peer_addr);
@@ -803,14 +803,66 @@ impl PeerSet {
                 if !self.is_authorized(&peer_key) {
                     return;
                 }
-                let mut bc = chain.guard();
-                if new_chain.len() > bc.chain.len() {
-                    #[cfg(feature = "telemetry")]
-                    let start = Instant::now();
-                    let _ = bc.import_chain(new_chain);
-                    #[cfg(feature = "telemetry")]
-                    observer::observe_convergence(start);
+                if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+                    let mut bc = chain.guard();
+                    if new_chain.len() > bc.chain.len() {
+                        #[cfg(feature = "telemetry")]
+                        let start = Instant::now();
+                        let _ = bc.import_chain(new_chain);
+                        #[cfg(feature = "telemetry")]
+                        observer::observe_convergence(start);
+                    }
+                    return;
                 }
+                let (params, current_len, tip_hash, rollback_indices) = {
+                    let bc = chain.guard();
+                    let current_len = bc.chain.len();
+                    if new_chain.len() <= current_len {
+                        return;
+                    }
+                    let lca = bc
+                        .chain
+                        .iter()
+                        .zip(&new_chain)
+                        .take_while(|(a, b)| a.hash == b.hash)
+                        .count();
+                    let depth = current_len.saturating_sub(lca);
+                    let rollback_indices = bc
+                        .chain
+                        .iter()
+                        .rev()
+                        .take(depth)
+                        .map(|b| b.index)
+                        .collect::<Vec<_>>();
+                    let tip_hash = bc.chain.last().map(|b| b.hash.clone());
+                    (bc.params.clone(), current_len, tip_hash, rollback_indices)
+                };
+                let replayed =
+                    match crate::Blockchain::validate_chain_with_params(&new_chain, &params) {
+                        Ok(state) => state,
+                        Err(_) => return,
+                    };
+                let import_state =
+                    match crate::Blockchain::build_chain_import_state(new_chain, &params, &replayed)
+                    {
+                        Ok(state) => state,
+                        Err(_) => return,
+                    };
+                let mut bc = chain.guard();
+                if bc.chain.len() != current_len
+                    || bc.chain.last().map(|b| b.hash.clone()) != tip_hash
+                {
+                    return;
+                }
+                #[cfg(feature = "telemetry")]
+                let start = Instant::now();
+                let _ = if bc.params == params {
+                    bc.apply_import_state(import_state, replayed, &rollback_indices)
+                } else {
+                    bc.import_chain(import_state.chain)
+                };
+                #[cfg(feature = "telemetry")]
+                observer::observe_convergence(start);
             }
             Payload::BlobChunk(chunk) => {
                 if !self.is_authorized(&peer_key) {
@@ -824,7 +876,7 @@ impl PeerSet {
                         _ => DropReason::Malformed,
                     };
                     record_drop(&peer_key, reason);
-                    if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
+                    if matches!(code, PeerErrorCode::Banned) {
                         if let Some(peer_addr) = addr {
                             let mut a = self.addrs.guard();
                             a.remove(&peer_addr);
@@ -1540,7 +1592,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.drops.entry(reason).or_default() += 1;
-        if reason == DropReason::TooBusy {
+        if matches!(reason, DropReason::TooBusy | DropReason::RateLimit) {
             entry.reputation.penalize(0.9);
             update_reputation_metric(pk, entry.reputation.score);
         }
@@ -1568,7 +1620,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         }
         let mut entry = PeerMetrics::default();
         *entry.drops.entry(reason).or_default() += 1;
-        if reason == DropReason::TooBusy {
+        if matches!(reason, DropReason::TooBusy | DropReason::RateLimit) {
             entry.reputation.penalize(0.9);
             update_reputation_metric(pk, entry.reputation.score);
         }

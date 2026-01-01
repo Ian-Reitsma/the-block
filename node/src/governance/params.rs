@@ -274,7 +274,7 @@ pub struct ParamSpec {
 const DEFAULT_TIMELOCK_EPOCHS: u64 = 2;
 const KILL_SWITCH_TIMELOCK_EPOCHS: u64 = 10800; // ≈12h at 4s epochs
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct Params {
     pub snapshot_interval_secs: i64,

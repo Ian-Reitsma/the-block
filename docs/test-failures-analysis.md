@@ -309,13 +309,16 @@ fn prune_store_entry(store: &mut PeerCertStore, now: u64) {
 
 **Test:** `shard_roots_persist` - [shard_roots.rs:56-57](node/tests/shard_roots.rs#L56-L57)
 
-**Root Cause:** The `commit()` function writes shard roots but they aren't persisted to the database correctly.
+**Root Cause:** `Blockchain::drop` deletes the chain directory, so the follow-up
+`Blockchain::open()` sees a fresh DB and loses persisted shard state.
 
 **Check:** [node/src/blockchain/process.rs:176-189](node/src/blockchain/process.rs#L176-L189) - `write_shard_state()` call
 
-**And:** [node/src/lib.rs:2455-2464](node/src/lib.rs#L2455-L2464) - `db.shard_ids()` during load
+**And:** [node/src/lib.rs:1161-1168](node/src/lib.rs#L1161-L1168) - `Drop` cleanup path
 
-**Fix:** Ensure the database transaction is flushed before drop, or `shard_ids()` returns the written shards.
+**Fix:** Do not delete the chain directory on drop; let tempdirs clean themselves
+or add an explicit cleanup path in tests. Once the DB survives, shard roots load
+from `ShardState` (per-shard CF) or `shard_root:{id}` fallback.
 
 ### 4D. Release Flow Signature
 

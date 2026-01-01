@@ -207,8 +207,7 @@ fn tail_streams_indexed_rows() -> Result<()> {
             let mut ws = ClientStream::new(stream);
 
             // Poll for the first message with a bounded deadline so we tolerate slight startup jitter.
-            let deadline = std::time::Instant::now()
-                + std::time::Duration::from_secs(5);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
             let mut message = None;
             while std::time::Instant::now() < deadline {
                 match runtime::timeout(std::time::Duration::from_millis(250), ws.recv()).await {

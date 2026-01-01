@@ -919,11 +919,7 @@ fn post_json(rpc: &str, req: Value) -> Result<Value, HttpClientError> {
         .json(&req)?
         .send()?
         .json()?;
-    if let Some(inner) = val
-        .get("Result")
-        .or_else(|| val.get("Error"))
-        .cloned()
-    {
+    if let Some(inner) = val.get("Result").or_else(|| val.get("Error")).cloned() {
         val = inner;
     }
     Ok(val)

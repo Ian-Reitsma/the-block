@@ -61,6 +61,14 @@ fn release_flow_requires_signature_when_signers_configured() {
     ];
     let proposal = ReleaseVote::new(hash.clone(), attestations, 2, "tester".into(), 0, 0);
     let id = controller::submit_release(&store, proposal).unwrap();
+    let ballot = ReleaseBallot {
+        proposal_id: id,
+        voter: "tester".into(),
+        choice: VoteChoice::Yes,
+        weight: 1,
+        received_at: 0,
+    };
+    controller::vote_release(&store, ballot).unwrap();
     controller::tally_release(&store, id, 0).unwrap();
     assert!(store.is_release_hash_approved(&hash).unwrap());
 

@@ -13,7 +13,7 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let mut req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
     );
     if let Some(t) = token {
@@ -62,9 +62,9 @@ fn rpc_auth_and_host_filters() {
         let mut stream = expect_timeout(TcpStream::connect(addr_socket))
             .await
             .unwrap();
-        expect_timeout(
-            stream.write_all(b"POST / HTTP/1.1\r\nHost: evil.com\r\nContent-Length: 0\r\n\r\n"),
-        )
+        expect_timeout(stream.write_all(
+            b"POST / HTTP/1.1\r\nHost: evil.com\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        ))
         .await
         .unwrap();
         let mut buf = Vec::new();
