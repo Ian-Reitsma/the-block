@@ -71,6 +71,7 @@ Quick Index
 - Compute-market admission quotas: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
 - Compute-unit calibration: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
 - Compute-market SNARK receipts: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- BlockTorch compute framework strategy: see [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy)
 - Multi-hop trust-line routing: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
 - DEX escrow and partial-payment proofs: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
 - AMM pools and liquidity mining: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
@@ -220,6 +221,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 **Outstanding focus areas:**
 - Ship governance treasury disbursement tooling and explorer timelines before opening external treasury submissions.
 - Integrate compute-market SLA slashing atop the lane-aware matcher and document remediation dashboards for operators.
+- Align BlockTorch (metal-tensor) with compute market readiness: publish the spec checklist, determinism requirements, and coordinator milestones from `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md` Part XII.
 - Continue WAN-scale QUIC chaos drills for relay fan-out while publishing mitigation recipes from the new telemetry traces and validating cross-provider failover through the transport registry.
 - Finish multisig wallet UX polish (batched signer discovery, richer CLI prompts) so remote signers can run production workflows.
 - Expand bridge and DEX documentation with signer-set payloads, explorer telemetry, and release-verifier guidance ahead of the next tag.
@@ -650,6 +652,21 @@ The following items block mainnet readiness and should be prioritized. Each task
 - **Test coverage** — Expand `node/src/compute_market/tests/` and top-level `tests/` to cover fairness windows, starvation protection, SLA triggers, receipt persistence, and replay after restarts; include deterministic replays that validate persisted receipts, plus fuzzing for receipt serialization.
 - **Remediation tooling** — Ship Grafana panels (sourced from `monitoring/`) and CLI commands that summarize per-lane degradation so operators can triage slashed jobs rapidly.
 - **Ledger integration** — Ensure slashing updates propagate through `node/src/treasury_executor.rs`, ledger snapshots, and governance reporting so payouts and per-lane quotas remain in sync with the unified BLOCK ledger.
+
+#### 15.B.1 BlockTorch Compute Framework Checklist (Priority Order)
+
+These steps translate `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md` Part XII into a delivery checklist. Complete them in order and keep the referenced sections aligned.
+
+1. **Finalize naming + scope** — Confirm the BlockTorch rebrand scope, keep `metal-backend/` as the canonical code path, and align README/handbook wording with the spec (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#122-the-blocktorch-vision-becoming-the-cuda-of-blockchain-compute`).
+2. **Publish the spec bundle** — Kernel signatures, determinism rules, gradient wire format, SNARK circuit spec, and marketplace job protocol (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#126-the-industry-standard-play`).
+3. **Ship the coordinator** — Build the distributed training coordinator that posts compute jobs, selects bidders, and aggregates gradients (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#124-distributed-training-architecture-for-the-compute-marketplace`).
+4. **Lock determinism** — Define the deterministic op subset, ordered reductions, fixed-point/rounding rules, and RNG seeding across backends (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#124-distributed-training-architecture-for-the-compute-marketplace`).
+5. **Gradient serialization + attestation** — Standardize gradient hashes, signatures, and metadata so proofs and settlements stay replayable (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#127-integration-with-existing-compute-market-infrastructure`).
+6. **SNARK proof integration** — Implement gradient proof circuits and hit the overhead targets (<50% proof time, <100ms verify) (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#128-local-testing-methodology`).
+7. **Pricing + settlement wiring** — Use `ORCHARD_TENSOR_PROFILE` to price hardware/proof costs, then flow receipts through the compute market settlement path (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#1210-economic-integration-with-subsidy-and-tariff-systems`).
+8. **Backend expansion plan** — Publish the backend interface and target CUDA/ROCm priorities after Metal/CPU stability (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#125-hardware-optimization-strategy`).
+9. **Observability surfaces** — Wire worker/job/proof status into RPC and dashboards (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#129-dashboard-integration-strategy`).
+10. **Testnet rollout gates** — Complete local three-machine validation, then stage testnet jobs with deterministic output checks (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#128-local-testing-methodology`).
 
 ### 15.C Networking, Transport & Range-Boost Reliability
 - **Chaos drill automation** — Script WAN-scale QUIC chaos drills (fault injection across providers) touching `node/src/net`, `node/src/p2p`, and `range_boost/`, validating handshake fallback, fanout scoring, mutual-TLS rotation, and recovery flows (`AGENTS.md:124`).

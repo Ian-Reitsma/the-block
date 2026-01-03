@@ -34,9 +34,14 @@ pub fn broadcast(msg: &Message, peers: &[(SocketAddr, Transport, Option<Bytes>)]
 pub fn broadcast_chunk(
     chunk: &BlobChunk,
     sk: &SigningKey,
+    cert_fingerprint: Option<Bytes>,
     peers: &[(SocketAddr, Transport, Option<Bytes>)],
 ) {
-    match Message::new(crate::net::message::Payload::BlobChunk(chunk.clone()), sk) {
+    match Message::new_with_cert_fingerprint(
+        crate::net::message::Payload::BlobChunk(chunk.clone()),
+        sk,
+        cert_fingerprint,
+    ) {
         Ok(msg) => broadcast(&msg, peers),
         Err(err) => {
             tracing::error!(
@@ -52,11 +57,13 @@ pub fn broadcast_chunk(
 pub fn broadcast_reputation(
     entries: &[ReputationUpdate],
     sk: &SigningKey,
+    cert_fingerprint: Option<Bytes>,
     peers: &[(SocketAddr, Transport, Option<Bytes>)],
 ) {
-    match Message::new(
+    match Message::new_with_cert_fingerprint(
         crate::net::message::Payload::Reputation(entries.to_vec()),
         sk,
+        cert_fingerprint,
     ) {
         Ok(msg) => broadcast(&msg, peers),
         Err(err) => {

@@ -421,6 +421,8 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - `node/src/p2p/handshake.rs` negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the `p2p_overlay` crate with in-house and stub adapters.
 - Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.
 - Handshake hellos now carry the sender's gossip listener address; peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.
+- Adding a peer triggers an immediate handshake + hello exchange so rejoined peers resync and refresh their peer lists without waiting on a new block.
+- QUIC certificates are required for QUIC transport; if a TCP-only peer advertises an invalid QUIC cert, the handshake proceeds but QUIC metadata is ignored and the peer stays on TCP.
 
 ### P2P Wire Protocol
 - Message framing and compatibility shims live under `node/src/p2p/wire_binary.rs`. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.
@@ -503,6 +505,8 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 > - **SNARK receipt**: Proof that computation happened correctly
 > - **SLA (Service Level Agreement)**: Rules about quality/uptime; violations can lead to slashing
 > - **Lane**: Priority tier for different job types
+
+**BlockTorch integration**: The `metal-backend/` stack (metal-tensor + autograd) provides the deterministic tensor layer for ML workloads executed through the compute marketplace. BlockTorch defines the kernel set, gradient serialization, and proof-ready metadata needed for SNARK attestation and pricing via `ORCHARD_TENSOR_PROFILE`. The strategic roadmap and coordinator workflow live in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy), with execution priority captured in `AGENTS.md §15.B.1`.
 
 ### Offers and Matching
 - Computation lives under `node/src/compute_market`. Offers, bids, and receipts serialize through `foundation_serialization` and are exposed over RPC (`node/src/rpc/compute_market.rs`).

@@ -116,6 +116,7 @@ async fn rpc_server_addr() -> Result<std::net::SocketAddr> {
 
 #[testkit::tb_serial]
 fn state_stream_upgrade_requires_headers() -> Result<()> {
+    configure_runtime();
     runtime::block_on(async {
         let addr = rpc_server_addr().await?;
 
@@ -144,6 +145,7 @@ fn state_stream_upgrade_requires_headers() -> Result<()> {
 
 #[testkit::tb_serial]
 fn missing_upgrade_header_is_rejected() -> Result<()> {
+    configure_runtime();
     runtime::block_on(async {
         let addr = rpc_server_addr().await?;
 

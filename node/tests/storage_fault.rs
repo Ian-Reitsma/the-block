@@ -20,9 +20,6 @@ fn permission_error() {
     let mut perms = std::fs::metadata(&path).unwrap().permissions();
     perms.set_mode(0o500);
     std::fs::set_permissions(&path, perms).unwrap();
-    let res = std::panic::catch_unwind(|| {
-        let mut db = SimpleDb::open(path.to_str().unwrap());
-        db.insert("k", b"v".to_vec());
-    });
-    assert!(res.is_err());
+    let mut db = SimpleDb::open(path.to_str().unwrap());
+    assert!(db.try_insert("k", b"v".to_vec()).is_err());
 }

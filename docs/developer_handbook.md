@@ -16,6 +16,7 @@ If you're new to blockchain development, here's a quick reference:
 | **Proposal** | A governance request to change parameters or spend treasury funds | `governance/src/proposals.rs`, [`economics_and_governance.md#proposal-lifecycle`](economics_and_governance.md#proposal-lifecycle) |
 | **Macro-block** | Periodic checkpoint summarizing state for faster syncing | `node/src/macro_block.rs`, [`architecture.md#macro-blocks-and-finality`](architecture.md#macro-blocks-and-finality) |
 | **SNARK** | Small proof that computation was done correctly (without re-running it) | `node/src/compute_market/snark.rs`, [`architecture.md#compute-marketplace`](architecture.md#compute-marketplace) |
+| **BlockTorch** | Deterministic tensor/autograd framework (metal-backend) for verified ML compute workloads | [`ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy) |
 | **Bridge** | Mechanism for moving assets between blockchains | `bridges/`, [`architecture.md#token-bridges`](architecture.md#token-bridges) |
 | **Trust line** | Credit relationship between parties for DEX trading | `dex/`, [`architecture.md#dex-and-trust-lines`](architecture.md#dex-and-trust-lines) |
 | **Read acknowledgement** | Proof that data was served to a client | `node/src/gateway/read_receipt.rs`, [`architecture.md#read-receipts`](architecture.md#read-receipts) |
@@ -34,7 +35,11 @@ If you're new to blockchain development, here's a quick reference:
 - `cli/` – user-facing CLI with governance, wallet, bridge, compute, telemetry, and remediation commands.
 - `metrics-aggregator/`, `monitoring/`, `explorer/` – ops tooling.
 - `bridges/`, `dex/`, `storage_market/`, `gateway/` – specialised crates referenced by the node.
+- `metal-backend/` – BlockTorch tensor runtime (metal-tensor + autograd), profiling hooks, and the PyTorch bridge used for validation.
 - `docs/` – this handbook (mdBook). Run `mdbook build docs` before submitting docs changes.
+
+## BlockTorch onboarding summary
+BlockTorch is the deterministic tensor/autograd layer that powers verified ML compute in the marketplace. The `metal-backend/` stack provides Metal and CPU backends, profiling hooks (`ORCHARD_TENSOR_PROFILE`), and an experimental PyTorch bridge for validation while the native kernel set reaches full parity. The strategic roadmap and coordinator workflow are documented in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy) and the priority checklist lives in `AGENTS.md §15.B.1`.
 
 ## Spec, Docs, and Owners
 - Read `AGENTS.md` + this handbook once, then operate as if you authored them. Implementation never outruns docs: diff behaviour vs `AGENTS.md §0.6` + [`docs/overview.md`](overview.md) before touching code, patch the spec first, route it through the Document Map owner, and cite the doc PR/issue in the code review.

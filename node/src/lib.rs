@@ -3016,7 +3016,10 @@ impl Blockchain {
     }
 
     pub fn circulating_supply(&self) -> u64 {
-        self.emission
+        self.accounts
+            .values()
+            .map(|account| account.balance.amount)
+            .sum()
     }
 
     /// Construct and persist the genesis block.

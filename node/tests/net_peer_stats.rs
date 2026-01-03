@@ -75,12 +75,9 @@ async fn rpc(addr: &str, body: &str) -> json::Value {
     })
     .await;
 
-    if let Ok(Ok(mut val)) = client_resp {
+    if let Ok(Ok(val)) = client_resp {
         if debug {
             eprintln!("rpc http_client path ok");
-        }
-        if let Some(inner) = val.get("Result").or_else(|| val.get("Error")).cloned() {
-            val = inner;
         }
         return val;
     } else if debug {
@@ -125,11 +122,7 @@ async fn rpc(addr: &str, body: &str) -> json::Value {
     let mut resp = vec![0u8; content_len];
     expect_timeout(stream.read_exact(&mut resp)).await.unwrap();
     let resp = String::from_utf8(resp).unwrap();
-    let mut val: json::Value = json::from_str(&resp).unwrap();
-    if let Some(inner) = val.get("Result").or_else(|| val.get("Error")).cloned() {
-        val = inner;
-    }
-    val
+    json::from_str(&resp).unwrap()
 }
 
 #[testkit::tb_serial]

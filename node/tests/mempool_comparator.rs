@@ -74,7 +74,7 @@ fn ordering_stable_after_heap_rebuild() {
     bc.tx_ttl = 100;
     bc.base_fee = 0;
     bc.min_fee_per_byte_consumer = 0;
-    // Disable dynamic fee floor (0th percentile = no floor) to test pure ordering logic without fee validation
+    // Use a monotonic fee floor so we can submit ascending fees without rejections.
     bc.set_fee_floor_policy(1, 0);
     bc.add_account("sink".into(), 0).unwrap();
     for acct in ["a", "b", "c", "d", "e"] {
@@ -96,11 +96,11 @@ fn ordering_stable_after_heap_rebuild() {
         bc.submit_transaction(tx).unwrap();
     };
 
-    submit(&mut bc, "a", 40_000);
-    submit(&mut bc, "b", 30_000);
-    submit(&mut bc, "c", 30_000);
     submit(&mut bc, "d", 20_000);
     submit(&mut bc, "e", 25_000);
+    submit(&mut bc, "b", 30_000);
+    submit(&mut bc, "c", 30_000);
+    submit(&mut bc, "a", 40_000);
 
     let base = SystemTime::now()
         .duration_since(UNIX_EPOCH)

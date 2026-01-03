@@ -98,7 +98,9 @@ fn rate_limit_drop_records_reason() {
 
     // Avoid leaking the overridden rate limit to other tests in this binary.
     std::env::remove_var("TB_P2P_MAX_PER_SEC");
+    std::env::remove_var("TB_P2P_RATE_WINDOW_SECS");
     the_block::net::set_p2p_max_per_sec(100);
+    the_block::net::set_p2p_rate_window_secs(1);
 }
 
 #[test]

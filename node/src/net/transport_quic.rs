@@ -170,14 +170,18 @@ fn cert_store_path() -> PathBuf {
 }
 
 #[cfg(feature = "inhouse")]
-fn certificate_from_store(store: &InhouseCertificateStore) -> Result<InhouseCertificate> {
-    // Try to load existing certificate
+fn certificate_from_store(
+    store: &InhouseCertificateStore,
+    signing_key: &SigningKey,
+) -> Result<InhouseCertificate> {
+    let expected = signing_key.verifying_key().to_bytes();
     if let Some(cert) = store.load_certificate() {
-        return Ok(cert);
+        if cert.verifying_key == expected {
+            return Ok(cert);
+        }
     }
 
-    // If no certificate exists, generate a new one and install it
-    let cert = inhouse::Certificate::generate()
+    let cert = inhouse::Certificate::generate_for_signing_key(signing_key)
         .map_err(|err| anyhow!("generate inhouse certificate: {err}"))?;
     store
         .install_certificate(&cert)
@@ -194,7 +198,7 @@ pub fn initialize(signing_key: &SigningKey) -> Result<CertAdvertisement> {
             .map_err(Into::into),
         #[cfg(feature = "inhouse")]
         ActiveProvider::Inhouse { store, .. } => {
-            let cert = inhouse::Certificate::generate()
+            let cert = inhouse::Certificate::generate_for_signing_key(signing_key)
                 .map_err(|err| anyhow!("generate inhouse certificate: {err}"))?;
             let advert = store
                 .install_certificate(&cert)
@@ -213,7 +217,7 @@ pub fn rotate(signing_key: &SigningKey) -> Result<CertAdvertisement> {
             .map_err(Into::into),
         #[cfg(feature = "inhouse")]
         ActiveProvider::Inhouse { store, .. } => {
-            let cert = inhouse::Certificate::generate()
+            let cert = inhouse::Certificate::generate_for_signing_key(signing_key)
                 .map_err(|err| anyhow!("generate inhouse certificate: {err}"))?;
             let advert = store
                 .install_certificate(&cert)
@@ -285,14 +289,9 @@ pub async fn start_server(addr: SocketAddr) -> Result<ListenerHandle> {
         }
         #[cfg(feature = "inhouse")]
         ActiveProvider::Inhouse { adapter, store } => {
-            let (endpoint, cert_handle) = adapter.listen(addr).await?;
-            // Extract the certificate from the handle and store it
-            if let transport::CertificateHandle::Inhouse(cert) = &cert_handle {
-                // Store the certificate DER bytes
-                store
-                    .install_certificate(cert)
-                    .map_err(|err| anyhow!("persist inhouse certificate: {err}"))?;
-            }
+            let key = load_net_key();
+            let certificate = certificate_from_store(store, &key)?;
+            let (endpoint, _) = adapter.listen_with_certificate(addr, certificate).await?;
             Ok(endpoint)
         }
     }
@@ -304,7 +303,8 @@ pub async fn connect(addr: SocketAddr) -> Result<()> {
         ActiveProvider::S2n(adapter) => adapter.connect(addr).await,
         #[cfg(feature = "inhouse")]
         ActiveProvider::Inhouse { adapter, store } => {
-            let certificate = certificate_from_store(store)?;
+            let key = load_net_key();
+            let certificate = certificate_from_store(store, &key)?;
             let cert_handle = transport::CertificateHandle::Inhouse(certificate);
             adapter.connect(addr, &cert_handle).await.map(|_| ())
         }

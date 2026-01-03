@@ -23,6 +23,8 @@ pub struct ClientConfig {
     pub request_timeout: Duration,
     /// Optional upper bound for reading the response payload.
     pub read_timeout: Option<Duration>,
+    /// Maximum duration allowed for completing the TLS handshake.
+    pub tls_handshake_timeout: Duration,
     /// Maximum number of response bytes buffered in memory.
     pub max_response_bytes: usize,
     /// Optional TLS connector used for HTTPS requests.
@@ -31,12 +33,15 @@ pub struct ClientConfig {
 
 impl Default for ClientConfig {
     fn default() -> Self {
+        let tls_handshake_timeout = Duration::from_secs(10);
         Self {
             connect_timeout: Duration::from_secs(5),
             request_timeout: Duration::from_secs(15),
             read_timeout: Some(Duration::from_secs(15)),
+            tls_handshake_timeout,
             max_response_bytes: 16 * 1024 * 1024,
-            tls: super::default_tls_connector(),
+            tls: super::default_tls_connector()
+                .map(|connector| connector.with_handshake_timeout(tls_handshake_timeout)),
         }
     }
 }
@@ -53,9 +58,18 @@ impl ClientConfig {
     pub fn from_env(prefixes: &[&str]) -> Result<Self, TlsConnectorError> {
         let mut config = Self::default();
         if let Some(connector) = super::tls_connector_from_env_any(prefixes)? {
-            config.tls = Some(connector);
+            config.tls = Some(connector.with_handshake_timeout(config.tls_handshake_timeout));
         }
         Ok(config)
+    }
+
+    /// Override the TLS handshake timeout.
+    pub fn with_tls_handshake_timeout(mut self, timeout: Duration) -> Self {
+        self.tls_handshake_timeout = timeout;
+        if let Some(connector) = self.tls.take() {
+            self.tls = Some(connector.with_handshake_timeout(timeout));
+        }
+        self
     }
 }
 
@@ -68,6 +82,10 @@ pub struct Client {
 impl Client {
     /// Create a client with the provided configuration.
     pub fn new(config: ClientConfig) -> Self {
+        let mut config = config;
+        if let Some(connector) = config.tls.take() {
+            config.tls = Some(connector.with_handshake_timeout(config.tls_handshake_timeout));
+        }
         Self { config }
     }
 
@@ -587,25 +605,37 @@ fn execute_https_blocking(
     max_response_bytes: usize,
     read_timeout: Option<Duration>,
 ) -> Result<ClientResponse, ClientError> {
+    let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
     let stream = connect_blocking_with_retry(&addr, connect_timeout)?;
     let _ = stream.set_nodelay(true);
+    let _ = stream.set_read_timeout(None);
+    let _ = stream.set_write_timeout(None);
+
+    if debug {
+        eprintln!("[tls-client] starting https handshake to {addr}");
+    }
+    let mut tls_stream = connector.connect(&host, stream)?;
     match read_timeout {
         Some(timeout) => {
-            let _ = stream.set_read_timeout(Some(timeout));
+            let _ = tls_stream.set_read_timeout(Some(timeout));
         }
         None => {
-            let _ = stream.set_read_timeout(None);
+            let _ = tls_stream.set_read_timeout(None);
         }
     }
-    let _ = stream.set_write_timeout(Some(request_timeout));
-
-    let mut tls_stream = connector.connect(&host, stream)?;
+    let _ = tls_stream.set_write_timeout(Some(request_timeout));
+    if debug {
+        eprintln!("[tls-client] https handshake complete, sending request");
+    }
     let request = build_request(method, &url, &mut headers, &body, &host)?;
     tls_stream.write_all(request.as_bytes())?;
     if !body.is_empty() {
         tls_stream.write_all(&body)?;
     }
     tls_stream.flush()?;
+    if debug {
+        eprintln!("[tls-client] request sent, reading response");
+    }
 
     let mut reader = BufReader::new(tls_stream);
     read_response_blocking(&mut reader, max_response_bytes)
@@ -654,7 +684,10 @@ fn connect_blocking_with_retry(
     let mut delay = Duration::from_millis(25);
     for attempt in 0..MAX_ATTEMPTS {
         match std::net::TcpStream::connect_timeout(addr, timeout) {
-            Ok(stream) => return Ok(stream),
+            Ok(stream) => {
+                let _ = stream.set_nonblocking(false);
+                return Ok(stream);
+            }
             Err(err) if should_retry_connect(&err) && attempt + 1 < MAX_ATTEMPTS => {
                 thread::sleep(delay);
                 delay = (delay + delay).min(Duration::from_millis(300));

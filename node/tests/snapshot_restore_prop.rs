@@ -9,7 +9,10 @@ use util::temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {});
+    ONCE.call_once(|| {
+        // Keep property tests deterministic and fast by skipping proof-of-work loops.
+        std::env::set_var("TB_FAST_MINE", "1");
+    });
 }
 
 tb_prop_test!(snapshot_restore_roundtrip, |runner| {

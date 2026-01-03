@@ -38,6 +38,29 @@ impl Certificate {
         })
     }
 
+    pub fn generate_for_signing_key(signing_key: &SigningKey) -> DiagResult<Self> {
+        let now = UtcDateTime::now();
+        let not_before = now - TimeDuration::hours(1);
+        let not_after = now + TimeDuration::days(30);
+        let mut serial = [0u8; 16];
+        OsRng::default().fill_bytes(&mut serial);
+        let params = SelfSignedCertParams::builder()
+            .subject_cn("the-block inhouse transport")
+            .add_dns_name("the-block")
+            .validity(not_before, not_after)
+            .serial(serial)
+            .build()
+            .map_err(|err| anyhow!("build certificate params: {err}"))?;
+        let certificate = sign_self_signed_ed25519(signing_key, &params)
+            .map_err(|err| anyhow!("sign certificate: {err}"))?;
+        let fingerprint = fingerprint(&certificate);
+        Ok(Self {
+            fingerprint,
+            verifying_key: signing_key.verifying_key().to_bytes(),
+            der: Bytes::from(certificate),
+        })
+    }
+
     pub fn from_der_lossy(der: Bytes) -> Self {
         let fingerprint = fingerprint(der.as_ref());
         let verifying_key = ed25519_public_key_from_der(der.as_ref()).unwrap_or([0u8; 32]);

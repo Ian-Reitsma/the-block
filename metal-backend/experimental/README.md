@@ -30,7 +30,7 @@ The `experimental` directory preserves the legacy PyTorch bridge used before Ten
 3. Trim obsolete scripts and data to keep the directory lean until deprecation.
 
 ## Deprecation
-These components remain only for historical comparison. They will be removed once the Metal stack reaches feature parity and no longer relies on PyTorch.
+These components remain only for historical comparison. They will be removed once the Metal stack reaches feature parity and no longer relies on PyTorch. The BlockTorch roadmap in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](../../docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy) defines the migration milestones.
 
 ## Contributor Protocol
 - Follow `../AGENTS.md` for all repository rules even when working in this experimental subtree.

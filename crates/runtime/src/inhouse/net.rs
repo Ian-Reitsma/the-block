@@ -29,6 +29,9 @@ fn tcp_debug_enabled() -> bool {
     std::env::var("RUNTIME_TCP_DEBUG").is_ok()
 }
 
+const READ_WITHOUT_READY_METRIC: &str = "runtime_read_without_ready_total";
+const WRITE_WITHOUT_READY_METRIC: &str = "runtime_write_without_ready_total";
+
 pub(crate) struct TcpListener {
     reactor: Arc<ReactorInner>,
     inner: Mutex<SysTcpListener>,
@@ -95,11 +98,7 @@ pub(crate) struct TcpStream {
 impl TcpStream {
     pub(crate) fn new(reactor: Arc<ReactorInner>, stream: SysTcpStream) -> io::Result<Self> {
         let fd = reactor_raw_of(&stream);
-        let registration = IoRegistration::new(
-            reactor,
-            fd,
-            ReactorInterest::READABLE | ReactorInterest::WRITABLE,
-        )?;
+        let registration = IoRegistration::new(reactor, fd, ReactorInterest::READABLE)?;
         Ok(Self {
             inner: stream,
             registration,
@@ -123,11 +122,22 @@ impl TcpStream {
     }
 
     pub(crate) fn read<'a>(&'a mut self, buf: &'a mut [u8]) -> TcpReadFuture<'a> {
-        TcpReadFuture { stream: self, buf }
+        TcpReadFuture {
+            stream: self,
+            buf,
+            backoff: None,
+            backoff_triggered: false,
+        }
     }
 
     pub(crate) fn write<'a>(&'a mut self, buf: &'a [u8]) -> TcpWriteFuture<'a> {
-        TcpWriteFuture { stream: self, buf }
+        TcpWriteFuture {
+            stream: self,
+            buf,
+            waiting_for_write: false,
+            backoff: None,
+            backoff_triggered: false,
+        }
     }
 
     pub(crate) async fn flush(&mut self) -> io::Result<()> {
@@ -167,11 +177,7 @@ impl UdpSocket {
         let reactor = runtime.reactor();
         let udp = net::bind_udp_socket(addr)?;
         let fd = reactor_raw_of(&udp);
-        let registration = IoRegistration::new(
-            Arc::clone(&reactor),
-            fd,
-            ReactorInterest::READABLE | ReactorInterest::WRITABLE,
-        )?;
+        let registration = IoRegistration::new(Arc::clone(&reactor), fd, ReactorInterest::READABLE)?;
         Ok(Self {
             inner: udp,
             registration,
@@ -187,6 +193,9 @@ impl UdpSocket {
             socket: self,
             buf,
             addr,
+            waiting_for_write: false,
+            backoff: None,
+            backoff_triggered: false,
         }
     }
 
@@ -274,6 +283,9 @@ impl Future for ConnectFuture {
                                 "connect future missing registration",
                             )));
                         };
+                        if let Err(err) = registration.disable_write_interest() {
+                            return Poll::Ready(Err(err));
+                        }
                         let tcp_stream = TcpStream {
                             inner: stream,
                             registration,
@@ -325,6 +337,8 @@ fn is_connect_in_progress_code(_code: i32) -> bool {
 pub(crate) struct TcpReadFuture<'a> {
     stream: &'a mut TcpStream,
     buf: &'a mut [u8],
+    backoff: Option<super::InHouseSleep>,
+    backoff_triggered: bool,
 }
 
 impl Future for TcpReadFuture<'_> {
@@ -335,6 +349,11 @@ impl Future for TcpReadFuture<'_> {
         loop {
             match this.stream.inner.read(this.buf) {
                 Ok(bytes) => {
+                    if this.backoff_triggered && bytes > 0 {
+                        foundation_metrics::increment_counter!(READ_WITHOUT_READY_METRIC, 1);
+                    }
+                    this.backoff_triggered = false;
+                    this.backoff = None;
                     if tcp_debug_enabled() {
                         eprintln!(
                             "[TCP] fd={} read {} bytes",
@@ -351,9 +370,30 @@ impl Future for TcpReadFuture<'_> {
                         );
                     }
                     match this.stream.registration.poll_read_ready(cx) {
-                        Poll::Ready(Ok(())) => continue,
+                        Poll::Ready(Ok(())) => {
+                            this.backoff_triggered = false;
+                            this.backoff = None;
+                            continue;
+                        }
                         Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-                        Poll::Pending => return Poll::Pending,
+                        Poll::Pending => {
+                            if this.backoff.is_none() {
+                                // Fallback to a short sleep to avoid hanging if an IO
+                                // readiness notification is missed by the reactor.
+                                this.backoff = Some(super::InHouseSleep::new(
+                                    Arc::clone(&this.stream.registration.reactor),
+                                    super::io_read_backoff(),
+                                ));
+                            }
+                            if let Some(backoff) = &mut this.backoff {
+                                if backoff.poll(cx).is_ready() {
+                                    this.backoff = None;
+                                    this.backoff_triggered = true;
+                                    continue;
+                                }
+                            }
+                            return Poll::Pending;
+                        }
                     }
                 }
                 Err(err) => return Poll::Ready(Err(err)),
@@ -365,6 +405,9 @@ impl Future for TcpReadFuture<'_> {
 pub(crate) struct TcpWriteFuture<'a> {
     stream: &'a mut TcpStream,
     buf: &'a [u8],
+    waiting_for_write: bool,
+    backoff: Option<super::InHouseSleep>,
+    backoff_triggered: bool,
 }
 
 impl Future for TcpWriteFuture<'_> {
@@ -375,6 +418,15 @@ impl Future for TcpWriteFuture<'_> {
         loop {
             match this.stream.inner.write(this.buf) {
                 Ok(bytes) => {
+                    if this.backoff_triggered && bytes > 0 {
+                        foundation_metrics::increment_counter!(WRITE_WITHOUT_READY_METRIC, 1);
+                    }
+                    this.backoff_triggered = false;
+                    this.backoff = None;
+                    if this.waiting_for_write {
+                        let _ = this.stream.registration.disable_write_interest();
+                        this.waiting_for_write = false;
+                    }
                     if tcp_debug_enabled() {
                         eprintln!(
                             "[TCP] fd={} wrote {} bytes",
@@ -390,13 +442,56 @@ impl Future for TcpWriteFuture<'_> {
                             this.stream.registration.fd
                         );
                     }
+                    if !this.waiting_for_write {
+                        if let Err(err) = this.stream.registration.enable_write_interest() {
+                            return Poll::Ready(Err(err));
+                        }
+                        this.waiting_for_write = true;
+                    }
                     match this.stream.registration.poll_write_ready(cx) {
-                        Poll::Ready(Ok(())) => continue,
-                        Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Ok(())) => {
+                            let _ = this.stream.registration.disable_write_interest();
+                            this.waiting_for_write = false;
+                            this.backoff_triggered = false;
+                            this.backoff = None;
+                            continue;
+                        }
+                        Poll::Ready(Err(err)) => {
+                            let _ = this.stream.registration.disable_write_interest();
+                            this.waiting_for_write = false;
+                            this.backoff_triggered = false;
+                            this.backoff = None;
+                            return Poll::Ready(Err(err));
+                        }
+                        Poll::Pending => {
+                            if this.backoff.is_none() {
+                                // Fallback to a short sleep to avoid hanging if an IO
+                                // readiness notification is missed by the reactor.
+                                this.backoff = Some(super::InHouseSleep::new(
+                                    Arc::clone(&this.stream.registration.reactor),
+                                    super::io_write_backoff(),
+                                ));
+                            }
+                            if let Some(backoff) = &mut this.backoff {
+                                if backoff.poll(cx).is_ready() {
+                                    this.backoff = None;
+                                    this.backoff_triggered = true;
+                                    continue;
+                                }
+                            }
+                            return Poll::Pending;
+                        }
                     }
                 }
-                Err(err) => return Poll::Ready(Err(err)),
+                Err(err) => {
+                    if this.waiting_for_write {
+                        let _ = this.stream.registration.disable_write_interest();
+                        this.waiting_for_write = false;
+                    }
+                    this.backoff_triggered = false;
+                    this.backoff = None;
+                    return Poll::Ready(Err(err));
+                }
             }
         }
     }
@@ -432,6 +527,9 @@ pub(crate) struct UdpSendFuture<'a> {
     socket: &'a mut UdpSocket,
     buf: &'a [u8],
     addr: SocketAddr,
+    waiting_for_write: bool,
+    backoff: Option<super::InHouseSleep>,
+    backoff_triggered: bool,
 }
 
 impl Future for UdpSendFuture<'_> {
@@ -441,15 +539,63 @@ impl Future for UdpSendFuture<'_> {
         let this = self.get_mut();
         loop {
             match this.socket.inner.send_to(this.buf, this.addr) {
-                Ok(bytes) => return Poll::Ready(Ok(bytes)),
+                Ok(bytes) => {
+                    if this.backoff_triggered && bytes > 0 {
+                        foundation_metrics::increment_counter!(WRITE_WITHOUT_READY_METRIC, 1);
+                    }
+                    this.backoff_triggered = false;
+                    this.backoff = None;
+                    return Poll::Ready(Ok(bytes));
+                }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                    if !this.waiting_for_write {
+                        if let Err(err) = this.socket.registration.enable_write_interest() {
+                            return Poll::Ready(Err(err));
+                        }
+                        this.waiting_for_write = true;
+                    }
                     match this.socket.registration.poll_write_ready(cx) {
-                        Poll::Ready(Ok(())) => continue,
-                        Poll::Ready(Err(err)) => return Poll::Ready(Err(err)),
-                        Poll::Pending => return Poll::Pending,
+                        Poll::Ready(Ok(())) => {
+                            let _ = this.socket.registration.disable_write_interest();
+                            this.waiting_for_write = false;
+                            this.backoff_triggered = false;
+                            this.backoff = None;
+                            continue;
+                        }
+                        Poll::Ready(Err(err)) => {
+                            let _ = this.socket.registration.disable_write_interest();
+                            this.waiting_for_write = false;
+                            this.backoff_triggered = false;
+                            this.backoff = None;
+                            return Poll::Ready(Err(err));
+                        }
+                        Poll::Pending => {
+                            if this.backoff.is_none() {
+                                this.backoff = Some(super::InHouseSleep::new(
+                                    Arc::clone(&this.socket.registration.reactor),
+                                    super::io_write_backoff(),
+                                ));
+                            }
+                            if let Some(backoff) = &mut this.backoff {
+                                if backoff.poll(cx).is_ready() {
+                                    this.backoff = None;
+                                    this.backoff_triggered = true;
+                                    continue;
+                                }
+                            }
+                            return Poll::Pending;
+                        }
                     }
                 }
-                Err(err) => return Poll::Ready(Err(err)),
+                Err(err) => {
+                    if this.waiting_for_write {
+                        let _ = this.socket.registration.disable_write_interest();
+                        this.waiting_for_write = false;
+                    }
+                    this.backoff_triggered = false;
+                    this.backoff = None;
+                    return Poll::Ready(Err(err));
+                }
             }
         }
     }

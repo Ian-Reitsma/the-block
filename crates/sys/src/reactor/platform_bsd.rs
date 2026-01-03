@@ -13,7 +13,7 @@ use crate::bsd_kqueue::{ffi, Kevent as KEvent, Timespec};
 use std::ffi::c_void;
 use std::io::{self, ErrorKind};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 const EV_ADD: u16 = 0x0001;
@@ -125,6 +125,28 @@ fn token_from_udata(value: isize) -> Token {
     Token(value as usize)
 }
 
+fn raw_debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("RUNTIME_REACTOR_DEBUG").is_ok())
+}
+
+fn raw_udata(raw: &KEvent) -> usize {
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    {
+        raw.udata as usize
+    }
+
+    #[cfg(any(
+        target_os = "freebsd",
+        target_os = "netbsd",
+        target_os = "openbsd",
+        target_os = "dragonfly"
+    ))]
+    {
+        raw.udata as usize
+    }
+}
+
 pub struct Poll {
     inner: Arc<Inner>,
 }
@@ -153,6 +175,16 @@ impl Poll {
 
     pub fn register(&self, fd: RawFd, token: Token, interest: Interest) -> io::Result<()> {
         self.inner.register_fd(fd, token, interest)
+    }
+
+    pub fn update_interest(
+        &self,
+        fd: RawFd,
+        token: Token,
+        previous: Interest,
+        current: Interest,
+    ) -> io::Result<()> {
+        self.inner.update_interest(fd, token, previous, current)
     }
 
     pub fn deregister(&self, fd: RawFd, token: Token) -> io::Result<()> {
@@ -207,13 +239,13 @@ impl Inner {
     fn register_fd(&self, fd: RawFd, token: Token, interest: Interest) -> io::Result<()> {
         let mut last_err: Option<io::Error> = None;
         if interest.contains(Interest::READABLE) {
-            let mut change = KEvent::for_fd(fd, EVFILT_READ, EV_ADD | EV_CLEAR, token);
+            let mut change = KEvent::for_fd(fd, EVFILT_READ, EV_ADD, token);
             if let Err(err) = self.submit_changes(core::slice::from_mut(&mut change)) {
                 last_err = Some(err);
             }
         }
         if interest.contains(Interest::WRITABLE) {
-            let mut change = KEvent::for_fd(fd, EVFILT_WRITE, EV_ADD | EV_CLEAR, token);
+            let mut change = KEvent::for_fd(fd, EVFILT_WRITE, EV_ADD, token);
             if let Err(err) = self.submit_changes(core::slice::from_mut(&mut change)) {
                 last_err = Some(err);
             }
@@ -222,6 +254,44 @@ impl Inner {
             return Err(err);
         }
         Ok(())
+    }
+
+    fn update_interest(
+        &self,
+        fd: RawFd,
+        token: Token,
+        previous: Interest,
+        current: Interest,
+    ) -> io::Result<()> {
+        let mut changes: [KEvent; 4] = [KEvent::zeroed(); 4];
+        let mut count = 0usize;
+        let read_was = previous.contains(Interest::READABLE);
+        let read_is = current.contains(Interest::READABLE);
+        let write_was = previous.contains(Interest::WRITABLE);
+        let write_is = current.contains(Interest::WRITABLE);
+
+        if read_was != read_is {
+            let flags = if read_is { EV_ADD } else { EV_DELETE };
+            changes[count] = KEvent::for_fd(fd, EVFILT_READ, flags, token);
+            count += 1;
+        }
+        if write_was != write_is {
+            let flags = if write_is { EV_ADD } else { EV_DELETE };
+            changes[count] = KEvent::for_fd(fd, EVFILT_WRITE, flags, token);
+            count += 1;
+        }
+
+        if count == 0 {
+            return Ok(());
+        }
+
+        self.submit_changes(&mut changes[..count])
+            .or_else(|err| {
+                if err.kind() == ErrorKind::NotFound || err.raw_os_error() == Some(ENOENT) {
+                    return Ok(());
+                }
+                Err(err)
+            })
     }
 
     fn deregister_fd(&self, fd: RawFd, token: Token) -> io::Result<()> {
@@ -291,6 +361,13 @@ fn duration_to_timespec(duration: Duration) -> Timespec {
 }
 
 fn convert_event(raw: KEvent) -> Event {
+    if raw_debug_enabled() {
+        let udata = raw_udata(&raw);
+        eprintln!(
+            "[KQUEUE] ident={} filter={} flags=0x{:04x} fflags=0x{:08x} data={} udata=0x{:x}",
+            raw.ident, raw.filter, raw.flags, raw.fflags, raw.data, udata
+        );
+    }
     let token = token_from_udata(raw.udata);
     let readable = raw.filter == EVFILT_READ;
     let writable = raw.filter == EVFILT_WRITE;
@@ -300,6 +377,7 @@ fn convert_event(raw: KEvent) -> Event {
     let priority = raw.filter == EVFILT_USER;
     Event::new(
         token,
+        Some(raw.ident),
         readable,
         writable,
         error,

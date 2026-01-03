@@ -36,6 +36,14 @@ pub struct Message {
 impl Message {
     /// Sign `body` with `kp` producing an authenticated message.
     pub fn new(body: Payload, sk: &SigningKey) -> EncodeResult<Self> {
+        Self::new_with_cert_fingerprint(body, sk, None)
+    }
+
+    pub fn new_with_cert_fingerprint(
+        body: Payload,
+        sk: &SigningKey,
+        cert_fingerprint: Option<Bytes>,
+    ) -> EncodeResult<Self> {
         let bytes = encode_payload(&body)?;
         let sig = sk.sign(&bytes);
         Ok(Self {
@@ -43,17 +51,7 @@ impl Message {
             signature: Bytes::from(sig.to_bytes().to_vec()),
             body,
             partition: None,
-            cert_fingerprint: {
-                #[cfg(feature = "quic")]
-                {
-                    crate::net::transport_quic::current_advertisement()
-                        .map(|ad| Bytes::from(ad.fingerprint.to_vec()))
-                }
-                #[cfg(not(feature = "quic"))]
-                {
-                    None
-                }
-            },
+            cert_fingerprint,
         })
     }
 }

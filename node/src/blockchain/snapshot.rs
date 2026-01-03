@@ -532,6 +532,7 @@ pub fn account_proof(
     for (addr, acc) in accounts {
         let mut data = Vec::new();
         data.extend_from_slice(&acc.balance.amount.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
         data.extend_from_slice(&acc.nonce.to_le_bytes());
         trie.insert(addr.as_bytes(), &data);
     }

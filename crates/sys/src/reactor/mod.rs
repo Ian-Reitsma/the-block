@@ -26,6 +26,18 @@ impl Interest {
     pub const fn contains(self, other: Self) -> bool {
         (self.bits & other.bits) == other.bits
     }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            bits: self.bits | other.bits,
+        }
+    }
+
+    pub const fn without(self, other: Self) -> Self {
+        Self {
+            bits: self.bits & !other.bits,
+        }
+    }
 }
 
 impl BitOr for Interest {
@@ -47,6 +59,7 @@ impl BitOrAssign for Interest {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Event {
     token: Token,
+    ident: Option<usize>,
     readable: bool,
     writable: bool,
     error: bool,
@@ -58,6 +71,7 @@ pub struct Event {
 impl Event {
     fn new(
         token: Token,
+        ident: Option<usize>,
         readable: bool,
         writable: bool,
         error: bool,
@@ -67,6 +81,7 @@ impl Event {
     ) -> Self {
         Self {
             token,
+            ident,
             readable,
             writable,
             error,
@@ -78,6 +93,10 @@ impl Event {
 
     pub fn token(&self) -> Token {
         self.token
+    }
+
+    pub fn ident(&self) -> Option<usize> {
+        self.ident
     }
 
     pub fn is_readable(&self) -> bool {
@@ -140,6 +159,16 @@ impl Poll {
 
     pub fn register(&self, fd: RawFd, token: Token, interest: Interest) -> io::Result<()> {
         self.inner.register(fd, token, interest)
+    }
+
+    pub fn update_interest(
+        &self,
+        fd: RawFd,
+        token: Token,
+        previous: Interest,
+        current: Interest,
+    ) -> io::Result<()> {
+        self.inner.update_interest(fd, token, previous, current)
     }
 
     pub fn deregister(&self, fd: RawFd, token: Token) -> io::Result<()> {

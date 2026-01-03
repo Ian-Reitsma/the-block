@@ -6,6 +6,7 @@ use std::{collections::HashMap, path::PathBuf};
 const EMBEDDED_LOCALNET_DEVICES: &str = include_str!("../../../config/localnet_devices.toml");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
 #[repr(u8)]
 pub enum DeviceClass {
     #[serde(alias = "phone")]

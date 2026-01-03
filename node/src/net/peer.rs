@@ -181,6 +181,7 @@ pub struct PeerSet {
     quic_peer_db_path: PathBuf,
     key: SigningKey,
     local_addr: Option<SocketAddr>,
+    cert_fingerprint: Arc<Mutex<Option<Bytes>>>,
 }
 
 impl PeerSet {
@@ -223,7 +224,16 @@ impl PeerSet {
             quic_peer_db_path,
             key,
             local_addr,
+            cert_fingerprint: Arc::new(Mutex::new(None)),
         }
+    }
+
+    pub fn set_cert_fingerprint(&self, cert_fingerprint: Option<Bytes>) {
+        *self.cert_fingerprint.guard() = cert_fingerprint;
+    }
+
+    fn cert_fingerprint(&self) -> Option<Bytes> {
+        self.cert_fingerprint.guard().clone()
     }
 
     /// Add a peer to the set.
@@ -569,6 +579,24 @@ impl PeerSet {
 
         record_request(&peer_key);
 
+        if let Err(code) = self.check_rate(&peer_key) {
+            telemetry_peer_error(code);
+            let reason = match code {
+                PeerErrorCode::RateLimit => DropReason::RateLimit,
+                PeerErrorCode::Banned => DropReason::Blacklist,
+                _ => DropReason::Malformed,
+            };
+            record_drop(&peer_key, reason);
+            if matches!(code, PeerErrorCode::Banned) {
+                if let Some(peer_addr) = addr {
+                    let mut a = self.addrs.guard();
+                    a.remove(&peer_addr);
+                }
+                self.authorized.guard().remove(&peer_key);
+            }
+            return;
+        }
+
         if is_throttled(&peer_key) {
             if let Some(_m) = peer_stats(&peer_key) {
                 #[cfg(feature = "telemetry")]
@@ -586,24 +614,6 @@ impl PeerSet {
                 }
             }
             record_drop(&peer_key, DropReason::TooBusy);
-            return;
-        }
-
-        if let Err(code) = self.check_rate(&peer_key) {
-            telemetry_peer_error(code);
-            let reason = match code {
-                PeerErrorCode::RateLimit => DropReason::RateLimit,
-                PeerErrorCode::Banned => DropReason::Blacklist,
-                _ => DropReason::Malformed,
-            };
-            record_drop(&peer_key, reason);
-            if matches!(code, PeerErrorCode::Banned) {
-                if let Some(peer_addr) = addr {
-                    let mut a = self.addrs.guard();
-                    a.remove(&peer_addr);
-                }
-                self.authorized.guard().remove(&peer_key);
-            }
             return;
         }
 
@@ -662,9 +672,38 @@ impl PeerSet {
                     return;
                 }
                 #[cfg(feature = "quic")]
-                let validated_cert = match validate_quic_certificate(&peer_key, &hs) {
-                    Ok(v) => v,
-                    Err(_) => {
+                let mut validated_cert = None;
+                #[cfg(feature = "quic")]
+                let mut quic_ok = true;
+                #[cfg(feature = "quic")]
+                let mut quic_error = None;
+                #[cfg(feature = "quic")]
+                {
+                    let needs_quic_cert =
+                        hs.transport == Transport::Quic || hs.quic_addr.is_some();
+                    if hs.quic_cert.is_some() {
+                        match validate_quic_certificate(&peer_key, &hs) {
+                            Ok(v) => validated_cert = v,
+                            Err(_) => {
+                                telemetry_peer_error(PeerErrorCode::HandshakeFeature);
+                                #[cfg(feature = "telemetry")]
+                                {
+                                    let labels = ["certificate"];
+                                    with_metric_handle(
+                                        "handshake_fail_total",
+                                        &labels,
+                                        || {
+                                            crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                                                .ensure_handle_for_label_values(&labels)
+                                        },
+                                        |counter| counter.inc(),
+                                    );
+                                }
+                                quic_ok = false;
+                                quic_error = Some(HandshakeError::Certificate);
+                            }
+                        }
+                    } else if needs_quic_cert {
                         telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                         #[cfg(feature = "telemetry")]
                         {
@@ -679,41 +718,66 @@ impl PeerSet {
                                 |counter| counter.inc(),
                             );
                         }
-                        record_handshake_fail(&peer_key, HandshakeError::Certificate);
-                        return;
+                        quic_ok = false;
+                        quic_error = Some(HandshakeError::Certificate);
                     }
-                };
+
+                    if let Some(reason) = quic_error {
+                        if hs.transport == Transport::Quic {
+                            record_handshake_fail(&peer_key, reason);
+                            return;
+                        }
+                        record_handshake_issue(&peer_key, reason, false);
+                    }
+                }
                 self.authorize(peer_key);
                 record_handshake_success(&peer_key);
                 let peer_addr = hs.gossip_addr.or(addr);
                 if let Some(peer_addr) = peer_addr {
                     self.add(peer_addr);
                     self.map_addr(peer_addr, peer_key);
-                    self.set_transport(peer_addr, hs.transport);
-                    if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
-                        self.set_quic(peer_addr, qaddr, cert.clone());
-                        #[cfg(feature = "quic")]
-                        if let Some(vc) = &validated_cert {
-                            record_peer_certificate(
-                                &peer_key,
-                                &vc.provider,
-                                cert.clone(),
-                                vc.fingerprint,
-                                vc.previous.clone(),
+                    let mut transport = hs.transport;
+                    #[cfg(feature = "quic")]
+                    {
+                        if !quic_ok {
+                            transport = Transport::Tcp;
+                            diagnostics::tracing::warn!(
+                                target: "p2p",
+                                peer = %overlay_peer_label(&peer_key),
+                                "quic certificate rejected; continuing with tcp only"
                             );
+                        }
+                    }
+                    self.set_transport(peer_addr, transport);
+                    #[cfg(feature = "quic")]
+                    if quic_ok {
+                        if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
+                            self.set_quic(peer_addr, qaddr, cert.clone());
+                            if let Some(vc) = &validated_cert {
+                                record_peer_certificate(
+                                    &peer_key,
+                                    &vc.provider,
+                                    cert.clone(),
+                                    vc.fingerprint,
+                                    vc.previous.clone(),
+                                );
+                            }
                         }
                     }
                     if !was_authorized {
                         let key = self.key.clone();
-                        if let Ok(msg) = Message::new(
+                        let cert_fingerprint = self.cert_fingerprint();
+                        if let Ok(msg) = Message::new_with_cert_fingerprint(
                             Payload::Handshake(local_hello_for_handshake(self.local_addr)),
                             &key,
+                            cert_fingerprint.clone(),
                         ) {
                             let _ = send_msg(peer_addr, &msg);
                         }
                         // Give the peer time to authorize us before sending the chain snapshot.
                         let chain = Arc::clone(chain);
                         let key = key.clone();
+                        let cert_fingerprint = cert_fingerprint.clone();
                         std::thread::spawn(move || {
                             std::thread::sleep(Duration::from_millis(50));
                             let chain_snapshot = {
@@ -721,8 +785,11 @@ impl PeerSet {
                                 bc.chain.clone()
                             };
                             if !chain_snapshot.is_empty() {
-                                if let Ok(msg) = Message::new(Payload::Chain(chain_snapshot), &key)
-                                {
+                                if let Ok(msg) = Message::new_with_cert_fingerprint(
+                                    Payload::Chain(chain_snapshot),
+                                    &key,
+                                    cert_fingerprint,
+                                ) {
                                     let _ = send_msg(peer_addr, &msg);
                                 }
                             }
@@ -734,8 +801,11 @@ impl PeerSet {
                             bc.chain.clone()
                         };
                         if !chain_snapshot.is_empty() {
-                            if let Ok(msg) = Message::new(Payload::Chain(chain_snapshot), &self.key)
-                            {
+                            if let Ok(msg) = Message::new_with_cert_fingerprint(
+                                Payload::Chain(chain_snapshot),
+                                &self.key,
+                                self.cert_fingerprint(),
+                            ) {
                                 let _ = send_msg(peer_addr, &msg);
                             }
                         }
@@ -780,7 +850,11 @@ impl PeerSet {
                         new_chain.push(block.clone());
                         if bc.import_chain(new_chain.clone()).is_ok() {
                             drop(bc);
-                            match Message::new(Payload::Chain(new_chain), &self.key) {
+                            match Message::new_with_cert_fingerprint(
+                                Payload::Chain(new_chain),
+                                &self.key,
+                                self.cert_fingerprint(),
+                            ) {
                                 Ok(msg) => {
                                     for p in self.list() {
                                         let _ = send_msg(p, &msg);
@@ -876,7 +950,7 @@ impl PeerSet {
                         _ => DropReason::Malformed,
                     };
                     record_drop(&peer_key, reason);
-                    if matches!(code, PeerErrorCode::Banned) {
+                    if matches!(code, PeerErrorCode::Banned | PeerErrorCode::RateLimit) {
                         if let Some(peer_addr) = addr {
                             let mut a = self.addrs.guard();
                             a.remove(&peer_addr);
@@ -890,7 +964,7 @@ impl PeerSet {
                     crypto_suite::hex::encode(chunk.root),
                     chunk.index
                 );
-                let _ = CHUNK_DB.guard().try_insert(&key, chunk.data.into_vec());
+                let _ = with_chunk_db(|db| db.try_insert(&key, chunk.data.into_vec()));
             }
             Payload::Reputation(entries) => {
                 if crate::compute_market::scheduler::reputation_gossip_enabled() {
@@ -1651,7 +1725,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     super::quic_stats::record_handshake_failure(pk);
 }
 
-fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
+fn record_handshake_issue(pk: &[u8; 32], reason: HandshakeError, penalize: bool) {
     if !TRACK_HANDSHAKE_FAIL.load(Ordering::Relaxed) {
         return;
     }
@@ -1662,7 +1736,9 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
             entry.tls_errors += 1;
         }
-        entry.reputation.penalize(0.95);
+        if penalize {
+            entry.reputation.penalize(0.95);
+        }
         entry.last_updated = now_secs();
         broadcast_metrics(pk, &entry);
         map.insert(*pk, entry);
@@ -1687,7 +1763,9 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
             entry.tls_errors = 1;
         }
-        entry.reputation.penalize(0.95);
+        if penalize {
+            entry.reputation.penalize(0.95);
+        }
         entry.last_updated = now_secs();
         map.insert(*pk, entry);
         update_active_gauge(map.len());
@@ -1739,6 +1817,10 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     if log.len() > HANDSHAKE_LOG_CAP {
         log.pop_front();
     }
+}
+
+fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
+    record_handshake_issue(pk, reason, true);
 }
 
 fn record_handshake_success(pk: &[u8; 32]) {
@@ -2922,13 +3004,36 @@ fn chunk_db_path() -> PathBuf {
         })
 }
 
-static CHUNK_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
-    let path = chunk_db_path();
+struct ChunkDb {
+    path: PathBuf,
+    db: SimpleDb,
+}
+
+fn open_chunk_db(path: &Path) -> SimpleDb {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let path_string = path.to_string_lossy().into_owned();
-    Mutex::new(SimpleDb::open_named(names::NET_PEER_CHUNKS, &path_string))
+    SimpleDb::open_named(names::NET_PEER_CHUNKS, &path_string)
+}
+
+fn with_chunk_db<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut SimpleDb) -> R,
+{
+    let desired = chunk_db_path();
+    let mut guard = CHUNK_DB.guard();
+    if guard.path != desired {
+        guard.db = open_chunk_db(&desired);
+        guard.path = desired;
+    }
+    f(&mut guard.db)
+}
+
+static CHUNK_DB: Lazy<Mutex<ChunkDb>> = Lazy::new(|| {
+    let path = chunk_db_path();
+    let db = open_chunk_db(&path);
+    Mutex::new(ChunkDb { path, db })
 });
 
 fn persist_peers(path: &Path, set: &HashSet<SocketAddr>) {

@@ -1,6 +1,6 @@
 # metal-tensor
 
-`metal-tensor` contains the Tensor v0 library and runtime. It provides:
+`metal-tensor` contains the Tensor v0 library and runtime. It is the Layer 1 tensor engine for the BlockTorch compute framework described in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](../../docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy). It provides:
 
 - intrusive ref-counted Storage objects
 - Tensor::empty, Tensor::view, Tensor::slice, and zero-copy Tensor::fromData
@@ -52,6 +52,7 @@ CPU-only configurations also run transpose, matmul, mean, and sum backward tests
 - Broaden autograd coverage and add more differentiable operators.
 - Implement Metal kernels for remaining CPU paths and retire redundant code.
 - Grow the test suite to cover additional device transfers and upcoming ops.
+- Keep the tensor API and determinism constraints aligned with the BlockTorch spec and compute market integration plan.
 
 ## Contributor Protocol
 - Study `../AGENTS.md` before changing any source, test, or documentation file; it governs every operation in this repository.

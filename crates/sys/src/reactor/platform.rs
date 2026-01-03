@@ -79,6 +79,16 @@ impl Poll {
         self.inner.register(fd, token, interest)
     }
 
+    pub fn update_interest(
+        &self,
+        fd: RawFd,
+        token: Token,
+        _previous: Interest,
+        current: Interest,
+    ) -> io::Result<()> {
+        self.inner.update_interest(fd, token, current)
+    }
+
     pub fn deregister(&self, fd: RawFd, token: Token) -> io::Result<()> {
         self.inner.deregister(fd, token)
     }
@@ -127,6 +137,10 @@ impl Inner {
         } else {
             Ok(())
         }
+    }
+
+    fn update_interest(&self, fd: RawFd, token: Token, interest: Interest) -> io::Result<()> {
+        self.register(fd, token, interest)
     }
 
     fn deregister(&self, fd: RawFd, token: Token) -> io::Result<()> {
@@ -231,6 +245,7 @@ fn convert_event(raw: EpollEvent) -> Event {
     let priority = raw.events & EPOLLPRI != 0;
     Event::new(
         Token(raw.data as usize),
+        None,
         readable,
         writable,
         error,

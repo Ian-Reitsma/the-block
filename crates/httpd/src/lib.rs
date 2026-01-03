@@ -341,6 +341,7 @@ pub struct ServerConfig {
     pub request_timeout: Duration,
     pub keep_alive: Duration,
     pub max_body_bytes: usize,
+    pub tls_handshake_timeout: Duration,
 }
 
 impl Default for ServerConfig {
@@ -349,6 +350,7 @@ impl Default for ServerConfig {
             request_timeout: Duration::from_secs(10),
             keep_alive: Duration::from_secs(90),
             max_body_bytes: 16 * 1024 * 1024,
+            tls_handshake_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -547,9 +549,25 @@ struct TlsStream {
 }
 
 impl TlsStream {
-    async fn accept(mut stream: TcpStream, config: Arc<ServerTlsConfigInner>) -> io::Result<Self> {
-        let outcome =
-            tls::perform_handshake(&mut stream, &config.identity, &config.client_auth).await?;
+    async fn accept(
+        mut stream: TcpStream,
+        config: Arc<ServerTlsConfigInner>,
+        handshake_timeout: Duration,
+    ) -> io::Result<Self> {
+        let outcome = match timeout(
+            handshake_timeout,
+            tls::perform_handshake(&mut stream, &config.identity, &config.client_auth),
+        )
+        .await
+        {
+            Ok(outcome) => outcome?,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "tls handshake timed out",
+                ))
+            }
+        };
         if let Some(client) = outcome.client_key {
             let encoded = base64_fp::encode_standard(&client.to_bytes());
             info!("tls client authenticated", %encoded);
@@ -598,6 +616,7 @@ impl TlsStream {
     }
 
     async fn read_record(&mut self) -> io::Result<Option<Vec<u8>>> {
+        let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
         let mut header = [0u8; 12];
         match self.stream.read_exact(&mut header).await {
             Ok(()) => {}
@@ -606,6 +625,9 @@ impl TlsStream {
         }
         let length = u32::from_be_bytes(header[..4].try_into().unwrap()) as usize;
         let seq = u64::from_be_bytes(header[4..12].try_into().unwrap());
+        if debug {
+            eprintln!("[tls] received record header len={length} seq={seq}");
+        }
         let padded = ((length / AES_BLOCK) + 1) * AES_BLOCK;
         let mut iv = [0u8; AES_BLOCK];
         self.stream.read_exact(&mut iv).await?;
@@ -618,12 +640,20 @@ impl TlsStream {
         frame.extend_from_slice(&iv);
         frame.extend_from_slice(&ciphertext);
         frame.extend_from_slice(&mac);
-        let plain = tls::decrypt_record(
+        let plain = match tls::decrypt_record(
             &self.session.client_write,
             &self.session.client_mac,
             self.read_seq,
             &frame,
-        )?;
+        ) {
+            Ok(plain) => plain,
+            Err(err) => {
+                if debug {
+                    eprintln!("[tls] decrypt record failed: {err:?}");
+                }
+                return Err(err.into_io());
+            }
+        };
         if seq != self.read_seq {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -1357,9 +1387,11 @@ where
         let (stream, remote) = listener.accept().await?;
         let router = router.clone();
         let config = config.clone();
-        if let Err(err) = handle_connection(stream, remote, router, config).await {
-            debug!(?err, "http connection error");
-        }
+        spawn(async move {
+            if let Err(err) = handle_connection(stream, remote, router, config).await {
+                debug!(?err, "http connection error");
+            }
+        });
     }
 }
 
@@ -1374,19 +1406,34 @@ pub async fn serve_tls<State>(
 where
     State: Send + Sync + 'static,
 {
+    let debug_tls = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
     loop {
         let (stream, remote) = listener.accept().await?;
         let router = router.clone();
         let config = config.clone();
         let tls = tls.clone();
+        let log_debug = debug_tls;
         spawn(async move {
-            match TlsStream::accept(stream, tls.inner()).await {
+            if log_debug {
+                eprintln!("[tls] accepted connection from {remote}");
+                eprintln!("[tls] beginning tls handshake with {remote}");
+            }
+            match TlsStream::accept(stream, tls.inner(), config.tls_handshake_timeout).await {
                 Ok(tls_stream) => {
+                    if log_debug {
+                        eprintln!("[tls] tls handshake completed for {remote}");
+                    }
                     if let Err(err) = handle_connection(tls_stream, remote, router, config).await {
+                        if log_debug {
+                            eprintln!("[tls] http connection error for {remote}: {err}");
+                        }
                         debug!(?err, "http tls connection error");
                     }
                 }
                 Err(err) => {
+                    if log_debug {
+                        eprintln!("[tls] tls handshake failed for {remote}: {err}");
+                    }
                     debug!(?err, "tls handshake failed");
                 }
             }
@@ -1419,7 +1466,7 @@ pub async fn serve_tls_stream<State>(
 where
     State: Send + Sync + 'static,
 {
-    let tls_stream = TlsStream::accept(stream, tls.inner())
+    let tls_stream = TlsStream::accept(stream, tls.inner(), config.tls_handshake_timeout)
         .await
         .map_err(HttpError::Io)?;
     serve_stream(tls_stream, remote, router, config).await
@@ -1435,6 +1482,7 @@ where
     State: Send + Sync + 'static,
     S: ConnectionIo + UpgradeIo,
 {
+    let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
     let mut stream = BufferedStream::new(stream);
     let mut idle_deadline = config.request_timeout;
     loop {
@@ -1455,6 +1503,14 @@ where
         let Some(request) = request else {
             return Ok(());
         };
+        if debug {
+            eprintln!(
+                "[httpd] received request {} {} from {}",
+                request.method().as_str(),
+                request.path(),
+                remote
+            );
+        }
         idle_deadline = config.request_timeout;
         let mut request = request;
         let keep_alive = request.keep_alive();

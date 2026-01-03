@@ -65,7 +65,7 @@ use crate::{
 };
 use base64_fp::{decode_standard, encode_standard};
 use coding::default_encryptor;
-use concurrency::{Bytes, Lazy, MutexExt, OnceCell};
+use concurrency::{Bytes, Lazy, MutexExt};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
@@ -713,7 +713,6 @@ static PEER_CERT_MAX_AGE: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(DEFAULT_
 static PEER_CERT_WATCH_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 static PEER_CERT_PERSIST_DISABLED: Lazy<bool> =
     Lazy::new(|| std::env::var_os(DISABLE_PERSIST_ENV).is_some());
-static PEER_CERT_ENC_KEY: OnceCell<Option<[u8; 32]>> = OnceCell::new();
 static GOSSIP_RELAY: Lazy<RwLock<Option<std::sync::Arc<Relay>>>> = Lazy::new(|| RwLock::new(None));
 
 pub fn set_gossip_relay(relay: std::sync::Arc<Relay>) {
@@ -854,36 +853,32 @@ fn peer_cert_encryption_key() -> Option<[u8; 32]> {
     if !peer_cert_persistence_enabled() {
         return None;
     }
-    PEER_CERT_ENC_KEY
-        .get_or_init(|| {
-            if let Ok(key_hex) = std::env::var("TB_PEER_CERT_KEY_HEX") {
-                if let Ok(bytes) = crypto_suite::hex::decode(key_hex.trim()) {
-                    if bytes.len() == 32 {
-                        let mut key = [0u8; 32];
-                        key.copy_from_slice(&bytes);
-                        return Some(key);
-                    }
-                    let hash = blake3::hash(&bytes);
-                    let mut key = [0u8; 32];
-                    key.copy_from_slice(hash.as_bytes());
-                    return Some(key);
-                }
+    if let Ok(key_hex) = std::env::var("TB_PEER_CERT_KEY_HEX") {
+        if let Ok(bytes) = crypto_suite::hex::decode(key_hex.trim()) {
+            if bytes.len() == 32 {
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&bytes);
+                return Some(key);
             }
-            if let Ok(node_hex) = std::env::var("TB_NODE_KEY_HEX") {
-                if let Ok(bytes) = crypto_suite::hex::decode(node_hex.trim()) {
-                    let hash = blake3::hash(&bytes);
-                    let mut key = [0u8; 32];
-                    key.copy_from_slice(hash.as_bytes());
-                    return Some(key);
-                }
-            }
-            let key = load_net_key();
-            Some(blake3::derive_key(
-                "the-block:quic-peer-cert-store",
-                &key.to_keypair_bytes(),
-            ))
-        })
-        .clone()
+            let hash = blake3::hash(&bytes);
+            let mut key = [0u8; 32];
+            key.copy_from_slice(hash.as_bytes());
+            return Some(key);
+        }
+    }
+    if let Ok(node_hex) = std::env::var("TB_NODE_KEY_HEX") {
+        if let Ok(bytes) = crypto_suite::hex::decode(node_hex.trim()) {
+            let hash = blake3::hash(&bytes);
+            let mut key = [0u8; 32];
+            key.copy_from_slice(hash.as_bytes());
+            return Some(key);
+        }
+    }
+    let key = load_net_key();
+    Some(blake3::derive_key(
+        "the-block:quic-peer-cert-store",
+        &key.to_keypair_bytes(),
+    ))
 }
 
 fn encrypt_cert_blob(cert: &[u8]) -> Option<String> {
@@ -1538,7 +1533,12 @@ pub fn reputation_sync() {
         return;
     }
     let sk = load_net_key();
-    turbine::broadcast_reputation(&entries, &sk, &peers);
+    #[cfg(feature = "quic")]
+    let cert_fingerprint = transport_quic::current_advertisement()
+        .map(|advert| Bytes::from(advert.fingerprint.to_vec()));
+    #[cfg(not(feature = "quic"))]
+    let cert_fingerprint = None;
+    turbine::broadcast_reputation(&entries, &sk, cert_fingerprint, &peers);
 }
 
 /// Return current reputation score for `peer`.
@@ -1612,10 +1612,17 @@ impl Node {
                     }),
                 )
             }
-            None => {
-                let _ = transport_quic::initialize(&key);
-                (None, transport_quic::current_advertisement())
-            }
+            None => match transport_quic::initialize(&key) {
+                Ok(advert) => (None, Some(advert)),
+                Err(err) => {
+                    diagnostics::tracing::warn!(
+                        target = "net",
+                        reason = %err,
+                        "quic_advertisement_init_failed"
+                    );
+                    (None, None)
+                }
+            },
         };
         #[cfg(not(feature = "quic"))]
         let (quic_addr, quic_cert) = match quic {
@@ -1631,9 +1638,17 @@ impl Node {
         }
         let relay = std::sync::Arc::new(Relay::default());
         set_gossip_relay(std::sync::Arc::clone(&relay));
+        let peers = PeerSet::new_with_key_and_addr(peers, key.clone(), Some(addr));
+        #[cfg(feature = "quic")]
+        let local_fingerprint = quic_advert
+            .as_ref()
+            .map(|advert| Bytes::from(advert.fingerprint.to_vec()));
+        #[cfg(not(feature = "quic"))]
+        let local_fingerprint = None;
+        peers.set_cert_fingerprint(local_fingerprint);
         Self {
             addr,
-            peers: PeerSet::new_with_key_and_addr(peers, key.clone(), Some(addr)),
+            peers,
             chain: Arc::new(Mutex::new(bc)),
             key,
             relay,
@@ -1643,6 +1658,77 @@ impl Node {
             #[cfg(not(feature = "quic"))]
             quic_cert,
         }
+    }
+
+    fn handshake_message(&self) -> Option<Message> {
+        let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
+        let nonce = OsRng::default().next_u64();
+        let transport = if self.quic_addr.is_some() {
+            Transport::Quic
+        } else {
+            Transport::Tcp
+        };
+        #[cfg(feature = "quic")]
+        let (quic_provider, quic_capabilities) = {
+            let meta = transport_registry().map(|registry| registry.metadata());
+            let provider = meta
+                .as_ref()
+                .map(|m| m.id.to_string())
+                .or_else(|| crate::net::transport_quic::provider_id().map(str::to_string));
+            let caps = meta
+                .map(|m| {
+                    m.capabilities
+                        .iter()
+                        .map(|cap| capability_label(*cap).to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (provider, caps)
+        };
+        #[cfg(feature = "quic")]
+        let (quic_cert, quic_fp, quic_prev) = match &self.quic_advert {
+            Some(advert) => (
+                Some(advert.cert.clone()),
+                Some(Bytes::from(advert.fingerprint.to_vec())),
+                advert
+                    .previous
+                    .iter()
+                    .map(|fp| Bytes::from(fp.to_vec()))
+                    .collect::<Vec<Bytes>>(),
+            ),
+            None => (None, None, Vec::new()),
+        };
+        let hello = Hello {
+            network_id: [0u8; 4],
+            proto_version: PROTOCOL_VERSION,
+            feature_bits: LOCAL_FEATURES,
+            agent,
+            nonce,
+            transport,
+            gossip_addr: Some(self.addr),
+            quic_addr: self.quic_addr,
+            #[cfg(feature = "quic")]
+            quic_cert,
+            #[cfg(not(feature = "quic"))]
+            quic_cert: self.quic_cert.clone(),
+            #[cfg(feature = "quic")]
+            quic_fingerprint: quic_fp,
+            #[cfg(feature = "quic")]
+            quic_fingerprint_previous: quic_prev,
+            #[cfg(not(feature = "quic"))]
+            quic_fingerprint: None,
+            #[cfg(not(feature = "quic"))]
+            quic_fingerprint_previous: Vec::new(),
+            #[cfg(feature = "quic")]
+            quic_provider,
+            #[cfg(feature = "quic")]
+            quic_capabilities,
+            #[cfg(not(feature = "quic"))]
+            quic_provider: None,
+            #[cfg(not(feature = "quic"))]
+            quic_capabilities: Vec::new(),
+        };
+        self.sign_payload(Payload::Handshake(hello), "handshake")
     }
 
     /// Start the listener thread handling inbound gossip.
@@ -1748,74 +1834,7 @@ impl Node {
     pub fn discover_peers(&self) {
         let peers = self.peers.bootstrap();
         // send handshake to each peer
-        let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
-        let nonce = OsRng::default().next_u64();
-        let transport = if self.quic_addr.is_some() {
-            Transport::Quic
-        } else {
-            Transport::Tcp
-        };
-        #[cfg(feature = "quic")]
-        let (quic_provider, quic_capabilities) = {
-            let meta = transport_registry().map(|registry| registry.metadata());
-            let provider = meta
-                .as_ref()
-                .map(|m| m.id.to_string())
-                .or_else(|| crate::net::transport_quic::provider_id().map(str::to_string));
-            let caps = meta
-                .map(|m| {
-                    m.capabilities
-                        .iter()
-                        .map(|cap| capability_label(*cap).to_string())
-                        .collect()
-                })
-                .unwrap_or_default();
-            (provider, caps)
-        };
-        #[cfg(feature = "quic")]
-        let (quic_cert, quic_fp, quic_prev) = match &self.quic_advert {
-            Some(advert) => (
-                Some(advert.cert.clone()),
-                Some(Bytes::from(advert.fingerprint.to_vec())),
-                advert
-                    .previous
-                    .iter()
-                    .map(|fp| Bytes::from(fp.to_vec()))
-                    .collect::<Vec<Bytes>>(),
-            ),
-            None => (None, None, Vec::new()),
-        };
-        let hello = Hello {
-            network_id: [0u8; 4],
-            proto_version: PROTOCOL_VERSION,
-            feature_bits: LOCAL_FEATURES,
-            agent,
-            nonce,
-            transport,
-            gossip_addr: Some(self.addr),
-            quic_addr: self.quic_addr,
-            #[cfg(feature = "quic")]
-            quic_cert,
-            #[cfg(not(feature = "quic"))]
-            quic_cert: self.quic_cert.clone(),
-            #[cfg(feature = "quic")]
-            quic_fingerprint: quic_fp,
-            #[cfg(feature = "quic")]
-            quic_fingerprint_previous: quic_prev,
-            #[cfg(not(feature = "quic"))]
-            quic_fingerprint: None,
-            #[cfg(not(feature = "quic"))]
-            quic_fingerprint_previous: Vec::new(),
-            #[cfg(feature = "quic")]
-            quic_provider,
-            #[cfg(feature = "quic")]
-            quic_capabilities,
-            #[cfg(not(feature = "quic"))]
-            quic_provider: None,
-            #[cfg(not(feature = "quic"))]
-            quic_capabilities: Vec::new(),
-        };
-        if let Some(hs_msg) = self.sign_payload(Payload::Handshake(hello), "handshake") {
+        if let Some(hs_msg) = self.handshake_message() {
             for p in &peers {
                 let _ = send_msg(*p, &hs_msg);
             }
@@ -1838,6 +1857,17 @@ impl Node {
     /// Add a peer address to this node.
     pub fn add_peer(&self, addr: SocketAddr) {
         self.peers.add(addr);
+        if addr == self.addr {
+            return;
+        }
+        if let Some(hs_msg) = self.handshake_message() {
+            let _ = send_msg(addr, &hs_msg);
+        }
+        let mut addrs = self.peers.list();
+        addrs.push(self.addr);
+        if let Some(hello_msg) = self.sign_payload(Payload::Hello(addrs), "hello") {
+            let _ = send_msg(addr, &hello_msg);
+        }
     }
 
     /// Remove a peer address from this node.
@@ -1879,7 +1909,14 @@ impl Node {
     }
 
     fn sign_payload(&self, body: Payload, context: &str) -> Option<Message> {
-        match Message::new(body, &self.key) {
+        #[cfg(feature = "quic")]
+        let cert_fingerprint = self
+            .quic_advert
+            .as_ref()
+            .map(|advert| Bytes::from(advert.fingerprint.to_vec()));
+        #[cfg(not(feature = "quic"))]
+        let cert_fingerprint = None;
+        match Message::new_with_cert_fingerprint(body, &self.key, cert_fingerprint) {
             Ok(msg) => Some(msg),
             Err(err) => {
                 diagnostics::tracing::error!(

@@ -49,6 +49,7 @@ fn mempool_stats_rpc() {
             let mut guard = bc.lock().unwrap();
             guard.min_fee_per_byte_consumer = 0;
             guard.min_fee_per_byte_industrial = 0;
+            guard.base_fee = 0;
             guard.add_account("alice".into(), 1000).unwrap();
             guard.add_account("bob".into(), 0).unwrap();
             let (sk, _) = generate_keypair();

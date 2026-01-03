@@ -911,7 +911,7 @@ fn top_level_commands() -> Vec<&'static str> {
 }
 
 fn post_json(rpc: &str, req: Value) -> Result<Value, HttpClientError> {
-    let mut val: Value = http_client::blocking_client()
+    let val: Value = http_client::blocking_client()
         .request(Method::Post, rpc)?
         .timeout(Duration::from_secs(5))
         .header("host", "localhost")
@@ -919,9 +919,6 @@ fn post_json(rpc: &str, req: Value) -> Result<Value, HttpClientError> {
         .json(&req)?
         .send()?
         .json()?;
-    if let Some(inner) = val.get("Result").or_else(|| val.get("Error")).cloned() {
-        val = inner;
-    }
     Ok(val)
 }
 
@@ -1284,7 +1281,10 @@ fn main() {
                                     std::process::exit(1);
                                 }
                                 let res = &val["result"];
-                                let rep = res["reputation"]["score"].as_f64().unwrap_or(0.0);
+                                let rep = res["reputation"]
+                                    .as_f64()
+                                    .or_else(|| res["reputation"]["score"].as_f64())
+                                    .unwrap_or(0.0);
                                 if let Some(min) = min_reputation {
                                     if rep < min {
                                         eprintln!("filtered");

@@ -114,8 +114,6 @@ impl AuthorizedDisbursementOps {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn queue_disbursement_requires_matching_operation() {
         // This would require setting up full test fixtures

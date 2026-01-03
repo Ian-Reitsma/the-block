@@ -166,13 +166,6 @@ impl ClientAuthPolicy {
     pub fn requires_client_cert(&self) -> bool {
         matches!(self, ClientAuthPolicy::Required(_))
     }
-
-    pub fn registry(&self) -> Option<&ClientRegistry> {
-        match self {
-            ClientAuthPolicy::None => None,
-            ClientAuthPolicy::Optional(reg) | ClientAuthPolicy::Required(reg) => Some(reg),
-        }
-    }
 }
 
 impl SessionKeys {
@@ -232,9 +225,16 @@ pub async fn perform_handshake(
     identity: &ServerIdentity,
     auth: &ClientAuthPolicy,
 ) -> io::Result<HandshakeOutcome> {
+    let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
+    if debug {
+        eprintln!("[tls] performing handshake; waiting for client length prefix");
+    }
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).await?;
     let frame_len = u32::from_be_bytes(len_buf) as usize;
+    if debug {
+        eprintln!("[tls] accepted connection, waiting for client hello (len={frame_len})");
+    }
     if frame_len > HANDSHAKE_MAX_LEN {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -243,6 +243,9 @@ pub async fn perform_handshake(
     }
     let mut frame = vec![0u8; frame_len];
     stream.read_exact(&mut frame).await?;
+    if debug {
+        eprintln!("[tls] received client hello frame ({} bytes)", frame.len());
+    }
     let client = ClientHello::decode(&frame).map_err(Error::into_io)?;
     if &client.magic != HANDSHAKE_MAGIC {
         return Err(Error::InvalidHandshake("invalid handshake magic").into_io());
@@ -253,18 +256,56 @@ pub async fn perform_handshake(
     let client_ephemeral = X25519Public::from_bytes(&client.client_ephemeral)
         .map_err(|_| Error::InvalidHandshake("client ephemeral length").into_io())?;
     let client_nonce = client.client_nonce;
-    let client_identity = if let Some(cert_bytes) = &client.certificate {
-        let verifying = parse_certificate(cert_bytes).map_err(Error::into_io)?;
-        if auth.requires_client_cert() {
-            if !auth.registry().unwrap().contains(&verifying) {
-                return Err(Error::UnknownClient.into_io());
-            }
-        } else if let Some(registry) = auth.registry() {
-            if !registry.contains(&verifying) {
-                debug!("client certificate not in registry; proceeding with optional auth");
+    let client_identity = match auth {
+        ClientAuthPolicy::None => None,
+        ClientAuthPolicy::Optional(registry) => {
+            // Optional auth accepts unauthenticated clients; only verified identities are recorded.
+            if let Some(cert_bytes) = &client.certificate {
+                let verifying = parse_certificate(cert_bytes).map_err(Error::into_io)?;
+                if !registry.contains(&verifying) {
+                    debug!("client certificate not in registry; treating as unauthenticated");
+                    None
+                } else if let Some(signature) = &client.signature {
+                    if signature.len() != ed25519::SIGNATURE_LENGTH {
+                        debug!("client signature length invalid; treating as unauthenticated");
+                        None
+                    } else {
+                        let mut sig_bytes = [0u8; ed25519::SIGNATURE_LENGTH];
+                        sig_bytes.copy_from_slice(signature);
+                        let sig = Signature::from_bytes(&sig_bytes);
+                        let mut message = Vec::with_capacity(
+                            client.client_ephemeral.len() + client.client_nonce.len(),
+                        );
+                        message.extend_from_slice(&client.client_ephemeral);
+                        message.extend_from_slice(&client.client_nonce);
+                        if verifying.verify(&message, &sig).is_ok() {
+                            Some(verifying)
+                        } else {
+                            debug!("client signature invalid; treating as unauthenticated");
+                            None
+                        }
+                    }
+                } else {
+                    debug!("client certificate missing signature; treating as unauthenticated");
+                    None
+                }
+            } else {
+                None
             }
         }
-        if let Some(signature) = &client.signature {
+        ClientAuthPolicy::Required(registry) => {
+            let cert_bytes = client
+                .certificate
+                .as_ref()
+                .ok_or_else(|| Error::InvalidHandshake("missing client certificate").into_io())?;
+            let verifying = parse_certificate(cert_bytes).map_err(Error::into_io)?;
+            if !registry.contains(&verifying) {
+                return Err(Error::UnknownClient.into_io());
+            }
+            let signature = client
+                .signature
+                .as_ref()
+                .ok_or_else(|| Error::InvalidHandshake("missing client signature").into_io())?;
             if signature.len() != ed25519::SIGNATURE_LENGTH {
                 return Err(Error::InvalidHandshake("client signature length").into_io());
             }
@@ -278,15 +319,8 @@ pub async fn perform_handshake(
             verifying
                 .verify(&message, &sig)
                 .map_err(|_| Error::SignatureFailed.into_io())?;
-        } else if auth.requires_client_cert() {
-            return Err(Error::InvalidHandshake("missing client signature").into_io());
+            Some(verifying)
         }
-        Some(verifying)
-    } else {
-        if auth.requires_client_cert() {
-            return Err(Error::InvalidHandshake("missing client certificate").into_io());
-        }
-        None
     };
     let mut rng = OsRng::default();
     let server_secret = X25519Secret::generate(&mut rng);
@@ -312,9 +346,25 @@ pub async fn perform_handshake(
     };
     let payload = server_msg.encode();
     let len_buf = (payload.len() as u32).to_be_bytes();
+    if debug {
+        eprintln!("[tls] writing server hello len_buf ({} bytes)", len_buf.len());
+    }
     stream.write_all(&len_buf).await?;
+    if debug {
+        eprintln!("[tls] wrote len_buf, now writing payload ({} bytes)", payload.len());
+    }
     stream.write_all(&payload).await?;
+    if debug {
+        eprintln!("[tls] wrote payload, now flushing");
+    }
     stream.flush().await?;
+    if debug {
+        eprintln!(
+            "[tls] sent server hello (payload={}, requires_cert={})",
+            payload.len(),
+            auth.requires_client_cert()
+        );
+    }
     let session = SessionKeys::derive(&shared, &client_nonce, &server_nonce)?;
     Ok(HandshakeOutcome {
         session,

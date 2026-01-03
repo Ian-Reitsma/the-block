@@ -48,6 +48,8 @@ pub struct NodeConfig {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub energy: EnergyConfig,
     pub telemetry_summary_interval: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub runtime: RuntimeTuningConfig,
     #[serde(default = "default_max_peer_metrics")]
     pub max_peer_metrics: usize,
     #[serde(default = "default_true")]
@@ -129,6 +131,7 @@ impl Default for NodeConfig {
             compute_market: ComputeMarketConfig::default(),
             energy: EnergyConfig::default(),
             telemetry_summary_interval: 0,
+            runtime: RuntimeTuningConfig::default(),
             max_peer_metrics: default_max_peer_metrics(),
             peer_metrics_export: default_true(),
             peer_metrics_path: default_peer_metrics_path(),
@@ -177,6 +180,63 @@ fn default_read_ack_privacy() -> ReadAckPrivacyMode {
 
 fn default_receipt_providers() -> Vec<ReceiptProviderConfig> {
     Vec::new()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RuntimeTuningConfig {
+    #[serde(default = "default_runtime_reactor_idle_poll_ms")]
+    pub reactor_idle_poll_ms: u64,
+    #[serde(default = "default_runtime_io_read_backoff_ms")]
+    pub io_read_backoff_ms: u64,
+    #[serde(default = "default_runtime_io_write_backoff_ms")]
+    pub io_write_backoff_ms: u64,
+}
+
+impl RuntimeTuningConfig {
+    fn normalized(&self) -> Self {
+        let reactor_idle_poll_ms = if self.reactor_idle_poll_ms == 0 {
+            default_runtime_reactor_idle_poll_ms()
+        } else {
+            self.reactor_idle_poll_ms
+        };
+        let io_read_backoff_ms = if self.io_read_backoff_ms == 0 {
+            default_runtime_io_read_backoff_ms()
+        } else {
+            self.io_read_backoff_ms
+        };
+        let io_write_backoff_ms = if self.io_write_backoff_ms == 0 {
+            default_runtime_io_write_backoff_ms()
+        } else {
+            self.io_write_backoff_ms
+        };
+        Self {
+            reactor_idle_poll_ms,
+            io_read_backoff_ms,
+            io_write_backoff_ms,
+        }
+    }
+}
+
+impl Default for RuntimeTuningConfig {
+    fn default() -> Self {
+        Self {
+            reactor_idle_poll_ms: default_runtime_reactor_idle_poll_ms(),
+            io_read_backoff_ms: default_runtime_io_read_backoff_ms(),
+            io_write_backoff_ms: default_runtime_io_write_backoff_ms(),
+        }
+    }
+}
+
+fn default_runtime_reactor_idle_poll_ms() -> u64 {
+    100
+}
+
+fn default_runtime_io_read_backoff_ms() -> u64 {
+    10
+}
+
+fn default_runtime_io_write_backoff_ms() -> u64 {
+    10
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -896,6 +956,16 @@ fn apply(cfg: &NodeConfig) {
         rep.provider_reputation_decay = cfg.provider_reputation_decay;
         rep.provider_reputation_retention = cfg.provider_reputation_retention;
     }
+    let runtime_cfg = cfg.runtime.normalized();
+    runtime::configure_reactor_idle_poll(Duration::from_millis(
+        runtime_cfg.reactor_idle_poll_ms,
+    ));
+    runtime::configure_io_read_backoff(Duration::from_millis(
+        runtime_cfg.io_read_backoff_ms,
+    ));
+    runtime::configure_io_write_backoff(Duration::from_millis(
+        runtime_cfg.io_write_backoff_ms,
+    ));
     crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
     crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);

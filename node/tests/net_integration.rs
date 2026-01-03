@@ -1,5 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use std::net::SocketAddr;
+use std::path::Path;
 use std::time::Duration;
 use std::time::Instant;
 use sys::tempfile::tempdir;
@@ -15,11 +16,28 @@ fn free_addr() -> SocketAddr {
 fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
-    std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
-    std::env::set_var("TB_NET_KEY_SEED", "net_integration");
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
     std::env::set_var("TB_PEER_SEED", "42");
     dir
+}
+
+fn set_net_key_env(path: &Path, seed: &str) -> (Option<String>, Option<String>) {
+    let prev_path = std::env::var("TB_NET_KEY_PATH").ok();
+    let prev_seed = std::env::var("TB_NET_KEY_SEED").ok();
+    std::env::set_var("TB_NET_KEY_PATH", path);
+    std::env::set_var("TB_NET_KEY_SEED", seed);
+    (prev_path, prev_seed)
+}
+
+fn restore_net_key_env(prev: (Option<String>, Option<String>)) {
+    match prev.0 {
+        Some(value) => std::env::set_var("TB_NET_KEY_PATH", value),
+        None => std::env::remove_var("TB_NET_KEY_PATH"),
+    }
+    match prev.1 {
+        Some(value) => std::env::set_var("TB_NET_KEY_SEED", value),
+        None => std::env::remove_var("TB_NET_KEY_SEED"),
+    }
 }
 
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
@@ -45,11 +63,15 @@ struct TestNode {
 }
 
 impl TestNode {
-    fn new(addr: SocketAddr, peers: &[SocketAddr]) -> Self {
+    fn new(node_id: usize, addr: SocketAddr, peers: &[SocketAddr]) -> Self {
         let dir = tempdir().unwrap();
         let bc = Blockchain::open(dir.path().to_str().unwrap()).expect("open bc");
         std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
+        let key_path = dir.path().join(format!("net_key_{node_id}"));
+        let key_seed = format!("net_integration_{node_id}");
+        let prev_env = set_net_key_env(&key_path, &key_seed);
         let node = Node::new(addr, peers.to_vec(), bc);
+        restore_net_key_env(prev_env);
         let flag = ShutdownFlag::new();
         let handle = node.start_with_flag(&flag).expect("start gossip node");
         node.discover_peers();
@@ -75,10 +97,10 @@ fn partitions_merge_consistent_fork_choice() {
     runtime::block_on(async {
         let _env = init_env();
         let mut nodes: Vec<TestNode> = Vec::new();
-        for _ in 0..5 {
+        for id in 0..5 {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
-            let tn = TestNode::new(addr, &peers);
+            let tn = TestNode::new(id, addr, &peers);
             for p in &peers {
                 tn.node.add_peer(*p);
             }

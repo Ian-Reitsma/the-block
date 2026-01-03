@@ -160,6 +160,17 @@ impl Poll {
         self.inner.register(fd, token, interest)
     }
 
+    pub fn update_interest(
+        &self,
+        fd: Socket,
+        token: Token,
+        _previous: Interest,
+        current: Interest,
+    ) -> io::Result<()> {
+        ensure_wsa_started()?;
+        self.inner.update_interest(fd, token, current)
+    }
+
     pub fn deregister(&self, fd: Socket, token: Token) -> io::Result<()> {
         self.inner.deregister(fd, token)
     }
@@ -202,7 +213,7 @@ pub struct Waker {
 impl Waker {
     pub fn wake(&self) -> io::Result<()> {
         self.inner.post_event(Event::new(
-            self.token, true, true, false, false, false, true,
+            self.token, None, true, true, false, false, false, true,
         ))
     }
 }
@@ -259,7 +270,7 @@ impl Inner {
                 events.push(completion.event);
             } else {
                 let token = Token(entry.lpCompletionKey as usize);
-                events.push(Event::new(token, true, true, false, false, false, true));
+                events.push(Event::new(token, None, true, true, false, false, false, true));
             }
         }
 
@@ -345,6 +356,11 @@ impl Inner {
         }
 
         Ok(())
+    }
+
+    fn update_interest(&self, socket: Socket, token: Token, interest: Interest) -> io::Result<()> {
+        self.deregister(socket, token)?;
+        self.register(socket, token, interest)
     }
 
     fn create_waker(self: &Arc<Self>, token: Token) -> io::Result<super::Waker> {
@@ -608,7 +624,7 @@ fn run_shard(id: usize, port: Handle, control: WsaEvent, rx: mpsc::Receiver<Comm
         if res == SOCKET_ERROR {
             let _ = post_completion(
                 port,
-                Event::new(watcher.token, false, false, true, true, true, true),
+                Event::new(watcher.token, None, false, false, true, true, true, true),
             );
             continue;
         }
@@ -675,6 +691,7 @@ fn convert_network_events(watcher: &Watcher, network: &WsanetworkEvents) -> Opti
     if readable || writable || read_closed || write_closed || error {
         Some(Event::new(
             watcher.token,
+            Some(watcher.socket as usize),
             readable,
             writable,
             error,

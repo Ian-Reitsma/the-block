@@ -6,6 +6,24 @@
 
 ---
 
+## Telemetry Wiring
+
+### Runtime Reactor
+
+- `runtime_read_without_ready_total` increments when reads succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.
+- `runtime_write_without_ready_total` increments when writes succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.
+
+### Runtime Tuning Knobs
+
+- `runtime.reactor_idle_poll_ms`: maximum sleep between reactor polls (ms).
+- `runtime.io_read_backoff_ms`: fallback delay before retrying reads when readiness is missing (ms).
+- `runtime.io_write_backoff_ms`: fallback delay before retrying writes when readiness is missing (ms).
+
+### TLS Handshake Timeouts
+
+- HTTP servers use `ServerConfig.tls_handshake_timeout` for TLS handshakes.
+- HTTP clients use `ClientConfig.tls_handshake_timeout` or `TlsConnectorBuilder::handshake_timeout`.
+
 ## Treasury Stuck
 
 ### Symptoms

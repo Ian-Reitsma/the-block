@@ -2,7 +2,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use crypto_suite::hashing::blake3::Hasher;
+use state::{MerkleTrie, Proof};
 use the_block::Blockchain;
 
 mod util;
@@ -24,22 +24,32 @@ fn account_proof_roundtrip() {
     bc.mine_block("miner").unwrap();
     let (root, proof) = bc.account_proof("alice".into()).unwrap();
     let acc = bc.accounts.get("alice").unwrap();
-    let mut h = Hasher::new();
-    h.update("alice".as_bytes());
-    h.update(&acc.balance.amount.to_le_bytes());
-    h.update(&acc.nonce.to_le_bytes());
-    let mut leaf = *h.finalize().as_bytes();
-    for (sib_hex, is_left) in proof {
-        let sib = crypto_suite::hex::decode(sib_hex).unwrap();
-        let mut hh = Hasher::new();
-        if is_left {
-            hh.update(&sib);
-            hh.update(&leaf);
-        } else {
-            hh.update(&leaf);
-            hh.update(&sib);
-        }
-        leaf = *hh.finalize().as_bytes();
-    }
-    assert_eq!(crypto_suite::hex::encode(leaf), root);
+    let mut value = Vec::new();
+    value.extend_from_slice(&acc.balance.amount.to_le_bytes());
+    value.extend_from_slice(&0u64.to_le_bytes());
+    value.extend_from_slice(&acc.nonce.to_le_bytes());
+
+    let proof = Proof(
+        proof
+            .into_iter()
+            .map(|(sib_hex, is_left)| {
+                let bytes = crypto_suite::hex::decode(sib_hex).unwrap();
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                (arr, is_left)
+            })
+            .collect(),
+    );
+    let root_bytes = {
+        let bytes = crypto_suite::hex::decode(root).unwrap();
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        arr
+    };
+    assert!(MerkleTrie::verify_proof(
+        root_bytes,
+        "alice".as_bytes(),
+        &value,
+        &proof
+    ));
 }

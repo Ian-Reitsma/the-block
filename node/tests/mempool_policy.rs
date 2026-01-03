@@ -82,7 +82,7 @@ fn eviction_via_drop_transaction() {
     bc.submit_transaction(tx2.clone()).unwrap();
     assert!(bc.mempool_consumer.contains_key(&("bob".to_string(), 1)));
     bc.drop_transaction("bob", 1).unwrap();
-    let tx3 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 1000, 1);
+    let tx3 = build_signed_tx(&sk_a, "alice", "bob", 1, 0, 2500, 1);
     bc.submit_transaction(tx3).unwrap();
 }
 

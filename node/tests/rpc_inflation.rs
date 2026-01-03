@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use foundation_serialization::json::Value;
-use std::sync::{atomic::AtomicBool, Arc, Mutex, Once};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, Once, OnceLock};
 
 use the_block::{
     compute_market::settlement::{SettleMode, Settlement},
@@ -23,6 +23,11 @@ fn configure_runtime() {
     });
 }
 
+fn rpc_debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("RPC_INFLATION_DEBUG").is_ok())
+}
+
 async fn expect_timeout_with<F, T>(fut: F, context: &str) -> T
 where
     F: std::future::Future<Output = T>,
@@ -42,7 +47,14 @@ async fn read_http_body(stream: runtime::net::TcpStream) -> std::io::Result<Vec<
     if read == 0 {
         return Err(Error::new(ErrorKind::UnexpectedEof, "missing status line"));
     }
+    let debug = rpc_debug_enabled();
+    if debug {
+        eprintln!("rpc_inflation status: {}", line.trim_end());
+    }
     let mut content_length = None;
+    if debug {
+        eprintln!("rpc_inflation headers:");
+    }
     loop {
         line.clear();
         let read = reader.read_line(&mut line).await?;
@@ -53,12 +65,18 @@ async fn read_http_body(stream: runtime::net::TcpStream) -> std::io::Result<Vec<
             break;
         }
         if let Some((name, value)) = line.split_once(':') {
+            if debug {
+                eprintln!("  {}: {}", name.trim(), value.trim());
+            }
             if name.trim().eq_ignore_ascii_case("content-length") {
                 content_length = value.trim().parse::<usize>().ok();
             }
         }
     }
     let len = content_length.unwrap_or(0);
+    if debug {
+        eprintln!("rpc_inflation content-length: {len}");
+    }
     let mut body = vec![0u8; len];
     if len > 0 {
         reader.read_exact(&mut body).await?;
@@ -73,6 +91,10 @@ async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
     let connect_ctx = format!("connect {body}");
     let write_ctx = format!("write {body}");
     let read_ctx = format!("read {body}");
+    let debug = rpc_debug_enabled();
+    if debug {
+        eprintln!("rpc_inflation request: {body}");
+    }
     let mut stream = expect_timeout_with(TcpStream::connect(addr), &connect_ctx)
         .await
         .unwrap();
@@ -88,14 +110,17 @@ async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
         .await
         .unwrap();
     let body = String::from_utf8(body).unwrap();
+    if debug {
+        eprintln!("rpc_inflation response body: {body}");
+    }
     foundation_serialization::json::from_str::<foundation_serialization::json::Value>(&body)
         .unwrap()
 }
 
 #[testkit::tb_serial]
 fn rpc_inflation_reports_industrial() {
+    configure_runtime();
     runtime::block_on(async {
-        configure_runtime();
         let dir = util::temp::temp_dir("rpc_inflation");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
