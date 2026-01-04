@@ -88,6 +88,8 @@ pub struct NodeConfig {
     pub p2p_max_bytes_per_sec: u64,
     #[serde(default = "default_p2p_rate_window_secs")]
     pub p2p_rate_window_secs: u64,
+    #[serde(default = "default_p2p_chain_sync_interval_ms")]
+    pub p2p_chain_sync_interval_ms: u64,
     #[serde(default = "default_provider_reputation_decay")]
     pub provider_reputation_decay: f64,
     #[serde(default = "default_provider_reputation_retention")]
@@ -151,6 +153,7 @@ impl Default for NodeConfig {
             p2p_max_per_sec: default_p2p_max_per_sec(),
             p2p_max_bytes_per_sec: default_p2p_max_bytes_per_sec(),
             p2p_rate_window_secs: default_p2p_rate_window_secs(),
+            p2p_chain_sync_interval_ms: default_p2p_chain_sync_interval_ms(),
             provider_reputation_decay: default_provider_reputation_decay(),
             provider_reputation_retention: default_provider_reputation_retention(),
             reputation_gossip: default_true(),
@@ -598,6 +601,10 @@ fn default_p2p_rate_window_secs() -> u64 {
     1
 }
 
+fn default_p2p_chain_sync_interval_ms() -> u64 {
+    500
+}
+
 fn default_provider_reputation_decay() -> f64 {
     0.05
 }
@@ -970,6 +977,7 @@ fn apply(cfg: &NodeConfig) {
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
     crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
     crate::net::set_p2p_rate_window_secs(cfg.p2p_rate_window_secs);
+    crate::net::set_p2p_chain_sync_interval_ms(cfg.p2p_chain_sync_interval_ms);
     crate::compute_market::scheduler::set_provider_reputation_decay(cfg.provider_reputation_decay);
     crate::compute_market::scheduler::set_provider_reputation_retention(
         cfg.provider_reputation_retention,

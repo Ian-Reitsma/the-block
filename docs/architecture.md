@@ -422,7 +422,9 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.
 - Handshake hellos now carry the sender's gossip listener address; peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.
 - Adding a peer triggers an immediate handshake + hello exchange so rejoined peers resync and refresh their peer lists without waiting on a new block.
+- Inbound gossip is accepted on a non-blocking listener and processed on the blocking worker pool so chain validation cannot stall new connections. Chain sync uses explicit `ChainRequest` pulls (requesting from the local height) plus immediate snapshot pushes with exponential-backoff retries, and a periodic pull tick (default 500ms, `TB_P2P_CHAIN_SYNC_INTERVAL_MS`) to recover from missed broadcasts.
 - QUIC certificates are required for QUIC transport; if a TCP-only peer advertises an invalid QUIC cert, the handshake proceeds but QUIC metadata is ignored and the peer stays on TCP.
+- Certificate fingerprints are enforced for QUIC traffic (and for any message that includes a fingerprint); TCP fallbacks accept missing fingerprints even when a cached QUIC cert exists so mixed-transport peers can still converge.
 
 ### P2P Wire Protocol
 - Message framing and compatibility shims live under `node/src/p2p/wire_binary.rs`. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.

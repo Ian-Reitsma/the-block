@@ -75,7 +75,7 @@ impl Default for ReplayedEconomicsState {
     fn default() -> Self {
         Self {
             block_height: 0,
-            block_reward_per_block: 50_000_000, // Genesis reward
+            block_reward_per_block: crate::INITIAL_BLOCK_REWARD, // Bootstrap reward
             prev_subsidy: SubsidySnapshot::default(),
             prev_tariff: TariffSnapshot::default(),
             prev_annual_issuance: 0,
@@ -382,7 +382,7 @@ mod tests {
         let state = replay_economics_to_tip(&chain, &params);
 
         assert_eq!(state.block_height, 0);
-        assert_eq!(state.block_reward_per_block, 50_000_000); // Genesis default
+        assert_eq!(state.block_reward_per_block, crate::INITIAL_BLOCK_REWARD);
         assert_eq!(state.cumulative_treasury_inflow, 0);
         assert_eq!(state.cumulative_ad_spend_usd_micros, 0);
         assert_eq!(state.cumulative_non_kyc_volume, 0);

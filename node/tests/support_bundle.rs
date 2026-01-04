@@ -43,7 +43,10 @@ fn support_bundle_redacts_tokens() {
     let mut reader = tar::Reader::new(decoder);
     let mut contents = None;
     while let Some(entry) = reader.next().expect("read entry") {
-        if entry.name() == "config.toml" {
+        // Strip leading "./" prefix if present, then check for config.toml
+        let name = entry.name();
+        let normalized = name.strip_prefix("./").unwrap_or(name);
+        if normalized == "config.toml" {
             contents = Some(String::from_utf8(entry.data().to_vec()).expect("utf8"));
             break;
         }

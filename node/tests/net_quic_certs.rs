@@ -105,9 +105,31 @@ fn prunes_stale_quic_cert_history() {
         foundation_serialization::json::from_str(&data).expect("decode store");
     if let Some(array) = json.as_array_mut() {
         if let Some(entry) = array.first_mut() {
-            if let Some(history) = entry.get_mut("history") {
-                if let Some(first) = history.as_array_mut().and_then(|v| v.first_mut()) {
-                    first["updated_at"] = foundation_serialization::json!(0);
+            // Check providers[].history first (new format), fallback to legacy history
+            let modified = if let Some(providers) = entry.get_mut("providers") {
+                if let Some(provider) = providers.as_array_mut().and_then(|v| v.first_mut()) {
+                    if let Some(history) = provider.get_mut("history") {
+                        if let Some(first) = history.as_array_mut().and_then(|v| v.first_mut()) {
+                            first["updated_at"] = foundation_serialization::json!(0);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            // Fallback to legacy history field
+            if !modified {
+                if let Some(history) = entry.get_mut("history") {
+                    if let Some(first) = history.as_array_mut().and_then(|v| v.first_mut()) {
+                        first["updated_at"] = foundation_serialization::json!(0);
+                    }
                 }
             }
         }

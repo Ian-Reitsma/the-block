@@ -71,6 +71,8 @@ pub enum Payload {
     Block(ShardId, Block),
     /// Share an entire chain snapshot for fork resolution.
     Chain(Vec<Block>),
+    /// Request a chain snapshot when behind.
+    ChainRequest(ChainRequest),
     /// Disseminate a single erasure-coded shard of a blob.
     BlobChunk(BlobChunk),
     /// Propagate provider reputation scores.
@@ -88,6 +90,12 @@ pub struct BlobChunk {
     pub total: u32,
     /// Raw shard bytes.
     pub data: Bytes,
+}
+
+/// Request a chain snapshot starting from a given height.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ChainRequest {
+    pub from_height: u64,
 }
 
 // ReputationUpdate defined in peer.rs
@@ -220,6 +228,10 @@ fn write_payload(writer: &mut BinaryWriter, payload: &Payload) -> EncodeResult<(
                 block_binary::write_block(writer, block)
             })?;
         }
+        Payload::ChainRequest(request) => {
+            writer.write_u32(8);
+            write_chain_request(writer, request)?;
+        }
         Payload::BlobChunk(chunk) => {
             writer.write_u32(6);
             write_blob_chunk(writer, chunk)?;
@@ -254,11 +266,35 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
             reader,
             read_reputation_update,
         )?)),
+        8 => Ok(Payload::ChainRequest(read_chain_request(reader)?)),
         other => Err(DecodeError::InvalidEnumDiscriminant {
             ty: "Payload",
             value: other,
         }),
     }
+}
+
+fn write_chain_request(
+    writer: &mut BinaryWriter,
+    request: &ChainRequest,
+) -> EncodeResult<()> {
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_u64("from_height", request.from_height);
+    });
+    Ok(())
+}
+
+fn read_chain_request(reader: &mut BinaryReader<'_>) -> binary_struct::Result<ChainRequest> {
+    let mut from_height = None;
+
+    decode_struct(reader, Some(1), |key, reader| match key {
+        "from_height" => assign_once(&mut from_height, reader.read_u64()?, "from_height"),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+
+    Ok(ChainRequest {
+        from_height: from_height.ok_or(DecodeError::MissingField("from_height"))?,
+    })
 }
 
 fn write_blob_chunk(writer: &mut BinaryWriter, chunk: &BlobChunk) -> EncodeResult<()> {
@@ -681,6 +717,16 @@ mod tests {
                 assert_eq!(blocks[1].index, 1);
             }
             other => panic!("expected chain, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chain_request_payload_round_trips() {
+        let request = ChainRequest { from_height: 42 };
+        let decoded = round_trip_payload(Payload::ChainRequest(request.clone()));
+        match decoded {
+            Payload::ChainRequest(actual) => assert_eq!(actual, request),
+            other => panic!("expected chain request, got {other:?}"),
         }
     }
 

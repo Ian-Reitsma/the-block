@@ -529,16 +529,17 @@ async fn execute_http(
         .await
         .map_err(|_| ClientError::Timeout)??;
 
-    let response = if let Some(limit) = client.config.read_timeout {
-        timeout(
-            limit,
-            read_response(&mut buffered, client.config.max_response_bytes),
-        )
-        .await
-        .map_err(|_| ClientError::Timeout)??
-    } else {
-        read_response(&mut buffered, client.config.max_response_bytes).await?
-    };
+    // Use per-request timeout if set, then configured read_timeout, then request_timeout
+    // This ensures per-request timeouts (via .timeout()) apply to the entire request-response cycle
+    let read_limit = timeout_override
+        .or(client.config.read_timeout)
+        .unwrap_or(request_timeout);
+    let response = timeout(
+        read_limit,
+        read_response(&mut buffered, client.config.max_response_bytes),
+    )
+    .await
+    .map_err(|_| ClientError::Timeout)??;
     Ok(response)
 }
 
@@ -615,14 +616,10 @@ fn execute_https_blocking(
         eprintln!("[tls-client] starting https handshake to {addr}");
     }
     let mut tls_stream = connector.connect(&host, stream)?;
-    match read_timeout {
-        Some(timeout) => {
-            let _ = tls_stream.set_read_timeout(Some(timeout));
-        }
-        None => {
-            let _ = tls_stream.set_read_timeout(None);
-        }
-    }
+    // Use the configured read_timeout if set, otherwise fall back to request_timeout
+    // This ensures per-request timeouts apply to the entire request-response cycle
+    let effective_read_timeout = read_timeout.unwrap_or(request_timeout);
+    let _ = tls_stream.set_read_timeout(Some(effective_read_timeout));
     let _ = tls_stream.set_write_timeout(Some(request_timeout));
     if debug {
         eprintln!("[tls-client] https handshake complete, sending request");

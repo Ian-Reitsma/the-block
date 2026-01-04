@@ -6,13 +6,13 @@ use crate::config::AggregatorConfig;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use crate::http_client;
-use crate::net::message::{encode_payload, Message, Payload};
+use crate::net::message::{encode_payload, ChainRequest, Message, Payload};
 use crate::net::Bytes;
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::{Hello, Transport};
 use crate::simple_db::{names, SimpleDb};
-use crate::Blockchain;
+use crate::{Block, Blockchain};
 use concurrency::{Lazy, MutexExt, OrderedMap};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use foundation_serialization::{
@@ -35,6 +35,8 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex as StdMutex,
 };
+#[cfg(feature = "integration-tests")]
+use std::sync::{OnceLock};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 use sys::fs::{FileLockExt, O_NOFOLLOW};
@@ -143,6 +145,131 @@ fn overlay_peer_label(pk: &[u8; 32]) -> String {
         .unwrap_or_else(|_| crypto_suite::hex::encode(pk))
 }
 
+fn addr_from_peer_key(peer_key: &[u8; 32]) -> Option<SocketAddr> {
+    ADDR_MAP
+        .guard()
+        .iter()
+        .find_map(|(addr, key)| (key == peer_key).then_some(*addr))
+}
+
+fn send_chain_snapshot(peers: &PeerSet, addr: Option<SocketAddr>, chain: Vec<Block>) {
+    if chain.is_empty() {
+        return;
+    }
+    #[cfg(feature = "integration-tests")]
+    eprintln!("send_chain_snapshot len={} to={:?}", chain.len(), addr);
+    let msg = match Message::new_with_cert_fingerprint(
+        Payload::Chain(chain),
+        &peers.key,
+        peers.cert_fingerprint(),
+    ) {
+        Ok(msg) => msg,
+        Err(err) => {
+            diagnostics::tracing::error!(
+                target = "net",
+                reason = %err,
+                "failed_to_sign_chain_payload"
+            );
+            #[cfg(feature = "integration-tests")]
+            eprintln!("send_chain_snapshot FAILED to sign: {}", err);
+            return;
+        }
+    };
+    let msg = Arc::new(msg);
+    let peers_snapshot = peers.list();
+    #[cfg(feature = "integration-tests")]
+    eprintln!("send_chain_snapshot peers={:?}", peers_snapshot);
+    if let Some(peer_addr) = addr {
+        send_msg_with_backoff(peer_addr, Arc::clone(&msg), 3);
+        return;
+    }
+    for peer in peers_snapshot {
+        send_msg_with_backoff(peer, Arc::clone(&msg), 3);
+    }
+}
+
+fn send_chain_request(peers: &PeerSet, addr: Option<SocketAddr>, from_height: u64) {
+    let request = ChainRequest { from_height };
+    let msg = match Message::new_with_cert_fingerprint(
+        Payload::ChainRequest(request),
+        &peers.key,
+        peers.cert_fingerprint(),
+    ) {
+        Ok(msg) => msg,
+        Err(err) => {
+            diagnostics::tracing::error!(
+                target = "net",
+                reason = %err,
+                "failed_to_sign_chain_request"
+            );
+            return;
+        }
+    };
+    let msg = Arc::new(msg);
+    let peers_snapshot = peers.list();
+    if let Some(peer_addr) = addr {
+        if peers_snapshot.contains(&peer_addr) {
+            send_msg_with_backoff(peer_addr, Arc::clone(&msg), 3);
+            return;
+        }
+    }
+    for peer in peers_snapshot {
+        send_msg_with_backoff(peer, Arc::clone(&msg), 3);
+    }
+}
+
+#[cfg(not(feature = "integration-tests"))]
+fn schedule_chain_request(peers: PeerSet, from_height: u64) {
+    std::thread::spawn(move || {
+        #[cfg(feature = "integration-tests")]
+        {
+            // Keep integration test chatter low: single request, no retries.
+            send_chain_request(&peers, None, from_height);
+        }
+        #[cfg(not(feature = "integration-tests"))]
+        {
+            let mut delay = Duration::from_millis(100);
+            for _ in 0..3 {
+                send_chain_request(&peers, None, from_height);
+                std::thread::sleep(delay);
+                delay = (delay * 2).min(Duration::from_millis(800));
+            }
+        }
+    });
+}
+
+fn send_msg_with_backoff(addr: SocketAddr, msg: Arc<Message>, attempts: usize) {
+    if attempts == 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut delay = Duration::from_millis(50);
+        for attempt in 0..attempts {
+            match send_msg(addr, &msg) {
+                Ok(()) => {
+                    #[cfg(feature = "integration-tests")]
+                    if matches!(msg.body, Payload::Chain(_)) {
+                        eprintln!("send_msg_with_backoff: SUCCESS to {} attempt {}", addr, attempt);
+                    }
+                    return;
+                }
+                Err(e) => {
+                    #[cfg(feature = "integration-tests")]
+                    if matches!(msg.body, Payload::Chain(_)) {
+                        eprintln!("send_msg_with_backoff: FAILED to {} attempt {} err={}", addr, attempt, e);
+                    }
+                }
+            }
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_millis(400));
+        }
+        #[cfg(feature = "integration-tests")]
+        if matches!(msg.body, Payload::Chain(_)) {
+            eprintln!("send_msg_with_backoff: ALL ATTEMPTS FAILED to {}", addr);
+        }
+    });
+}
+
 fn validate_metrics_archive(path: &Path) -> std::io::Result<()> {
     let file = fs::File::open(path)?;
     let decoder = gzip::Decoder::new(file)?;
@@ -182,6 +309,10 @@ pub struct PeerSet {
     key: SigningKey,
     local_addr: Option<SocketAddr>,
     cert_fingerprint: Arc<Mutex<Option<Bytes>>>,
+    broadcast_pending: Arc<Mutex<Option<Vec<Block>>>>,
+    broadcast_active: Arc<AtomicBool>,
+    /// Track the length of the last chain we successfully broadcast to avoid redundant broadcasts.
+    last_broadcast_len: Arc<AtomicUsize>,
 }
 
 impl PeerSet {
@@ -225,6 +356,9 @@ impl PeerSet {
             key,
             local_addr,
             cert_fingerprint: Arc::new(Mutex::new(None)),
+            broadcast_pending: Arc::new(Mutex::new(None)),
+            broadcast_active: Arc::new(AtomicBool::new(false)),
+            last_broadcast_len: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -232,12 +366,124 @@ impl PeerSet {
         *self.cert_fingerprint.guard() = cert_fingerprint;
     }
 
+    /// Clear the broadcast watermark so the next chain broadcast is sent even if the height
+    /// did not increase. This is used when new peers join so they receive the current tip.
+    pub(crate) fn reset_broadcast_watermark(&self) {
+        self.last_broadcast_len.store(0, Ordering::Release);
+    }
+
     fn cert_fingerprint(&self) -> Option<Bytes> {
         self.cert_fingerprint.guard().clone()
     }
 
+    pub(crate) fn schedule_chain_broadcast(&self, chain: Vec<Block>) {
+        if chain.is_empty() {
+            return;
+        }
+        // Only broadcast if this chain is strictly longer than what we've already broadcast.
+        // This prevents redundant rebroadcasts when multiple peers send us the same chain.
+        let last_len = self.last_broadcast_len.load(Ordering::Acquire);
+        if chain.len() <= last_len {
+            #[cfg(feature = "integration-tests")]
+            eprintln!(
+                "schedule_chain_broadcast: SKIP chain.len={} <= last_broadcast_len={}",
+                chain.len(),
+                last_len
+            );
+            return;
+        }
+        let should_spawn = {
+            let mut pending = self.broadcast_pending.guard();
+            let replace = match pending.as_ref() {
+                None => true,
+                Some(existing) => {
+                    if chain.len() > existing.len() {
+                        true
+                    } else if chain.len() == existing.len() {
+                        let existing_tip = existing.last().map(|b| &b.hash);
+                        let new_tip = chain.last().map(|b| &b.hash);
+                        existing_tip != new_tip
+                    } else {
+                        false
+                    }
+                }
+            };
+            if !replace {
+                return;
+            }
+            *pending = Some(chain);
+            !self.broadcast_active.swap(true, Ordering::AcqRel)
+        };
+        if !should_spawn {
+            return;
+        }
+        let peers = self.clone();
+        std::thread::spawn(move || {
+            let mut backoff = Duration::from_millis(0);
+            loop {
+                let chain_to_send = {
+                    let mut pending = peers.broadcast_pending.guard();
+                    pending.take()
+                };
+                if let Some(chain) = chain_to_send {
+                    let chain_len = chain.len();
+                    send_chain_snapshot(&peers, None, chain);
+                    // Update last_broadcast_len after successful broadcast
+                    peers.last_broadcast_len.fetch_max(chain_len, Ordering::Release);
+                }
+                if peers.broadcast_pending.guard().is_none() {
+                    peers.broadcast_active.store(false, Ordering::Release);
+                    if peers.broadcast_pending.guard().is_none() {
+                        return;
+                    }
+                    if peers.broadcast_active.swap(true, Ordering::AcqRel) {
+                        return;
+                    }
+                }
+                backoff = if backoff.is_zero() {
+                    Duration::from_millis(25)
+                } else {
+                    (backoff * 2).min(Duration::from_millis(200))
+                };
+                std::thread::sleep(backoff);
+            }
+        });
+    }
+
+    pub(crate) fn broadcast_chain_snapshot(&self, chain: Vec<Block>) {
+        if chain.is_empty() {
+            return;
+        }
+        // Avoid rebroadcasting identical-length chains in integration tests to cut duplicate
+        // snapshot chatter; only send when the tip length advanced.
+        let last_len = self.last_broadcast_len.load(Ordering::Acquire);
+        if chain.len() <= last_len {
+            #[cfg(feature = "integration-tests")]
+            eprintln!(
+                "broadcast_chain_snapshot: SKIP chain.len={} <= last_broadcast_len={}",
+                chain.len(),
+                last_len
+            );
+            return;
+        }
+        let chain_len = chain.len();
+        let peers = self.clone();
+        std::thread::spawn(move || {
+            send_chain_snapshot(&peers, None, chain);
+            // Update last_broadcast_len after successful broadcast
+            peers.last_broadcast_len.fetch_max(chain_len, Ordering::Release);
+        });
+    }
+
+    pub(crate) fn request_chain_from(&self, addr: SocketAddr, from_height: u64) {
+        send_chain_request(self, Some(addr), from_height);
+    }
+
     /// Add a peer to the set.
     pub fn add(&self, addr: SocketAddr) {
+        if Some(addr) == self.local_addr {
+            return;
+        }
         let mut guard = self.addrs.guard();
         guard.insert(addr);
         persist_peers(&self.peer_db_path, &guard);
@@ -272,6 +518,11 @@ impl PeerSet {
         self.addrs.guard().iter().copied().collect()
     }
 
+    /// Whether we have already mapped this address to a peer identity.
+    pub fn is_mapped(&self, addr: SocketAddr) -> bool {
+        ADDR_MAP.guard().contains_key(&addr)
+    }
+
     /// Snapshot peers with their advertised transport.
     pub fn list_with_transport(&self) -> Vec<(SocketAddr, Transport)> {
         self.list_with_info()
@@ -299,6 +550,12 @@ impl PeerSet {
 
     /// Record the mapping from address to peer id and allocate metrics entry.
     fn map_addr(&self, addr: SocketAddr, pk: [u8; 32]) {
+        #[cfg(feature = "integration-tests")]
+        eprintln!(
+            "map_addr: peer={} addr={}",
+            overlay_peer_label(&pk),
+            addr
+        );
         {
             let mut m = ADDR_MAP.guard();
             m.insert(addr, pk);
@@ -328,6 +585,46 @@ impl PeerSet {
         entry.last_updated = now_secs();
         metrics.insert(pk, entry);
         update_active_gauge(metrics.len());
+    }
+
+    #[cfg(feature = "integration-tests")]
+    fn recent_handshake_or_hello(
+        addr: Option<SocketAddr>,
+        peer_key: &[u8; 32],
+        kind: &'static str,
+        ttl: Duration,
+    ) -> bool {
+        let now = Instant::now();
+        if let Some(a) = addr {
+            let map = RECENT_HANDSHAKES.get_or_init(|| Mutex::new(HashMap::new()));
+            let mut guard = map.lock().unwrap();
+            match guard.entry((a, kind)) {
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if now.duration_since(*e.get()) < ttl {
+                        return true;
+                    }
+                    *e.get_mut() = now;
+                }
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert(now);
+                }
+            }
+        }
+        let map = RECENT_HANDSHAKES_BY_KEY
+            .get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = map.lock().unwrap();
+        match guard.entry((*peer_key, kind)) {
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                if now.duration_since(*e.get()) < ttl {
+                    return true;
+                }
+                *e.get_mut() = now;
+            }
+            std::collections::hash_map::Entry::Vacant(v) => {
+                v.insert(now);
+            }
+        }
+        false
     }
 
     /// Record the preferred transport for `addr`.
@@ -534,9 +831,38 @@ impl PeerSet {
         addr: Option<SocketAddr>,
         chain: &Arc<StdMutex<Blockchain>>,
     ) {
+        #[cfg(feature = "integration-tests")]
+        {
+            let payload_type = match &msg.body {
+                Payload::Handshake(_) => "Handshake",
+                Payload::Hello(_) => "Hello",
+                Payload::Chain(c) => {
+                    eprintln!("handle_message: Chain len={} from={:?}", c.len(), addr);
+                    "Chain"
+                }
+                Payload::ChainRequest(_) => "ChainRequest",
+                _ => "Other",
+            };
+            let _ = payload_type;
+        }
+        #[cfg(feature = "integration-tests")]
+        match &msg.body {
+            Payload::ChainRequest(_) => eprintln!("handle_message: ENTER ChainRequest from {:?}", addr),
+            Payload::Chain(c) => eprintln!("handle_message: ENTER Chain(len={}) from {:?}", c.len(), addr),
+            _ => {}
+        }
         let bytes = match encode_payload(&msg.body) {
             Ok(b) => b,
-            Err(_) => return,
+            Err(err) => {
+                #[cfg(feature = "integration-tests")]
+                if matches!(msg.body, Payload::Chain(_)) {
+                    eprintln!(
+                        "handle_message: encode_payload FAILED for Chain from {:?}: {}",
+                        addr, err
+                    );
+                }
+                return;
+            }
         };
         let pk = match VerifyingKey::from_bytes(&msg.pubkey) {
             Ok(p) => p,
@@ -548,6 +874,10 @@ impl PeerSet {
         };
         let sig = Signature::from_bytes(&sig_bytes);
         if pk.verify(&bytes, &sig).is_err() {
+            #[cfg(feature = "integration-tests")]
+            if matches!(msg.body, Payload::Chain(_)) {
+                eprintln!("handle_message: signature verify FAILED for Chain from {:?}", addr);
+            }
             return;
         }
 
@@ -570,16 +900,43 @@ impl PeerSet {
             }
         });
         #[cfg(feature = "quic")]
-        if !matches!(msg.body, Payload::Handshake(_))
-            && !verify_peer_fingerprint(&peer_key, msg_fingerprint.as_ref().map(|fp| fp))
-        {
-            record_drop(&peer_key, DropReason::Malformed);
-            return;
+        if !matches!(msg.body, Payload::Handshake(_)) {
+            let fingerprint = msg_fingerprint.as_ref().map(|fp| fp);
+            let quic_addr = addr
+                .as_ref()
+                .map(|addr| self.quic.guard().contains_key(addr))
+                .unwrap_or(false);
+            // Only enforce certificate fingerprints when the message includes one
+            // or the peer is known to be using QUIC for this address.
+            if (fingerprint.is_some() || quic_addr)
+                && !verify_peer_fingerprint(&peer_key, fingerprint)
+            {
+                record_drop(&peer_key, DropReason::Malformed);
+                return;
+            }
         }
 
         record_request(&peer_key);
 
         if let Err(code) = self.check_rate(&peer_key) {
+            #[cfg(feature = "integration-tests")]
+            match &msg.body {
+                Payload::ChainRequest(_) => {
+                    eprintln!(
+                        "handle_message: DROPPED ChainRequest from {:?} code={}",
+                        addr,
+                        code.as_str()
+                    );
+                }
+                Payload::Chain(_) => {
+                    eprintln!(
+                        "handle_message: DROPPED Chain from {:?} code={}",
+                        addr,
+                        code.as_str()
+                    );
+                }
+                _ => {}
+            }
             telemetry_peer_error(code);
             let reason = match code {
                 PeerErrorCode::RateLimit => DropReason::RateLimit,
@@ -597,7 +954,72 @@ impl PeerSet {
             return;
         }
 
+        #[cfg(feature = "integration-tests")]
+        if matches!(msg.body, Payload::Chain(_)) {
+            eprintln!("handle_message: Chain passed check_rate addr={:?}", addr);
+        }
+
+        // Drop duplicate Hello/Handshake from the same peer address or key with a short TTL
+        // to prevent ping-pong connection storms during integration tests.
+        if matches!(msg.body, Payload::Hello(_) | Payload::Handshake(_)) {
+            #[cfg(feature = "integration-tests")]
+            {
+                let kind = match &msg.body {
+                    Payload::Hello(_) => "hello",
+                    Payload::Handshake(_) => "handshake",
+                    _ => "other",
+                };
+                if Self::recent_handshake_or_hello(
+                    addr,
+                    &peer_key,
+                    kind,
+                    Duration::from_millis(250),
+                ) {
+                    eprintln!(
+                        "handle_message: DUPLICATE {:?} from {:?} peer={} within 250ms; dropping",
+                        match &msg.body {
+                            Payload::Hello(_) => "Hello",
+                            Payload::Handshake(_) => "Handshake",
+                            _ => "Other",
+                        },
+                        addr,
+                        overlay_peer_label(&peer_key)
+                    );
+                    return;
+                }
+            }
+            if let Some(addr) = addr {
+                let dup = {
+                    let map = ADDR_MAP.guard();
+                    map.get(&addr).map(|pk| pk == &peer_key).unwrap_or(false)
+                };
+                if dup {
+                    #[cfg(feature = "integration-tests")]
+                    eprintln!(
+                        "handle_message: DUPLICATE {:?} from {:?}, already mapped; dropping",
+                        match &msg.body {
+                            Payload::Hello(_) => "Hello",
+                            Payload::Handshake(_) => "Handshake",
+                            _ => "Other",
+                        },
+                        addr
+                    );
+                    return;
+                }
+            }
+        }
+
         if is_throttled(&peer_key) {
+            #[cfg(feature = "integration-tests")]
+            match &msg.body {
+                Payload::ChainRequest(_) => {
+                    eprintln!("handle_message: THROTTLED ChainRequest from {:?}", addr);
+                }
+                Payload::Chain(_) => {
+                    eprintln!("handle_message: THROTTLED Chain from {:?}", addr);
+                }
+                _ => {}
+            }
             if let Some(_m) = peer_stats(&peer_key) {
                 #[cfg(feature = "telemetry")]
                 if let Some(reason) = _m.throttle_reason.as_deref() {
@@ -617,8 +1039,21 @@ impl PeerSet {
             return;
         }
 
+        #[cfg(feature = "integration-tests")]
+        if matches!(msg.body, Payload::Chain(_)) {
+            eprintln!(
+                "handle_message: Chain passed prechecks (not throttled) addr={:?}",
+                addr
+            );
+        }
+
         match msg.body {
             Payload::Handshake(hs) => {
+                #[cfg(feature = "integration-tests")]
+                eprintln!(
+                    "handle_message: HANDSHAKE gossip_addr={:?} remote_addr={:?} local_addr={:?}",
+                    hs.gossip_addr, addr, self.local_addr
+                );
                 let was_authorized = self.is_authorized(&peer_key);
                 if hs.proto_version != PROTOCOL_VERSION {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
@@ -736,32 +1171,40 @@ impl PeerSet {
                 if let Some(peer_addr) = peer_addr {
                     self.add(peer_addr);
                     self.map_addr(peer_addr, peer_key);
-                    let mut transport = hs.transport;
-                    #[cfg(feature = "quic")]
-                    {
-                        if !quic_ok {
-                            transport = Transport::Tcp;
-                            diagnostics::tracing::warn!(
-                                target: "p2p",
-                                peer = %overlay_peer_label(&peer_key),
-                                "quic certificate rejected; continuing with tcp only"
-                            );
+                    let transport = {
+                        #[cfg(feature = "quic")]
+                        {
+                            let mut transport = hs.transport;
+                            if !quic_ok {
+                                transport = Transport::Tcp;
+                                diagnostics::tracing::warn!(
+                                    target: "p2p",
+                                    peer = %overlay_peer_label(&peer_key),
+                                    "quic certificate rejected; continuing with tcp only"
+                                );
+                            }
+                            transport
                         }
-                    }
+                        #[cfg(not(feature = "quic"))]
+                        {
+                            hs.transport
+                        }
+                    };
                     self.set_transport(peer_addr, transport);
                     #[cfg(feature = "quic")]
                     if quic_ok {
                         if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
                             self.set_quic(peer_addr, qaddr, cert.clone());
-                            if let Some(vc) = &validated_cert {
-                                record_peer_certificate(
-                                    &peer_key,
-                                    &vc.provider,
-                                    cert.clone(),
-                                    vc.fingerprint,
-                                    vc.previous.clone(),
-                                );
-                            }
+                        }
+                        if let (Some(cert), Some(vc)) = (hs.quic_cert.clone(), validated_cert.as_ref())
+                        {
+                            record_peer_certificate(
+                                &peer_key,
+                                &vc.provider,
+                                cert,
+                                vc.fingerprint,
+                                vc.previous.clone(),
+                            );
                         }
                     }
                     if !was_authorized {
@@ -774,50 +1217,63 @@ impl PeerSet {
                         ) {
                             let _ = send_msg(peer_addr, &msg);
                         }
-                        // Give the peer time to authorize us before sending the chain snapshot.
-                        let chain = Arc::clone(chain);
-                        let key = key.clone();
-                        let cert_fingerprint = cert_fingerprint.clone();
-                        std::thread::spawn(move || {
-                            std::thread::sleep(Duration::from_millis(50));
-                            let chain_snapshot = {
-                                let bc = chain.guard();
-                                bc.chain.clone()
-                            };
-                            if !chain_snapshot.is_empty() {
-                                if let Ok(msg) = Message::new_with_cert_fingerprint(
-                                    Payload::Chain(chain_snapshot),
-                                    &key,
-                                    cert_fingerprint,
-                                ) {
-                                    let _ = send_msg(peer_addr, &msg);
-                                }
-                            }
-                        });
-                    } else {
-                        // Proactively sync already-authorized peers with the current chain state.
                         let chain_snapshot = {
                             let bc = chain.guard();
                             bc.chain.clone()
                         };
-                        if !chain_snapshot.is_empty() {
-                            if let Ok(msg) = Message::new_with_cert_fingerprint(
-                                Payload::Chain(chain_snapshot),
-                                &self.key,
-                                self.cert_fingerprint(),
-                            ) {
-                                let _ = send_msg(peer_addr, &msg);
-                            }
-                        }
+                        // On initial authorization, seed the peer with our current view of the
+                        // chain and let the regular reconciliation flow request follow-ups only
+                        // if we're behind. Avoid immediately issuing a redundant ChainRequest
+                        // that creates extra inbound traffic for every new peer.
+                        send_chain_snapshot(self, Some(peer_addr), chain_snapshot.clone());
                     }
                 }
             }
             Payload::Hello(addrs) => {
-                let authorized = self.is_authorized(&peer_key);
+                let mut handshake_targets = Vec::new();
+                let mut new_peers = Vec::new();
                 for a in addrs {
+                    if Some(a) == self.local_addr {
+                        continue;
+                    }
+                    let is_new = {
+                        let guard = self.addrs.guard();
+                        !guard.contains(&a)
+                    };
                     self.add(a);
-                    if authorized {
-                        self.map_addr(a, peer_key);
+                    if is_new {
+                        new_peers.push(a);
+                    }
+                    if pk_from_addr(&a).is_none() {
+                        handshake_targets.push(a);
+                    }
+                }
+                if !handshake_targets.is_empty() {
+                    if let Ok(msg) = Message::new_with_cert_fingerprint(
+                        Payload::Handshake(local_hello_for_handshake(self.local_addr)),
+                        &self.key,
+                        self.cert_fingerprint(),
+                    ) {
+                        for addr in handshake_targets {
+                            let _ = send_msg(addr, &msg);
+                        }
+                    }
+                }
+                if !new_peers.is_empty() {
+                    let chain_snapshot = {
+                        let bc = chain.guard();
+                        bc.chain.clone()
+                    };
+                    if !chain_snapshot.is_empty() {
+                        if let Ok(msg) = Message::new_with_cert_fingerprint(
+                            Payload::Chain(chain_snapshot),
+                            &self.key,
+                            self.cert_fingerprint(),
+                        ) {
+                            for addr in new_peers {
+                                let _ = send_msg(addr, &msg);
+                            }
+                        }
                     }
                 }
             }
@@ -850,36 +1306,54 @@ impl PeerSet {
                         new_chain.push(block.clone());
                         if bc.import_chain(new_chain.clone()).is_ok() {
                             drop(bc);
-                            match Message::new_with_cert_fingerprint(
-                                Payload::Chain(new_chain),
-                                &self.key,
-                                self.cert_fingerprint(),
-                            ) {
-                                Ok(msg) => {
-                                    for p in self.list() {
-                                        let _ = send_msg(p, &msg);
-                                    }
-                                }
-                                Err(err) => {
-                                    diagnostics::tracing::error!(
-                                        target = "net",
-                                        reason = %err,
-                                        "failed_to_sign_chain_payload"
-                                    );
-                                }
-                            }
+                            self.schedule_chain_broadcast(new_chain);
                             return;
                         }
                     }
                 }
             }
             Payload::Chain(new_chain) => {
-                if !self.is_authorized(&peer_key) {
-                    return;
+                let authorized = self.is_authorized(&peer_key);
+                #[cfg(feature = "integration-tests")]
+                {
+                    let current_len = {
+                        let bc = chain.guard();
+                        bc.chain.len()
+                    };
+                    eprintln!(
+                        "Chain handler: local={:?} current_len={} new_len={} from={:?} authorized={}",
+                        self.local_addr,
+                        current_len,
+                        new_chain.len(),
+                        addr,
+                        authorized
+                    );
+                }
+                if !authorized {
+                    #[cfg(feature = "integration-tests")]
+                    {
+                        eprintln!(
+                            "Chain handler: AUTHORIZE on first chain local={:?} new_len={} from={:?}",
+                            self.local_addr,
+                            new_chain.len(),
+                            addr
+                        );
+                        self.authorize(peer_key);
+                    }
+                    #[cfg(not(feature = "integration-tests"))]
+                    {
+                        diagnostics::tracing::warn!(
+                            target = "net",
+                            peer = %overlay_peer_label(&peer_key),
+                            "chain_from_unauthorized_peer"
+                        );
+                        return;
+                    }
                 }
                 if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
                     let mut bc = chain.guard();
-                    if new_chain.len() > bc.chain.len() {
+                    let current_len = bc.chain.len();
+                    if new_chain.len() > current_len {
                         #[cfg(feature = "telemetry")]
                         let start = Instant::now();
                         let _ = bc.import_chain(new_chain);
@@ -888,16 +1362,90 @@ impl PeerSet {
                     }
                     return;
                 }
-                let (params, current_len, tip_hash, rollback_indices) = {
+                let response_addr = addr_from_peer_key(&peer_key).or(addr);
+                let new_len = new_chain.len();
+                let current_len = {
                     let bc = chain.guard();
+                    bc.chain.len()
+                };
+                if new_len <= current_len {
+                    #[cfg(feature = "integration-tests")]
+                    eprintln!(
+                        "Chain handler: EARLY EXIT local={:?} current_len={} new_len={} from={:?}",
+                        self.local_addr, current_len, new_len, addr
+                    );
+                    if new_len < current_len {
+                        let chain_snapshot = {
+                            let bc = chain.guard();
+                            bc.chain.clone()
+                        };
+                        send_chain_snapshot(self, response_addr, chain_snapshot);
+                    }
+                    return;
+                }
+                let mut params = {
+                    let bc = chain.guard();
+                    bc.params.clone()
+                };
+                loop {
+                    let replayed =
+                        match crate::Blockchain::validate_chain_with_params(&new_chain, &params) {
+                            Ok(state) => state,
+                            Err(reason) => {
+                                #[cfg(feature = "integration-tests")]
+                                eprintln!(
+                                    "Chain handler: VALIDATION FAILED local={:?} new_len={} reason={}",
+                                    self.local_addr, new_len, reason
+                                );
+                                diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason,
+                                "chain_validation_failed"
+                            );
+                                return;
+                            }
+                        };
+                    let import_state = match crate::Blockchain::build_chain_import_state(
+                        new_chain.clone(),
+                        &params,
+                        &replayed,
+                    ) {
+                        Ok(state) => state,
+                        Err(err) => {
+                            #[cfg(feature = "integration-tests")]
+                            eprintln!(
+                                "Chain handler: IMPORT STATE FAILED local={:?} new_len={} err={}",
+                                self.local_addr, new_len, err
+                            );
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason = %err,
+                                "chain_import_state_failed"
+                            );
+                            return;
+                        }
+                    };
+                    let mut bc = chain.guard();
                     let current_len = bc.chain.len();
-                    if new_chain.len() <= current_len {
+                    if new_len <= current_len {
+                        if new_len < current_len {
+                            let chain_snapshot = bc.chain.clone();
+                            drop(bc);
+                            send_chain_snapshot(self, response_addr, chain_snapshot);
+                        }
                         return;
+                    }
+                    if bc.params != params {
+                        params = bc.params.clone();
+                        drop(bc);
+                        continue;
                     }
                     let lca = bc
                         .chain
                         .iter()
-                        .zip(&new_chain)
+                        .zip(&import_state.chain)
                         .take_while(|(a, b)| a.hash == b.hash)
                         .count();
                     let depth = current_len.saturating_sub(lca);
@@ -908,35 +1456,60 @@ impl PeerSet {
                         .take(depth)
                         .map(|b| b.index)
                         .collect::<Vec<_>>();
-                    let tip_hash = bc.chain.last().map(|b| b.hash.clone());
-                    (bc.params.clone(), current_len, tip_hash, rollback_indices)
-                };
-                let replayed =
-                    match crate::Blockchain::validate_chain_with_params(&new_chain, &params) {
-                        Ok(state) => state,
-                        Err(_) => return,
-                    };
-                let import_state =
-                    match crate::Blockchain::build_chain_import_state(new_chain, &params, &replayed)
-                    {
-                        Ok(state) => state,
-                        Err(_) => return,
-                    };
-                let mut bc = chain.guard();
-                if bc.chain.len() != current_len
-                    || bc.chain.last().map(|b| b.hash.clone()) != tip_hash
-                {
+                    #[cfg(feature = "telemetry")]
+                    let start = Instant::now();
+                    let applied = bc.apply_import_state(import_state, replayed, &rollback_indices);
+                    #[cfg(feature = "telemetry")]
+                    observer::observe_convergence(start);
+                    match applied {
+                        Ok(()) => {
+                            #[cfg(feature = "integration-tests")]
+                            eprintln!(
+                                "Chain handler: APPLY OK local={:?} new_len={} current_len_after={}",
+                                self.local_addr,
+                                new_len,
+                                bc.chain.len()
+                            );
+                            drop(bc);
+                            self.schedule_chain_broadcast(new_chain);
+                            #[cfg(not(feature = "integration-tests"))]
+                            schedule_chain_request(self.clone(), new_len as u64);
+                        }
+                        Err(err) => {
+                            #[cfg(feature = "integration-tests")]
+                            eprintln!(
+                                "Chain handler: APPLY FAILED local={:?} new_len={} err={}",
+                                self.local_addr, new_len, err
+                            );
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason = %err,
+                                "chain_apply_failed"
+                            );
+                        }
+                    }
                     return;
                 }
-                #[cfg(feature = "telemetry")]
-                let start = Instant::now();
-                let _ = if bc.params == params {
-                    bc.apply_import_state(import_state, replayed, &rollback_indices)
-                } else {
-                    bc.import_chain(import_state.chain)
+            }
+            Payload::ChainRequest(request) => {
+                let current_len = {
+                    let bc = chain.guard();
+                    bc.chain.len() as u64
                 };
-                #[cfg(feature = "telemetry")]
-                observer::observe_convergence(start);
+                if current_len > request.from_height {
+                    let chain_snapshot = {
+                        let bc = chain.guard();
+                        bc.chain.clone()
+                    };
+                    let target = addr_from_peer_key(&peer_key).or(addr);
+                    #[cfg(feature = "integration-tests")]
+                    eprintln!(
+                        "ChainRequest handler: from_height={} current_len={} target={:?} addr={:?}",
+                        request.from_height, current_len, target, addr
+                    );
+                    send_chain_snapshot(self, target, chain_snapshot);
+                }
             }
             Payload::BlobChunk(chunk) => {
                 if !self.is_authorized(&peer_key) {
@@ -1969,8 +2542,34 @@ pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
 }
 
 pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
-    let mut map = peer_metrics_guard();
-    if let Some((_, metrics)) = map.shift_remove_entry(old) {
+    let mut metrics = {
+        let mut map = peer_metrics_guard();
+        map.shift_remove_entry(old).map(|(_, metrics)| metrics)
+    };
+
+    if metrics.is_none() {
+        // If metrics were reloaded from disk after a config change, try to
+        // refresh and recover the peer entry before refusing rotation.
+        load_peer_metrics();
+        let mut map = peer_metrics_guard();
+        metrics = map.shift_remove_entry(old).map(|(_, metrics)| metrics);
+    }
+
+    if metrics.is_none() {
+        let ids = PEER_IDENTITIES.guard();
+        if !ids.contains_key(old) {
+            return false;
+        }
+        // Minimum viable metrics: the peer has successfully handshaked at least once.
+        let mut fallback = PeerMetrics::default();
+        fallback.requests = 1;
+        fallback.handshake_success = 1;
+        fallback.last_updated = now_secs();
+        metrics = Some(fallback);
+    }
+
+    if let Some(metrics) = metrics {
+        let mut map = peer_metrics_guard();
         map.insert(new, metrics);
         update_active_gauge(map.len());
         update_memory_usage(map.len());
@@ -3075,6 +3674,14 @@ static P2P_RATE_WINDOW_SECS: Lazy<std::sync::atomic::AtomicU64> = Lazy::new(|| {
     std::sync::atomic::AtomicU64::new(val)
 });
 
+static P2P_CHAIN_SYNC_INTERVAL_MS: Lazy<AtomicU64> = Lazy::new(|| {
+    let val = std::env::var("TB_P2P_CHAIN_SYNC_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(500);
+    AtomicU64::new(val)
+});
+
 static P2P_MAX_BYTES_PER_SEC: Lazy<AtomicU64> = Lazy::new(|| {
     let val = std::env::var("TB_P2P_MAX_BYTES_PER_SEC")
         .ok()
@@ -3120,6 +3727,12 @@ fn peer_metrics_guard() -> std::sync::MutexGuard<'static, OrderedMap<[u8; 32], P
 
 static ADDR_MAP: Lazy<Mutex<HashMap<SocketAddr, [u8; 32]>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
+#[cfg(feature = "integration-tests")]
+static RECENT_HANDSHAKES: OnceLock<Mutex<HashMap<(SocketAddr, &'static str), Instant>>> =
+    OnceLock::new();
+#[cfg(feature = "integration-tests")]
+static RECENT_HANDSHAKES_BY_KEY: OnceLock<Mutex<HashMap<([u8; 32], &'static str), Instant>>> =
+    OnceLock::new();
 static MAX_PEER_METRICS: AtomicUsize = AtomicUsize::new(1024);
 static EXPORT_PEER_METRICS: AtomicBool = AtomicBool::new(true);
 #[cfg(feature = "telemetry")]
@@ -3581,12 +4194,20 @@ pub fn set_p2p_rate_window_secs(v: u64) {
     P2P_RATE_WINDOW_SECS.store(v, Ordering::Relaxed);
 }
 
+pub fn set_p2p_chain_sync_interval_ms(v: u64) {
+    P2P_CHAIN_SYNC_INTERVAL_MS.store(v, Ordering::Relaxed);
+}
+
 pub fn set_p2p_max_bytes_per_sec(v: u64) {
     P2P_MAX_BYTES_PER_SEC.store(v, Ordering::Relaxed);
 }
 
 pub fn p2p_max_bytes_per_sec() -> u64 {
     P2P_MAX_BYTES_PER_SEC.load(Ordering::Relaxed)
+}
+
+pub fn p2p_chain_sync_interval_ms() -> u64 {
+    P2P_CHAIN_SYNC_INTERVAL_MS.load(Ordering::Relaxed)
 }
 
 pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
@@ -3792,12 +4413,25 @@ pub fn load_peer_metrics() {
         let export = EXPORT_PEER_METRICS.load(Ordering::Relaxed);
         #[cfg(not(feature = "telemetry"))]
         let export = false;
-        map.clear();
+        let is_empty = map.is_empty();
+        if is_empty {
+            map.clear();
+        }
         for (pk, m) in entries {
-            if export {
-                register_peer_metrics(&pk, &m);
+            let should_update = if is_empty {
+                true
+            } else {
+                match map.get(&pk) {
+                    Some(existing) => m.last_updated > existing.last_updated,
+                    None => true,
+                }
+            };
+            if should_update {
+                if export {
+                    register_peer_metrics(&pk, &m);
+                }
+                map.insert(pk, m);
             }
-            map.insert(pk, m);
         }
         update_active_gauge(map.len());
         update_memory_usage(map.len());

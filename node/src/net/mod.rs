@@ -85,8 +85,10 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+#[cfg(feature = "integration-tests")]
+use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sys::paths;
 
 use runtime::fs::watch::{
@@ -109,19 +111,24 @@ use transport::{
     ProviderRegistry as TransportProviderRegistry, TransportCallbacks,
 };
 
+#[cfg(feature = "integration-tests")]
+static ACCEPT_RATE: OnceLock<Mutex<HashMap<SocketAddr, (Instant, u32)>>> = OnceLock::new();
+
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
 pub use message::{BlobChunk, Message, Payload};
 pub use peer::ReputationUpdate;
 pub use peer::{
     clear_peer_metrics, clear_throttle, export_all_peer_stats, export_peer_stats, known_peers,
-    load_peer_metrics, p2p_max_bytes_per_sec, p2p_max_per_sec, peer_reputation_decay, peer_stats,
-    peer_stats_all, peer_stats_map, persist_peer_metrics, publish_telemetry_summary,
-    recent_handshake_failures, record_request, reset_peer_metrics, rotate_peer_key,
+    load_peer_metrics, p2p_chain_sync_interval_ms, p2p_max_bytes_per_sec, p2p_max_per_sec,
+    peer_reputation_decay, peer_stats, peer_stats_all, peer_stats_map, persist_peer_metrics,
+    publish_telemetry_summary, recent_handshake_failures, record_request, reset_peer_metrics,
+    rotate_peer_key,
     set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
-    set_p2p_max_bytes_per_sec, set_p2p_max_per_sec, set_p2p_rate_window_secs,
-    set_peer_metrics_compress, set_peer_metrics_export, set_peer_metrics_export_quota,
-    set_peer_metrics_path, set_peer_metrics_retention, set_peer_metrics_sample_rate,
-    set_peer_reputation_decay, set_track_drop_reasons, set_track_handshake_fail, throttle_peer,
+    set_p2p_chain_sync_interval_ms, set_p2p_max_bytes_per_sec, set_p2p_max_per_sec,
+    set_p2p_rate_window_secs, set_peer_metrics_compress, set_peer_metrics_export,
+    set_peer_metrics_export_quota, set_peer_metrics_path, set_peer_metrics_retention,
+    set_peer_metrics_sample_rate, set_peer_reputation_decay, set_track_drop_reasons,
+    set_track_handshake_fail, throttle_peer,
     DropReason, HandshakeError, PeerMetrics, PeerReputation, PeerSet, PeerStat,
 };
 
@@ -1744,37 +1751,192 @@ impl Node {
         let stop = shutdown.as_arc();
         let peers = self.peers.clone();
         let chain = Arc::clone(&self.chain);
+        let sync_interval = peer::p2p_chain_sync_interval_ms();
+        if sync_interval > 0 {
+            let sync_stop = shutdown.as_arc();
+            let sync_peers = peers.clone();
+            let sync_chain = Arc::clone(&chain);
+            std::thread::spawn(move || {
+                let mut rng = rand::thread_rng();
+                while !sync_stop.load(Ordering::Relaxed) {
+                    let interval = peer::p2p_chain_sync_interval_ms();
+                    if interval == 0 {
+                        break;
+                    }
+                    let peers_snapshot = sync_peers.list();
+                    if !peers_snapshot.is_empty() {
+                        let idx = rng.gen_range(0..peers_snapshot.len());
+                        let target = peers_snapshot[idx];
+                        let current_len = sync_chain
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .chain
+                            .len() as u64;
+                        sync_peers.request_chain_from(target, current_len);
+                    }
+                    let jitter = if interval > 10 {
+                        rng.gen_range(0..=interval / 5)
+                    } else {
+                        0
+                    };
+                    std::thread::sleep(Duration::from_millis(interval + jitter));
+                }
+            });
+        }
         Ok(thread::spawn(move || loop {
             if stop.load(Ordering::Relaxed) {
                 break;
             }
             match listener.accept() {
                 Ok((mut stream, addr)) => {
-                    let addr = Some(addr);
-                    let mut buf = Vec::new();
-                    // Listener is non-blocking; switch accepted sockets back to blocking mode
-                    // so read_to_end can wait for EOF without spurious WouldBlock errors.
-                    let _ = stream.set_nonblocking(false);
-                    // Avoid blocking indefinitely on peers that never close the socket.
-                    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                    if stream.read_to_end(&mut buf).is_ok() {
-                        #[cfg(feature = "telemetry")]
-                        if crate::telemetry::should_log("p2p") {
-                            let trace = crate::telemetry::log_context();
-                            let span = crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
-                            span.in_scope(|| {
-                                diagnostics::tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
-                            });
+                    #[cfg(feature = "integration-tests")]
+                    {
+                        let now = Instant::now();
+                        let rate = ACCEPT_RATE
+                            .get_or_init(|| Mutex::new(HashMap::new()));
+                        let mut guard = rate.lock().unwrap();
+                        let entry = guard.entry(addr).or_insert((now, 0));
+                        if now.duration_since(entry.0) > Duration::from_secs(1) {
+                            *entry = (now, 0);
                         }
-                        if let Ok(msg) = message::decode(&buf) {
-                            peers.handle_message(msg, addr, &chain);
+                        entry.1 = entry.1.saturating_add(1);
+                        // Drop connections exceeding 25/sec from any single address to prevent
+                        // handshake storms from overwhelming the listener.
+                        if entry.1 > 25 {
+                            eprintln!("listener: rate limit exceeded for {}; dropping", addr);
+                            drop(stream);
+                            continue;
                         }
+                    }
+                    let local = stream.local_addr().ok();
+                    #[cfg(feature = "integration-tests")]
+                    match local {
+                        Some(local) => {
+                            eprintln!(
+                                "listener: ACCEPTED connection local {} from {}",
+                                local, addr
+                            );
+                        }
+                        None => eprintln!("listener: ACCEPTED connection from {}", addr),
+                    }
+                    let peers = peers.clone();
+                    let chain = Arc::clone(&chain);
+                    let task = move || {
+                        let addr = Some(addr);
+                        let mut buf = Vec::new();
+                        // Listener is non-blocking; switch accepted sockets back to blocking mode
+                        // so read_to_end can wait for EOF without spurious WouldBlock errors.
+                        let _ = stream.set_nonblocking(false);
+                        // Avoid blocking indefinitely on peers that never close the socket.
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        match stream.read_to_end(&mut buf) {
+                            Ok(_) => {
+                                #[cfg(feature = "integration-tests")]
+                                match local {
+                                    Some(local) => eprintln!(
+                                        "listener: READ {} bytes local {} from {:?}",
+                                        buf.len(),
+                                        local,
+                                        addr
+                                    ),
+                                    None => eprintln!(
+                                        "listener: READ {} bytes from {:?}",
+                                        buf.len(),
+                                        addr
+                                    ),
+                                }
+                                #[cfg(feature = "telemetry")]
+                                if crate::telemetry::should_log("p2p") {
+                                    let trace = crate::telemetry::log_context();
+                                    let span =
+                                        crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
+                                    span.in_scope(|| {
+                                        diagnostics::tracing::info!(
+                                            parent: &trace,
+                                            peer = ?addr,
+                                            len = buf.len(),
+                                            "recv_msg"
+                                        );
+                                    });
+                                }
+                                match message::decode(&buf) {
+                                    Ok(msg) => {
+                                        #[cfg(feature = "integration-tests")]
+                                        {
+                                            let payload_name = match &msg.body {
+                                                Payload::Chain(c) => format!("Chain(len={})", c.len()),
+                                                Payload::Handshake(_) => "Handshake".to_string(),
+                                                Payload::Hello(_) => "Hello".to_string(),
+                                                Payload::ChainRequest(_) => "ChainRequest".to_string(),
+                                                _ => "Other".to_string(),
+                                            };
+                                            match local {
+                                                Some(local) => eprintln!(
+                                                    "listener: DECODED {} local {} from {:?}",
+                                                    payload_name, local, addr
+                                                ),
+                                                None => eprintln!(
+                                                    "listener: DECODED {} from {:?}",
+                                                    payload_name, addr
+                                                ),
+                                            }
+                                        }
+                                        peers.handle_message(msg, addr, &chain);
+                                    }
+                                    Err(err) => {
+                                        #[cfg(feature = "integration-tests")]
+                                        eprintln!("listener: DECODE FAILED from {:?}: {:?}", addr, err);
+                                        diagnostics::tracing::warn!(
+                                            target = "net",
+                                            peer = ?addr,
+                                            reason = ?err,
+                                            "message_decode_failed"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                #[cfg(feature = "integration-tests")]
+                                match local {
+                                    Some(local) => eprintln!(
+                                        "listener: READ ERROR local {} from {:?}: {}",
+                                        local, addr, err
+                                    ),
+                                    None => eprintln!(
+                                        "listener: READ ERROR from {:?}: {}",
+                                        addr, err
+                                    ),
+                                }
+                                diagnostics::tracing::warn!(
+                                    target = "net",
+                                    peer = ?addr,
+                                    reason = %err,
+                                    "message_read_failed"
+                                );
+                            }
+                        }
+                    };
+                    #[cfg(feature = "integration-tests")]
+                    {
+                        std::thread::spawn(task);
+                    }
+                    #[cfg(not(feature = "integration-tests"))]
+                    {
+                        runtime::spawn_blocking(task);
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     std::thread::sleep(Duration::from_millis(20));
                 }
-                Err(_) => break,
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) => {
+                    diagnostics::tracing::warn!(
+                        target = "net",
+                        %err,
+                        "gossip_accept_failed"
+                    );
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
         }))
     }
@@ -1800,34 +1962,7 @@ impl Node {
             Ok(bc) => bc.chain.clone(),
             Err(_) => return,
         };
-        let msg = match self.sign_payload(Payload::Chain(chain), "broadcast_chain") {
-            Some(msg) => msg,
-            None => return,
-        };
-        let peers = self.peers.list_with_info();
-        let serialized = codec::serialize(codec::profiles::gossip::codec(), &msg)
-            .unwrap_or_default();
-        let large = serialized.len() > 1024;
-        for (addr, transport, cert) in peers {
-            if large {
-                if let Some(c) = cert.as_ref() {
-                    let _ = send_quic_msg(addr, c, &msg);
-                } else {
-                    let _ = send_msg(addr, &msg);
-                }
-            } else {
-                match transport {
-                    Transport::Tcp => {
-                        let _ = send_msg(addr, &msg);
-                    }
-                    Transport::Quic => {
-                        if let Some(c) = cert.as_ref() {
-                            let _ = send_quic_msg(addr, c, &msg);
-                        }
-                    }
-                }
-            }
-        }
+        self.peers.broadcast_chain_snapshot(chain);
     }
 
     /// Perform peer discovery by handshaking with known peers and exchanging address lists.
@@ -1856,17 +1991,33 @@ impl Node {
 
     /// Add a peer address to this node.
     pub fn add_peer(&self, addr: SocketAddr) {
+        let already_known = self.peers.list().contains(&addr);
+        let already_mapped = self.peers.is_mapped(addr);
         self.peers.add(addr);
         if addr == self.addr {
+            return;
+        }
+        // Force the next chain broadcast to include newly added peers even if our height
+        // has not advanced, so late joiners receive the current tip immediately.
+        if !already_known || !already_mapped {
+            self.peers.reset_broadcast_watermark();
+        }
+        if already_known && already_mapped {
+            #[cfg(feature = "integration-tests")]
+            eprintln!("add_peer: SKIP repeat handshake/hello to {}", addr);
             return;
         }
         if let Some(hs_msg) = self.handshake_message() {
             let _ = send_msg(addr, &hs_msg);
         }
-        let mut addrs = self.peers.list();
-        addrs.push(self.addr);
-        if let Some(hello_msg) = self.sign_payload(Payload::Hello(addrs), "hello") {
-            let _ = send_msg(addr, &hello_msg);
+        // Send Hello only when we are adding a genuinely new address to avoid flooding the
+        // network with redundant address lists during aggressive reconnection.
+        if !already_known || !already_mapped {
+            let mut addrs = self.peers.list();
+            addrs.push(self.addr);
+            if let Some(hello_msg) = self.sign_payload(Payload::Hello(addrs), "hello") {
+                let _ = send_msg(addr, &hello_msg);
+            }
         }
     }
 
@@ -1958,6 +2109,46 @@ fn bind_tcp_listener(addr: SocketAddr) -> io::Result<TcpListener> {
 }
 
 pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
+    let mut rng = rand::thread_rng();
+    if let Ok(loss_str) = std::env::var("TB_NET_PACKET_LOSS") {
+        if let Ok(loss) = loss_str.parse::<f64>() {
+            if rng.gen_bool(loss) {
+                return Ok(());
+            }
+        }
+    }
+    if let Ok(jitter_str) = std::env::var("TB_NET_JITTER_MS") {
+        if let Ok(jitter) = jitter_str.parse::<u64>() {
+            let delay = rng.gen_range(0..=jitter);
+            std::thread::sleep(Duration::from_millis(delay));
+        }
+    }
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
+    let bytes = message::encode_message(msg)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("serialize: {err}")))?;
+    #[cfg(feature = "integration-tests")]
+    if matches!(msg.body, Payload::Chain(_)) {
+        match stream.local_addr() {
+            Ok(local) => {
+                eprintln!("send_msg: CHAIN {} bytes {} -> {}", bytes.len(), local, addr);
+            }
+            Err(_) => eprintln!("send_msg: CHAIN {} bytes to {}", bytes.len(), addr),
+        }
+    }
+    stream.write_all(&bytes)?;
+    // Explicitly shutdown the write half to signal EOF to the reader
+    use std::net::Shutdown;
+    let _ = stream.shutdown(Shutdown::Write);
+    #[cfg(feature = "integration-tests")]
+    if matches!(msg.body, Payload::Chain(_)) {
+        eprintln!("send_msg: CHAIN write complete to {}", addr);
+    }
+    crate::net::peer::record_send(addr, bytes.len());
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn send_msg_old(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     let mut rng = rand::thread_rng();
     if let Ok(loss_str) = std::env::var("TB_NET_PACKET_LOSS") {
         if let Ok(loss) = loss_str.parse::<f64>() {

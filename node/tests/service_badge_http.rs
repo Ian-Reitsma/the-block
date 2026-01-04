@@ -4,12 +4,47 @@ use foundation_serialization::json::Value;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 
-use runtime::io::read_to_end;
-use runtime::net::TcpStream;
+use runtime::{
+    io::BufferedTcpStream,
+    net::TcpStream,
+};
 use std::net::SocketAddr;
 use util::timeout::expect_timeout;
 
 mod util;
+
+async fn read_http_body(stream: TcpStream) -> std::io::Result<Vec<u8>> {
+    use std::io::{Error, ErrorKind};
+
+    let mut reader = BufferedTcpStream::new(stream);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).await?;
+    if read == 0 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "missing status line"));
+    }
+    let mut content_length = None;
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "truncated headers"));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse::<usize>().ok();
+            }
+        }
+    }
+    let len = content_length.unwrap_or(0);
+    let mut body = vec![0u8; len];
+    if len > 0 {
+        reader.read_exact(&mut body).await?;
+    }
+    Ok(body)
+}
 
 #[test]
 fn badge_status_endpoint() {
@@ -37,13 +72,8 @@ fn badge_status_endpoint() {
         ))
         .await
         .unwrap();
-        let mut resp = Vec::new();
-        expect_timeout(read_to_end(&mut stream, &mut resp))
-            .await
-            .unwrap();
-        let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let body: Value =
-            foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
+        let body = expect_timeout(read_http_body(stream)).await.unwrap();
+        let body: Value = foundation_serialization::json::from_slice(&body).unwrap();
         assert!(!body["active"].as_bool().unwrap());
         assert!(matches!(body.get("last_mint"), Some(Value::Null)));
         assert!(matches!(body.get("last_burn"), Some(Value::Null)));
@@ -68,13 +98,8 @@ fn badge_status_endpoint() {
         ))
         .await
         .unwrap();
-        resp.clear();
-        expect_timeout(read_to_end(&mut stream, &mut resp))
-            .await
-            .unwrap();
-        let body_idx = resp.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
-        let body: Value =
-            foundation_serialization::json::from_slice(&resp[body_idx + 4..]).unwrap();
+        let body = expect_timeout(read_http_body(stream)).await.unwrap();
+        let body: Value = foundation_serialization::json::from_slice(&body).unwrap();
         assert!(body["active"].as_bool().unwrap());
         assert!(body["last_mint"].as_u64().is_some());
 

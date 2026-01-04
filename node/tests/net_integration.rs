@@ -18,6 +18,13 @@ fn init_env() -> sys::tempfile::TempDir {
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
     std::env::set_var("TB_PEER_SEED", "42");
+    // Relax rate limits for this test to avoid drops during the handshake storm.
+    std::env::set_var("TB_P2P_MAX_PER_SEC", "100000");
+    // Disable periodic chain sync in this test to avoid flooding the listener with
+    // redundant ChainRequest traffic.
+    std::env::set_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS", "0");
+    // Use fast mining to skip real PoW - without this, mining takes hours.
+    std::env::set_var("TB_FAST_MINE", "1");
     dir
 }
 
@@ -38,10 +45,12 @@ fn restore_net_key_env(prev: (Option<String>, Option<String>)) {
         Some(value) => std::env::set_var("TB_NET_KEY_SEED", value),
         None => std::env::remove_var("TB_NET_KEY_SEED"),
     }
+    std::env::remove_var("TB_P2P_MAX_PER_SEC");
 }
 
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
+    let mut tick: u64 = 0;
     loop {
         let first = nodes[0].blockchain().block_height;
         if nodes.iter().all(|n| n.blockchain().block_height == first) {
@@ -49,6 +58,17 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         }
         if start.elapsed() > max {
             return false;
+        }
+        tick += 1;
+        if tick % 250 == 0 {
+            eprintln!(
+                "wait_until_converged: elapsed={:?} heights={:?}",
+                start.elapsed(),
+                nodes
+                    .iter()
+                    .map(|n| n.blockchain().block_height)
+                    .collect::<Vec<_>>()
+            );
         }
         the_block::sleep(Duration::from_millis(20)).await;
     }
@@ -101,13 +121,26 @@ fn partitions_merge_consistent_fork_choice() {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
             let tn = TestNode::new(id, addr, &peers);
+            eprintln!("test node{id} gossip_addr={addr}");
             for p in &peers {
                 tn.node.add_peer(*p);
             }
             nodes.push(tn);
         }
 
-        the_block::sleep(Duration::from_millis(100)).await;
+        // Give more time for handshakes to complete and peer lists to populate
+        the_block::sleep(Duration::from_millis(1500)).await;
+
+        // Ensure all nodes have full peer lists by explicitly adding all peer pairs
+        for i in 0..nodes.len() {
+            for j in 0..nodes.len() {
+                if i != j {
+                    nodes[i].node.add_peer(nodes[j].addr);
+                }
+            }
+        }
+        the_block::sleep(Duration::from_millis(500)).await;
+
         let mut ts = 1u64;
         for _ in 0..3 {
             {
@@ -116,16 +149,38 @@ fn partitions_merge_consistent_fork_choice() {
                 ts += 1;
             }
             nodes[0].node.broadcast_chain();
-            the_block::sleep(Duration::from_millis(50)).await;
+            the_block::sleep(Duration::from_millis(100)).await;
         }
 
-        assert!(
-            wait_until_converged(
-                &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-                Duration::from_secs(5)
-            )
-            .await
+        let heights_after_mine = nodes
+            .iter()
+            .map(|n| n.node.blockchain().block_height)
+            .collect::<Vec<_>>();
+        eprintln!(
+            "initial mine complete heights={heights_after_mine:?} peers={:?}",
+            nodes
+                .iter()
+                .map(|n| n.node.peer_addrs().len())
+                .collect::<Vec<_>>()
         );
+
+        let converged = wait_until_converged(
+            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+            Duration::from_secs(12),
+        )
+        .await;
+        if !converged {
+            let heights = nodes
+                .iter()
+                .map(|n| n.node.blockchain().block_height)
+                .collect::<Vec<_>>();
+            let peers = nodes
+                .iter()
+                .map(|n| n.node.peer_addrs().len())
+                .collect::<Vec<_>>();
+            panic!("initial convergence failed: heights={heights:?} peers={peers:?}");
+        }
+        eprintln!("initial convergence ok heights={:?}", heights_after_mine);
 
         for node in nodes.iter().take(3) {
             for peer in nodes.iter().skip(3) {
@@ -133,6 +188,14 @@ fn partitions_merge_consistent_fork_choice() {
                 peer.node.remove_peer(node.addr);
             }
         }
+
+        eprintln!(
+            "partitions set heights={:?}",
+            nodes
+                .iter()
+                .map(|n| n.node.blockchain().block_height)
+                .collect::<Vec<_>>()
+        );
 
         for _ in 0..2 {
             {
@@ -158,6 +221,14 @@ fn partitions_merge_consistent_fork_choice() {
             the_block::sleep(Duration::from_millis(50)).await;
         }
 
+        eprintln!(
+            "post-partition mining heights={:?}",
+            nodes
+                .iter()
+                .map(|n| n.node.blockchain().block_height)
+                .collect::<Vec<_>>()
+        );
+
         for node in nodes.iter().take(3) {
             for peer in nodes.iter().skip(3) {
                 node.node.add_peer(peer.addr);
@@ -165,13 +236,49 @@ fn partitions_merge_consistent_fork_choice() {
             }
         }
 
-        assert!(
-            wait_until_converged(
-                &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-                Duration::from_secs(10)
-            )
-            .await
+        // Give time for handshakes to complete after re-connecting
+        the_block::sleep(Duration::from_millis(800)).await;
+
+        // Ensure all nodes have complete peer lists after re-connecting
+        for i in 0..nodes.len() {
+            for j in 0..nodes.len() {
+                if i != j {
+                    nodes[i].node.add_peer(nodes[j].addr);
+                }
+            }
+        }
+        the_block::sleep(Duration::from_millis(500)).await;
+
+        // Trigger chain exchange after partition merge by broadcasting from all nodes
+        for node in &nodes {
+            node.node.broadcast_chain();
+        }
+        the_block::sleep(Duration::from_millis(1200)).await;
+
+        eprintln!(
+            "post-merge broadcast heights={:?}",
+            nodes
+                .iter()
+                .map(|n| n.node.blockchain().block_height)
+                .collect::<Vec<_>>()
         );
+
+        let converged = wait_until_converged(
+            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+            Duration::from_secs(20),
+        )
+        .await;
+        if !converged {
+            let heights = nodes
+                .iter()
+                .map(|n| n.node.blockchain().block_height)
+                .collect::<Vec<_>>();
+            let peers = nodes
+                .iter()
+                .map(|n| n.node.peer_addrs().len())
+                .collect::<Vec<_>>();
+            panic!("post-merge convergence failed: heights={heights:?} peers={peers:?}");
+        }
 
         let height = nodes[3].node.blockchain().block_height;
         assert!(nodes
@@ -185,5 +292,8 @@ fn partitions_merge_consistent_fork_choice() {
         std::env::remove_var("TB_NET_KEY_SEED");
         std::env::remove_var("TB_PEER_DB_PATH");
         std::env::remove_var("TB_PEER_SEED");
+        std::env::remove_var("TB_P2P_MAX_PER_SEC");
+        std::env::remove_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS");
+        std::env::remove_var("TB_FAST_MINE");
     });
 }

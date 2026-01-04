@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crypto_suite::signatures::ed25519::SigningKey;
 use rand::{thread_rng, RngCore};
+use sys::tempfile::tempdir;
 use the_block::net::{
     peer_stats, record_ip_drop, set_max_peer_metrics, DropReason, Hello, Message, Payload, PeerSet,
     Transport, LOCAL_FEATURES, PROTOCOL_VERSION,
@@ -11,6 +12,19 @@ use the_block::net::{
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
 use the_block::Blockchain;
+
+#[cfg(feature = "telemetry")]
+fn peer_label(pk: &[u8; 32]) -> String {
+    the_block::net::overlay_peer_from_bytes(pk)
+        .map(|peer| the_block::net::overlay_peer_to_base58(&peer))
+        .unwrap_or_else(|_| crypto_suite::hex::encode(pk))
+}
+
+fn init_env() -> sys::tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
+    dir
+}
 
 #[test]
 fn ip_drop_increments_metric() {
@@ -32,6 +46,7 @@ fn ip_drop_increments_metric() {
 
 #[testkit::tb_serial]
 fn rate_limit_drop_records_reason() {
+    let _env = init_env();
     // Lower the per-second threshold so we can reliably trigger a drop without
     // burning the full default quota. Environment variables are read once on
     // first access, so set it before instantiating any peer structures.
@@ -85,7 +100,7 @@ fn rate_limit_drop_records_reason() {
     #[cfg(feature = "telemetry")]
     {
         use the_block::telemetry::{PEER_DROP_TOTAL, PEER_METRICS_ACTIVE};
-        let id = crypto_suite::hex::encode(pk);
+        let id = peer_label(&pk);
         assert!(
             PEER_DROP_TOTAL
                 .ensure_handle_for_label_values(&[id.as_str(), "rate_limit"])
@@ -157,7 +172,14 @@ fn evicts_least_recently_used_peer() {
 
 #[testkit::tb_serial]
 fn reputation_decreases_on_rate_limit() {
+    let _env = init_env();
+    // Force a deterministic, low threshold so the test reliably trips the limiter
+    // regardless of scheduler jitter.
+    std::env::set_var("TB_P2P_MAX_PER_SEC", "10");
+    std::env::set_var("TB_P2P_RATE_WINDOW_SECS", "3600");
     the_block::net::set_track_drop_reasons(true);
+    the_block::net::set_p2p_max_per_sec(10);
+    the_block::net::set_p2p_rate_window_secs(3600);
     let peers = PeerSet::new(vec![]);
     let chain = Arc::new(Mutex::new(Blockchain::default()));
     let mut seed = [0u8; 32];
@@ -190,4 +212,10 @@ fn reputation_decreases_on_rate_limit() {
     }
     let rep = peer_stats(&pk).unwrap().reputation.score;
     assert!(rep < 1.0);
+
+    // Restore defaults so other tests in this binary are unaffected.
+    std::env::remove_var("TB_P2P_MAX_PER_SEC");
+    std::env::remove_var("TB_P2P_RATE_WINDOW_SECS");
+    the_block::net::set_p2p_max_per_sec(100);
+    the_block::net::set_p2p_rate_window_secs(1);
 }

@@ -769,7 +769,7 @@ impl MempoolEntry {
         if self.serialized_size == 0 {
             0
         } else {
-            self.tx.tip / self.serialized_size
+            self.tx.payload.fee / self.serialized_size
         }
     }
 
@@ -5108,7 +5108,7 @@ impl Blockchain {
                 if self.recent_miners.len() > RECENT_MINER_WINDOW {
                     self.recent_miners.pop_front();
                 }
-                if index % EPOCH_BLOCKS == 0 {
+                if index > 0 && index % EPOCH_BLOCKS == 0 {
                     let stats = Utilization {
                         bytes_stored: self.epoch_storage_bytes as f64,
                         bytes_read: self.epoch_read_bytes as f64,
@@ -6140,6 +6140,15 @@ impl Blockchain {
             if coinbase_block_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
+                diagnostics::tracing::warn!(
+                    target = "consensus",
+                    height = b.index,
+                    expected_consumer,
+                    actual_consumer = coinbase_block_total,
+                    expected_industrial,
+                    actual_industrial = coinbase_industrial_total,
+                    "coinbase_mismatch"
+                );
                 return Err("coinbase_mismatch");
             }
         }

@@ -2,10 +2,7 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use foundation_serialization::json::Value;
-use runtime::{
-    io::{read_to_end, BufferedTcpStream},
-    net::TcpStream,
-};
+use runtime::{io::BufferedTcpStream, net::TcpStream};
 use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use util::timeout::expect_timeout;
@@ -65,6 +62,39 @@ async fn read_http_body(stream: TcpStream) -> std::io::Result<Vec<u8>> {
     Ok(body)
 }
 
+async fn read_http_response(stream: TcpStream) -> std::io::Result<(String, Vec<u8>)> {
+    use std::io::{Error, ErrorKind};
+
+    let mut reader = BufferedTcpStream::new(stream);
+    let mut status_line = String::new();
+    let read = reader.read_line(&mut status_line).await?;
+    if read == 0 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "missing status line"));
+    }
+    let mut content_length = None;
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "truncated headers"));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse::<usize>().ok();
+            }
+        }
+    }
+    let len = content_length.unwrap_or(0);
+    let mut body = vec![0u8; len];
+    if len > 0 {
+        reader.read_exact(&mut body).await?;
+    }
+    Ok((status_line, body))
+}
+
 #[test]
 fn rpc_auth_and_host_filters() {
     runtime::block_on(async {
@@ -99,12 +129,8 @@ fn rpc_auth_and_host_filters() {
         ))
         .await
         .unwrap();
-        let mut buf = Vec::new();
-        expect_timeout(read_to_end(&mut stream, &mut buf))
-            .await
-            .unwrap();
-        let resp = String::from_utf8(buf).unwrap();
-        assert!(resp.starts_with("HTTP/1.1 403"));
+        let (status, _body) = expect_timeout(read_http_response(stream)).await.unwrap();
+        assert!(status.starts_with("HTTP/1.1 403"));
 
         // admin without token
         let val = rpc(

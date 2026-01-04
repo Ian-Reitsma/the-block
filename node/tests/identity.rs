@@ -7,8 +7,10 @@ use the_block::generate_keypair;
 use the_block::identity::handle_registry::{HandleError, HandleRegistry, RegistrationOutcome};
 
 fn sign_msg(handle: &str, sk: &SigningKey, nonce: u64) -> (Vec<u8>, Vec<u8>) {
-    let normalizer = Normalizer;
-    let handle_norm = normalizer.nfkc(handle).as_str().to_lowercase();
+    // Use identical normalization as handle_registry.rs
+    let normalized = Normalizer::default().nfkc(handle);
+    let trimmed = normalized.as_str().trim();
+    let handle_norm = trimmed.to_lowercase();
     let pk = sk.verifying_key();
     let mut h = blake3::Hasher::new();
     h.update(b"register:");

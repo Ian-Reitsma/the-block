@@ -64,13 +64,19 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
     let mut last_report = Duration::from_secs(0);
     loop {
-        let first = nodes[0].blockchain().block_height;
-        if nodes.iter().all(|n| n.blockchain().block_height == first) {
+        let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
+        let first = heights[0];
+        if heights.iter().all(|h| *h == first) {
             return true;
+        }
+        // Push the longest known chain out to peers whenever we see divergence to
+        // kick stalled gossip back into sync after partitions heal.
+        if let Some((idx, _)) = heights.iter().enumerate().max_by_key(|(_, h)| *h) {
+            nodes[idx].discover_peers();
+            nodes[idx].broadcast_chain();
         }
         let elapsed = start.elapsed();
         if elapsed > max {
-            let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
             eprintln!(
                 "chaos convergence timed out after {:?}, heights = {:?}",
                 elapsed, heights
@@ -78,7 +84,6 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
             return false;
         }
         if elapsed - last_report > Duration::from_secs(1) {
-            let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
             eprintln!("chaos convergence progress: {:?}", heights);
             last_report = elapsed;
         }
