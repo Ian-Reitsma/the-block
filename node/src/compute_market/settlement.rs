@@ -256,6 +256,7 @@ impl SettlementState {
     fn persist_all(&mut self) {
         self.refresh_sla_metrics();
         let mut attempts = 0;
+        let max_attempts = 5;
         loop {
             let mut batch = self.db.batch();
             let mut encode = || -> io::Result<()> {
@@ -274,14 +275,15 @@ impl SettlementState {
             match encode().and_then(|_| self.db.write_batch(batch)) {
                 Ok(_) => break,
                 Err(err) => {
-                    let is_missing =
-                        err.kind() == io::ErrorKind::NotFound || err.raw_os_error() == Some(2);
-                    if is_missing && attempts == 0 {
-                        // The backing directory was removed out-of-band; recreate it and retry once.
+                    let is_missing = err.kind() == io::ErrorKind::NotFound
+                        || err.raw_os_error() == Some(2);
+                    if is_missing && attempts + 1 < max_attempts {
+                        // The backing directory was removed out-of-band; recreate it and retry.
                         let _ = fs::create_dir_all(&self.base);
                         if let Some(parent) = self.db_path.parent() {
                             let _ = fs::create_dir_all(parent);
                         }
+                        // Reopen the DB in case the underlying file vanished.
                         self.db = SimpleDb::open_named(
                             names::COMPUTE_SETTLEMENT,
                             self.db_path.to_str().unwrap_or_else(|| {
@@ -289,6 +291,9 @@ impl SettlementState {
                             }),
                         );
                         attempts += 1;
+                        // Give the filesystem a moment to settle on platforms where temp dirs
+                        // are pruned aggressively.
+                        std::thread::sleep(std::time::Duration::from_millis(25 * attempts));
                         continue;
                     }
                     #[cfg(feature = "telemetry")]

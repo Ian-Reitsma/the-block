@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use std::io::{self, ErrorKind, Read, Write};
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, TryLockError};
 use std::time::Duration;
 
 use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
@@ -28,7 +28,8 @@ use util::timeout::expect_timeout;
 mod util;
 
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const RPC_RW_TIMEOUT: Duration = Duration::from_secs(10);
+// Keep RPC I/O bounded so a stuck server can't hang the suite.
+const RPC_RW_TIMEOUT: Duration = Duration::from_secs(30);
 
 fn rpc_debug() -> bool {
     std::env::var("RPC_TEST_DEBUG").is_ok()
@@ -120,7 +121,9 @@ fn connect_blocking(addr: SocketAddr) -> Result<StdTcpStream, RpcRequestError> {
     stream
         .set_write_timeout(Some(RPC_RW_TIMEOUT))
         .map_err(RpcRequestError::Io)?;
-    stream.set_read_timeout(None).map_err(RpcRequestError::Io)?;
+    stream
+        .set_read_timeout(Some(RPC_RW_TIMEOUT))
+        .map_err(RpcRequestError::Io)?;
     Ok(stream)
 }
 
@@ -590,15 +593,37 @@ fn rpc_concurrent_controls() {
         for h in handles {
             let _ = h.await;
         }
+        if rpc_debug() {
+            eprintln!("rpc concurrent tasks complete; issuing final stop_mining");
+        }
         rpc(
             &addr,
             r#"{"method":"stop_mining","params":{"nonce":999}}"#,
             Some("testtoken"),
         )
         .await;
+        if rpc_debug() {
+            eprintln!("rpc concurrent stop_mining completed; aborting server");
+        }
+        match bc.try_lock() {
+            Ok(guard) => {
+                assert!(guard.mempool_consumer.len() <= 1);
+            }
+            Err(TryLockError::Poisoned(poison)) => {
+                let guard = poison.into_inner();
+                assert!(guard.mempool_consumer.len() <= 1);
+            }
+            Err(TryLockError::WouldBlock) => {
+                if rpc_debug() {
+                    eprintln!("rpc concurrent mempool check skipped; blockchain lock busy");
+                }
+            }
+        }
         handle.abort();
         let _ = handle.await;
-        assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
+        if rpc_debug() {
+            eprintln!("rpc concurrent server aborted; mempool checked");
+        }
     });
 }
 

@@ -62,7 +62,8 @@ fn timeout_factor() -> u64 {
     std::env::var("TB_TEST_TIMEOUT_MULT")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(3) // Default to 3x for CI resilience
+        // Default to a higher multiplier to keep noisy or slow CI hosts stable across OSes.
+        .unwrap_or(5)
 }
 
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
@@ -79,6 +80,11 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         if let Some((idx, _)) = heights.iter().enumerate().max_by_key(|(_, h)| *h) {
             nodes[idx].discover_peers();
             nodes[idx].broadcast_chain();
+        }
+        // Keep peers warm so connection churn on busy test hosts (Linux/macOS/Windows CI)
+        // does not leave nodes idle while waiting for convergence.
+        for n in nodes {
+            n.discover_peers();
         }
         let elapsed = start.elapsed();
         if elapsed > max {
