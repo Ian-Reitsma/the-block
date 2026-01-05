@@ -36,11 +36,17 @@ const SO_REUSEADDR: i32 = 2;
     target_os = "dragonfly"
 ))]
 const SO_REUSEADDR: i32 = 0x0004;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const O_NONBLOCK: i32 = 0o0004000;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const F_GETFL: i32 = 3;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const F_SETFL: i32 = 4;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const F_GETFD: i32 = 1;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const F_SETFD: i32 = 2;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const FD_CLOEXEC: i32 = 1;
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -221,6 +227,7 @@ extern "C" {
     fn listen(fd: i32, backlog: i32) -> i32;
     fn setsockopt(fd: i32, level: i32, optname: i32, optval: *const i32, optlen: u32) -> i32;
     fn close(fd: i32) -> i32;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     fn fcntl(fd: i32, cmd: i32, ...) -> i32;
 }
 

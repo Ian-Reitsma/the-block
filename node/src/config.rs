@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use sys::paths;
 use sys::signals::{Signals, SIGHUP};
 
@@ -1089,63 +1089,82 @@ pub fn watch(dir: &str) {
         *CONFIG_DIR.write().unwrap() = dir.to_string();
     }
     crate::gossip::config::watch(dir);
-    if cfg!(test) {
+    if cfg!(test) && std::env::var_os("TB_ENABLE_CONFIG_WATCH_TESTS").is_none() {
         // Tests exercise configuration reload paths explicitly; avoid spawning
         // long-lived filesystem watchers that never shut down across property
         // test iterations.
         return;
     }
     let cfg_dir = dir.to_string();
-    runtime::spawn(async move {
-        let path = Path::new(&cfg_dir);
-        match FsWatcher::new(path, WatchRecursiveMode::NonRecursive) {
-            Ok(mut watcher) => loop {
-                match watcher.next().await {
-                    Ok(event)
-                        if matches!(
-                            event.kind,
-                            WatchEventKind::Created
-                                | WatchEventKind::Modified
-                                | WatchEventKind::Removed
-                        ) =>
-                    {
-                        let mut reload_node = false;
-                        let mut reload_gossip = false;
-                        let mut reload_storage = false;
-                        for changed in &event.paths {
-                            if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
-                                match name {
-                                    "default.toml" => reload_node = true,
-                                    "gossip.toml" => reload_gossip = true,
-                                    "storage.toml" => reload_storage = true,
-                                    _ => {}
-                                }
-                            }
+    runtime::spawn({
+        let cfg_dir = cfg_dir.clone();
+        async move {
+            let mut last_mtimes = (
+                file_mtime(Path::new(&cfg_dir).join("default.toml")),
+                file_mtime(Path::new(&cfg_dir).join("gossip.toml")),
+                file_mtime(Path::new(&cfg_dir).join("storage.toml")),
+            );
+            let handle_paths = |paths: &[PathBuf]| {
+                let mut reload_node = false;
+                let mut reload_gossip = false;
+                let mut reload_storage = false;
+                for changed in paths {
+                    if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
+                        match name {
+                            "default.toml" => reload_node = true,
+                            "gossip.toml" => reload_gossip = true,
+                            "storage.toml" => reload_storage = true,
+                            _ => {}
                         }
-                        if reload_node {
-                            let _ = reload();
-                        }
-                        if reload_gossip {
-                            crate::gossip::config::reload();
-                        }
-                        if reload_storage {
-                            crate::storage::settings::configure_from_dir(&cfg_dir);
-                        }
-                        // Yield to prevent starving other async tasks when processing bursts of file events
-                        runtime::yield_now().await;
-                    }
-                    Ok(_) => {
-                        // Yield even for non-matching events to prevent task starvation
-                        runtime::yield_now().await;
-                    }
-                    Err(err) => {
-                        diagnostics::log::warn!("config_watch_error: {err}");
-                        runtime::sleep(Duration::from_secs(1)).await;
                     }
                 }
-            },
-            Err(err) => {
-                diagnostics::log::warn!("config_watch_init_failed: {err}");
+                if reload_node {
+                    let _ = reload();
+                }
+                if reload_gossip {
+                    crate::gossip::config::reload();
+                }
+                if reload_storage {
+                    crate::storage::settings::configure_from_dir(&cfg_dir);
+                }
+            };
+            let path = Path::new(&cfg_dir);
+            match FsWatcher::new(path, WatchRecursiveMode::NonRecursive) {
+                Ok(mut watcher) => loop {
+                    match watcher.next().await {
+                        Ok(event)
+                            if matches!(
+                                event.kind,
+                                WatchEventKind::Created
+                                    | WatchEventKind::Modified
+                                    | WatchEventKind::Removed
+                            ) =>
+                        {
+                            handle_paths(&event.paths);
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            diagnostics::log::warn!("config_watch_error: {err}");
+                            runtime::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                    if let Some(polled) = poll_config_changes(&cfg_dir, &mut last_mtimes) {
+                        handle_paths(&polled);
+                    }
+                    // Yield to prevent starving other async tasks when processing bursts of file events
+                    runtime::yield_now().await;
+                },
+                Err(err) => {
+                    diagnostics::log::warn!(
+                        "config_watch_init_failed: {err}; falling back to polling"
+                    );
+                    loop {
+                        if let Some(polled) = poll_config_changes(&cfg_dir, &mut last_mtimes) {
+                            handle_paths(&polled);
+                        }
+                        runtime::sleep(Duration::from_millis(250)).await;
+                    }
+                }
             }
         }
     });
@@ -1157,6 +1176,42 @@ pub fn watch(dir: &str) {
             crate::gossip::config::reload();
         }
     });
+}
+
+fn file_mtime(path: impl AsRef<Path>) -> Option<SystemTime> {
+    fs::metadata(path.as_ref())
+        .and_then(|m| m.modified())
+        .ok()
+}
+
+fn poll_config_changes(
+    cfg_dir: &str,
+    last: &mut (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>),
+) -> Option<Vec<PathBuf>> {
+    let default_path = Path::new(cfg_dir).join("default.toml");
+    let gossip_path = Path::new(cfg_dir).join("gossip.toml");
+    let storage_path = Path::new(cfg_dir).join("storage.toml");
+    let current = (
+        file_mtime(&default_path),
+        file_mtime(&gossip_path),
+        file_mtime(&storage_path),
+    );
+    let mut changes = Vec::new();
+    if current.0 != last.0 {
+        changes.push(default_path);
+    }
+    if current.1 != last.1 {
+        changes.push(gossip_path);
+    }
+    if current.2 != last.2 {
+        changes.push(storage_path);
+    }
+    *last = current;
+    if changes.is_empty() {
+        None
+    } else {
+        Some(changes)
+    }
 }
 
 static BLOCKCHAIN_HANDLE: Lazy<RwLock<Option<Weak<Mutex<Blockchain>>>>> =

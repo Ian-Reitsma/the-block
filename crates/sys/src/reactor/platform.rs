@@ -237,6 +237,10 @@ fn interest_to_epoll(interest: Interest) -> u32 {
 }
 
 fn convert_event(raw: EpollEvent) -> Event {
+    // Some platforms truncate or otherwise perturb the upper bits of the user
+    // data field. Mask to 32 bits to keep token comparisons stable across
+    // architectures while we only ever allocate tokens in the lower range.
+    let token = Token((raw.data as usize) & 0xFFFF_FFFF);
     let readable = raw.events & (EPOLLIN | EPOLLRDHUP | EPOLLHUP) != 0;
     let writable = raw.events & EPOLLOUT != 0;
     let error = raw.events & EPOLLERR != 0;
@@ -244,7 +248,7 @@ fn convert_event(raw: EpollEvent) -> Event {
     let write_closed = raw.events & EPOLLHUP != 0;
     let priority = raw.events & EPOLLPRI != 0;
     Event::new(
-        Token(raw.data as usize),
+        token,
         None,
         readable,
         writable,

@@ -139,7 +139,7 @@ echo -e "${GREEN}Package commands: $PACKAGE_COMMANDS_LOG${NC}"
 echo ""
 
 # Initialize error log with header
-cat > "$ERROR_LOG" << 'EOF'
+cat > "$ERROR_LOG" <<EOF
 ═══════════════════════════════════════════════════════════════
   WARNINGS AND ERRORS REPORT
 ═══════════════════════════════════════════════════════════════
@@ -152,11 +152,8 @@ Generated at: $(date)
 ═══════════════════════════════════════════════════════════════
 EOF
 
-# Replace $(date) with actual date
-sed -i '' "s/\$(date)/$(date)/" "$ERROR_LOG"
-
 # Initialize failed tests log
-cat > "$FAILED_TESTS_LOG" << 'EOF'
+cat > "$FAILED_TESTS_LOG" <<EOF
 ═══════════════════════════════════════════════════════════════
   COMMANDS TO RE-RUN FAILED TESTS
 ═══════════════════════════════════════════════════════════════
@@ -168,10 +165,9 @@ To re-run a specific failed test, copy and paste the command below.
 ═══════════════════════════════════════════════════════════════
 
 EOF
-sed -i '' "s/\$(date)/$(date)/" "$FAILED_TESTS_LOG"
 
 # Initialize package commands log
-cat > "$PACKAGE_COMMANDS_LOG" << 'EOF'
+cat > "$PACKAGE_COMMANDS_LOG" <<EOF
 ═══════════════════════════════════════════════════════════════
   COMMANDS TO TEST EACH PACKAGE
 ═══════════════════════════════════════════════════════════════
@@ -183,7 +179,6 @@ To test a specific package, copy and paste the command below.
 ═══════════════════════════════════════════════════════════════
 
 EOF
-sed -i '' "s/\$(date)/$(date)/" "$PACKAGE_COMMANDS_LOG"
 
 # Run complete workspace test with all features
 echo -e "${BLUE}Running full workspace test suite with all features...${NC}"

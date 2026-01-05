@@ -100,11 +100,44 @@ pub fn is_charging() -> io::Result<bool> {
         .unwrap_or_else(|| Error::new(ErrorKind::NotFound, "no battery status source discovered")))
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "android", target_os = "linux")))]
 mod tests {
+    use super::read_trimmed;
+    use std::env;
+    use std::fs::{self, File};
+    use std::io::{self, Write};
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new() -> io::Result<Self> {
+            let mut path = env::temp_dir();
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let pid = std::process::id();
+            path.push(format!("battery_test-{pid}-{timestamp}"));
+            fs::create_dir_all(&path)?;
+            Ok(Self { path })
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
 
     #[test]
-    #[cfg(any(target_os = "android", target_os = "linux"))]
     fn parses_capacity_values() {
         let dir = TempDir::new().expect("tempdir");
         let path = dir.path().join("capacity");

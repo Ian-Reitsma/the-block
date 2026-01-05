@@ -1350,17 +1350,51 @@ impl PeerSet {
                         return;
                     }
                 }
-                if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+                let fast_mine = std::env::var("TB_FAST_MINE").as_deref() == Ok("1");
+                if fast_mine {
                     let mut bc = chain.guard();
                     let current_len = bc.chain.len();
                     if new_chain.len() > current_len {
                         #[cfg(feature = "telemetry")]
                         let start = Instant::now();
-                        let _ = bc.import_chain(new_chain);
-                        #[cfg(feature = "telemetry")]
-                        observer::observe_convergence(start);
+                        match bc.import_chain(new_chain.clone()) {
+                            Ok(()) => {
+                                #[cfg(feature = "integration-tests")]
+                                eprintln!(
+                                    "Chain handler: FAST import ok local={:?} new_len={} current_len_after={}",
+                                    self.local_addr,
+                                    new_chain.len(),
+                                    bc.chain.len()
+                                );
+                                drop(bc);
+                                self.schedule_chain_broadcast(new_chain);
+                                #[cfg(feature = "telemetry")]
+                                observer::observe_convergence(start);
+                                return;
+                            }
+                            Err(err) => {
+                                #[cfg(feature = "integration-tests")]
+                                eprintln!(
+                                    "Chain handler: FAST import failed local={:?} new_len={} err={}",
+                                    self.local_addr,
+                                    new_chain.len(),
+                                    err
+                                );
+                                #[cfg(feature = "telemetry")]
+                                observer::observe_convergence(start);
+                            }
+                        }
+                    } else {
+                        #[cfg(feature = "integration-tests")]
+                        eprintln!(
+                            "Chain handler: FAST path up-to-date local={:?} current_len={} new_len={} from={:?}",
+                            self.local_addr,
+                            current_len,
+                            new_chain.len(),
+                            addr
+                        );
+                        return;
                     }
-                    return;
                 }
                 let response_addr = addr_from_peer_key(&peer_key).or(addr);
                 let new_len = new_chain.len();

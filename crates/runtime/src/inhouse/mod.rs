@@ -28,7 +28,10 @@ pub(crate) mod net;
 
 const SPAWN_LATENCY_METRIC: &str = "runtime_spawn_latency_seconds";
 const PENDING_TASKS_METRIC: &str = "runtime_pending_tasks";
-const REACTOR_WAKER_TOKEN: Token = Token(usize::MAX - 1);
+// Use a 32-bit sentinel for compatibility with pollers that truncate user data
+// fields (observed in some epoll configurations). Keeping this value within
+// the u32 range ensures token comparisons remain stable across platforms.
+const REACTOR_WAKER_TOKEN: Token = Token(u32::MAX as usize - 1);
 const DEFAULT_REACTOR_IDLE_POLL_MS: u64 = 100;
 const DEFAULT_IO_READ_BACKOFF_MS: u64 = 10;
 const DEFAULT_IO_WRITE_BACKOFF_MS: u64 = 10;

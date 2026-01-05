@@ -274,7 +274,9 @@ impl SettlementState {
             match encode().and_then(|_| self.db.write_batch(batch)) {
                 Ok(_) => break,
                 Err(err) => {
-                    if err.kind() == io::ErrorKind::NotFound && attempts == 0 {
+                    let is_missing =
+                        err.kind() == io::ErrorKind::NotFound || err.raw_os_error() == Some(2);
+                    if is_missing && attempts == 0 {
                         // The backing directory was removed out-of-band; recreate it and retry once.
                         let _ = fs::create_dir_all(&self.base);
                         if let Some(parent) = self.db_path.parent() {

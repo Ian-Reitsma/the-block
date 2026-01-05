@@ -13,6 +13,7 @@ fn config_watch_detects_changes() {
     let default_path = dir.path().join("default.toml");
     let gossip_path = dir.path().join("gossip.toml");
     let storage_path = dir.path().join("storage.toml");
+    std::env::set_var("TB_ENABLE_CONFIG_WATCH_TESTS", "1");
 
     let initial = NodeConfig {
         snapshot_interval: 5,
@@ -41,12 +42,15 @@ fn config_watch_detects_changes() {
 
     // Touch the directory to force kqueue notification on macOS (APFS doesn't immediately
     // update directory mtime when files change, so we manually trigger it)
-    use std::os::unix::fs::PermissionsExt;
-    let dir_meta = fs::metadata(dir.path()).expect("get dir metadata");
-    let mut perms = dir_meta.permissions();
-    let mode = perms.mode();
-    perms.set_mode(mode); // Set to same value to trigger mtime update
-    fs::set_permissions(dir.path(), perms).expect("touch directory");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir_meta = fs::metadata(dir.path()).expect("get dir metadata");
+        let mut perms = dir_meta.permissions();
+        let mode = perms.mode();
+        perms.set_mode(mode); // Set to same value to trigger mtime update
+        fs::set_permissions(dir.path(), perms).expect("touch directory");
+    }
 
     runtime::block_on(async {
         // Wait up to 5 seconds for config reload (kqueue + async scheduling can be slow)
@@ -59,4 +63,5 @@ fn config_watch_detects_changes() {
         }
         panic!("config watcher failed to reload default config");
     });
+    std::env::remove_var("TB_ENABLE_CONFIG_WATCH_TESTS");
 }

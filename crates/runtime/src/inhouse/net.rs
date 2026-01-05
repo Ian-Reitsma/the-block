@@ -42,6 +42,13 @@ impl TcpListener {
     pub(crate) fn bind(runtime: &InHouseRuntime, addr: SocketAddr) -> io::Result<Self> {
         let reactor = runtime.reactor();
         let listener = net::bind_tcp_listener(addr)?;
+        if tcp_debug_enabled() {
+            eprintln!(
+                "[RUNTIME_TCP] bound listener fd={} addr={}",
+                reactor_raw_of(&listener),
+                addr
+            );
+        }
         let fd = reactor_raw_of(&listener);
         let registration =
             IoRegistration::new(Arc::clone(&reactor), fd, ReactorInterest::READABLE)?;
@@ -108,6 +115,14 @@ impl TcpStream {
     pub(crate) fn connect(runtime: &InHouseRuntime, addr: SocketAddr) -> io::Result<ConnectFuture> {
         let reactor = runtime.reactor();
         let (stream, ready) = net::connect(addr)?;
+        if tcp_debug_enabled() {
+            eprintln!(
+                "[RUNTIME_TCP] connect fd={} addr={} ready={}",
+                reactor_raw_of(&stream),
+                addr,
+                ready
+            );
+        }
         let fd = reactor_raw_of(&stream);
         let registration = IoRegistration::new(
             Arc::clone(&reactor),

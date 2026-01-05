@@ -2254,7 +2254,18 @@ pub fn load_net_key() -> SigningKey {
             );
         }
     }
-    if let Err(err) = fs::write(&path, sk.to_keypair_bytes()) {
+    let key_bytes = sk.to_keypair_bytes();
+    let mut wrote = fs::write(&path, key_bytes);
+    if let Err(err) = &wrote {
+        let missing = err.kind() == io::ErrorKind::NotFound || err.raw_os_error() == Some(2);
+        if missing {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            wrote = fs::write(&path, key_bytes);
+        }
+    }
+    if let Err(err) = wrote {
         diagnostics::tracing::error!(
             path = %path.display(),
             reason = %err,

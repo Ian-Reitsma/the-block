@@ -79,6 +79,16 @@ pub struct Client {
     config: ClientConfig,
 }
 
+fn http_debug_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("TB_HTTP_DEBUG").is_ok())
+}
+
+fn force_blocking_http() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("TB_HTTP_FORCE_BLOCKING").is_ok())
+}
+
 impl Client {
     /// Create a client with the provided configuration.
     pub fn new(config: ClientConfig) -> Self {
@@ -301,7 +311,39 @@ async fn execute(
     timeout_override: Option<Duration>,
 ) -> Result<ClientResponse, ClientError> {
     match url.scheme() {
-        "http" => execute_http(client, method, url, headers, body, timeout_override).await,
+        "http" => {
+            if force_blocking_http() {
+                return execute_http_blocking(client, method, url, headers, body, timeout_override)
+                    .await;
+            }
+
+            // Clone upfront to allow a fallback to the blocking path if the async connect
+            // times out (observed intermittently on some Linux environments).
+            let retry_url = url.clone();
+            let retry_headers = headers.clone();
+            let retry_body = body.clone();
+
+            match execute_http_async(client, method, url, headers, body, timeout_override).await {
+                Ok(response) => Ok(response),
+                Err(ClientError::Timeout) => {
+                    if http_debug_enabled() {
+                        eprintln!(
+                            "[http-client] async path timed out, falling back to blocking connect"
+                        );
+                    }
+                    execute_http_blocking(
+                        client,
+                        method,
+                        retry_url,
+                        retry_headers,
+                        retry_body,
+                        timeout_override,
+                    )
+                    .await
+                }
+                Err(err) => Err(err),
+            }
+        }
         "https" => {
             let connector = client
                 .config
@@ -492,7 +534,7 @@ async fn read_chunked_body(
     Ok(body)
 }
 
-async fn execute_http(
+async fn execute_http_async(
     client: &Client,
     method: Method,
     url: Uri,
@@ -500,6 +542,7 @@ async fn execute_http(
     body: Vec<u8>,
     timeout_override: Option<Duration>,
 ) -> Result<ClientResponse, ClientError> {
+    let debug = http_debug_enabled();
     let host = url
         .host_str()
         .ok_or_else(|| ClientError::InvalidResponse("missing host"))?;
@@ -513,6 +556,9 @@ async fn execute_http(
     let stream = timeout(connect_timeout, TcpStream::connect(addr))
         .await
         .map_err(|_| ClientError::Timeout)??;
+    if debug {
+        eprintln!("[http-client] connected to {addr}");
+    }
     let mut buffered = BufferedTcpStream::new(stream);
 
     let request = build_request(method, &url, &mut headers, &body, host)?;
@@ -520,14 +566,26 @@ async fn execute_http(
     timeout(request_timeout, buffered.write_all(request.as_bytes()))
         .await
         .map_err(|_| ClientError::Timeout)??;
+    if debug {
+        eprintln!(
+            "[http-client] wrote request headers ({} bytes)",
+            request.len()
+        );
+    }
     if !body.is_empty() {
         timeout(request_timeout, buffered.write_all(&body))
             .await
             .map_err(|_| ClientError::Timeout)??;
+        if debug {
+            eprintln!("[http-client] wrote request body ({} bytes)", body.len());
+        }
     }
     timeout(request_timeout, buffered.get_mut().flush())
         .await
         .map_err(|_| ClientError::Timeout)??;
+    if debug {
+        eprintln!("[http-client] flushed request");
+    }
 
     // Use per-request timeout if set, then configured read_timeout, then request_timeout
     // This ensures per-request timeouts (via .timeout()) apply to the entire request-response cycle
@@ -540,7 +598,86 @@ async fn execute_http(
     )
     .await
     .map_err(|_| ClientError::Timeout)??;
+    if debug {
+        eprintln!("[http-client] received response status {}", response.status);
+    }
     Ok(response)
+}
+
+async fn execute_http_blocking(
+    client: &Client,
+    method: Method,
+    url: Uri,
+    mut headers: HashMap<String, String>,
+    body: Vec<u8>,
+    timeout_override: Option<Duration>,
+) -> Result<ClientResponse, ClientError> {
+    let config = client.config.clone();
+    let debug = http_debug_enabled();
+    spawn_blocking(move || {
+        let host = url
+            .host_str()
+            .ok_or_else(|| ClientError::InvalidResponse("missing host"))?;
+        let socket = url
+            .socket_addr()
+            .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+        let addr =
+            resolve_addr(&socket).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+        let connect_timeout = config.connect_timeout;
+        let request_timeout = timeout_override.unwrap_or(config.request_timeout);
+        let read_limit = timeout_override
+            .or(config.read_timeout)
+            .unwrap_or(request_timeout);
+
+        let mut stream = connect_blocking_with_retry(&addr, connect_timeout)
+            .map_err(ClientError::from)?;
+        let _ = stream.set_nodelay(true);
+        let _ = stream.set_read_timeout(Some(read_limit));
+        let _ = stream.set_write_timeout(Some(request_timeout));
+
+        if debug {
+            eprintln!("[http-client] [blocking] connected to {addr}");
+        }
+
+        let request = build_request(method, &url, &mut headers, &body, host)?;
+        stream.write_all(request.as_bytes())?;
+        if debug {
+            eprintln!(
+                "[http-client] [blocking] wrote request headers ({} bytes)",
+                request.len()
+            );
+        }
+        if !body.is_empty() {
+            stream.write_all(&body)?;
+            if debug {
+                eprintln!(
+                    "[http-client] [blocking] wrote request body ({} bytes)",
+                    body.len()
+                );
+            }
+        }
+        stream.flush()?;
+        if debug {
+            eprintln!("[http-client] [blocking] flushed request");
+        }
+
+        let mut reader = BufReader::new(stream);
+        let response = read_response_blocking(&mut reader, config.max_response_bytes)?;
+        if debug {
+            eprintln!(
+                "[http-client] [blocking] received response status {}",
+                response.status
+            );
+        }
+        Ok(response)
+    })
+    .await
+    .map_err(|err| {
+        ClientError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("join blocking http task: {err}"),
+        ))
+    })?
 }
 
 async fn execute_https(
@@ -711,8 +848,8 @@ fn should_retry_connect(err: &io::Error) -> bool {
     }
 }
 
-fn read_response_blocking(
-    reader: &mut BufReader<crate::ClientTlsStream>,
+fn read_response_blocking<R: Read>(
+    reader: &mut BufReader<R>,
     max_body: usize,
 ) -> Result<ClientResponse, ClientError> {
     let mut status_line = String::new();
@@ -730,8 +867,8 @@ fn read_response_blocking(
     })
 }
 
-fn read_headers_blocking(
-    reader: &mut BufReader<crate::ClientTlsStream>,
+fn read_headers_blocking<R: Read>(
+    reader: &mut BufReader<R>,
 ) -> Result<HashMap<String, String>, ClientError> {
     let mut headers = HashMap::new();
     loop {
@@ -754,8 +891,8 @@ fn read_headers_blocking(
     Ok(headers)
 }
 
-fn read_body_blocking(
-    reader: &mut BufReader<crate::ClientTlsStream>,
+fn read_body_blocking<R: Read>(
+    reader: &mut BufReader<R>,
     headers: &HashMap<String, String>,
     max_body: usize,
 ) -> Result<Vec<u8>, ClientError> {
@@ -778,8 +915,8 @@ fn read_body_blocking(
     Ok(body)
 }
 
-fn read_chunked_body_blocking(
-    reader: &mut BufReader<crate::ClientTlsStream>,
+fn read_chunked_body_blocking<R: Read>(
+    reader: &mut BufReader<R>,
     max_body: usize,
 ) -> Result<Vec<u8>, ClientError> {
     let mut body = Vec::new();

@@ -50,6 +50,11 @@ fn init_env() -> sys::tempfile::TempDir {
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
     std::env::set_var("TB_FAST_MINE", "1");
     std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
+    #[cfg(feature = "telemetry")]
+    {
+        // Silence noisy p2p telemetry during tests to keep runs fast and logs concise.
+        the_block::telemetry::set_log_enabled("p2p", false);
+    }
     dir
 }
 

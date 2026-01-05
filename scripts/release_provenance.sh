@@ -57,9 +57,12 @@ if tar --version 2>&1 | grep -q "GNU tar"; then
 else
   MTIME_ARG=""
 fi
+# Place all positional tar options before the file list to satisfy both GNU and
+# BSD tar (macOS). The file list is supplied via stdin, so there are no trailing
+# non-option arguments.
 VENDOR_HASH=$(cd "$VENDOR_STAGE" && find . -print0 | LC_ALL=C sort -z | \
-  tar --null -T - --no-recursion --owner=0 --group=0 --numeric-owner \
-  $MTIME_ARG -cf - | sha256sum | awk '{print $1}')
+  tar -cf - --no-recursion --owner=0 --group=0 --numeric-owner \
+  $MTIME_ARG --null -T - | sha256sum | awk '{print $1}')
 rm -rf "$VENDOR_STAGE"
 echo "$VENDOR_HASH" > "$OUTDIR/vendor-sha256.txt"
 SNAPSHOT_HASH=$(sha256sum "$SNAPSHOT_PATH" | awk '{print $1}')

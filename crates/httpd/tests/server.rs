@@ -302,10 +302,17 @@ fn serve_plain_round_trip() {
             None => return,
         };
         let addr = listener.local_addr().expect("addr");
-        let router = Router::new(()).get("/ping", |_req| async move {
-            Ok(Response::new(StatusCode::OK)
-                .with_body(b"pong".to_vec())
-                .close())
+        let debug = std::env::var("TB_HTTP_DEBUG").is_ok();
+        let router = Router::new(()).get("/ping", move |_req| {
+            let debug = debug;
+            async move {
+                if debug {
+                    eprintln!("[http-server] received /ping");
+                }
+                Ok(Response::new(StatusCode::OK)
+                    .with_body(b"pong".to_vec())
+                    .close())
+            }
         });
         let server_handle = spawn(async move {
             serve(listener, router, slow_server_config())
