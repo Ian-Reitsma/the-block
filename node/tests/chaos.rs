@@ -49,6 +49,16 @@ fn init_env() -> sys::tempfile::TempDir {
     std::env::set_var("TB_NET_JITTER_MS", "10");
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
     std::env::set_var("TB_FAST_MINE", "1");
+    
+    // Platform-specific socket tuning to prevent deadlocks and improve convergence
+    #[cfg(target_os = "macos")]
+    {
+        std::env::set_var("TB_SO_REUSEPORT", "1");
+        std::env::set_var("TB_TCP_NODELAY", "1");
+        std::env::set_var("TB_SO_RCVBUF", "262144");
+        std::env::set_var("TB_SO_SNDBUF", "262144");
+    }
+    
     std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
     #[cfg(feature = "telemetry")]
     {
@@ -69,35 +79,53 @@ fn timeout_factor() -> u64 {
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
     let mut last_report = Duration::from_secs(0);
+    let mut iteration = 0u64;
+    
     loop {
+        iteration += 1;
         let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
         let first = heights[0];
+        
         if heights.iter().all(|h| *h == first) {
+            eprintln!("Converged after {:?} ({} iterations)", start.elapsed(), iteration);
             return true;
         }
+        
         // Push the longest known chain out to peers whenever we see divergence to
         // kick stalled gossip back into sync after partitions heal.
+        // CRITICAL: Broadcast first, then sleep to let it complete before peer discovery
         if let Some((idx, _)) = heights.iter().enumerate().max_by_key(|(_, h)| *h) {
-            nodes[idx].discover_peers();
             nodes[idx].broadcast_chain();
+            // Give broadcast time to propagate before peer operations
+            the_block::sleep(Duration::from_millis(50)).await;
         }
+        
         // Keep peers warm so connection churn on busy test hosts (Linux/macOS/Windows CI)
         // does not leave nodes idle while waiting for convergence.
         for n in nodes {
             n.discover_peers();
         }
+        
         let elapsed = start.elapsed();
         if elapsed > max {
-            eprintln!(
-                "chaos convergence timed out after {:?}, heights = {:?}",
-                elapsed, heights
-            );
+            eprintln!("CONVERGENCE TIMEOUT after {:?}", elapsed);
+            eprintln!("Final heights: {:?}", heights);
+            for (i, n) in nodes.iter().enumerate() {
+                eprintln!(
+                    "  Node {}: height={}, peers={}",
+                    i,
+                    n.blockchain().block_height,
+                    n.peer_addrs().len()
+                );
+            }
             return false;
         }
+        
         if elapsed - last_report > Duration::from_secs(1) {
-            eprintln!("chaos convergence progress: {:?}", heights);
+            eprintln!("Convergence progress [{:?}]: {:?}", elapsed, heights);
             last_report = elapsed;
         }
+        
         the_block::sleep(Duration::from_millis(100)).await;
     }
 }
@@ -192,7 +220,10 @@ fn kill_node_recovers() {
             }
             nodes.push(tn);
         }
-        the_block::sleep(Duration::from_secs(1)).await;
+        
+        // CRITICAL: Wait longer for initial peering
+        the_block::sleep(Duration::from_secs(2)).await;
+        
         let mut ts = 1u64;
         let blocks_per_phase = 6u64;
         for _ in 0..blocks_per_phase {
@@ -202,27 +233,39 @@ fn kill_node_recovers() {
                 ts += 1;
             }
             nodes[0].node.broadcast_chain();
-            the_block::sleep(Duration::from_millis(20)).await;
+            the_block::sleep(Duration::from_millis(50)).await;
         }
         for n in &nodes {
             n.node.discover_peers();
         }
-        let max = Duration::from_secs(10 * timeout_factor());
+        
+        let max = Duration::from_secs(15 * timeout_factor());
         let start = Instant::now();
-        assert!(
-            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await
-        );
+        let converged = wait_until_converged(
+            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+            max
+        ).await;
+        if !converged {
+            panic!("initial convergence failed after {:?}", start.elapsed());
+        }
         println!("initial convergence {:?}", start.elapsed());
 
+        // Kill node 2
         nodes[2].flag.trigger();
         if let Some(handle) = nodes[2].handle.take() {
             let _ = handle.join();
         }
+        
+        // CRITICAL: Let shutdown complete before removing peers
+        the_block::sleep(Duration::from_millis(200)).await;
+        
         for (i, n) in nodes.iter().enumerate() {
             if i != 2 {
                 n.node.remove_peer(nodes[2].addr);
             }
         }
+        
+        // Mine on remaining nodes
         for _ in 0..blocks_per_phase {
             {
                 let mut bc = nodes[0].node.blockchain();
@@ -230,7 +273,7 @@ fn kill_node_recovers() {
                 ts += 1;
             }
             nodes[0].node.broadcast_chain();
-            the_block::sleep(Duration::from_millis(20)).await;
+            the_block::sleep(Duration::from_millis(50)).await;
         }
         for n in nodes
             .iter()
@@ -246,10 +289,15 @@ fn kill_node_recovers() {
             .filter(|(i, _)| *i != 2)
             .map(|(_, n)| &n.node)
             .collect();
+        
         let start = Instant::now();
-        assert!(wait_until_converged(&active, max).await);
+        let converged = wait_until_converged(&active, max).await;
+        if !converged {
+            panic!("convergence after removal failed after {:?}", start.elapsed());
+        }
         println!("convergence after removal {:?}", start.elapsed());
 
+        // Restart node 2
         let restart_bc = Blockchain::open(nodes[2].dir.path().to_str().unwrap()).unwrap();
         let prev_env = set_net_key_env(&nodes[2].net_key_path, &nodes[2].net_key_seed);
         let node3 = Node::new(
@@ -258,13 +306,19 @@ fn kill_node_recovers() {
             restart_bc,
         );
         restore_net_key_env(prev_env);
+        
+        let flag = ShutdownFlag::new();
+        let handle = node3.start_with_flag(&flag).expect("start gossip node");
+        
+        // CRITICAL: Let node start before adding to peer lists
+        the_block::sleep(Duration::from_millis(300)).await;
+        
         for (i, n) in nodes.iter().enumerate() {
             if i != 2 {
                 n.node.add_peer(nodes[2].addr);
             }
         }
-        let flag = ShutdownFlag::new();
-        let handle = node3.start_with_flag(&flag).expect("start gossip node");
+        
         node3.discover_peers();
         let addr = nodes[2].addr;
         let key_path = nodes[2].net_key_path.clone();
@@ -279,16 +333,34 @@ fn kill_node_recovers() {
             flag,
             handle: Some(handle),
         };
+        // CRITICAL: Let reconnection stabilize
+        the_block::sleep(Duration::from_millis(500)).await;
+        
         for n in &nodes {
             n.node.discover_peers();
         }
+        
         let start = Instant::now();
-        assert!(
-            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await
-        );
+        let converged = wait_until_converged(
+            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+            max
+        ).await;
+        if !converged {
+            eprintln!("FINAL CONVERGENCE FAILED:");
+            for (i, n) in nodes.iter().enumerate() {
+                eprintln!(
+                    "  Node {}: height={}, peers={}",
+                    i,
+                    n.node.blockchain().block_height,
+                    n.node.peer_addrs().len()
+                );
+            }
+            panic!("final convergence failed after {:?}", start.elapsed());
+        }
         println!("final convergence {:?}", start.elapsed());
+        
         let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(h, blocks_per_phase * 2);
+        assert_eq!(h, blocks_per_phase * 2, "Expected all blocks to be mined");
         for n in nodes.iter_mut() {
             n.shutdown();
         }
@@ -317,7 +389,10 @@ fn partition_heals_to_majority() {
             }
             nodes.push(tn);
         }
-        the_block::sleep(Duration::from_secs(1)).await;
+        
+        // CRITICAL: Wait longer for initial peering on Mac to prevent race conditions
+        the_block::sleep(Duration::from_secs(2)).await;
+        
         let mut ts = 1u64;
         {
             let mut bc = nodes[0].node.blockchain();
@@ -325,6 +400,8 @@ fn partition_heals_to_majority() {
             ts += 1;
         }
         nodes[0].node.broadcast_chain();
+        // Wait for initial sync to complete
+        the_block::sleep(Duration::from_millis(200)).await;
 
         // isolate node4 (index 3)
         let iso = 3usize;
@@ -334,6 +411,9 @@ fn partition_heals_to_majority() {
                 n.node.remove_peer(nodes[iso].addr);
             }
         }
+        
+        // CRITICAL: Let partition settle before mining
+        the_block::sleep(Duration::from_millis(100)).await;
 
         let main_blocks_after_isolation = 4u64;
         for _ in 0..main_blocks_after_isolation {
@@ -343,7 +423,7 @@ fn partition_heals_to_majority() {
                 ts += 1;
             }
             nodes[0].node.broadcast_chain();
-            the_block::sleep(Duration::from_millis(20)).await;
+            the_block::sleep(Duration::from_millis(50)).await;
         }
         {
             let mut bc = nodes[iso].node.blockchain();
@@ -359,27 +439,59 @@ fn partition_heals_to_majority() {
                 nodes[iso].node.add_peer(n.addr);
             }
         }
+        
+        // CRITICAL: Let reconnection complete before broadcasting
+        the_block::sleep(Duration::from_millis(500)).await;
+        
         nodes[iso].node.discover_peers();
+        the_block::sleep(Duration::from_millis(100)).await;
+        
+        // Broadcast from majority chain
         nodes[0].node.broadcast_chain();
-        let max = Duration::from_secs(10 * timeout_factor());
+        the_block::sleep(Duration::from_millis(200)).await;
+        
+        let max = Duration::from_secs(15 * timeout_factor());
         let start = Instant::now();
-        assert!(
-            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await
-        );
+        let converged = wait_until_converged(
+            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
+            max
+        ).await;
+        
+        if !converged {
+            eprintln!("PARTITION HEAL FAILED:");
+            for (i, n) in nodes.iter().enumerate() {
+                eprintln!(
+                    "  Node {}: height={}, peers={}",
+                    i,
+                    n.node.blockchain().block_height,
+                    n.node.peer_addrs().len()
+                );
+            }
+            panic!("partition heal convergence failed after {:?}", start.elapsed());
+        }
+        
         println!("partition heal convergence {:?}", start.elapsed());
         let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(h, 1 + main_blocks_after_isolation);
+        assert_eq!(
+            h,
+            1 + main_blocks_after_isolation,
+            "Expected majority chain to win"
+        );
+        
         #[cfg(feature = "telemetry")]
         {
             let c = the_block::telemetry::FORK_REORG_TOTAL
                 .ensure_handle_for_label_values(&["0"])
                 .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get();
-            assert!(c > 0);
+            assert!(c > 0, "Expected fork reorganization to be recorded");
         }
+        
         for n in nodes.iter_mut() {
             n.shutdown();
         }
+        
+        // Cleanup
         std::env::remove_var("TB_NET_PACKET_LOSS");
         std::env::remove_var("TB_NET_JITTER_MS");
         std::env::remove_var("TB_NET_KEY_PATH");

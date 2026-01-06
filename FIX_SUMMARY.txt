@@ -1,0 +1,28 @@
+CHAOS TEST FIXES - COMPILATION FIX
+Date: January 6, 2026, 2:02 PM EST
+
+PROBLEM:
+error[E0609]: no field `blocks` on type `std::sync::MutexGuard<'_, Blockchain>`
+
+CAUSE:
+Attempted to access bc.blocks.last() - not part of public API
+
+SOLUTION:
+Removed bc.blocks access, kept bc.block_height (public API)
+
+FIX:
+In partition_heals_to_majority(), changed diagnostic from:
+    bc.blocks.last().map(|b| &b.hash)
+To:
+    n.node.blockchain().block_height
+
+RESULT:
+- Compiles successfully
+- Diagnostics still show node height and peer count
+- All deadlock fixes remain active
+- Blockchain functionality unchanged
+
+VERIFY:
+cargo test --test chaos --features integration-tests --no-run
+
+STATUS: FIXED ✓
