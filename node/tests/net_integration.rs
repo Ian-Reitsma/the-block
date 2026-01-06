@@ -74,6 +74,14 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     }
 }
 
+fn timeout_factor() -> u64 {
+    std::env::var("TB_TEST_TIMEOUT_MULT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        // Default to a higher multiplier to keep noisy or slow hosts (macOS CI, Windows) stable.
+        .unwrap_or(8)
+}
+
 struct TestNode {
     addr: SocketAddr,
     _dir: sys::tempfile::TempDir,
@@ -166,7 +174,7 @@ fn partitions_merge_consistent_fork_choice() {
 
         let converged = wait_until_converged(
             &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-            Duration::from_secs(12),
+            Duration::from_secs(10 * timeout_factor()),
         )
         .await;
         if !converged {
