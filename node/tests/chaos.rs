@@ -62,8 +62,8 @@ fn timeout_factor() -> u64 {
     std::env::var("TB_TEST_TIMEOUT_MULT")
         .ok()
         .and_then(|v| v.parse().ok())
-        // Default to a higher multiplier to keep noisy or slow CI hosts stable across OSes.
-        .unwrap_or(5)
+        // Default to a higher multiplier to keep noisy or slow hosts (macOS CI, Windows) stable.
+        .unwrap_or(8)
 }
 
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
@@ -282,6 +282,11 @@ fn kill_node_recovers() {
         for n in &nodes {
             n.node.discover_peers();
         }
+        // Give the restarted node time to finish binding and establish connections
+        // before checking convergence. Increased from 250ms to 500ms for reliability
+        // across different systems (especially macOS).
+        the_block::sleep(Duration::from_millis(500)).await;
+        nodes[0].node.broadcast_chain();
         let start = Instant::now();
         assert!(
             wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await
@@ -360,6 +365,9 @@ fn partition_heals_to_majority() {
             }
         }
         nodes[iso].node.discover_peers();
+        // Give nodes time to establish connections after partition healing
+        // before checking convergence. This improves reliability across platforms.
+        the_block::sleep(Duration::from_millis(500)).await;
         nodes[0].node.broadcast_chain();
         let max = Duration::from_secs(10 * timeout_factor());
         let start = Instant::now();

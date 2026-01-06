@@ -1645,10 +1645,16 @@ impl Node {
         let relay = std::sync::Arc::new(Relay::default());
         set_gossip_relay(std::sync::Arc::clone(&relay));
         let peers = PeerSet::new_with_key_and_addr(peers, key.clone(), Some(addr));
+        // Only include cert_fingerprint in messages when actually using QUIC transport.
+        // When quic_addr is None, we're using TCP and shouldn't require fingerprint validation.
         #[cfg(feature = "quic")]
-        let local_fingerprint = quic_advert
-            .as_ref()
-            .map(|advert| Bytes::from(advert.fingerprint.to_vec()));
+        let local_fingerprint = if quic_addr.is_some() {
+            quic_advert
+                .as_ref()
+                .map(|advert| Bytes::from(advert.fingerprint.to_vec()))
+        } else {
+            None
+        };
         #[cfg(not(feature = "quic"))]
         let local_fingerprint = None;
         peers.set_cert_fingerprint(local_fingerprint);

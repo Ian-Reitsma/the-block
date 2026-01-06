@@ -69,6 +69,28 @@ impl HandleRegistry {
         }
     }
 
+    /// Produce the canonical registration message hash for a handle/pubkey/nonce tuple.
+    /// This mirrors the logic used during verification so external signers and tests
+    /// can generate signatures without duplicating normalization rules.
+    ///
+    /// Note: This function does NOT check if the handle is reserved - that check
+    /// happens in register_handle(). This allows external signers to create signatures
+    /// for any handle, and the reservation check is enforced only during registration.
+    pub fn registration_message(
+        handle: &str,
+        pubkey: &[u8],
+        nonce: u64,
+    ) -> Result<[u8; 32], HandleError> {
+        let normalized = Self::normalize(handle).ok_or(HandleError::Reserved)?;
+        let handle_norm = normalized.value.clone();
+        let mut h = Hasher::new();
+        h.update(b"register:");
+        h.update(handle_norm.as_bytes());
+        h.update(pubkey);
+        h.update(&nonce.to_le_bytes());
+        Ok(*h.finalize().as_bytes())
+    }
+
     fn normalize(handle: &str) -> Option<NormalizedHandle> {
         let normalized = Normalizer::default().nfkc(handle);
         let trimmed = normalized.as_str().trim();
@@ -110,6 +132,7 @@ impl HandleRegistry {
         sig: &[u8],
         nonce: u64,
     ) -> Result<RegistrationOutcome, HandleError> {
+        let msg = Self::registration_message(handle, pubkey, nonce)?;
         let normalized = Self::normalize(handle).ok_or(HandleError::Reserved)?;
         if Self::reserved(normalized.value()) {
             return Err(HandleError::Reserved);
@@ -131,18 +154,11 @@ impl HandleRegistry {
                 }
             }
         }
-        // compute message hash
-        let mut h = Hasher::new();
-        h.update(b"register:");
-        h.update(handle_norm.as_bytes());
-        h.update(pubkey);
-        h.update(&nonce.to_le_bytes());
-        let msg = h.finalize();
         // verify
         let vk = VerifyingKey::from_bytes(&crate::to_array_32(pubkey).ok_or(HandleError::BadSig)?)
             .map_err(|_| HandleError::BadSig)?;
         let sig = Signature::from_bytes(&crate::to_array_64(sig).ok_or(HandleError::BadSig)?);
-        vk.verify(msg.as_bytes(), &sig)
+        vk.verify(&msg, &sig)
             .map_err(|_| HandleError::BadSig)?;
         // handle duplication
         let key = Self::handle_key(&handle_norm);
