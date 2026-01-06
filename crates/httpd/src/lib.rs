@@ -565,7 +565,7 @@ impl TlsStream {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "tls handshake timed out",
-                ))
+                ));
             }
         };
         if let Some(client) = outcome.client_key {

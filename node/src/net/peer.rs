@@ -31,12 +31,12 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+#[cfg(feature = "integration-tests")]
+use std::sync::OnceLock;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex as StdMutex,
 };
-#[cfg(feature = "integration-tests")]
-use std::sync::{OnceLock};
 use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 use sys::fs::{FileLockExt, O_NOFOLLOW};
@@ -249,14 +249,21 @@ fn send_msg_with_backoff(addr: SocketAddr, msg: Arc<Message>, attempts: usize) {
                 Ok(()) => {
                     #[cfg(feature = "integration-tests")]
                     if matches!(msg.body, Payload::Chain(_)) {
-                        eprintln!("send_msg_with_backoff: SUCCESS to {} attempt {}", addr, attempt);
+                        eprintln!(
+                            "send_msg_with_backoff: SUCCESS to {} attempt {}",
+                            addr, attempt
+                        );
                     }
                     return;
                 }
-                Err(e) => {
+                Err(e) =>
+                {
                     #[cfg(feature = "integration-tests")]
                     if matches!(msg.body, Payload::Chain(_)) {
-                        eprintln!("send_msg_with_backoff: FAILED to {} attempt {} err={}", addr, attempt, e);
+                        eprintln!(
+                            "send_msg_with_backoff: FAILED to {} attempt {} err={}",
+                            addr, attempt, e
+                        );
                     }
                 }
             }
@@ -429,7 +436,9 @@ impl PeerSet {
                     let chain_len = chain.len();
                     send_chain_snapshot(&peers, None, chain);
                     // Update last_broadcast_len after successful broadcast
-                    peers.last_broadcast_len.fetch_max(chain_len, Ordering::Release);
+                    peers
+                        .last_broadcast_len
+                        .fetch_max(chain_len, Ordering::Release);
                 }
                 if peers.broadcast_pending.guard().is_none() {
                     peers.broadcast_active.store(false, Ordering::Release);
@@ -471,7 +480,9 @@ impl PeerSet {
         std::thread::spawn(move || {
             send_chain_snapshot(&peers, None, chain);
             // Update last_broadcast_len after successful broadcast
-            peers.last_broadcast_len.fetch_max(chain_len, Ordering::Release);
+            peers
+                .last_broadcast_len
+                .fetch_max(chain_len, Ordering::Release);
         });
     }
 
@@ -551,11 +562,7 @@ impl PeerSet {
     /// Record the mapping from address to peer id and allocate metrics entry.
     fn map_addr(&self, addr: SocketAddr, pk: [u8; 32]) {
         #[cfg(feature = "integration-tests")]
-        eprintln!(
-            "map_addr: peer={} addr={}",
-            overlay_peer_label(&pk),
-            addr
-        );
+        eprintln!("map_addr: peer={} addr={}", overlay_peer_label(&pk), addr);
         {
             let mut m = ADDR_MAP.guard();
             m.insert(addr, pk);
@@ -610,8 +617,7 @@ impl PeerSet {
                 }
             }
         }
-        let map = RECENT_HANDSHAKES_BY_KEY
-            .get_or_init(|| Mutex::new(HashMap::new()));
+        let map = RECENT_HANDSHAKES_BY_KEY.get_or_init(|| Mutex::new(HashMap::new()));
         let mut guard = map.lock().unwrap();
         match guard.entry((*peer_key, kind)) {
             std::collections::hash_map::Entry::Occupied(mut e) => {
@@ -847,8 +853,14 @@ impl PeerSet {
         }
         #[cfg(feature = "integration-tests")]
         match &msg.body {
-            Payload::ChainRequest(_) => eprintln!("handle_message: ENTER ChainRequest from {:?}", addr),
-            Payload::Chain(c) => eprintln!("handle_message: ENTER Chain(len={}) from {:?}", c.len(), addr),
+            Payload::ChainRequest(_) => {
+                eprintln!("handle_message: ENTER ChainRequest from {:?}", addr)
+            }
+            Payload::Chain(c) => eprintln!(
+                "handle_message: ENTER Chain(len={}) from {:?}",
+                c.len(),
+                addr
+            ),
             _ => {}
         }
         let bytes = match encode_payload(&msg.body) {
@@ -876,7 +888,10 @@ impl PeerSet {
         if pk.verify(&bytes, &sig).is_err() {
             #[cfg(feature = "integration-tests")]
             if matches!(msg.body, Payload::Chain(_)) {
-                eprintln!("handle_message: signature verify FAILED for Chain from {:?}", addr);
+                eprintln!(
+                    "handle_message: signature verify FAILED for Chain from {:?}",
+                    addr
+                );
             }
             return;
         }
@@ -1114,8 +1129,7 @@ impl PeerSet {
                 let mut quic_error = None;
                 #[cfg(feature = "quic")]
                 {
-                    let needs_quic_cert =
-                        hs.transport == Transport::Quic || hs.quic_addr.is_some();
+                    let needs_quic_cert = hs.transport == Transport::Quic || hs.quic_addr.is_some();
                     if hs.quic_cert.is_some() {
                         match validate_quic_certificate(&peer_key, &hs) {
                             Ok(v) => validated_cert = v,
@@ -1196,7 +1210,8 @@ impl PeerSet {
                         if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
                             self.set_quic(peer_addr, qaddr, cert.clone());
                         }
-                        if let (Some(cert), Some(vc)) = (hs.quic_cert.clone(), validated_cert.as_ref())
+                        if let (Some(cert), Some(vc)) =
+                            (hs.quic_cert.clone(), validated_cert.as_ref())
                         {
                             record_peer_certificate(
                                 &peer_key,
@@ -1422,24 +1437,25 @@ impl PeerSet {
                     bc.params.clone()
                 };
                 loop {
-                    let replayed =
-                        match crate::Blockchain::validate_chain_with_params(&new_chain, &params) {
-                            Ok(state) => state,
-                            Err(reason) => {
-                                #[cfg(feature = "integration-tests")]
-                                eprintln!(
-                                    "Chain handler: VALIDATION FAILED local={:?} new_len={} reason={}",
-                                    self.local_addr, new_len, reason
-                                );
-                                diagnostics::tracing::warn!(
+                    let replayed = match crate::Blockchain::validate_chain_with_params(
+                        &new_chain, &params,
+                    ) {
+                        Ok(state) => state,
+                        Err(reason) => {
+                            #[cfg(feature = "integration-tests")]
+                            eprintln!(
+                                "Chain handler: VALIDATION FAILED local={:?} new_len={} reason={}",
+                                self.local_addr, new_len, reason
+                            );
+                            diagnostics::tracing::warn!(
                                 target = "net",
                                 peer = %overlay_peer_label(&peer_key),
                                 reason,
                                 "chain_validation_failed"
                             );
-                                return;
-                            }
-                        };
+                            return;
+                        }
+                    };
                     let import_state = match crate::Blockchain::build_chain_import_state(
                         new_chain.clone(),
                         &params,

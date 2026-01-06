@@ -848,7 +848,13 @@ impl ReactorInner {
                 entry.interest = new_interest;
                 should_update = true;
             }
-            (entry.fd, prev_interest, new_interest, should_update, decremented)
+            (
+                entry.fd,
+                prev_interest,
+                new_interest,
+                should_update,
+                decremented,
+            )
         };
 
         if should_update {
@@ -927,8 +933,7 @@ impl IoState {
     }
 
     fn insert(&mut self, token: Token, fd: ReactorRaw, interest: ReactorInterest) {
-        self.entries
-            .insert(token.0, IoEntry::new(fd, interest));
+        self.entries.insert(token.0, IoEntry::new(fd, interest));
         self.token_by_fd.insert(fd, token);
     }
 

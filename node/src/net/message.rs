@@ -274,10 +274,7 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
     }
 }
 
-fn write_chain_request(
-    writer: &mut BinaryWriter,
-    request: &ChainRequest,
-) -> EncodeResult<()> {
+fn write_chain_request(writer: &mut BinaryWriter, request: &ChainRequest) -> EncodeResult<()> {
     writer.write_struct(|struct_writer| {
         struct_writer.field_u64("from_height", request.from_height);
     });

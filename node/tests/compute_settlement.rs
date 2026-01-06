@@ -45,11 +45,10 @@ fn audit_records_split_and_refunds() {
 fn submit_anchor_appends_audit_log() {
     teardown();
     let dir = tempdir().expect("tempdir");
-    let base = dir.path().to_path_buf();
-    Settlement::init(base.to_str().unwrap(), SettleMode::DryRun);
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     Settlement::submit_anchor(b"settle-anchor");
+    let audit_path = Settlement::storage_path().join("le_audit.log");
     Settlement::shutdown();
-    let audit_path = base.join("le_audit.log");
     let contents = fs::read_to_string(audit_path).expect("audit log");
     assert!(contents.contains("compute_anchor"));
     teardown();

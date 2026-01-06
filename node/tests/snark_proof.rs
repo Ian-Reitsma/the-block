@@ -1,10 +1,10 @@
 #![cfg(feature = "integration-tests")]
+use sys::tempfile::tempdir;
 use the_block::compute_market::{
     scheduler,
     settlement::{SettleMode, Settlement},
     snark, ExecutionReceipt, Job, Market, Offer, Workload,
 };
-use sys::tempfile::tempdir;
 
 #[test]
 fn invalid_proof_rejected() {

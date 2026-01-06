@@ -192,7 +192,8 @@ impl UdpSocket {
         let reactor = runtime.reactor();
         let udp = net::bind_udp_socket(addr)?;
         let fd = reactor_raw_of(&udp);
-        let registration = IoRegistration::new(Arc::clone(&reactor), fd, ReactorInterest::READABLE)?;
+        let registration =
+            IoRegistration::new(Arc::clone(&reactor), fd, ReactorInterest::READABLE)?;
         Ok(Self {
             inner: udp,
             registration,

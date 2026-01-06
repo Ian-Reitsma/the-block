@@ -128,8 +128,8 @@ fn state_stream_upgrade_requires_headers() -> Result<()> {
         expect_timeout_with(client.write_all(request.as_bytes()), "write")
             .await
             .expect("write handshake");
-        let headers = expect_timeout_with(read_response_headers(&mut client), "read headers")
-            .await?;
+        let headers =
+            expect_timeout_with(read_response_headers(&mut client), "read headers").await?;
         assert!(
             headers.starts_with("HTTP/1.1 101"),
             "unexpected response: {headers}"
@@ -157,8 +157,8 @@ fn missing_upgrade_header_is_rejected() -> Result<()> {
         expect_timeout_with(client.write_all(request.as_bytes()), "write")
             .await
             .expect("write handshake");
-        let headers = expect_timeout_with(read_response_headers(&mut client), "read headers")
-            .await?;
+        let headers =
+            expect_timeout_with(read_response_headers(&mut client), "read headers").await?;
         assert!(
             headers.starts_with("HTTP/1.1 400"),
             "unexpected response: {headers}"

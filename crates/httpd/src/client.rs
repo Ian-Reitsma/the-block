@@ -621,16 +621,16 @@ async fn execute_http_blocking(
         let socket = url
             .socket_addr()
             .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
-        let addr =
-            resolve_addr(&socket).ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
+        let addr = resolve_addr(&socket)
+            .ok_or_else(|| ClientError::InvalidResponse("unresolvable host"))?;
         let connect_timeout = config.connect_timeout;
         let request_timeout = timeout_override.unwrap_or(config.request_timeout);
         let read_limit = timeout_override
             .or(config.read_timeout)
             .unwrap_or(request_timeout);
 
-        let mut stream = connect_blocking_with_retry(&addr, connect_timeout)
-            .map_err(ClientError::from)?;
+        let mut stream =
+            connect_blocking_with_retry(&addr, connect_timeout).map_err(ClientError::from)?;
         let _ = stream.set_nodelay(true);
         let _ = stream.set_read_timeout(Some(read_limit));
         let _ = stream.set_write_timeout(Some(request_timeout));

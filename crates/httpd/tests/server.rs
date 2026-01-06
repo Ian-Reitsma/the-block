@@ -17,8 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use support::{LOCAL_BIND_ADDR, bind_runtime_listener};
 
-const SECURE_REQUEST: &str =
-    "GET /secure HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
+const SECURE_REQUEST: &str = "GET /secure HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n";
 
 /// RAII guard that ensures spawned server tasks are aborted and fully terminated
 /// even if the test panics. This prevents leftover tasks from polluting the global
@@ -220,9 +219,7 @@ impl TlsClient {
             buffer.extend_from_slice(&chunk[..read]);
         }
     }
-
 }
-
 
 #[test]
 fn request_builder_defaults_host_header() {
@@ -668,7 +665,7 @@ async fn perform_tls_request(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!("unsupported method: {method_raw}"),
-            ))
+            ));
         }
     };
     let (connector, _client_identity_dir) = build_tls_connector(identity, client_signing)?;

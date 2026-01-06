@@ -84,9 +84,9 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 #[cfg(feature = "integration-tests")]
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 use sys::paths;
@@ -122,14 +122,13 @@ pub use peer::{
     load_peer_metrics, p2p_chain_sync_interval_ms, p2p_max_bytes_per_sec, p2p_max_per_sec,
     peer_reputation_decay, peer_stats, peer_stats_all, peer_stats_map, persist_peer_metrics,
     publish_telemetry_summary, recent_handshake_failures, record_request, reset_peer_metrics,
-    rotate_peer_key,
-    set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
+    rotate_peer_key, set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
     set_p2p_chain_sync_interval_ms, set_p2p_max_bytes_per_sec, set_p2p_max_per_sec,
     set_p2p_rate_window_secs, set_peer_metrics_compress, set_peer_metrics_export,
     set_peer_metrics_export_quota, set_peer_metrics_path, set_peer_metrics_retention,
     set_peer_metrics_sample_rate, set_peer_reputation_decay, set_track_drop_reasons,
-    set_track_handshake_fail, throttle_peer,
-    DropReason, HandshakeError, PeerMetrics, PeerReputation, PeerSet, PeerStat,
+    set_track_handshake_fail, throttle_peer, DropReason, HandshakeError, PeerMetrics,
+    PeerReputation, PeerSet, PeerStat,
 };
 
 pub use peer::simulate_handshake_fail;
@@ -1792,8 +1791,7 @@ impl Node {
                     #[cfg(feature = "integration-tests")]
                     {
                         let now = Instant::now();
-                        let rate = ACCEPT_RATE
-                            .get_or_init(|| Mutex::new(HashMap::new()));
+                        let rate = ACCEPT_RATE.get_or_init(|| Mutex::new(HashMap::new()));
                         let mut guard = rate.lock().unwrap();
                         let entry = guard.entry(addr).or_insert((now, 0));
                         if now.duration_since(entry.0) > Duration::from_secs(1) {
@@ -1864,10 +1862,14 @@ impl Node {
                                         #[cfg(feature = "integration-tests")]
                                         {
                                             let payload_name = match &msg.body {
-                                                Payload::Chain(c) => format!("Chain(len={})", c.len()),
+                                                Payload::Chain(c) => {
+                                                    format!("Chain(len={})", c.len())
+                                                }
                                                 Payload::Handshake(_) => "Handshake".to_string(),
                                                 Payload::Hello(_) => "Hello".to_string(),
-                                                Payload::ChainRequest(_) => "ChainRequest".to_string(),
+                                                Payload::ChainRequest(_) => {
+                                                    "ChainRequest".to_string()
+                                                }
                                                 _ => "Other".to_string(),
                                             };
                                             match local {
@@ -1885,7 +1887,10 @@ impl Node {
                                     }
                                     Err(err) => {
                                         #[cfg(feature = "integration-tests")]
-                                        eprintln!("listener: DECODE FAILED from {:?}: {:?}", addr, err);
+                                        eprintln!(
+                                            "listener: DECODE FAILED from {:?}: {:?}",
+                                            addr, err
+                                        );
                                         diagnostics::tracing::warn!(
                                             target = "net",
                                             peer = ?addr,
@@ -1902,10 +1907,9 @@ impl Node {
                                         "listener: READ ERROR local {} from {:?}: {}",
                                         local, addr, err
                                     ),
-                                    None => eprintln!(
-                                        "listener: READ ERROR from {:?}: {}",
-                                        addr, err
-                                    ),
+                                    None => {
+                                        eprintln!("listener: READ ERROR from {:?}: {}", addr, err)
+                                    }
                                 }
                                 diagnostics::tracing::warn!(
                                     target = "net",
@@ -2130,7 +2134,12 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     if matches!(msg.body, Payload::Chain(_)) {
         match stream.local_addr() {
             Ok(local) => {
-                eprintln!("send_msg: CHAIN {} bytes {} -> {}", bytes.len(), local, addr);
+                eprintln!(
+                    "send_msg: CHAIN {} bytes {} -> {}",
+                    bytes.len(),
+                    local,
+                    addr
+                );
             }
             Err(_) => eprintln!("send_msg: CHAIN {} bytes to {}", bytes.len(), addr),
         }

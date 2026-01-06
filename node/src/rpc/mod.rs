@@ -3151,9 +3151,7 @@ pub async fn run_rpc_server_with_market(
         identity_dir.join("identity_db")
     };
     let handles = Arc::new(Mutex::new(HandleRegistry::open(
-        handle_path
-            .to_str()
-            .unwrap_or_else(|| "identity_db"),
+        handle_path.to_str().unwrap_or_else(|| "identity_db"),
     )));
     let did_path = std::env::var("TB_DID_DB_PATH")
         .map(PathBuf::from)

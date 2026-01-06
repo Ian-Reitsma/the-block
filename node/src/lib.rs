@@ -5696,8 +5696,7 @@ impl Blockchain {
         let mut accounts: HashMap<String, Account> = HashMap::new();
         let mut emission = 0u64;
         let mut block_height = 0u64;
-        let mut recent_timestamps: VecDeque<u64> =
-            VecDeque::with_capacity(DIFFICULTY_WINDOW);
+        let mut recent_timestamps: VecDeque<u64> = VecDeque::with_capacity(DIFFICULTY_WINDOW);
         let mut reorg_hashes: Vec<String> = Vec::with_capacity(new_chain.len());
 
         for block in &new_chain {

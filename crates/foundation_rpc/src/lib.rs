@@ -229,7 +229,11 @@ impl Serialize for Response {
 
         let mut state = serializer.serialize_struct("Response", 3)?;
         match self {
-            Response::Result { version, result, id } => {
+            Response::Result {
+                version,
+                result,
+                id,
+            } => {
                 state.serialize_field("jsonrpc", version)?;
                 state.serialize_field("result", result)?;
                 state.serialize_field("id", id)?;

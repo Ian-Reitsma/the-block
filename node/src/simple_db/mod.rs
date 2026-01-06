@@ -252,7 +252,8 @@ impl Engine {
             EngineKind::RocksDb => {
                 #[cfg(all(not(feature = "lightweight-integration"), feature = "storage-rocksdb"))]
                 {
-                    Ok(Engine::RocksDb(RocksDbEngine::default()))
+                    let dir = Self::unique_temp_dir("rocksdb")?;
+                    RocksDbEngine::open(&dir.to_string_lossy()).map(Engine::RocksDb)
                 }
                 #[cfg(not(all(
                     not(feature = "lightweight-integration"),
@@ -678,7 +679,10 @@ impl Default for SimpleDb {
 }
 
 fn to_io_error(err: StorageError) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, err.to_string())
+    match err {
+        StorageError::Io(inner) => inner,
+        StorageError::Backend(msg) => io::Error::new(io::ErrorKind::Other, msg),
+    }
 }
 
 #[cfg(feature = "telemetry")]

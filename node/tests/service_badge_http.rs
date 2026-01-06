@@ -4,10 +4,7 @@ use foundation_serialization::json::Value;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 
-use runtime::{
-    io::BufferedTcpStream,
-    net::TcpStream,
-};
+use runtime::{io::BufferedTcpStream, net::TcpStream};
 use std::net::SocketAddr;
 use util::timeout::expect_timeout;
 

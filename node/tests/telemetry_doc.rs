@@ -3,8 +3,7 @@ use std::collections::HashSet;
 
 #[test]
 fn telemetry_fields_documented() {
-    let docs_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../docs/telemetry.md");
+    let docs_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/telemetry.md");
     let docs = std::fs::read_to_string(&docs_path).expect("read docs");
     let expected: HashSet<&str> = [
         "subsystem",

@@ -3,6 +3,7 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::compute_market::snark::ProofBundle;
@@ -139,6 +140,7 @@ struct SettlementState {
     base: PathBuf,
     db_path: PathBuf,
     mode: SettleMode,
+    workspace_id: Option<String>,
     metadata: Metadata,
     ledger: AccountLedger,
     audit: VecDeque<AuditRecord>,
@@ -157,7 +159,13 @@ impl SettlementState {
         Ok(())
     }
 
-    fn new(base: PathBuf, mut mode: SettleMode, db_path: PathBuf, db: SimpleDb) -> Self {
+    fn new(
+        base: PathBuf,
+        workspace_id: Option<String>,
+        mut mode: SettleMode,
+        db_path: PathBuf,
+        db: SimpleDb,
+    ) -> Self {
         let ledger = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER, AccountLedger::new);
         let stored_mode = load_or_default::<SettleMode, _>(&db, KEY_MODE, || mode);
         mode = stored_mode;
@@ -173,6 +181,7 @@ impl SettlementState {
             db_path,
             db,
             mode,
+            workspace_id,
             metadata,
             ledger,
             audit,
@@ -256,7 +265,7 @@ impl SettlementState {
     fn persist_all(&mut self) {
         self.refresh_sla_metrics();
         let mut attempts = 0;
-        let max_attempts = 5;
+        let max_attempts = 7;
         loop {
             let mut batch = self.db.batch();
             let mut encode = || -> io::Result<()> {
@@ -275,11 +284,29 @@ impl SettlementState {
             match encode().and_then(|_| self.db.write_batch(batch)) {
                 Ok(_) => break,
                 Err(err) => {
-                    let is_missing = err.kind() == io::ErrorKind::NotFound
-                        || err.raw_os_error() == Some(2);
+                    let is_missing =
+                        err.kind() == io::ErrorKind::NotFound || err.raw_os_error() == Some(2);
                     if is_missing && attempts + 1 < max_attempts {
-                        // The backing directory was removed out-of-band; recreate it and retry.
-                        let _ = fs::create_dir_all(&self.base);
+                        let fallback = if let Some(id) = &self.workspace_id {
+                            settlement_workspace_root().join(format!("{id}-retry-{}", attempts + 1))
+                        } else {
+                            let base_name = self
+                                .base
+                                .file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| "settlement".to_string());
+                            self.base
+                                .parent()
+                                .map(|parent| {
+                                    parent.join(format!("{base_name}-retry-{}", attempts + 1))
+                                })
+                                .unwrap_or_else(|| {
+                                    self.base.join(format!("retry-{}", attempts + 1))
+                                })
+                        };
+                        let _ = fs::create_dir_all(&fallback);
+                        self.base = fallback;
+                        self.db_path = self.base.join("compute_settlement.db");
                         if let Some(parent) = self.db_path.parent() {
                             let _ = fs::create_dir_all(parent);
                         }
@@ -529,6 +556,32 @@ fn with_state<R>(f: impl FnOnce(&SettlementState) -> R) -> R {
     f(state)
 }
 
+fn settlement_workspace_root() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("target_tmp")
+        .join("compute_settlement")
+}
+
+fn settlement_identifier(path: &str) -> String {
+    if path.is_empty() {
+        format!("default-{}", process::id())
+    } else {
+        blake3::hash(path.as_bytes()).to_hex().to_string()
+    }
+}
+
+fn settlement_base_for(path: &str) -> (PathBuf, Option<String>) {
+    let path_buf = PathBuf::from(path);
+    let tmp_root = std::env::temp_dir();
+    if path.is_empty() || path_buf.starts_with(&tmp_root) {
+        let id = settlement_identifier(path);
+        (settlement_workspace_root().join(&id), Some(id))
+    } else {
+        (path_buf, None)
+    }
+}
+
 pub struct Settlement;
 
 impl Settlement {
@@ -549,13 +602,11 @@ impl Settlement {
             *guard = None;
         }
 
-        let base = if path.is_empty() {
-            sys::tempfile::tempdir()
-                .expect("create settlement tempdir")
-                .keep()
-        } else {
-            PathBuf::from(path)
-        };
+        // Avoid system temp directories that can be pruned mid-run; default to a
+        // workspace-local scratch path scoped by PID so concurrent test runs do
+        // not collide. If the caller points at a tempdir (common in tests), pivot
+        // to the workspace scratch as well.
+        let (base, workspace_id) = settlement_base_for(path);
         fs::create_dir_all(&base).unwrap_or_else(|e| panic!("create settlement dir: {e}"));
         let db_path = base.join("compute_settlement.db");
         let db_path_str = db_path
@@ -563,6 +614,7 @@ impl Settlement {
             .unwrap_or_else(|| panic!("non-utf8 settlement db path: {}", db_path.display()));
         let mut state = SettlementState::new(
             base,
+            workspace_id,
             mode,
             db_path.clone(),
             factory(names::COMPUTE_SETTLEMENT, db_path_str),
@@ -579,6 +631,14 @@ impl Settlement {
             state.flush();
         }
         *guard = None;
+    }
+
+    /// Returns the directory currently hosting settlement persistence files.
+    /// This reflects any fallback path chosen after transport errors so callers
+    /// can observe the real storage directory regardless of their original
+    /// configuration.
+    pub fn storage_path() -> PathBuf {
+        with_state(|state| state.base.clone())
     }
 
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
@@ -713,7 +773,7 @@ impl Settlement {
         with_state(|state| state.balance(provider))
     }
 
-pub fn balances() -> Vec<BalanceSnapshot> {
+    pub fn balances() -> Vec<BalanceSnapshot> {
         if let Ok(guard) = STATE.try_lock() {
             if let Some(state) = guard.as_ref() {
                 let balances = state.balances();

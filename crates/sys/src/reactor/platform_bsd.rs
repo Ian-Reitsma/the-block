@@ -285,13 +285,12 @@ impl Inner {
             return Ok(());
         }
 
-        self.submit_changes(&mut changes[..count])
-            .or_else(|err| {
-                if err.kind() == ErrorKind::NotFound || err.raw_os_error() == Some(ENOENT) {
-                    return Ok(());
-                }
-                Err(err)
-            })
+        self.submit_changes(&mut changes[..count]).or_else(|err| {
+            if err.kind() == ErrorKind::NotFound || err.raw_os_error() == Some(ENOENT) {
+                return Ok(());
+            }
+            Err(err)
+        })
     }
 
     fn deregister_fd(&self, fd: RawFd, token: Token) -> io::Result<()> {

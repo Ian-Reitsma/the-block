@@ -347,11 +347,17 @@ pub async fn perform_handshake(
     let payload = server_msg.encode();
     let len_buf = (payload.len() as u32).to_be_bytes();
     if debug {
-        eprintln!("[tls] writing server hello len_buf ({} bytes)", len_buf.len());
+        eprintln!(
+            "[tls] writing server hello len_buf ({} bytes)",
+            len_buf.len()
+        );
     }
     stream.write_all(&len_buf).await?;
     if debug {
-        eprintln!("[tls] wrote len_buf, now writing payload ({} bytes)", payload.len());
+        eprintln!(
+            "[tls] wrote len_buf, now writing payload ({} bytes)",
+            payload.len()
+        );
     }
     stream.write_all(&payload).await?;
     if debug {

@@ -124,7 +124,9 @@ impl TlsConnector {
         if debug {
             eprintln!("[tls-client] starting TLS handshake");
         }
-        stream.set_nonblocking(false).map_err(TlsConnectorError::Io)?;
+        stream
+            .set_nonblocking(false)
+            .map_err(TlsConnectorError::Io)?;
         stream.set_nodelay(true).ok();
         if self.handshake_timeout != Duration::from_secs(0) {
             let _ = stream.set_read_timeout(Some(self.handshake_timeout));
@@ -177,9 +179,7 @@ impl TlsConnector {
         blocking_read_exact(&mut stream, &mut len_buf)?;
         let frame_len = u32::from_be_bytes(len_buf) as usize;
         if debug {
-            eprintln!(
-                "[tls-client] received server hello length ({frame_len} bytes)"
-            );
+            eprintln!("[tls-client] received server hello length ({frame_len} bytes)");
         }
         if frame_len > HANDSHAKE_MAX_LEN {
             return Err(TlsConnectorError::InvalidCertificate(

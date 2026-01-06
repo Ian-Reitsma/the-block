@@ -964,15 +964,9 @@ fn apply(cfg: &NodeConfig) {
         rep.provider_reputation_retention = cfg.provider_reputation_retention;
     }
     let runtime_cfg = cfg.runtime.normalized();
-    runtime::configure_reactor_idle_poll(Duration::from_millis(
-        runtime_cfg.reactor_idle_poll_ms,
-    ));
-    runtime::configure_io_read_backoff(Duration::from_millis(
-        runtime_cfg.io_read_backoff_ms,
-    ));
-    runtime::configure_io_write_backoff(Duration::from_millis(
-        runtime_cfg.io_write_backoff_ms,
-    ));
+    runtime::configure_reactor_idle_poll(Duration::from_millis(runtime_cfg.reactor_idle_poll_ms));
+    runtime::configure_io_read_backoff(Duration::from_millis(runtime_cfg.io_read_backoff_ms));
+    runtime::configure_io_write_backoff(Duration::from_millis(runtime_cfg.io_write_backoff_ms));
     crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
     crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
@@ -1179,9 +1173,7 @@ pub fn watch(dir: &str) {
 }
 
 fn file_mtime(path: impl AsRef<Path>) -> Option<SystemTime> {
-    fs::metadata(path.as_ref())
-        .and_then(|m| m.modified())
-        .ok()
+    fs::metadata(path.as_ref()).and_then(|m| m.modified()).ok()
 }
 
 fn poll_config_changes(

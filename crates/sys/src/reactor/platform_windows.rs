@@ -270,7 +270,9 @@ impl Inner {
                 events.push(completion.event);
             } else {
                 let token = Token(entry.lpCompletionKey as usize);
-                events.push(Event::new(token, None, true, true, false, false, false, true));
+                events.push(Event::new(
+                    token, None, true, true, false, false, false, true,
+                ));
             }
         }
 
