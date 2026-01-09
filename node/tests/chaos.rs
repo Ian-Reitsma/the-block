@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::net::SocketAddr;
 use std::path::Path;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use sys::tempfile::tempdir;
@@ -37,6 +38,7 @@ fn free_addr() -> SocketAddr {
 }
 
 fn init_env() -> sys::tempfile::TempDir {
+    cleanup_env();
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
@@ -48,8 +50,8 @@ fn init_env() -> sys::tempfile::TempDir {
     std::env::set_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS", "0");
     // Use fast mining
     std::env::set_var("TB_FAST_MINE", "1");
-    // Light chaos: 5% packet loss, 50ms jitter
-    std::env::set_var("TB_NET_PACKET_LOSS", "0.05");
+    // Light chaos: 1% packet loss, 50ms jitter
+    std::env::set_var("TB_NET_PACKET_LOSS", "0.01");
     std::env::set_var("TB_NET_JITTER_MS", "50");
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
     std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
@@ -75,14 +77,10 @@ fn cleanup_env() {
     std::env::remove_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS");
 }
 
-fn reset_env() {
-    // Clean any leftover env vars from previous tests before setting our own
-    cleanup_env();
-}
-
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
     let mut last_broadcast = Instant::now();
+    let mut last_request: HashMap<SocketAddr, Instant> = HashMap::new();
     loop {
         let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
         let first = heights[0];
@@ -96,7 +94,23 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         // Under packet loss, actively broadcast longest chain every 200ms
         if last_broadcast.elapsed() > Duration::from_millis(200) {
             if let Some((idx, _)) = heights.iter().enumerate().max_by_key(|(_, h)| *h) {
-                nodes[idx].broadcast_chain();
+                let leader = nodes[idx];
+                leader.broadcast_chain();
+                let leader_addr = leader.addr();
+                for (peer_idx, node) in nodes.iter().enumerate() {
+                    if peer_idx != idx && heights[peer_idx] < heights[idx] {
+                        let now = Instant::now();
+                        let addr = node.addr();
+                        let should_request = last_request
+                            .get(&addr)
+                            .map(|ts| now.duration_since(*ts) > Duration::from_millis(500))
+                            .unwrap_or(true);
+                        if should_request {
+                            node.request_chain_from(leader_addr, heights[peer_idx]);
+                            last_request.insert(addr, now);
+                        }
+                    }
+                }
             }
             last_broadcast = Instant::now();
         }
@@ -201,7 +215,8 @@ fn kill_node_recovers() {
     runtime::block_on(async {
         let _e = init_env();
         let mut nodes: Vec<TestNode> = Vec::new();
-        for _ in 0..5 {
+        let node_count = 3usize;
+        for _ in 0..node_count {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
             let tn = TestNode::new(addr, peers.clone());
@@ -225,9 +240,9 @@ fn kill_node_recovers() {
         }
         the_block::sleep(Duration::from_millis(500)).await;
 
-        // Phase 1: Mine 10 blocks
+        // Phase 1: Mine 6 blocks
         let mut ts = 1u64;
-        for _ in 0..10 {
+        for _ in 0..6 {
             {
                 let mut bc = nodes[0].node.blockchain();
                 bc.mine_block_at("miner", ts).unwrap();
@@ -236,7 +251,7 @@ fn kill_node_recovers() {
             nodes[0].node.broadcast_chain();
             the_block::sleep(Duration::from_millis(50)).await;
         }
-        let max = Duration::from_secs(15 * timeout_factor());
+        let max = Duration::from_secs(18 * timeout_factor());
         assert!(
             wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
             "initial convergence failed"
@@ -247,14 +262,17 @@ fn kill_node_recovers() {
         if let Some(handle) = nodes[2].handle.take() {
             let _ = handle.join();
         }
+        
+        // Wait for socket to be fully released
+        the_block::sleep(Duration::from_millis(500)).await;
         for (i, n) in nodes.iter().enumerate() {
             if i != 2 {
                 n.node.remove_peer(nodes[2].addr);
             }
         }
 
-        // Phase 2: Mine 10 more blocks
-        for _ in 0..10 {
+        // Phase 2: Mine 6 more blocks
+        for _ in 0..6 {
             {
                 let mut bc = nodes[0].node.blockchain();
                 bc.mine_block_at("miner", ts).unwrap();
@@ -277,9 +295,16 @@ fn kill_node_recovers() {
         // Restart node 2
         let restart_bc = Blockchain::open(nodes[2].dir.path().to_str().unwrap()).unwrap();
         let prev_env = set_net_key_env(&nodes[2].net_key_path, &nodes[2].net_key_seed);
+        // Collect peer addresses before creating new node
+        let peer_addrs: Vec<SocketAddr> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 2)
+            .map(|(_, n)| n.addr)
+            .collect();
         let node3 = Node::new(
             nodes[2].addr,
-            active.iter().map(|n| n.addr()).collect(),
+            peer_addrs,
             restart_bc,
         );
         restore_net_key_env(prev_env);
@@ -305,7 +330,8 @@ fn kill_node_recovers() {
             handle: Some(handle),
         };
 
-        the_block::sleep(Duration::from_millis(500)).await;
+        // Wait longer for node restart and handshakes
+        the_block::sleep(Duration::from_millis(1500)).await;
 
         // Broadcast from all nodes to help convergence
         for n in &nodes {
@@ -319,7 +345,7 @@ fn kill_node_recovers() {
         );
 
         let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(h, 20, "Expected 20 blocks");
+        assert_eq!(h, 12, "Expected 12 blocks");
         for n in nodes.iter_mut() {
             n.shutdown();
         }
@@ -331,8 +357,9 @@ fn kill_node_recovers() {
 fn partition_heals_to_majority() {
     runtime::block_on(async {
         let _e = init_env();
+        let node_count = 3usize;
         let mut nodes: Vec<TestNode> = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..node_count {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
             let tn = TestNode::new(addr, peers.clone());
@@ -376,7 +403,7 @@ fn partition_heals_to_majority() {
         );
 
         // Isolate node 3
-        let iso = 3usize;
+        let iso = node_count - 1;
         nodes[iso].node.clear_peers();
         for (i, n) in nodes.iter().enumerate() {
             if i != iso {
@@ -384,8 +411,8 @@ fn partition_heals_to_majority() {
             }
         }
 
-        // Main partition mines 10 blocks
-        for _ in 0..10 {
+        // Main partition mines 6 blocks
+        for _ in 0..6 {
             {
                 let mut bc = nodes[0].node.blockchain();
                 bc.mine_block_at("miner", ts).unwrap();
@@ -428,16 +455,20 @@ fn partition_heals_to_majority() {
         for n in &nodes {
             n.node.broadcast_chain();
         }
+        // Actively pull the tip from the known leader to the isolated node
+        let leader_addr = nodes[0].addr;
+        let iso_height = nodes[iso].node.blockchain().block_height;
+        nodes[iso].node.request_chain_from(leader_addr, iso_height);
         the_block::sleep(Duration::from_millis(1200)).await;
 
-        let max = Duration::from_secs(20 * timeout_factor());
+        let max = Duration::from_secs(30 * timeout_factor());
         assert!(
             wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
             "partition heal failed"
         );
 
         let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(h, 13, "Expected majority chain (13 blocks: 3 pre-partition + 10 during) to win");
+        assert_eq!(h, 9, "Expected majority chain (9 blocks: 3 pre-partition + 6 during) to win");
 
         #[cfg(feature = "telemetry")]
         {

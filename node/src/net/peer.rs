@@ -127,6 +127,15 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+const P2P_MIN_CHAIN_REBROADCAST_MS: u64 = 25;
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[cfg(feature = "telemetry")]
 fn log_suspicious(path: &str) {
     let count = SUSPICIOUS_EXPORTS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -156,8 +165,6 @@ fn send_chain_snapshot(peers: &PeerSet, addr: Option<SocketAddr>, chain: Vec<Blo
     if chain.is_empty() {
         return;
     }
-    #[cfg(feature = "integration-tests")]
-    eprintln!("send_chain_snapshot len={} to={:?}", chain.len(), addr);
     let msg = match Message::new_with_cert_fingerprint(
         Payload::Chain(chain),
         &peers.key,
@@ -171,14 +178,11 @@ fn send_chain_snapshot(peers: &PeerSet, addr: Option<SocketAddr>, chain: Vec<Blo
                 "failed_to_sign_chain_payload"
             );
             #[cfg(feature = "integration-tests")]
-            eprintln!("send_chain_snapshot FAILED to sign: {}", err);
             return;
         }
     };
     let msg = Arc::new(msg);
     let peers_snapshot = peers.list();
-    #[cfg(feature = "integration-tests")]
-    eprintln!("send_chain_snapshot peers={:?}", peers_snapshot);
     if let Some(peer_addr) = addr {
         send_msg_with_backoff(peer_addr, Arc::clone(&msg), 3);
         return;
@@ -218,26 +222,6 @@ fn send_chain_request(peers: &PeerSet, addr: Option<SocketAddr>, from_height: u6
     }
 }
 
-#[cfg(not(feature = "integration-tests"))]
-fn schedule_chain_request(peers: PeerSet, from_height: u64) {
-    std::thread::spawn(move || {
-        #[cfg(feature = "integration-tests")]
-        {
-            // Keep integration test chatter low: single request, no retries.
-            send_chain_request(&peers, None, from_height);
-        }
-        #[cfg(not(feature = "integration-tests"))]
-        {
-            let mut delay = Duration::from_millis(100);
-            for _ in 0..3 {
-                send_chain_request(&peers, None, from_height);
-                std::thread::sleep(delay);
-                delay = (delay * 2).min(Duration::from_millis(800));
-            }
-        }
-    });
-}
-
 fn send_msg_with_backoff(addr: SocketAddr, msg: Arc<Message>, attempts: usize) {
     if attempts == 0 {
         return;
@@ -246,33 +230,11 @@ fn send_msg_with_backoff(addr: SocketAddr, msg: Arc<Message>, attempts: usize) {
         let mut delay = Duration::from_millis(50);
         for attempt in 0..attempts {
             match send_msg(addr, &msg) {
-                Ok(()) => {
-                    #[cfg(feature = "integration-tests")]
-                    if matches!(msg.body, Payload::Chain(_)) {
-                        eprintln!(
-                            "send_msg_with_backoff: SUCCESS to {} attempt {}",
-                            addr, attempt
-                        );
-                    }
-                    return;
-                }
-                Err(e) =>
-                {
-                    #[cfg(feature = "integration-tests")]
-                    if matches!(msg.body, Payload::Chain(_)) {
-                        eprintln!(
-                            "send_msg_with_backoff: FAILED to {} attempt {} err={}",
-                            addr, attempt, e
-                        );
-                    }
-                }
+                Ok(()) => return,
+                Err(_e) => {}
             }
             std::thread::sleep(delay);
             delay = (delay * 2).min(Duration::from_millis(400));
-        }
-        #[cfg(feature = "integration-tests")]
-        if matches!(msg.body, Payload::Chain(_)) {
-            eprintln!("send_msg_with_backoff: ALL ATTEMPTS FAILED to {}", addr);
         }
     });
 }
@@ -320,6 +282,8 @@ pub struct PeerSet {
     broadcast_active: Arc<AtomicBool>,
     /// Track the length of the last chain we successfully broadcast to avoid redundant broadcasts.
     last_broadcast_len: Arc<AtomicUsize>,
+    /// Timestamp (millis since UNIX_EPOCH) of the last chain broadcast attempt.
+    last_broadcast_ms: Arc<AtomicU64>,
 }
 
 impl PeerSet {
@@ -366,6 +330,7 @@ impl PeerSet {
             broadcast_pending: Arc::new(Mutex::new(None)),
             broadcast_active: Arc::new(AtomicBool::new(false)),
             last_broadcast_len: Arc::new(AtomicUsize::new(0)),
+            last_broadcast_ms: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -377,6 +342,7 @@ impl PeerSet {
     /// did not increase. This is used when new peers join so they receive the current tip.
     pub(crate) fn reset_broadcast_watermark(&self) {
         self.last_broadcast_len.store(0, Ordering::Release);
+        self.last_broadcast_ms.store(0, Ordering::Release);
     }
 
     fn cert_fingerprint(&self) -> Option<Bytes> {
@@ -387,16 +353,16 @@ impl PeerSet {
         if chain.is_empty() {
             return;
         }
-        // Only broadcast if this chain is strictly longer than what we've already broadcast.
-        // This prevents redundant rebroadcasts when multiple peers send us the same chain.
+        // Liveness: even if length didn't increase, rebroadcast periodically so
+        // packet loss can't strand peers forever.
         let last_len = self.last_broadcast_len.load(Ordering::Acquire);
-        if chain.len() <= last_len {
-            #[cfg(feature = "integration-tests")]
-            eprintln!(
-                "schedule_chain_broadcast: SKIP chain.len={} <= last_broadcast_len={}",
-                chain.len(),
-                last_len
-            );
+        let last_ms = self.last_broadcast_ms.load(Ordering::Acquire);
+        let now_ms = now_millis();
+
+        let len_increased = chain.len() > last_len;
+        let time_ok = now_ms.saturating_sub(last_ms) >= P2P_MIN_CHAIN_REBROADCAST_MS;
+
+        if !len_increased && !time_ok {
             return;
         }
         let should_spawn = {
@@ -434,8 +400,10 @@ impl PeerSet {
                 };
                 if let Some(chain) = chain_to_send {
                     let chain_len = chain.len();
+                    let sent_ms = now_millis();
                     send_chain_snapshot(&peers, None, chain);
-                    // Update last_broadcast_len after successful broadcast
+                    // Mark "attempted broadcast". (No ACK exists; this is best-effort.)
+                    peers.last_broadcast_ms.store(sent_ms, Ordering::Release);
                     peers
                         .last_broadcast_len
                         .fetch_max(chain_len, Ordering::Release);
@@ -463,23 +431,25 @@ impl PeerSet {
         if chain.is_empty() {
             return;
         }
-        // Avoid rebroadcasting identical-length chains in integration tests to cut duplicate
-        // snapshot chatter; only send when the tip length advanced.
+        // Liveness: even if length didn't increase, rebroadcast periodically so
+        // packet loss can't strand peers forever.
         let last_len = self.last_broadcast_len.load(Ordering::Acquire);
-        if chain.len() <= last_len {
-            #[cfg(feature = "integration-tests")]
-            eprintln!(
-                "broadcast_chain_snapshot: SKIP chain.len={} <= last_broadcast_len={}",
-                chain.len(),
-                last_len
-            );
+        let last_ms = self.last_broadcast_ms.load(Ordering::Acquire);
+        let now_ms = now_millis();
+
+        let len_increased = chain.len() > last_len;
+        let time_ok = now_ms.saturating_sub(last_ms) >= P2P_MIN_CHAIN_REBROADCAST_MS;
+
+        if !len_increased && !time_ok {
             return;
         }
         let chain_len = chain.len();
         let peers = self.clone();
         std::thread::spawn(move || {
+            let sent_ms = now_millis();
             send_chain_snapshot(&peers, None, chain);
-            // Update last_broadcast_len after successful broadcast
+            // Mark "attempted broadcast". (No ACK exists; this is best-effort.)
+            peers.last_broadcast_ms.store(sent_ms, Ordering::Release);
             peers
                 .last_broadcast_len
                 .fetch_max(chain_len, Ordering::Release);
@@ -504,6 +474,8 @@ impl PeerSet {
         if !q.contains_key(&addr) {
             persist_quic_peers(&self.quic_peer_db_path, &q);
         }
+        // Force tip rebroadcast so new peer gets the current chain
+        self.reset_broadcast_watermark();
     }
 
     /// Remove a peer from the set.
@@ -513,6 +485,8 @@ impl PeerSet {
         persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.remove(&addr);
+        // Force tip rebroadcast after topology change
+        self.reset_broadcast_watermark();
     }
 
     /// Clear all peers from the set.
@@ -561,8 +535,6 @@ impl PeerSet {
 
     /// Record the mapping from address to peer id and allocate metrics entry.
     fn map_addr(&self, addr: SocketAddr, pk: [u8; 32]) {
-        #[cfg(feature = "integration-tests")]
-        eprintln!("map_addr: peer={} addr={}", overlay_peer_label(&pk), addr);
         {
             let mut m = ADDR_MAP.guard();
             m.insert(addr, pk);
@@ -592,45 +564,6 @@ impl PeerSet {
         entry.last_updated = now_secs();
         metrics.insert(pk, entry);
         update_active_gauge(metrics.len());
-    }
-
-    #[cfg(feature = "integration-tests")]
-    fn recent_handshake_or_hello(
-        addr: Option<SocketAddr>,
-        peer_key: &[u8; 32],
-        kind: &'static str,
-        ttl: Duration,
-    ) -> bool {
-        let now = Instant::now();
-        if let Some(a) = addr {
-            let map = RECENT_HANDSHAKES.get_or_init(|| Mutex::new(HashMap::new()));
-            let mut guard = map.lock().unwrap();
-            match guard.entry((a, kind)) {
-                std::collections::hash_map::Entry::Occupied(mut e) => {
-                    if now.duration_since(*e.get()) < ttl {
-                        return true;
-                    }
-                    *e.get_mut() = now;
-                }
-                std::collections::hash_map::Entry::Vacant(v) => {
-                    v.insert(now);
-                }
-            }
-        }
-        let map = RECENT_HANDSHAKES_BY_KEY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = map.lock().unwrap();
-        match guard.entry((*peer_key, kind)) {
-            std::collections::hash_map::Entry::Occupied(mut e) => {
-                if now.duration_since(*e.get()) < ttl {
-                    return true;
-                }
-                *e.get_mut() = now;
-            }
-            std::collections::hash_map::Entry::Vacant(v) => {
-                v.insert(now);
-            }
-        }
-        false
     }
 
     /// Record the preferred transport for `addr`.
@@ -837,62 +770,26 @@ impl PeerSet {
         addr: Option<SocketAddr>,
         chain: &Arc<StdMutex<Blockchain>>,
     ) {
-        #[cfg(feature = "integration-tests")]
-        {
-            let payload_type = match &msg.body {
-                Payload::Handshake(_) => "Handshake",
-                Payload::Hello(_) => "Hello",
-                Payload::Chain(c) => {
-                    eprintln!("handle_message: Chain len={} from={:?}", c.len(), addr);
-                    "Chain"
-                }
-                Payload::ChainRequest(_) => "ChainRequest",
-                _ => "Other",
-            };
-            let _ = payload_type;
-        }
-        #[cfg(feature = "integration-tests")]
-        match &msg.body {
-            Payload::ChainRequest(_) => {
-                eprintln!("handle_message: ENTER ChainRequest from {:?}", addr)
-            }
-            Payload::Chain(c) => eprintln!(
-                "handle_message: ENTER Chain(len={}) from {:?}",
-                c.len(),
-                addr
-            ),
-            _ => {}
-        }
         let bytes = match encode_payload(&msg.body) {
             Ok(b) => b,
             Err(err) => {
-                #[cfg(feature = "integration-tests")]
-                if matches!(msg.body, Payload::Chain(_)) {
-                    eprintln!(
-                        "handle_message: encode_payload FAILED for Chain from {:?}: {}",
-                        addr, err
-                    );
-                }
                 return;
             }
         };
         let pk = match VerifyingKey::from_bytes(&msg.pubkey) {
             Ok(p) => p,
-            Err(_) => return,
+            Err(_) => {
+                return;
+            }
         };
         let sig_bytes: [u8; 64] = match msg.signature.as_ref().try_into() {
             Ok(bytes) => bytes,
-            Err(_) => return,
+            Err(_) => {
+                return;
+            }
         };
         let sig = Signature::from_bytes(&sig_bytes);
         if pk.verify(&bytes, &sig).is_err() {
-            #[cfg(feature = "integration-tests")]
-            if matches!(msg.body, Payload::Chain(_)) {
-                eprintln!(
-                    "handle_message: signature verify FAILED for Chain from {:?}",
-                    addr
-                );
-            }
             return;
         }
 
@@ -934,24 +831,6 @@ impl PeerSet {
         record_request(&peer_key);
 
         if let Err(code) = self.check_rate(&peer_key) {
-            #[cfg(feature = "integration-tests")]
-            match &msg.body {
-                Payload::ChainRequest(_) => {
-                    eprintln!(
-                        "handle_message: DROPPED ChainRequest from {:?} code={}",
-                        addr,
-                        code.as_str()
-                    );
-                }
-                Payload::Chain(_) => {
-                    eprintln!(
-                        "handle_message: DROPPED Chain from {:?} code={}",
-                        addr,
-                        code.as_str()
-                    );
-                }
-                _ => {}
-            }
             telemetry_peer_error(code);
             let reason = match code {
                 PeerErrorCode::RateLimit => DropReason::RateLimit,
@@ -969,72 +848,21 @@ impl PeerSet {
             return;
         }
 
-        #[cfg(feature = "integration-tests")]
-        if matches!(msg.body, Payload::Chain(_)) {
-            eprintln!("handle_message: Chain passed check_rate addr={:?}", addr);
-        }
-
         // Drop duplicate Hello/Handshake from the same peer address or key with a short TTL
         // to prevent ping-pong connection storms during integration tests.
         if matches!(msg.body, Payload::Hello(_) | Payload::Handshake(_)) {
-            #[cfg(feature = "integration-tests")]
-            {
-                let kind = match &msg.body {
-                    Payload::Hello(_) => "hello",
-                    Payload::Handshake(_) => "handshake",
-                    _ => "other",
-                };
-                if Self::recent_handshake_or_hello(
-                    addr,
-                    &peer_key,
-                    kind,
-                    Duration::from_millis(250),
-                ) {
-                    eprintln!(
-                        "handle_message: DUPLICATE {:?} from {:?} peer={} within 250ms; dropping",
-                        match &msg.body {
-                            Payload::Hello(_) => "Hello",
-                            Payload::Handshake(_) => "Handshake",
-                            _ => "Other",
-                        },
-                        addr,
-                        overlay_peer_label(&peer_key)
-                    );
-                    return;
-                }
-            }
             if let Some(addr) = addr {
                 let dup = {
                     let map = ADDR_MAP.guard();
                     map.get(&addr).map(|pk| pk == &peer_key).unwrap_or(false)
                 };
                 if dup {
-                    #[cfg(feature = "integration-tests")]
-                    eprintln!(
-                        "handle_message: DUPLICATE {:?} from {:?}, already mapped; dropping",
-                        match &msg.body {
-                            Payload::Hello(_) => "Hello",
-                            Payload::Handshake(_) => "Handshake",
-                            _ => "Other",
-                        },
-                        addr
-                    );
                     return;
                 }
             }
         }
 
         if is_throttled(&peer_key) {
-            #[cfg(feature = "integration-tests")]
-            match &msg.body {
-                Payload::ChainRequest(_) => {
-                    eprintln!("handle_message: THROTTLED ChainRequest from {:?}", addr);
-                }
-                Payload::Chain(_) => {
-                    eprintln!("handle_message: THROTTLED Chain from {:?}", addr);
-                }
-                _ => {}
-            }
             if let Some(_m) = peer_stats(&peer_key) {
                 #[cfg(feature = "telemetry")]
                 if let Some(reason) = _m.throttle_reason.as_deref() {
@@ -1054,21 +882,8 @@ impl PeerSet {
             return;
         }
 
-        #[cfg(feature = "integration-tests")]
-        if matches!(msg.body, Payload::Chain(_)) {
-            eprintln!(
-                "handle_message: Chain passed prechecks (not throttled) addr={:?}",
-                addr
-            );
-        }
-
         match msg.body {
             Payload::Handshake(hs) => {
-                #[cfg(feature = "integration-tests")]
-                eprintln!(
-                    "handle_message: HANDSHAKE gossip_addr={:?} remote_addr={:?} local_addr={:?}",
-                    hs.gossip_addr, addr, self.local_addr
-                );
                 let was_authorized = self.is_authorized(&peer_key);
                 if hs.proto_version != PROTOCOL_VERSION {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
@@ -1329,32 +1144,9 @@ impl PeerSet {
             }
             Payload::Chain(new_chain) => {
                 let authorized = self.is_authorized(&peer_key);
-                #[cfg(feature = "integration-tests")]
-                {
-                    let current_len = {
-                        let bc = chain.guard();
-                        bc.chain.len()
-                    };
-                    eprintln!(
-                        "Chain handler: local={:?} current_len={} new_len={} from={:?} authorized={}",
-                        self.local_addr,
-                        current_len,
-                        new_chain.len(),
-                        addr,
-                        authorized
-                    );
-                }
                 if !authorized {
                     #[cfg(feature = "integration-tests")]
-                    {
-                        eprintln!(
-                            "Chain handler: AUTHORIZE on first chain local={:?} new_len={} from={:?}",
-                            self.local_addr,
-                            new_chain.len(),
-                            addr
-                        );
-                        self.authorize(peer_key);
-                    }
+                    self.authorize(peer_key);
                     #[cfg(not(feature = "integration-tests"))]
                     {
                         diagnostics::tracing::warn!(
@@ -1374,40 +1166,18 @@ impl PeerSet {
                         let start = Instant::now();
                         match bc.import_chain(new_chain.clone()) {
                             Ok(()) => {
-                                #[cfg(feature = "integration-tests")]
-                                eprintln!(
-                                    "Chain handler: FAST import ok local={:?} new_len={} current_len_after={}",
-                                    self.local_addr,
-                                    new_chain.len(),
-                                    bc.chain.len()
-                                );
                                 drop(bc);
                                 self.schedule_chain_broadcast(new_chain);
                                 #[cfg(feature = "telemetry")]
                                 observer::observe_convergence(start);
                                 return;
                             }
-                            Err(err) => {
-                                #[cfg(feature = "integration-tests")]
-                                eprintln!(
-                                    "Chain handler: FAST import failed local={:?} new_len={} err={}",
-                                    self.local_addr,
-                                    new_chain.len(),
-                                    err
-                                );
+                            Err(_err) => {
                                 #[cfg(feature = "telemetry")]
                                 observer::observe_convergence(start);
                             }
                         }
                     } else {
-                        #[cfg(feature = "integration-tests")]
-                        eprintln!(
-                            "Chain handler: FAST path up-to-date local={:?} current_len={} new_len={} from={:?}",
-                            self.local_addr,
-                            current_len,
-                            new_chain.len(),
-                            addr
-                        );
                         return;
                     }
                 }
@@ -1418,11 +1188,6 @@ impl PeerSet {
                     bc.chain.len()
                 };
                 if new_len <= current_len {
-                    #[cfg(feature = "integration-tests")]
-                    eprintln!(
-                        "Chain handler: EARLY EXIT local={:?} current_len={} new_len={} from={:?}",
-                        self.local_addr, current_len, new_len, addr
-                    );
                     if new_len < current_len {
                         let chain_snapshot = {
                             let bc = chain.guard();
@@ -1442,11 +1207,6 @@ impl PeerSet {
                     ) {
                         Ok(state) => state,
                         Err(reason) => {
-                            #[cfg(feature = "integration-tests")]
-                            eprintln!(
-                                "Chain handler: VALIDATION FAILED local={:?} new_len={} reason={}",
-                                self.local_addr, new_len, reason
-                            );
                             diagnostics::tracing::warn!(
                                 target = "net",
                                 peer = %overlay_peer_label(&peer_key),
@@ -1463,11 +1223,6 @@ impl PeerSet {
                     ) {
                         Ok(state) => state,
                         Err(err) => {
-                            #[cfg(feature = "integration-tests")]
-                            eprintln!(
-                                "Chain handler: IMPORT STATE FAILED local={:?} new_len={} err={}",
-                                self.local_addr, new_len, err
-                            );
                             diagnostics::tracing::warn!(
                                 target = "net",
                                 peer = %overlay_peer_label(&peer_key),
@@ -1513,24 +1268,10 @@ impl PeerSet {
                     observer::observe_convergence(start);
                     match applied {
                         Ok(()) => {
-                            #[cfg(feature = "integration-tests")]
-                            eprintln!(
-                                "Chain handler: APPLY OK local={:?} new_len={} current_len_after={}",
-                                self.local_addr,
-                                new_len,
-                                bc.chain.len()
-                            );
                             drop(bc);
                             self.schedule_chain_broadcast(new_chain);
-                            #[cfg(not(feature = "integration-tests"))]
-                            schedule_chain_request(self.clone(), new_len as u64);
                         }
                         Err(err) => {
-                            #[cfg(feature = "integration-tests")]
-                            eprintln!(
-                                "Chain handler: APPLY FAILED local={:?} new_len={} err={}",
-                                self.local_addr, new_len, err
-                            );
                             diagnostics::tracing::warn!(
                                 target = "net",
                                 peer = %overlay_peer_label(&peer_key),
@@ -1553,11 +1294,6 @@ impl PeerSet {
                         bc.chain.clone()
                     };
                     let target = addr_from_peer_key(&peer_key).or(addr);
-                    #[cfg(feature = "integration-tests")]
-                    eprintln!(
-                        "ChainRequest handler: from_height={} current_len={} target={:?} addr={:?}",
-                        request.from_height, current_len, target, addr
-                    );
                     send_chain_snapshot(self, target, chain_snapshot);
                 }
             }
@@ -3777,12 +3513,6 @@ fn peer_metrics_guard() -> std::sync::MutexGuard<'static, OrderedMap<[u8; 32], P
 
 static ADDR_MAP: Lazy<Mutex<HashMap<SocketAddr, [u8; 32]>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-#[cfg(feature = "integration-tests")]
-static RECENT_HANDSHAKES: OnceLock<Mutex<HashMap<(SocketAddr, &'static str), Instant>>> =
-    OnceLock::new();
-#[cfg(feature = "integration-tests")]
-static RECENT_HANDSHAKES_BY_KEY: OnceLock<Mutex<HashMap<([u8; 32], &'static str), Instant>>> =
-    OnceLock::new();
 static MAX_PEER_METRICS: AtomicUsize = AtomicUsize::new(1024);
 static EXPORT_PEER_METRICS: AtomicBool = AtomicBool::new(true);
 #[cfg(feature = "telemetry")]

@@ -1966,6 +1966,11 @@ impl Node {
         self.broadcast_payload(Payload::BlobChunk(chunk));
     }
 
+    /// Explicitly request a chain snapshot from `addr` starting at `from_height`.
+    pub fn request_chain_from(&self, addr: SocketAddr, from_height: u64) {
+        self.peers.request_chain_from(addr, from_height);
+    }
+
     /// Broadcast the current chain to all known peers.
     pub fn broadcast_chain(&self) {
         let chain = match self.chain.lock() {
@@ -2136,28 +2141,10 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
     let bytes = message::encode_message(msg)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("serialize: {err}")))?;
-    #[cfg(feature = "integration-tests")]
-    if matches!(msg.body, Payload::Chain(_)) {
-        match stream.local_addr() {
-            Ok(local) => {
-                eprintln!(
-                    "send_msg: CHAIN {} bytes {} -> {}",
-                    bytes.len(),
-                    local,
-                    addr
-                );
-            }
-            Err(_) => eprintln!("send_msg: CHAIN {} bytes to {}", bytes.len(), addr),
-        }
-    }
     stream.write_all(&bytes)?;
     // Explicitly shutdown the write half to signal EOF to the reader
     use std::net::Shutdown;
     let _ = stream.shutdown(Shutdown::Write);
-    #[cfg(feature = "integration-tests")]
-    if matches!(msg.body, Payload::Chain(_)) {
-        eprintln!("send_msg: CHAIN write complete to {}", addr);
-    }
     crate::net::peer::record_send(addr, bytes.len());
     Ok(())
 }
