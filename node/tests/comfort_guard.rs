@@ -27,7 +27,11 @@ fn build_signed_tx(
         nonce,
         memo: Vec::new(),
     };
-    let mut tx = sign_tx(sk.to_vec(), payload).expect("sign");
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    let mut tx = sign_tx(secret.to_vec(), payload).expect("valid key");
     tx.lane = FeeLane::Industrial;
     tx
 }

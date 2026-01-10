@@ -77,6 +77,12 @@ static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> = Lazy::new(|| {
     ))
 });
 
+/// Clear the signature verification cache. For testing purposes only.
+#[doc(hidden)]
+pub fn clear_signature_cache() {
+    SIG_CACHE.guard().clear();
+}
+
 static TX_SIGNER: Lazy<TransactionSigner> =
     Lazy::new(|| TransactionSigner::from_chain_id(crate::constants::CHAIN_ID));
 

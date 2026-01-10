@@ -177,7 +177,6 @@ fn send_chain_snapshot(peers: &PeerSet, addr: Option<SocketAddr>, chain: Vec<Blo
                 reason = %err,
                 "failed_to_sign_chain_payload"
             );
-            #[cfg(feature = "integration-tests")]
             return;
         }
     };
@@ -428,32 +427,10 @@ impl PeerSet {
     }
 
     pub(crate) fn broadcast_chain_snapshot(&self, chain: Vec<Block>) {
-        if chain.is_empty() {
-            return;
-        }
-        // Liveness: even if length didn't increase, rebroadcast periodically so
-        // packet loss can't strand peers forever.
-        let last_len = self.last_broadcast_len.load(Ordering::Acquire);
-        let last_ms = self.last_broadcast_ms.load(Ordering::Acquire);
-        let now_ms = now_millis();
-
-        let len_increased = chain.len() > last_len;
-        let time_ok = now_ms.saturating_sub(last_ms) >= P2P_MIN_CHAIN_REBROADCAST_MS;
-
-        if !len_increased && !time_ok {
-            return;
-        }
-        let chain_len = chain.len();
-        let peers = self.clone();
-        std::thread::spawn(move || {
-            let sent_ms = now_millis();
-            send_chain_snapshot(&peers, None, chain);
-            // Mark "attempted broadcast". (No ACK exists; this is best-effort.)
-            peers.last_broadcast_ms.store(sent_ms, Ordering::Release);
-            peers
-                .last_broadcast_len
-                .fetch_max(chain_len, Ordering::Release);
-        });
+        // Delegate to schedule_chain_broadcast to avoid code duplication.
+        // The coalescing logic in schedule_chain_broadcast still sends the chain,
+        // but may batch it with other pending broadcasts for efficiency.
+        self.schedule_chain_broadcast(chain);
     }
 
     pub(crate) fn request_chain_from(&self, addr: SocketAddr, from_height: u64) {
@@ -3551,8 +3528,6 @@ static LAST_HANDSHAKE_ADDR: Lazy<Mutex<HashMap<SocketAddr, u64>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 #[cfg(feature = "quic")]
 const HANDSHAKE_DEBOUNCE_SECS: u64 = 1;
-#[allow(dead_code)]
-const PEER_METRICS_VERSION: u32 = 1;
 
 #[derive(Clone, Serialize)]
 pub struct PeerSnapshot {
@@ -3870,7 +3845,7 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "telemetry")]
 const DROP_REASON_VARIANTS: &[DropReason] = &[
     DropReason::RateLimit,
     DropReason::Malformed,
@@ -3880,7 +3855,7 @@ const DROP_REASON_VARIANTS: &[DropReason] = &[
     DropReason::Other,
 ];
 
-#[allow(dead_code)]
+#[cfg(feature = "telemetry")]
 const HANDSHAKE_ERROR_VARIANTS: &[HandshakeError] = &[
     HandshakeError::Tls,
     HandshakeError::Version,

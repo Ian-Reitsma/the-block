@@ -429,6 +429,13 @@ fn partition_heals_to_majority() {
             bc.mine_block_at("isolated", ts).unwrap();
         }
 
+        // Capture reorg metric baseline before healing partition
+        #[cfg(feature = "telemetry")]
+        let reorg_baseline = the_block::telemetry::FORK_REORG_TOTAL
+            .ensure_handle_for_label_values(&["2"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
+            .get();
+
         // Heal partition
         for (i, n) in nodes.iter().enumerate() {
             if i != iso {
@@ -472,11 +479,17 @@ fn partition_heals_to_majority() {
 
         #[cfg(feature = "telemetry")]
         {
+            // Isolated node mined 2 blocks, so reorg depth is 2
             let c = the_block::telemetry::FORK_REORG_TOTAL
-                .ensure_handle_for_label_values(&["0"])
+                .ensure_handle_for_label_values(&["2"])
                 .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get();
-            assert!(c > 0, "Expected fork reorg metric");
+            assert!(
+                c > reorg_baseline,
+                "Expected fork reorg metric at depth 2 to increase (before: {}, after: {})",
+                reorg_baseline,
+                c
+            );
         }
 
         for n in nodes.iter_mut() {

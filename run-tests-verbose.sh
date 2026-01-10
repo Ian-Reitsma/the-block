@@ -193,7 +193,7 @@ TOTAL_ERRORS=0
 START_TIME=$(date +%s)
 
 # Full workspace test command (original comprehensive approach)
-TEST_CMD="FIRST_PARTY_ONLY=1 RUST_BACKTRACE=full cargo test --workspace --all-targets --all-features --no-fail-fast -- --test-threads=1"
+TEST_CMD="FIRST_PARTY_ONLY=1 RUST_BACKTRACE=1 cargo test --workspace --all-targets --all-features --no-fail-fast -- --test-threads=1"
 
 # Log the command
 echo "" >> "$PACKAGE_COMMANDS_LOG"

@@ -2149,35 +2149,6 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-fn send_msg_old(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
-    let mut rng = rand::thread_rng();
-    if let Ok(loss_str) = std::env::var("TB_NET_PACKET_LOSS") {
-        if let Ok(loss) = loss_str.parse::<f64>() {
-            if rng.gen_bool(loss) {
-                return Ok(());
-            }
-        }
-    }
-    if let Ok(jitter_str) = std::env::var("TB_NET_JITTER_MS") {
-        if let Ok(jitter) = jitter_str.parse::<u64>() {
-            let delay = rng.gen_range(0..=jitter);
-            std::thread::sleep(Duration::from_millis(delay));
-        }
-    }
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
-    let bytes = message::encode_message(msg)
-        .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("serialize: {err}")))?;
-    #[cfg(feature = "telemetry")]
-    if crate::telemetry::should_log("p2p") {
-        let span = crate::log_context!(tx = *blake3::hash(&bytes).as_bytes());
-        diagnostics::tracing::info!(parent: &span, peer = %addr, len = bytes.len(), "send_msg");
-    }
-    stream.write_all(&bytes)?;
-    crate::net::peer::record_send(addr, bytes.len());
-    Ok(())
-}
-
 #[cfg(feature = "quic")]
 pub(crate) fn send_quic_msg(
     addr: SocketAddr,

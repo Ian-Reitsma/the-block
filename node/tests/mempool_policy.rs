@@ -226,7 +226,7 @@ fn ttl_purge_drops_orphan_and_decrements_counter() {
     init();
     let dir = temp_dir("temp_orphan_ttl");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.tx_ttl = 1;
+    bc.tx_ttl = 1; // 1 second TTL
     bc.add_account("alice".into(), 10_000).unwrap();
     bc.add_account("carol".into(), 10_000).unwrap();
     bc.add_account("bob".into(), 0).unwrap();
@@ -236,14 +236,26 @@ fn ttl_purge_drops_orphan_and_decrements_counter() {
     let tx2 = build_signed_tx(&sk_c, "carol", "bob", 1, 0, 1000, 1);
     bc.submit_transaction(tx1).unwrap();
     bc.submit_transaction(tx2).unwrap();
+    // Get the submission timestamp for deterministic testing
+    let submit_time = bc
+        .mempool_consumer
+        .get(&("alice".into(), 1))
+        .map(|e| e.timestamp_millis)
+        .unwrap();
     bc.accounts.remove("alice");
-    let _ = bc.purge_expired();
+    // Purge at submission time - tx is NOT expired (0ms elapsed < 1000ms TTL)
+    // but alice's account is removed, so tx should be orphaned
+    let _ = bc.purge_expired_at(submit_time);
     assert_eq!(bc.orphan_count(), 1);
+    // Make alice's tx appear old (timestamp = 0) so it's expired
+    // Carol's tx keeps current timestamp so it's NOT expired
     if let Some(mut entry) = bc.mempool_consumer.get_mut(&("alice".into(), 1)) {
         entry.timestamp_millis = 0;
         entry.timestamp_ticks = 0;
     }
-    let dropped = bc.purge_expired();
+    // Purge at submit_time - alice's tx is expired (submit_time - 0 > 1000ms)
+    // carol's tx is not expired (submit_time - submit_time = 0 < 1000ms)
+    let dropped = bc.purge_expired_at(submit_time);
     assert_eq!(dropped, 1);
     assert_eq!(bc.orphan_count(), 0);
     assert_eq!(bc.mempool_consumer.len(), 1);
