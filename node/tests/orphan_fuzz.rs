@@ -81,26 +81,60 @@ tb_prop_test!(orphan_counter_never_exceeds_mempool, |runner| {
                 // Detailed verification with debug info
                 let verify_result = the_block::transaction::verify_signed_tx(&tx);
                 if !verify_result {
+                    let payload_bytes = the_block::transaction::canonical_payload_bytes(&tx.payload);
+                    let signer = crypto_suite::transactions::TransactionSigner::from_chain_id(
+                        the_block::consensus::CHAIN_ID,
+                    );
+                    let msg = signer.message(&payload_bytes);
+                    let pk_arr: Option<[u8; 32]> = tx.public_key.as_slice().try_into().ok();
+                    let sig_arr: Option<[u8; 64]> =
+                        tx.signature.ed25519.as_slice().try_into().ok();
+                    let mut key_parse_ok = false;
+                    let sig_parse_ok = sig_arr.is_some();
+                    let mut direct_verify_ok = false;
+                    if let (Some(pk_bytes), Some(sig_bytes)) = (pk_arr, sig_arr) {
+                        match crypto_suite::signatures::ed25519::VerifyingKey::from_bytes(
+                            &pk_bytes,
+                        ) {
+                            Ok(vk) => {
+                                key_parse_ok = true;
+                                let sig =
+                                    crypto_suite::signatures::ed25519::Signature::from_bytes(
+                                        &sig_bytes,
+                                    );
+                                direct_verify_ok = vk.verify(&msg, &sig).is_ok();
+                            }
+                            Err(_) => {
+                                key_parse_ok = false;
+                            }
+                        }
+                    }
                     // Re-sign with the same key to see if we get the same result
                     let tx2 = build_signed_tx(&sk, &name, "sink", 1, 0, 1_000, 1);
                     let verify_result2 = the_block::transaction::verify_signed_tx(&tx2);
                     panic!(
                         "Transaction signature verification failed for account {}: \n\
-                         sk (first 16 bytes): {:02x?}\n\
+                         sk: {:02x?}\n\
                          pk: {:02x?}\n\
                          tx.public_key: {:02x?}\n\
-                         signature (first 32 bytes): {:02x?}\n\
+                         signature (full): {:02x?}\n\
+                         key_parse_ok: {}\n\
+                         sig_parse_ok: {}\n\
+                         direct_verify_ok: {}\n\
                          Re-sign verification: {}\n\
                          tx2.public_key: {:02x?}\n\
-                         tx2.signature (first 32 bytes): {:02x?}",
+                         tx2.signature (full): {:02x?}",
                         name,
-                        &sk[..16.min(sk.len())],
+                        &sk,
                         &pk,
                         &tx.public_key,
-                        &tx.signature.ed25519[..32.min(tx.signature.ed25519.len())],
+                        &tx.signature.ed25519,
+                        key_parse_ok,
+                        sig_parse_ok,
+                        direct_verify_ok,
                         verify_result2,
                         &tx2.public_key,
-                        &tx2.signature.ed25519[..32.min(tx2.signature.ed25519.len())]
+                        &tx2.signature.ed25519
                     );
                 }
                 bc.submit_transaction(tx)

@@ -6976,14 +6976,29 @@ fn calculate_hash(
 ///
 /// Returns the private and public key as raw byte vectors. The keys are
 /// suitable for both transaction signing and simple message authentication.
+///
+/// Includes a self-test to ensure the generated key verifies with the in-house
+/// Ed25519 implementation.
 #[must_use]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
-    rng.fill_bytes(&mut priv_bytes);
-    let sk = SigningKey::from_bytes(&priv_bytes);
-    let vk = sk.verifying_key();
-    (priv_bytes.to_vec(), vk.to_bytes().to_vec())
+    for _ in 0..128 {
+        rng.fill_bytes(&mut priv_bytes);
+        let sk = SigningKey::from_bytes(&priv_bytes);
+        let vk = sk.verifying_key();
+        let vk_bytes = vk.to_bytes();
+        let sig = sk.sign(b"the_block_keypair_self_test");
+        if let Ok(vk_parsed) = VerifyingKey::from_bytes(&vk_bytes) {
+            if vk_parsed
+                .verify(b"the_block_keypair_self_test", &sig)
+                .is_ok()
+            {
+                return (priv_bytes.to_vec(), vk_bytes.to_vec());
+            }
+        }
+    }
+    panic!("generate_keypair failed to produce a verifiable key after 128 attempts");
 }
 
 /// Sign an arbitrary message with a 32-byte Ed25519 private key.
