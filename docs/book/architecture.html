@@ -243,13 +243,13 @@
 </ul>
 <h3 id="fee-lanes-and-rebates"><a class="header" href="#fee-lanes-and-rebates">Fee Lanes and Rebates</a></h3>
 <ul>
-<li>Fee lanes are typed via <code>node/src/transaction::FeeLane</code> and <code>node/src/fee</code>, with rebate hooks under <code>node/src/fees</code> and <code>node/src/fee/readiness</code>. Governance controls floors through <code>governance/src/params.rs</code> and telemetry tracks enforcement (<code>gateway_fee_floor_*</code> metrics).</li>
+<li>Fee lanes are typed via <code>node/src/transaction::FeeLane</code> and <code>node/src/fee</code>, with rebate hooks under <code>node/src/fees</code> and <code>node/src/fee/readiness</code>. Governance controls floors through <code>governance/src/params.rs</code> and telemetry tracks enforcement (<code>fee_floor_warning_total</code>, <code>fee_floor_override_total</code>, <code>fee_floor_reject_total</code>).</li>
 <li>Rebates post ledger entries that auto-apply to the submitter before consuming liquid BLOCK. Reference detail lives in <code>docs/economics_and_governance.md#fee-lanes-and-rebates</code>.</li>
 </ul>
 <h3 id="mempool-admission-and-eviction"><a class="header" href="#mempool-admission-and-eviction">Mempool Admission and Eviction</a></h3>
 <ul>
 <li>Admission and QoS live under <code>node/src/mempool/admission.rs</code>; scoring and eviction policies are in <code>node/src/mempool/scoring.rs</code>. Tests live in <code>node/src/mempool/tests</code>.</li>
-<li>Fee floors and EIP‑1559‑style base fee nudges are applied per block; telemetry exposes <code>mempool_fee_floor_*</code> and target fullness gauges.</li>
+<li>Fee floors and EIP‑1559‑style base fee nudges are applied per block; telemetry exposes <code>fee_floor_current</code> plus per‑lane warning/override counters, and <code>mempool.stats</code> surfaces per‑lane floors for RPC/CLI consumers.</li>
 </ul>
 <h3 id="scheduler-and-parallel-execution"><a class="header" href="#scheduler-and-parallel-execution">Scheduler and Parallel Execution</a></h3>
 <ul>
@@ -597,16 +597,38 @@ if metrics.storage_utilization &gt;= STORAGE_GATE_THRESHOLD
 <ul>
 <li><code>node/src/p2p/handshake.rs</code> negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the <code>p2p_overlay</code> crate with in-house and stub adapters.</li>
 <li>Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.</li>
+<li>Handshake hellos now carry <code>gossip_addr</code> (the sender's gossip listener address); peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.</li>
+<li>Adding a peer triggers an immediate handshake + hello exchange so rejoined peers resync and refresh their peer lists without waiting on a new block.</li>
+<li>Inbound gossip is accepted on a non-blocking listener and processed on the blocking worker pool so chain validation cannot stall new connections. Chain sync uses explicit <code>ChainRequest</code> pulls (requesting from the local height) plus immediate snapshot pushes with exponential-backoff retries, and a periodic pull tick (default 500ms, <code>TB_P2P_CHAIN_SYNC_INTERVAL_MS</code>) to recover from missed broadcasts.</li>
+<li>QUIC certificates are required for QUIC transport; if a TCP-only peer advertises an invalid QUIC cert, the handshake proceeds but QUIC metadata is ignored and the peer stays on TCP.</li>
+<li>Certificate fingerprints are enforced for QUIC traffic (and for any message that includes a fingerprint); TCP fallbacks accept missing fingerprints even when a cached QUIC cert exists so mixed-transport peers can still converge.</li>
 </ul>
 <h3 id="p2p-wire-protocol"><a class="header" href="#p2p-wire-protocol">P2P Wire Protocol</a></h3>
 <ul>
 <li>Message framing and compatibility shims live under <code>node/src/p2p/wire_binary.rs</code>. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.</li>
+</ul>
+<h3 id="p2p-chain-synchronization"><a class="header" href="#p2p-chain-synchronization">P2P Chain Synchronization</a></h3>
+<ul>
+<li><strong>Messages:</strong> <code>ChainRequest { from_height }</code> (pull) and <code>Chain(Vec&lt;Block&gt;)</code> (push) live in <code>node/src/net/peer.rs</code>/<code>node/src/net/mod.rs</code>. Requests ask peers to stream the suffix beyond <code>from_height</code>; responses bundle a coalesced segment.</li>
+<li><strong>Periodic pulls:</strong> A dedicated tick thread triggers chain sync every <code>TB_P2P_CHAIN_SYNC_INTERVAL_MS</code> (default 500 ms) so nodes recover from missed broadcasts without waiting for new blocks.</li>
+<li><strong>Coalesced broadcast:</strong> <code>schedule_chain_broadcast()</code> batches outgoing <code>Chain</code> messages and tracks <code>last_broadcast_len</code>/<code>last_broadcast_ms</code> to avoid floods while keeping lagging peers caught up.</li>
+<li><strong>Backoff + dedup:</strong> Chain pushes retry with exponential backoff (<code>send_msg_with_backoff</code>) and track watermarks so duplicate payloads are dropped early.</li>
+<li><strong>PeerSet ownership:</strong> The <code>PeerSet</code> now owns the signing key used for chain sync messages and validates peer key ownership during scheduling to prevent spoofed chain pushes.</li>
 </ul>
 <h3 id="quic-transport"><a class="header" href="#quic-transport">QUIC Transport</a></h3>
 <ul>
 <li>The transport crate (<code>crates/transport</code>) exposes provider traits with backends for Quinn and s2n (feature-gated) plus an in-house stub for tests. Providers advertise capabilities to the handshake layer.</li>
 <li>TLS configuration is applied per provider during instance creation (e.g., <code>apply_quinn_tls</code>, <code>apply_s2n_tls</code>), with resets ensuring only one provider’s TLS stack is active at a time.</li>
 <li>Callbacks propagate connect/disconnect/handshake statistics into telemetry for dashboards and incident analysis.</li>
+<li>TLS handshake timeouts are enforced on both ends: <code>ServerConfig::tls_handshake_timeout</code> and <code>ClientConfig::tls_handshake_timeout</code> guard slowloris-style stalls and are exposed via <code>TB_TLS_HANDSHAKE_TIMEOUT_MS</code>.</li>
+</ul>
+<h3 id="runtime-reactor-configuration"><a class="header" href="#runtime-reactor-configuration">Runtime Reactor Configuration</a></h3>
+<ul>
+<li><strong>Idle polling:</strong> <code>REACTOR_IDLE_POLL_MS</code> (see <code>node/src/net/inhouse/mod.rs</code>) caps the sleep between polls to keep latency predictable. For throughput-sensitive deployments, lower values reduce tail latency at the cost of CPU.</li>
+<li><strong>Read/write backoff:</strong> <code>io_read_backoff_ms</code> and <code>io_write_backoff_ms</code> introduce short sleeps when readiness hints are missed; write interest is tracked explicitly to avoid busy loops on bursty peers.</li>
+<li><strong>BSD kqueue hardening:</strong> <code>node/src/net/platform_bsd.rs</code> now uses level-triggered mode (removing <code>EV_CLEAR</code>) and refreshes <code>update_interest()</code> when state changes to avoid missed wakeups under load.</li>
+<li><strong>Tuning guidance:</strong> Raise backoff delays if CPU is saturated by idle peers; lower them (and idle poll) for low-latency testnets. Keep telemetry on (<code>runtime_read_without_ready_total</code>, <code>runtime_write_without_ready_total</code>) to validate the chosen settings.</li>
+<li><strong>Config reload fallback:</strong> <code>node/src/config.rs</code> prefers inotify/kqueue watchers, but falls back to mtime polling if filesystem events fail. Expect up to one poll interval of delay when the fallback is active.</li>
 </ul>
 <h3 id="overlay-and-peer-persistence"><a class="header" href="#overlay-and-peer-persistence">Overlay and Peer Persistence</a></h3>
 <ul>
@@ -617,6 +639,7 @@ if metrics.storage_utilization &gt;= STORAGE_GATE_THRESHOLD
 <ul>
 <li><code>node/src/gossip/relay.rs</code> implements TTL-bound dedup, shard-aware peer sets, and latency + reputation scoring. Fanout metrics live in <code>node/src/telemetry.rs</code> (<code>GOSSIP_*</code> series) and the relay persists shard membership so partitions recover quickly.</li>
 <li>Range-boost deliveries and ANN payloads register as gossip hops, keeping mesh telemetry side-by-side with QUIC counts.</li>
+<li>P2P rate limiting clamps request volume with a configurable window: <code>TB_P2P_RATE_WINDOW_SECS</code> (default 1s) controls how long counts accumulate before reset, pairing with <code>TB_P2P_MAX_PER_SEC</code>/<code>TB_P2P_MAX_BYTES_PER_SEC</code> to keep abusive peers from starving the network. Operators can widen the window for incident drills or lock it down during attacks.</li>
 </ul>
 <h3 id="quic-transport-1"><a class="header" href="#quic-transport-1">QUIC Transport</a></h3>
 <ul>
@@ -673,7 +696,7 @@ if metrics.storage_utilization &gt;= STORAGE_GATE_THRESHOLD
 </ul>
 <h3 id="schema-migrations"><a class="header" href="#schema-migrations">Schema Migrations</a></h3>
 <ul>
-<li>On-disk schema changes are introduced behind version bumps and lossless migrations. Historical notes from <code>docs/schema_migrations/*</code> are consolidated here and inline in code where applicable.</li>
+<li>On-disk schema changes are introduced behind version bumps and lossless migrations. Historical notes are consolidated here, in <code>docs/system_reference.md#1-5-schema-migrations</code>, and inline in code where applicable.</li>
 <li>Examples: bridge header persistence (v8), DEX escrow (v9), and industrial subsidies (v10). Migrations run during startup with telemetry for progress and error handling.</li>
 </ul>
 <h2 id="compute-marketplace"><a class="header" href="#compute-marketplace">Compute Marketplace</a></h2>
@@ -695,6 +718,7 @@ if metrics.storage_utilization &gt;= STORAGE_GATE_THRESHOLD
 <li><strong>Lane</strong>: Priority tier for different job types</li>
 </ul>
 </blockquote>
+<p><strong>BlockTorch integration</strong>: The <code>metal-backend/</code> stack (metal-tensor + autograd) provides the deterministic tensor layer for ML workloads executed through the compute marketplace. BlockTorch defines the kernel set, gradient serialization, and proof-ready metadata needed for SNARK attestation and pricing via <code>ORCHARD_TENSOR_PROFILE</code>. The strategic roadmap and coordinator workflow live in <a href="ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.html#part-xii-blocktorch--the-compute-framework-strategy"><code>docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md</code></a>, with execution priority captured in <code>AGENTS.md §15.B.1</code>.</p>
 <h3 id="offers-and-matching"><a class="header" href="#offers-and-matching">Offers and Matching</a></h3>
 <ul>
 <li>Computation lives under <code>node/src/compute_market</code>. Offers, bids, and receipts serialize through <code>foundation_serialization</code> and are exposed over RPC (<code>node/src/rpc/compute_market.rs</code>).</li>
@@ -933,7 +957,7 @@ if metrics.storage_utilization &gt;= STORAGE_GATE_THRESHOLD
 <li><code>snapshot_hash_hex</code> — BLAKE3 hash for auditability</li>
 <li><code>metrics</code> — Summary and raw metrics that triggered the decision</li>
 </ul>
-<p>The RPC output now also contains an <code>economics_prev_market_metrics</code> array derived from <code>EconomicsPrevMetric</code>, and <code>tb-cli governor status</code> prints this deterministic snapshot alongside the regular <code>economics_sample</code>. This makes it easy to reconcile the governor’s JSON/RPC data with the Prometheus gauges stamped <code>economics_prev_market_metrics_{utilization,provider_margin}_ppm</code>.</p>
+<p>The RPC output now also contains an <code>economics_prev_market_metrics</code> array derived from <code>EconomicsPrevMetric</code>, and <code>contract-cli governor status</code> prints this deterministic snapshot alongside the regular <code>economics_sample</code>. This makes it easy to reconcile the governor’s JSON/RPC data with the Prometheus gauges stamped <code>economics_prev_market_metrics_{utilization,provider_margin}_ppm</code>.</p>
 <h3 id="configuration"><a class="header" href="#configuration">Configuration</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Environment Variable</th><th>Purpose</th><th>Default/Guidance</th></tr></thead><tbody>
 <tr><td><code>TB_GOVERNOR_ENABLED</code></td><td>Enables the background task</td><td><code>false</code> by default; <strong>must be <code>1</code> on shared testnets and mainnet</strong></td></tr>

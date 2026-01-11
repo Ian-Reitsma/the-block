@@ -313,19 +313,19 @@ ls -lh target/coverage/
 
 **Step 1**: Check executor health
 ```bash
-tb-cli gov treasury balance | jq .executor
+contract-cli gov treasury balance | jq .executor
 # Look for: last_error, pending_matured, staged_intents
 ```
 
 **Step 2**: List stuck disbursements
 ```bash
-tb-cli gov treasury list --status queued | jq '.[] | select(.created_at < (now - 3600))'
+contract-cli gov treasury list --status queued | jq '.[] | select(.created_at < (now - 3600))'
 ```
 
 **Step 3**: Check for dependency failures
 ```bash
-tb-cli gov treasury list --status queued | while read id; do
-  tb-cli gov treasury show --id $id | jq '.proposal.deps'
+contract-cli gov treasury list --status queued | while read id; do
+  contract-cli gov treasury show --id $id | jq '.proposal.deps'
 done
 ```
 
@@ -336,7 +336,7 @@ grep treasury_executor /var/log/node/*.log | tail -50
 
 **Step 5**: Check treasury balance
 ```bash
-tb-cli gov treasury balance
+contract-cli gov treasury balance
 # If insufficient: wait for accruals or governance approval
 ```
 
@@ -345,17 +345,17 @@ tb-cli gov treasury balance
 **If dependency issue**:
 ```bash
 # Show dependency state
-tb-cli gov treasury show --id <DEPENDENCY_ID>
+contract-cli gov treasury show --id <DEPENDENCY_ID>
 
 # If dependency is RolledBack:
 #   Cancel the dependent disbursement manually
-tb-cli gov treasury rollback --id <STUCK_ID> --reason "Dependency failed"
+contract-cli gov treasury rollback --id <STUCK_ID> --reason "Dependency failed"
 ```
 
 **If insufficient funds**:
 ```bash
 # Wait for treasury accruals (check treasury balance)
-watch -n 30 'tb-cli gov treasury balance | jq .balance'
+watch -n 30 'contract-cli gov treasury balance | jq .balance'
 
 # Or request governance approval for fund allocation
 ```
@@ -366,7 +366,7 @@ watch -n 30 'tb-cli gov treasury balance | jq .balance'
 systemctl restart the-block
 
 # Monitor recovery
-watch -n 5 'tb-cli metrics summary | grep treasury_disbursement_backlog'
+watch -n 5 'contract-cli metrics summary | grep treasury_disbursement_backlog'
 ```
 
 ### Alert Thresholds

@@ -54,7 +54,7 @@ This document tracks the completion of three critical workstreams required for m
 
 **Deliverables**:
 - [ ] JSON schemas for all 5 RPC methods (submit, fetch, queue, execute, rollback)
-- [ ] CLI commands: `tb-cli gov treasury submit`, `treasury status`, `treasury export --json`
+- [ ] CLI commands: `contract-cli gov treasury submit`, `treasury status`, `treasury export --json`
 - [ ] Explorer canonical snapshot format documentation
 
 ### 1.4 Telemetry, Metrics-Aggregator, Dashboards 🔄 IN PROGRESS

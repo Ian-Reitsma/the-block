@@ -2,7 +2,7 @@
 
 > **Plain-Language Overview**
 >
-> **BLOCK is the single token.** Everything in The Block settles in BLOCK — payments, rewards, fees, treasury disbursements. There's no second currency. Some telemetry fields still end in ``; treat those as BLOCK-denominated gauges until the rename completes.
+> **BLOCK is the single token.** Everything in The Block settles in BLOCK — payments, rewards, fees, treasury disbursements. There's no second currency. Some internal labels (for example `coin_c`/`coin_i`) remain for compatibility, but they are BLOCK-denominated buckets, not separate tokens.
 >
 > **How BLOCK moves around:**
 > | Flow | What Happens |
@@ -19,7 +19,8 @@ Everything settles in BLOCK. Consumer workloads, industrial compute/storage, and
 
 ## BLOCK Supply and Sub-Ledgers
 - Coinbases embed `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB` fields (see `node/src/blockchain/block_binary.rs`). Each bucket mints BLOCK but is accounted separately for policy analysis.
-- Industrial workload gauges (`industrial_backlog`, `industrial_utilization`) flow from storage/compute telemetry into `Block::industrial_subsidies()`.
+- `coin_c`/`coin_i` are legacy ledger labels for BLOCK-denominated buckets; they do not represent a second token. Lane routing happens at transaction submission, while subsidy accounting stays unified in BLOCK.
+- Industrial workload gauges (`industrial_backlog`, `industrial_utilization`) feed the subsidy allocator (`node/src/economics/subsidy_allocator.rs`) and replay-derived market metrics (`node/src/economics/replay.rs`).
 - Personal rebates are ledger entries only. They auto-apply to the submitter’s own write traffic before dipping into transferable BLOCK and never circulate.
 
 ## Network-Driven BLOCK Issuance
@@ -103,8 +104,48 @@ The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_
 > **Rebates** are ledger entries that reduce your future costs. If you overpaid or qualify for a promotion, you get a rebate that auto-applies to your next transactions. Rebates are NOT tokens — you can't send them to someone else.
 
 - `node/src/fee` defines the lane taxonomy (consumer, industrial, priority, treasury). `node/src/fees` implements QoS eviction and rebate books shared with RPC.
-- Lane-aware mempool enforcement sits in `node/src/mempool` (see `docs/architecture.md#fee-lanes-and-rebates`). Each block nudges the base fee toward a fullness target while telemetry exposes `mempool_fee_floor_*` gauges.
+- Lane-aware mempool enforcement sits in `node/src/mempool` (see `docs/architecture.md#fee-lanes-and-rebates`). Each block nudges the base fee toward a fullness target while telemetry exposes `fee_floor_current` plus per‑lane `fee_floor_warning_total` / `fee_floor_override_total`.
 - Rebates are persisted ledger entries exposed via RPC (`node/src/rpc/fees.rs`) and CLI (`cli/src/fee_estimator.rs`).
+
+## Lane Congestion Pricing
+
+> **Plain English:** The lane pricing engine treats each lane as its own queue with feedback control. Pricing rises smoothly as utilisation approaches 100 %, and a PI controller dampens oscillations so users see predictable fees.
+
+- **Queueing model (M/M/1):** Utilisation `ρ = λ / μ` per lane, clamped to `(0, 1)`. Congestion multiplier:
+  \[
+  C(ρ) = 1 + k \left(\frac{ρ}{1-ρ}\right)^n
+  \]
+  where `k` and `n` are lane-specific sensitivity parameters.
+- **PI controllers:** Per-lane proportional–integral loops hold utilisation near targets:
+  \[
+  A_{t+1} = A_t \cdot \left(1 + K_p e_t + K_i \sum e_t\right),\quad e_t = ρ_{\text{target}} - ρ_{\text{actual}}
+  \]
+  with anti-windup caps to prevent runaway adjustments.
+- **Market demand multiplier (industrial):** Market signals feed a bounded multiplier:
+  \[
+  M(D) = 1 + α \cdot \frac{e^{βD}-1}{e^{β}-1},\quad D \in [0, 1]
+  \]
+  giving smooth growth from `1.0` to `1.0 + α`.
+- **Cross-lane arbitrage prevention:** Industrial fees floor against consumer fees with a premium `δ`, and congestion signals are lane-local so bursts in one lane do not drag the other.
+- **Composite fees:**
+  - Consumer: `F_c = B_c · C_c(ρ_c) · A_c(t)`
+  - Industrial: `F_i = max(B_i · C_i(ρ_i) · M_i(D), F_c · (1 + δ))`
+- **Telemetry and control loop:** `node/src/fees/lane_pricing.rs` runs the loop each block using utilisation snapshots from `node/src/fees/congestion.rs` and demand signals from `node/src/fees/market_signals.rs`. Gauges expose per-lane utilisation, congestion multipliers, PI adjustments, and applied premiums for dashboards.
+- **Governance parameters (defaults live in `governance/src/params.rs`):**
+
+| Parameter (see `node/src/governance/params.rs`) | Default | Meaning |
+|---|---|---|
+| `lane_consumer_capacity` | 1000 | Nominal consumer throughput used for utilisation `ρ` |
+| `lane_industrial_capacity` | 500 | Nominal industrial throughput used for utilisation `ρ` |
+| `lane_consumer_congestion_sensitivity` | 300 | `k = 3.0` congestion sensitivity (value / 100) |
+| `lane_industrial_congestion_sensitivity` | 500 | `k = 5.0` congestion sensitivity (value / 100) |
+| `lane_industrial_min_premium_percent` | 50 | Minimum industrial premium over consumer (percent) |
+| `lane_target_utilization_percent` | 70 | PI target utilisation (percent) |
+| `lane_market_signal_half_life` | 50 | EMA half-life for demand signal (blocks) |
+| `lane_market_demand_max_multiplier_percent` | 300 | Max demand multiplier (percent; 300 = +3.0) |
+| `lane_market_demand_sensitivity_percent` | 200 | Demand sensitivity (percent; 200 = 2.0) |
+| `lane_pi_proportional_gain_percent` | 10 | PI Kp (percent; 10 = 0.1) |
+| `lane_pi_integral_gain_percent` | 1 | PI Ki (percent; 1 = 0.01) |
 
 ## Service Badges and Citizenship
 - Operators earn service badges when uptime/latency stay within governance thresholds. `node/src/service_badge.rs` calculates eligibility; telemetry publishes `BADGE_ISSUED_TOTAL`, `COMPUTE_PROVIDER_UPTIME`, etc.
@@ -152,6 +193,37 @@ The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_
 - `governance/src/params.rs` exposes typed knobs for fee floors, multipliers, SLA slashing, telemetry sampling, mesh toggles, AI diagnostics, etc.
 - Every integration (node, CLI, explorer, metrics aggregator) uses the same crate so policy proofs line up with on-chain values.
 - Historical policy snapshots stream through RPC + CLI; explorers visualise the same baseline.
+
+**Economic + lane pricing parameters (defaults):**
+
+| Param | Default | Notes |
+|---|---|---|
+| `beta_storage_sub` | 50 | Storage subsidy multiplier |
+| `gamma_read_sub` | 20 | Read subsidy multiplier |
+| `kappa_cpu_sub` | 10 | Compute subsidy multiplier |
+| `lambda_bytes_out_sub` | 5 | Bandwidth subsidy multiplier |
+| `read_subsidy_viewer_percent` | 40 | Read subsidy split |
+| `read_subsidy_host_percent` | 30 | Read subsidy split |
+| `read_subsidy_hardware_percent` | 15 | Read subsidy split |
+| `read_subsidy_verifier_percent` | 10 | Read subsidy split |
+| `read_subsidy_liquidity_percent` | 5 | Read subsidy split |
+| `treasury_percent` | 0 | Treasury share of fees |
+| `proof_rebate_limit` | 1 | Max proof rebate share |
+| `rent_rate_per_byte` | 0 | Storage rent rate |
+| `lane_based_settlement_enabled` | 0 | Enable lane-based settlement routing |
+| `lane_consumer_capacity` | 1000 | Consumer capacity |
+| `lane_industrial_capacity` | 500 | Industrial capacity |
+| `lane_consumer_congestion_sensitivity` | 300 | k = 3.0 |
+| `lane_industrial_congestion_sensitivity` | 500 | k = 5.0 |
+| `lane_industrial_min_premium_percent` | 50 | Premium floor |
+| `lane_target_utilization_percent` | 70 | PI target |
+| `lane_market_signal_half_life` | 50 | EMA half-life (blocks) |
+| `lane_market_demand_max_multiplier_percent` | 300 | Max demand multiplier |
+| `lane_market_demand_sensitivity_percent` | 200 | Demand sensitivity |
+| `lane_pi_proportional_gain_percent` | 10 | Kp = 0.1 |
+| `lane_pi_integral_gain_percent` | 1 | Ki = 0.01 |
+
+For the full parameter catalog (all governance knobs + defaults), see `docs/system_reference.md#appendix-e--governance-parameter-catalog-partial`, which should mirror the latest entries in `node/src/governance/params.rs`.
 
 ## Commit–Reveal and PQ Hooks
 - `node/src/commit_reveal.rs` implements Dilithium-based commits when compiled with `pq-crypto`, otherwise BLAKE3 commitments. Used for ballots, treasury releases, and challenge proofs.

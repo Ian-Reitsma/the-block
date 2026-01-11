@@ -3,22 +3,42 @@
   "title": "Fee Routing V2",
   "type": "object",
   "properties": {
-    "selector": {"type": "integer", "minimum": 0, "maximum": 2},
-    "fee": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
-    "fee_consumer": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
-    "fee_industrial": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}
+    "selector": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Consumer fee percentage (0-100)"
+    },
+    "fee": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807,
+      "description": "Total fee in BLOCK microunits (fee_consumer + fee_industrial)."
+    },
+    "fee_consumer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807,
+      "description": "Fee share routed to the consumer lane (BLOCK microunits)."
+    },
+    "fee_industrial": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9223372036854775807,
+      "description": "Fee share routed to the industrial lane (BLOCK microunits)."
+    }
   },
   "required": ["selector", "fee", "fee_consumer", "fee_industrial"],
   "additionalProperties": false,
   "examples": [
-    {"selector": 2, "fee": 100, "fee_consumer": 50, "fee_industrial": 50},
+    {"selector": 50, "fee": 100, "fee_consumer": 50, "fee_industrial": 50},
     {
-      "selector": 3,
+      "selector": 120,
       "fee": 1,
       "fee_consumer": 0,
       "fee_industrial": 1,
-      "$comment": "invalid selector: must be <=2"
+      "$comment": "invalid selector: must be <=100"
     }
   ],
-  "$comment": "INV-FEE-01/02 see ECONOMICS.md#inv-fee-01/#inv-fee-02"
+  "$comment": "INV-FEE-01/02 see docs/economics_and_governance.md#fee-lanes-and-rebates"
 }

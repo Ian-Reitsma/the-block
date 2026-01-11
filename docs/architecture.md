@@ -58,12 +58,12 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - Pipeline: mempool admission → QoS lanes → scheduler → execution → receipts anchored in ledger.
 
 ### Fee Lanes and Rebates
-- Fee lanes are typed via `node/src/transaction::FeeLane` and `node/src/fee`, with rebate hooks under `node/src/fees` and `node/src/fee/readiness`. Governance controls floors through `governance/src/params.rs` and telemetry tracks enforcement (`gateway_fee_floor_*` metrics).
+- Fee lanes are typed via `node/src/transaction::FeeLane` and `node/src/fee`, with rebate hooks under `node/src/fees` and `node/src/fee/readiness`. Governance controls floors through `governance/src/params.rs` and telemetry tracks enforcement (`fee_floor_warning_total`, `fee_floor_override_total`, `fee_floor_reject_total`).
 - Rebates post ledger entries that auto-apply to the submitter before consuming liquid BLOCK. Reference detail lives in `docs/economics_and_governance.md#fee-lanes-and-rebates`.
 
 ### Mempool Admission and Eviction
 - Admission and QoS live under `node/src/mempool/admission.rs`; scoring and eviction policies are in `node/src/mempool/scoring.rs`. Tests live in `node/src/mempool/tests`.
-- Fee floors and EIP‑1559‑style base fee nudges are applied per block; telemetry exposes `mempool_fee_floor_*` and target fullness gauges.
+- Fee floors and EIP‑1559‑style base fee nudges are applied per block; telemetry exposes `fee_floor_current` plus per‑lane warning/override counters, and `mempool.stats` surfaces per‑lane floors for RPC/CLI consumers.
 
 ### Scheduler and Parallel Execution
 - `node/src/scheduler.rs` coordinates lane-aware batches with fairness timeouts. Workloads feed into `node/src/parallel.rs` so CPU-heavy tasks (GPU hashing, SNARK verification) stay deterministic.
@@ -420,7 +420,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 ### P2P Handshake
 - `node/src/p2p/handshake.rs` negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the `p2p_overlay` crate with in-house and stub adapters.
 - Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.
-- Handshake hellos now carry the sender's gossip listener address; peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.
+- Handshake hellos now carry `gossip_addr` (the sender's gossip listener address); peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.
 - Adding a peer triggers an immediate handshake + hello exchange so rejoined peers resync and refresh their peer lists without waiting on a new block.
 - Inbound gossip is accepted on a non-blocking listener and processed on the blocking worker pool so chain validation cannot stall new connections. Chain sync uses explicit `ChainRequest` pulls (requesting from the local height) plus immediate snapshot pushes with exponential-backoff retries, and a periodic pull tick (default 500ms, `TB_P2P_CHAIN_SYNC_INTERVAL_MS`) to recover from missed broadcasts.
 - QUIC certificates are required for QUIC transport; if a TCP-only peer advertises an invalid QUIC cert, the handshake proceeds but QUIC metadata is ignored and the peer stays on TCP.
@@ -429,10 +429,25 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 ### P2P Wire Protocol
 - Message framing and compatibility shims live under `node/src/p2p/wire_binary.rs`. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.
 
+### P2P Chain Synchronization
+- **Messages:** `ChainRequest { from_height }` (pull) and `Chain(Vec<Block>)` (push) live in `node/src/net/peer.rs`/`node/src/net/mod.rs`. Requests ask peers to stream the suffix beyond `from_height`; responses bundle a coalesced segment.
+- **Periodic pulls:** A dedicated tick thread triggers chain sync every `TB_P2P_CHAIN_SYNC_INTERVAL_MS` (default 500 ms) so nodes recover from missed broadcasts without waiting for new blocks.
+- **Coalesced broadcast:** `schedule_chain_broadcast()` batches outgoing `Chain` messages and tracks `last_broadcast_len`/`last_broadcast_ms` to avoid floods while keeping lagging peers caught up.
+- **Backoff + dedup:** Chain pushes retry with exponential backoff (`send_msg_with_backoff`) and track watermarks so duplicate payloads are dropped early.
+- **PeerSet ownership:** The `PeerSet` now owns the signing key used for chain sync messages and validates peer key ownership during scheduling to prevent spoofed chain pushes.
+
 ### QUIC Transport
 - The transport crate (`crates/transport`) exposes provider traits with backends for Quinn and s2n (feature-gated) plus an in-house stub for tests. Providers advertise capabilities to the handshake layer.
 - TLS configuration is applied per provider during instance creation (e.g., `apply_quinn_tls`, `apply_s2n_tls`), with resets ensuring only one provider’s TLS stack is active at a time.
 - Callbacks propagate connect/disconnect/handshake statistics into telemetry for dashboards and incident analysis.
+- TLS handshake timeouts are enforced on both ends: `ServerConfig::tls_handshake_timeout` and `ClientConfig::tls_handshake_timeout` guard slowloris-style stalls and are exposed via `TB_TLS_HANDSHAKE_TIMEOUT_MS`.
+
+### Runtime Reactor Configuration
+- **Idle polling:** `REACTOR_IDLE_POLL_MS` (see `node/src/net/inhouse/mod.rs`) caps the sleep between polls to keep latency predictable. For throughput-sensitive deployments, lower values reduce tail latency at the cost of CPU.
+- **Read/write backoff:** `io_read_backoff_ms` and `io_write_backoff_ms` introduce short sleeps when readiness hints are missed; write interest is tracked explicitly to avoid busy loops on bursty peers.
+- **BSD kqueue hardening:** `node/src/net/platform_bsd.rs` now uses level-triggered mode (removing `EV_CLEAR`) and refreshes `update_interest()` when state changes to avoid missed wakeups under load.
+- **Tuning guidance:** Raise backoff delays if CPU is saturated by idle peers; lower them (and idle poll) for low-latency testnets. Keep telemetry on (`runtime_read_without_ready_total`, `runtime_write_without_ready_total`) to validate the chosen settings.
+- **Config reload fallback:** `node/src/config.rs` prefers inotify/kqueue watchers, but falls back to mtime polling if filesystem events fail. Expect up to one poll interval of delay when the fallback is active.
 
 ### Overlay and Peer Persistence
 - Overlay persistence relies on `SimpleDb` namespaces (`node/src/net/peer.rs`, `net/overlay_store`). Operators migrate peer DBs via `scripts/migrate_overlay_store.rs` with guidance captured in `docs/operations.md#overlay-stores`.
@@ -488,7 +503,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - Simulation harnesses (`docs/simulation_framework.md` content) now live here with references to `sim/` and `fuzz/` suites.
 
 ### Schema Migrations
-- On-disk schema changes are introduced behind version bumps and lossless migrations. Historical notes from `docs/schema_migrations/*` are consolidated here and inline in code where applicable.
+- On-disk schema changes are introduced behind version bumps and lossless migrations. Historical notes are consolidated here, in `docs/system_reference.md#1-5-schema-migrations`, and inline in code where applicable.
 - Examples: bridge header persistence (v8), DEX escrow (v9), and industrial subsidies (v10). Migrations run during startup with telemetry for progress and error handling.
 
 ## Compute Marketplace
@@ -704,7 +719,7 @@ Intent records include:
 - `snapshot_hash_hex` — BLAKE3 hash for auditability
 - `metrics` — Summary and raw metrics that triggered the decision
 
-The RPC output now also contains an `economics_prev_market_metrics` array derived from `EconomicsPrevMetric`, and `tb-cli governor status` prints this deterministic snapshot alongside the regular `economics_sample`. This makes it easy to reconcile the governor’s JSON/RPC data with the Prometheus gauges stamped `economics_prev_market_metrics_{utilization,provider_margin}_ppm`.
+The RPC output now also contains an `economics_prev_market_metrics` array derived from `EconomicsPrevMetric`, and `contract-cli governor status` prints this deterministic snapshot alongside the regular `economics_sample`. This makes it easy to reconcile the governor’s JSON/RPC data with the Prometheus gauges stamped `economics_prev_market_metrics_{utilization,provider_margin}_ppm`.
 
 ### Configuration
 

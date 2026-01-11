@@ -78,7 +78,7 @@ curl http://localhost:9615/metrics 2>/dev/null | grep circuit_breaker
 
 ## Documentation Files
 
-- **STRIDE_1_COMPLETE.md** - Full implementation guide (comprehensive)
+- **docs/archive/STRIDE_1_COMPLETE.md** - Full implementation guide (comprehensive)
 - **STRIDE_1_ARCHITECTURE.md** - System design diagrams (detailed)
 - **STRIDE_1_ALL_FIXES.md** - Every code change (reference)
 - **validate_stride_1.sh** - Automated validation script

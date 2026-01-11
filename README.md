@@ -21,6 +21,7 @@ The Block is a **Layer 1 (L1) blockchain**, meaning it's a foundation blockchain
   - **Storage** (keeping files safe)
   - **Computation** (running programs)
   - **Bandwidth** (helping data move around)
+- **Lane-Based Pricing Engine**: Dual-lane mempool (consumer + industrial) with congestion pricing, PI controllers, and market demand multipliers to keep fees predictable while preventing cross-lane arbitrage.
 - **Targeted Ad Marketplace**: A built-in ad market matches campaigns to viewers using privacy-preserving "cohorts" defined by domain tiers, badges, interest tags, and proof-of-presence buckets sourced from LocalNet/Range Boost infrastructure. Governance controls every selector knob, and readiness/auction metrics are wired into Grafana so operators can prove the system is production-ready before mainnet.
 - **Single Currency (BLOCK)**: Fixed supply of 40 million BLOCK tokens (similar to Bitcoin's 21M cap). You can send and receive BLOCK like Bitcoin or cash, and it pays for all services on the network. Formula-driven issuance based on network activity - no arbitrary constants.
 - **BlockTorch Compute Framework**: The metal-backend stack (metal-tensor + autograd) provides deterministic tensor ops and gradient tracking for compute marketplace workloads, with CPU fallbacks, Metal kernels, and a PyTorch bridge for validation.
@@ -45,8 +46,6 @@ BLOCK is the single currency that powers everything on The Block. Think of it li
 | **Carol** | Offers spare compute power (like a mini AWS) | Earns BLOCK when people run jobs on her machine |
 | **Dave** | Operates a smart meter that reports energy usage | Earns BLOCK for verified energy readings via the energy market |
 | **Eve** | Wants to run a machine-learning model | Pays BLOCK to Carol's compute; gets results back |
-
-**Note on Legacy Code:** Replace any lingering references to the legacy consumer-token label with BLOCK so the docs reflect the single-token reality. Fields/metrics that still use `_ct` suffixes remain BLOCK-denominated ledger labels until the rename completes.
 
 ### Why "Self-Contained" Matters
 

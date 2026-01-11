@@ -47,9 +47,9 @@ treasury_balance
 
 **CLI Command**:
 ```bash
-tb-cli gov treasury balance
-tb-cli gov treasury list --limit 100 | grep -c queued
-tb-cli metrics summary | grep "governance_disbursements\|treasury_"
+contract-cli gov treasury balance
+contract-cli gov treasury list --limit 100 | grep -c queued
+contract-cli metrics summary | grep "governance_disbursements\|treasury_"
 ```
 
 **Runbook**: `docs/operations.md#treasury-stuck`
@@ -66,23 +66,23 @@ tb-cli metrics summary | grep "governance_disbursements\|treasury_"
 **Diagnosis**:
 ```bash
 # Check executor health
-tb-cli gov treasury balance | jq .executor
+contract-cli gov treasury balance | jq .executor
 
 # List stuck disbursements (old created_at)
-tb-cli gov treasury list --status queued | jq 'select(.created_at < (now - 3600))'
+contract-cli gov treasury list --status queued | jq 'select(.created_at < (now - 3600))'
 
 # Check error metrics
 prometheus_query 'rate(treasury_execution_errors_total[5m]) > 0'
 
 # Inspect ledger for failures
-tb-cli ledger search --filter 'type=disbursement_failed' | head -20
+contract-cli ledger search --filter 'type=disbursement_failed' | head -20
 ```
 
 **Resolution**:
 1. Check executor logs: `grep treasury_executor /var/log/node/*.log`
-2. Verify treasury balance: `tb-cli gov treasury balance`
+2. Verify treasury balance: `contract-cli gov treasury balance`
 3. If insufficient funds: Wait for accruals or governance approval
-4. If dependency issue: Use `tb-cli gov treasury show --id X` to check dep states
+4. If dependency issue: Use `contract-cli gov treasury show --id X` to check dep states
 5. If data corruption: Contact ops (manual ledger recovery)
 
 **Alert Threshold**:
@@ -106,13 +106,13 @@ treasury_disbursement_lag_seconds  # Histogram percentiles
 **CLI Command**:
 ```bash
 # Get disbursement details
-tb-cli gov treasury show --id 42
+contract-cli gov treasury show --id 42
 
 # Verify in ledger
-tb-cli ledger search --filter 'disbursement_id=42' | jq 'select(.type=="treasury_transfer")'
+contract-cli ledger search --filter 'disbursement_id=42' | jq 'select(.type=="treasury_transfer")'
 
 # Check receipt
-tb-cli receipts search --filter 'source_id=42' --limit 5
+contract-cli receipts search --filter 'source_id=42' --limit 5
 ```
 
 **Verification**:
@@ -132,10 +132,10 @@ tb-cli receipts search --filter 'source_id=42' --limit 5
 **CLI Command**:
 ```bash
 # Current balance
-tb-cli gov treasury balance
+contract-cli gov treasury balance
 
 # Historical balance changes
-tb-cli gov treasury balance --history --limit 50
+contract-cli gov treasury balance --history --limit 50
 
 # Settlement audit
 cargo test -p the_block --test settlement_audit --release -- --nocapture
@@ -179,16 +179,16 @@ energy_signature_verification_failures_total
 **CLI Command**:
 ```bash
 # Provider inventory
-tb-cli energy market --verbose
+contract-cli energy market --verbose
 
 # Individual provider details
-tb-cli energy provider show provider_usa_001
+contract-cli energy provider show provider_usa_001
 
 # Pending credits
-tb-cli energy credits list --status pending --limit 20
+contract-cli energy credits list --status pending --limit 20
 
 # Metrics summary
-tb-cli metrics summary | grep energy_
+contract-cli metrics summary | grep energy_
 ```
 
 **Runbook**: `docs/operations.md#energy-stalled`
@@ -214,13 +214,13 @@ grep "signature_verification" /var/log/node/energy.log | tail -20
 grep "timestamp_skew" /var/log/node/energy.log | wc -l
 
 # Pending credits accumulation
-tb-cli energy credits list --status pending | jq '.[] | .expires_at' | sort | uniq -c
+contract-cli energy credits list --status pending | jq '.[] | .expires_at' | sort | uniq -c
 ```
 
 **Resolution**:
 1. Verify oracle node is running: `systemctl status energy-oracle`
 2. Check oracle logs: `tail -f /var/log/oracle/*.log`
-3. Verify Ed25519 keys: `tb-cli energy oracle keys status`
+3. Verify Ed25519 keys: `contract-cli energy oracle keys status`
 4. If timestamp skew: Check provider and oracle clock sync (`ntpd`)
 5. If signature failures: Verify provider public keys in registry
 
@@ -247,13 +247,13 @@ energy_disputes_resolved_total{outcome="slashed"}
 **CLI Command**:
 ```bash
 # Active disputes
-tb-cli energy disputes list --status pending
+contract-cli energy disputes list --status pending
 
 # Recent slashing
-tb-cli energy disputes list --status resolved | grep slashed | tail -10
+contract-cli energy disputes list --status resolved | grep slashed | tail -10
 
 # Provider reputation impact
-tb-cli energy provider show provider_flagged_001 | jq .reputation
+contract-cli energy provider show provider_flagged_001 | jq .reputation
 ```
 
 **Runbook**: `docs/operations.md#energy-dispute-resolution`
@@ -284,16 +284,16 @@ receipt_pending_depth{market=~".*"}
 **CLI Command**:
 ```bash
 # Receipt statistics
-tb-cli receipts stats --market all
+contract-cli receipts stats --market all
 
 # Check each market
-tb-cli receipts stats --market storage
-tb-cli receipts stats --market compute
-tb-cli receipts stats --market energy
-tb-cli receipts stats --market ad
+contract-cli receipts stats --market storage
+contract-cli receipts stats --market compute
+contract-cli receipts stats --market energy
+contract-cli receipts stats --market ad
 
 # Recent failures
-tb-cli receipts search --filter 'status=failed' --limit 20
+contract-cli receipts search --filter 'status=failed' --limit 20
 ```
 
 **Verification Checklist**:
@@ -321,13 +321,13 @@ explorer_db_sync_lag_blocks
 **CLI Command**:
 ```bash
 # Explorer status
-tb-cli explorer status
+contract-cli explorer status
 
 # Check receipt lag
 prometheus_query 'explorer_receipt_lag_seconds'
 
 # Verify database
-tb-cli explorer db-check --verbose
+contract-cli explorer db-check --verbose
 ```
 
 ---
@@ -360,13 +360,13 @@ economics_block_reward_per_block
 **CLI Command**:
 ```bash
 # Economics snapshot
-tb-cli governor status | jq '.economics'
+contract-cli governor status | jq '.economics'
 
 # Market metrics
-tb-cli economics metrics --market all
+contract-cli economics metrics --market all
 
 # Block reward tracking
-tb-cli economics block-reward --limit 100
+contract-cli economics block-reward --limit 100
 ```
 
 **Health Checks**:
@@ -393,11 +393,11 @@ settlement_audit_conservation_failures_total
 cargo test -p the_block --test settlement_audit --release -- --nocapture
 
 # Quick ledger check
-tb-cli ledger verify --sample-size 10000
+contract-cli ledger verify --sample-size 10000
 
 # Treasury vs ledger
-tb-cli ledger search --filter 'type=treasury_transfer' | jq 'map(.amount) | add'
-tb-cli gov treasury balance | jq .balance
+contract-cli ledger search --filter 'type=treasury_transfer' | jq 'map(.amount) | add'
+contract-cli gov treasury balance | jq .balance
 ```
 
 **Alert**: If these differ: STOP and investigate (data corruption)
@@ -459,19 +459,19 @@ tb-cli gov treasury balance | jq .balance
 
 ```bash
 # Governance proposal to pause disbursements
-tb-cli gov propose \
+contract-cli gov propose \
   --title "Emergency: Pause Treasury" \
   --param kill_switch_subsidy_reduction=true
 
 # Status
-watch -n 10 'tb-cli gov treasury list --status queued | wc -l'
+watch -n 10 'contract-cli gov treasury list --status queued | wc -l'
 ```
 
 ### Kill Switch: Halt Energy Settlement
 
 ```bash
 # Raise slashing rate to prevent bad settlements
-tb-cli gov propose \
+contract-cli gov propose \
   --title "Emergency: Energy Slashing (Pause)" \
   --param energy_slashing_rate_bps=10000
 ```
@@ -480,7 +480,7 @@ tb-cli gov propose \
 
 ```bash
 # Inspect corruption
-tb-cli ledger dump --range 1000-2000 > ledger_dump.json
+contract-cli ledger dump --range 1000-2000 > ledger_dump.json
 
 # Contact operations team with:
 # - ledger_dump.json

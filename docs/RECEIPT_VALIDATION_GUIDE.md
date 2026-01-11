@@ -386,7 +386,7 @@ fn block_with_too_many_receipts_fails() {
 
 ## See Also
 
-- [CRITICAL_FIXES_COMPLETE.md](CRITICAL_FIXES_COMPLETE.md) - Complete implementation details
+- [docs/archive/CRITICAL_FIXES_COMPLETE.md](docs/archive/CRITICAL_FIXES_COMPLETE.md) - Complete implementation details
 - [docs/instructions.md](docs/instructions.md) - Comprehensive audit report
 - [node/src/receipts_validation.rs](node/src/receipts_validation.rs) - Full implementation
 - [node/tests/receipt_integration.rs](node/tests/receipt_integration.rs) - Integration tests

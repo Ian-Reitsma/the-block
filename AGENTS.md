@@ -130,12 +130,12 @@ The last 10% of work is operational hardening—this list is derived from the li
 1. **✅ COMPLETE (2025-12-18): WAN-scale chaos (`sim/chaos_lab.rs`, `docs/operations.md#chaos-and-fault-drills`)**: Automated via `scripts/wan_chaos_drill.sh`. Multi-provider failover drill now orchestrates TLS rotation simulation, produces `chaos/status diff` artifacts, and generates drill summary with Grafana screenshot placeholders. All required artifacts (status snapshots, provider failover reports, TLS rotation logs) are generated and archived.
 2. **✅ COMPLETE (2025-12-18): Provider margin telemetry (`node/src/telemetry.rs`, `docs/ECONOMIC_SYSTEM_CHANGELOG.md:207`)**: Real market metric derivation implemented in `node/src/economics/replay.rs` (lines 220-439). All four markets (storage, compute, energy, ad) now derive utilization and provider margin deterministically from on-chain data. The `economics_prev_market_metrics_{utilization,provider_margin}_ppm` gauges receive real values, resolving the "placeholder" status.
 3. **✅ COMPLETE (2025-12-18): Treasury executor scaling (`governance/src/store.rs:150-214`)**: Batched executor implemented with MAX_BATCH_SIZE=100 and MAX_SCAN_SIZE=500. Pre-filtering and early-exit optimization allow handling 1,000+ pending disbursements without stalls. Executor now processes eligible payouts incrementally across ticks, preventing backlog-induced dashboard alerts.
-4. **✅ COMPLETE (2025-12-19): Receipt Integration System at 99% readiness** (`node/src/receipts.rs`, `node/src/telemetry/receipts.rs`, `PHASES_2-4_COMPLETE.md`):
+4. **✅ COMPLETE (2025-12-19): Receipt Integration System at 99% readiness** (`node/src/receipts.rs`, `node/src/telemetry/receipts.rs`, `docs/archive/PHASES_2-4_COMPLETE.md`):
    - **Infrastructure delivered**: Receipt types, block serialization, cached hash integration, telemetry counters, metrics engine, and validation helpers.
    - **Markets integrated**: Ad, Storage, Compute, and Energy emit receipts with correct block heights and telemetry drains.
    - **Telemetry & monitoring**: Grafana dashboard (`monitoring/grafana_receipt_dashboard.json`), `metrics-aggregator` wiring, recipient drains counters, and pending depth alerts ship with the release.
    - **Testing & benchmarks**: 12 stress tests, dedicated `receipt_benchmarks`, integration suite, and verification script confirm 10,000 receipts/10 MB limits.
-   - **Deployment guidance**: `RECEIPT_INTEGRATION_COMPLETE.md` and `PHASES_2-4_COMPLETE.md` describe the coordinated rollout, governor checks, and release checklist.
+   - **Deployment guidance**: `docs/archive/RECEIPT_INTEGRATION_COMPLETE.md` and `docs/archive/PHASES_2-4_COMPLETE.md` describe the coordinated rollout, governor checks, and release checklist.
    - **Consensus impact reminder**: Receipts now influence block hash; follow the governor coordination badges (`node/src/launch_governor`) and `docs/operations.md#telemetry-wiring` before switching on mainnet.
 
 #### Concrete Example: Changing BLOCK Fee Floor Behavior
@@ -297,10 +297,10 @@ The repository owns exactly four responsibility domains:
   token, and all operator rewards settle in transferable BLOCK minted directly
   in the coinbase.
 - Every block carries three subsidy fields: `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB`.
-- `industrial_backlog` and `industrial_utilization` gauges feed
-  `Block::industrial_subsidies()`; these metrics surface the queued work and
-  realised throughput that the subsidy governor uses when retuning
-  multipliers.
+- `industrial_backlog` and `industrial_utilization` gauges feed the subsidy
+  allocator (`node/src/economics/subsidy_allocator.rs`) and replay metrics
+  (`node/src/economics/replay.rs`), surfacing queued work and realised
+  throughput for multiplier retunes.
 - Per‑epoch utilisation `U_x` (bytes stored, bytes served, CPU ms, bytes
   out) feeds the "one‑dial" multiplier formula:
 
@@ -791,7 +791,7 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 - Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct` carries an arbitrary 0–100 split with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: QUIC/TCP transport with `PeerSet`; per-peer drop reasons and reputation-aware rate limits surface via `net.peer_stats` and the `net` CLI. JSON‑RPC server in `src/bin/node.rs`; integration tests cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Inflation subsidies: BLOCK minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. Ledger snapshots now flow through the BLOCK subsidy store described in [Economics and Governance § BLOCK Supply](docs/economics_and_governance.md#block-supply-and-sub-ledgers) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the same formula; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
+- Inflation subsidies: BLOCK minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics feed the subsidy allocator and replay metrics, surfacing queued work and realised throughput for multiplier retunes. Ledger snapshots now flow through the BLOCK subsidy store described in [Economics and Governance § BLOCK Supply](docs/economics_and_governance.md#block-supply-and-sub-ledgers) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the same formula; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
   `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
   a voted percentage, granting governance a rapid-response lever during economic
   shocks.

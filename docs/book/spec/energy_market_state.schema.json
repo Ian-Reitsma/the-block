@@ -34,13 +34,21 @@
             "minimum": 0,
             "description": "Price in BLOCK per kWh"
           },
-          "stake": {
+          "meter_address": {
+            "type": "string"
+          },
+          "reputation_score": {
+            "type": "number",
+            "description": "Provider reputation score"
+          },
+          "total_delivered_kwh": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "staked_balance": {
             "type": "integer",
             "minimum": 0,
             "description": "Bonded stake in BLOCK"
-          },
-          "meter_address": {
-            "type": "string"
           },
           "jurisdiction": {
             "type": "string",
@@ -51,7 +59,18 @@
             "description": "Owner account address"
           }
         },
-        "required": ["provider_id", "capacity_kwh", "price_per_kwh"]
+        "required": [
+          "provider_id",
+          "owner",
+          "jurisdiction",
+          "capacity_kwh",
+          "available_kwh",
+          "price_per_kwh",
+          "reputation_score",
+          "meter_address",
+          "total_delivered_kwh",
+          "staked_balance"
+        ]
       }
     },
     "credits": {
@@ -74,10 +93,6 @@
           "timestamp": {
             "type": "integer",
             "description": "Unix timestamp of reading"
-          },
-          "expires_at_block": {
-            "type": "integer",
-            "description": "Block height after which credit expires"
           }
         },
         "required": ["provider", "meter_hash", "amount_kwh", "timestamp"]
@@ -106,6 +121,10 @@
             "minimum": 0,
             "description": "Total BLOCK paid"
           },
+          "block_settled": {
+            "type": "integer",
+            "description": "Settlement block height"
+          },
           "treasury_fee": {
             "type": "integer",
             "minimum": 0,
@@ -118,12 +137,17 @@
           },
           "meter_hash": {
             "type": "string"
-          },
-          "settled_at_block": {
-            "type": "integer"
           }
         },
-        "required": ["seller", "kwh_delivered", "price_paid", "meter_hash"]
+        "required": [
+          "seller",
+          "kwh_delivered",
+          "price_paid",
+          "block_settled",
+          "treasury_fee",
+          "slash_applied",
+          "meter_hash"
+        ]
       }
     },
     "error": {
@@ -141,10 +165,12 @@
           "capacity_kwh": 10000,
           "available_kwh": 9000,
           "price_per_kwh": 50,
-          "stake": 1000000,
+          "staked_balance": 1000000,
           "meter_address": "meter_001",
+          "reputation_score": 0.0,
+          "total_delivered_kwh": 0,
           "jurisdiction": "US_CA",
-          "owner": "ct1owner..."
+          "owner": "tb1owner..."
         }
       ],
       "credits": [
@@ -161,6 +187,7 @@
           "seller": "energy-0x00",
           "kwh_delivered": 50,
           "price_paid": 2500,
+          "block_settled": 42,
           "treasury_fee": 125,
           "slash_applied": 0,
           "meter_hash": "e3c3a1b2..."

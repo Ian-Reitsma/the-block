@@ -319,7 +319,7 @@ node/src/
       └── treasury.rs                     (+60 lines)
 
 Documentation:
-  ├── STRIDE_1_COMPLETE.md               (NEW, comprehensive)
+  ├── docs/archive/STRIDE_1_COMPLETE.md               (NEW, comprehensive)
   ├── STRIDE_1_ARCHITECTURE.md           (NEW, detailed diagrams)
   └── STRIDE_1_ALL_FIXES.md              (this file)
 
@@ -397,7 +397,7 @@ treasury_circuit_breaker_successes 0.0
 ✅ **Compiles with zero warnings**  
 ✅ **treasury_circuit_breaker_state metric queryable in Prometheus**  
 ✅ **Alert fires when circuit opens**  
-✅ **Manual failover test passes** (documented in STRIDE_1_COMPLETE.md)  
+✅ **Manual failover test passes** (documented in docs/archive/STRIDE_1_COMPLETE.md)  
 ✅ **Error classification correct** (storage/cancelled excluded, submission counted)  
 ✅ **Telemetry feature-gated** (#[cfg(feature = "telemetry")] throughout)  
 ✅ **All integration tests pass** (10 comprehensive tests)  

@@ -223,22 +223,28 @@
 <li>Rotations reuse existing seeds to keep transcripts lightweight while the in‑house threshold scheme is finalized. The temporary design keeps transcripts in memory and never writes share material to disk.</li>
 </ul>
 <h3 id="14-hash-layout"><a class="header" href="#14-hash-layout">1.4 Hash layout</a></h3>
-<p><code>node/src/hashlayout.rs</code> lists the canonical order for block fields. Highlights:</p>
-<div class="table-wrapper"><table><thead><tr><th>Field order</th><th>Description</th></tr></thead><tbody>
-<tr><td><code>index</code>, <code>prev</code>, <code>timestamp</code>, <code>nonce</code>, <code>difficulty</code>, <code>retune_hint</code>, <code>base_fee</code></td><td>Header core; <code>retune_hint</code> is a signed byte summarising the Kalman filter trend.</td></tr>
-<tr><td>Subsidy buckets (<code>coin_c</code>, <code>coin_i</code>, <code>storage_sub</code>, <code>read_sub</code>, <code>read_sub_{viewer,host,hardware,verifier,liquidity}</code>, ad* fields, <code>compute_sub</code>, <code>proof_rebate</code>, industrial sub‑ledgers)</td><td>Every reward lane is hashed before state roots so subsidies bind to the ledger.</td></tr>
-<tr><td><code>read_root</code>, <code>fee_checksum</code>, <code>state_root</code></td><td>Merkle roots; <code>fee_checksum</code> protects the per‑block fee accumulator.</td></tr>
-<tr><td><code>l2_roots</code>, <code>l2_sizes</code> (variable length)</td><td>Deterministic ordering; lengths are encoded before bytes.</td></tr>
-<tr><td><code>vdf_commit</code>, <code>vdf_output</code>, <code>len(vdf_proof)</code>, <code>vdf_proof</code>, <code>tx_ids</code></td><td>Final section to keep PoH/VDF data and transaction IDs adjacent.</td></tr>
+<p><code>node/src/hashlayout.rs</code> lists the canonical order for block fields. The encoding still uses legacy names (<code>coin_c</code>, <code>coin_i</code>) but they represent BLOCK‑denominated buckets, not separate tokens.</p>
+<div class="table-wrapper"><table><thead><tr><th>Order</th><th>Field</th><th>Description</th></tr></thead><tbody>
+<tr><td>1–7</td><td><code>index</code>, <code>prev</code>, <code>timestamp</code>, <code>nonce</code>, <code>difficulty</code>, <code>retune_hint</code>, <code>base_fee</code></td><td>Header core; <code>retune_hint</code> is a signed byte summarising the Kalman filter trend.</td></tr>
+<tr><td>8–9</td><td><code>coin_c</code>, <code>coin_i</code></td><td>Legacy coinbase labels (BLOCK).</td></tr>
+<tr><td>10–16</td><td><code>storage_sub</code>, <code>read_sub</code>, <code>read_sub_viewer</code>, <code>read_sub_host</code>, <code>read_sub_hardware</code>, <code>read_sub_verifier</code>, <code>read_sub_liquidity</code></td><td>Read/storage subsidy buckets (BLOCK).</td></tr>
+<tr><td>17–23</td><td><code>ad_viewer</code>, <code>ad_host</code>, <code>ad_hardware</code>, <code>ad_verifier</code>, <code>ad_liquidity</code>, <code>ad_miner</code>, <code>ad_total_usd_micros</code></td><td>Ad settlement buckets + USD micros counter.</td></tr>
+<tr><td>24–25</td><td><code>ad_settlement_count</code>, <code>ad_oracle_price_usd_micros</code></td><td>Ad settlement counts + oracle price.</td></tr>
+<tr><td>26–27</td><td><code>compute_sub</code>, <code>proof_rebate</code></td><td>Compute subsidy + proof rebate (BLOCK).</td></tr>
+<tr><td>28–30</td><td><code>read_root</code>, <code>fee_checksum</code>, <code>state_root</code></td><td>Merkle roots; <code>fee_checksum</code> protects the per‑block fee accumulator.</td></tr>
+<tr><td>31–32</td><td><code>l2_roots</code>, <code>l2_sizes</code></td><td>Variable‑length arrays; order is encoded as bytes then sizes.</td></tr>
+<tr><td>33–36</td><td><code>vdf_commit</code>, <code>vdf_output</code>, <code>len(vdf_proof)</code>, <code>vdf_proof</code></td><td>PoH/VDF proof material.</td></tr>
+<tr><td>37–38</td><td><code>len(receipts_serialized)</code>, <code>receipts_serialized</code></td><td>Receipts are consensus‑critical and hashed before transactions.</td></tr>
+<tr><td>39</td><td><code>tx_ids</code></td><td>Final section: transaction IDs.</td></tr>
 </tbody></table>
 </div>
-<p>Never reorder or remove fields; instead add new suffix fields and bump the hash layout tests.</p>
+<p>Never reorder or remove fields; instead add new suffix fields and bump the hash layout tests. If you add or rename a field in <code>BlockEncoder</code>, update this table and regenerate schema docs under <code>docs/spec/</code>.</p>
 <h3 id="15-schema-migrations-v7v10"><a class="header" href="#15-schema-migrations-v7v10">1.5 Schema migrations (v7–v10)</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Version</th><th>Scope</th><th>Pre‑migration state</th><th>Post‑migration state</th><th>Operator expectations</th></tr></thead><tbody>
-<tr><td>v7</td><td>Recent timestamp journaling (<code>docs/schema_migrations/v7_recent_timestamps.md</code> ➜ <code>Blockchain::recent_timestamps</code>)</td><td>Mempool entries only tracked <code>timestamp_millis</code>; restarts lost ordering guarantees.</td><td><code>timestamp_ticks</code> persisted alongside millis so QoS lanes continue after restarts (<code>node/tests/reopen.rs</code>).</td><td>Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring <code>telemetry::STARTUP_TTL_DROP_TOTAL</code>.</td></tr>
-<tr><td>v8</td><td>Bridge header persistence (<code>docs/schema_migrations/v8_bridge_headers.md</code>)</td><td>Bridge proofs not materialised in sled; challenge windows could not replay after crash.</td><td><code>simple_db::names::BRIDGE</code> stores verified headers and pending withdrawals; CLI exposes `contract-cli bridge pending</td><td>disputes`.</td></tr>
-<tr><td>v9</td><td>DEX escrow snapshots</td><td>Escrow state stored only in memory; C/R flows risked desync.</td><td><code>simple_db::names::DEX_STORAGE</code> now stores <code>EscrowState</code> (orders, locks, HTLC proofs).</td><td>Before upgrading, pause matching, run <code>contract-cli dex escrow export</code>; after upgrade confirm <code>dex.order_book</code> RPC matches expectations.</td></tr>
-<tr><td>v10</td><td>Industrial subsidy buckets</td><td>Subsidy accounting was aggregated; per‑lane reporting missing.</td><td><code>Block::industrial_subsidies()</code> writes <code>storage_sub_it</code>, <code>read_sub_it</code>, <code>compute_sub_it</code>; governance surfaces via explorer and CLI.</td><td>Update dashboards to use the new metrics (<code>INDUSTRIAL_SUBSIDY_*</code>); re-run treasury audits to ensure ledgers reconcile.</td></tr>
+<tr><td>v7</td><td>Recent timestamp journaling (<code>Blockchain::recent_timestamps</code>)</td><td>Mempool entries only tracked <code>timestamp_millis</code>; restarts lost ordering guarantees.</td><td><code>timestamp_ticks</code> persisted alongside millis so QoS lanes continue after restarts (<code>node/tests/reopen.rs</code>).</td><td>Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring <code>telemetry::STARTUP_TTL_DROP_TOTAL</code>.</td></tr>
+<tr><td>v8</td><td>Bridge header persistence (<code>simple_db::names::BRIDGE</code>)</td><td>Bridge proofs not materialised in sled; challenge windows could not replay after crash.</td><td><code>simple_db::names::BRIDGE</code> stores verified headers and pending withdrawals; CLI exposes `contract-cli bridge pending</td><td>disputes`.</td></tr>
+<tr><td>v9</td><td>DEX escrow snapshots (<code>simple_db::names::DEX_STORAGE</code>)</td><td>Escrow state stored only in memory; C/R flows risked desync.</td><td><code>simple_db::names::DEX_STORAGE</code> now stores <code>EscrowState</code> (orders, locks, HTLC proofs).</td><td>Before upgrading, pause matching, run <code>contract-cli dex escrow export</code>; after upgrade confirm <code>dex.order_book</code> RPC matches expectations.</td></tr>
+<tr><td>v10</td><td>Unified subsidy buckets</td><td>Legacy dual‑token labels removed from on‑disk snapshots; subsidies now serialize as <code>storage_sub</code>, <code>read_sub</code>, <code>compute_sub</code> with read/ad splits preserved.</td><td>Ledger + RPC surfaces report unified BLOCK values; lane routing stays in mempool/fee policy.</td><td>Update dashboards to use unified metric names and re-run settlement audits to confirm invariants.</td></tr>
 </tbody></table>
 </div>
 <hr />
@@ -262,7 +268,7 @@ next = max(prev + Δ, 1)
 <ul>
 <li><code>TARGET_GAS_PER_BLOCK = 1_000_000</code>.</li>
 <li><code>Δ</code> is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑BLOCK per byte).</li>
-<li>Telemetry: <code>base_fee</code> gauge plus <code>mempool_fee_floor_*</code> histograms show nudges per block. <code>node/tests/base_fee.rs</code> exercises the path.</li>
+<li>Telemetry: <code>base_fee</code> gauge plus <code>fee_floor_current</code> and <code>fee_floor_warning_total</code> / <code>fee_floor_override_total</code> counters show nudges per block. <code>node/tests/base_fee.rs</code> exercises the path.</li>
 </ul>
 <h3 id="23-qos-accounting-ttl-math-and-rpc-surfaces"><a class="header" href="#23-qos-accounting-ttl-math-and-rpc-surfaces">2.3 QoS accounting, TTL math, and RPC surfaces</a></h3>
 <ul>
@@ -273,7 +279,7 @@ next = max(prev + Δ, 1)
 <li><code>min_fee_per_byte_{consumer,industrial}</code> defaults to 1 µBLOCK/byte but is immediately clamped to the rolling floor.</li>
 </ul>
 </li>
-<li>Rolling floor: every admitted transaction records its <code>fee_per_byte</code>. The percentile window is configured by governance (<code>fee_floor_window</code>, <code>fee_floor_percentile</code>) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post <code>mempool.qos_event</code> we log overrides (<code>FEE_FLOOR_WARNING_TOTAL</code> / <code>FEE_FLOOR_OVERRIDE_TOTAL</code>).</li>
+<li>Rolling floor: every admitted transaction records its <code>fee_per_byte</code>. The percentile window is configured by governance (<code>fee_floor_window</code>, <code>fee_floor_percentile</code>) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post <code>mempool.qos_event</code> we log overrides (<code>fee_floor_warning_total</code> / <code>fee_floor_override_total</code>).</li>
 <li>TTL ordering: <code>MempoolEntry::expires_at = timestamp_millis + (tx_ttl * 1000)</code> (<code>node/src/lib.rs:806–834</code>). <code>mempool_cmp</code> sorts by:
 <ol>
 <li><code>tip / serialized_size</code> (descending),</li>
@@ -317,7 +323,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
   "fee_floor": 900
 }
 </code></pre>
-<p>When consumer latency jumps above <code>comfort_threshold_p90</code> (governance parameter) the scheduler raises the base fee which in turn bumps lane floors; watch <code>mempool_fee_floor_current{lane}</code> for confirmation.</p>
+<p>When consumer latency jumps above <code>comfort_threshold_p90</code> (governance parameter) the scheduler raises the base fee which in turn bumps lane floors; watch <code>fee_floor_current</code> and <code>mempool.stats.fee_floor</code> for confirmation.</p>
 <h3 id="24-transaction-scheduler-fairness-windows-and-conflict-guards"><a class="header" href="#24-transaction-scheduler-fairness-windows-and-conflict-guards">2.4 Transaction scheduler, fairness windows, and conflict guards</a></h3>
 <ul>
 <li><code>node/src/scheduler.rs</code> drives the service pipeline. <code>ServiceScheduler</code> owns three classes (<code>gossip</code>, <code>compute</code>, <code>storage</code>) with weights exposed as governance parameters (<code>scheduler_weight_gossip</code>, <code>scheduler_weight_compute</code>, <code>scheduler_weight_storage</code>). <code>governance::registry</code> plumbs new values directly into the atomic defaults so the change is visible to the next block without restarting.</li>
@@ -488,7 +494,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </ul>
 <h3 id="57-rent-escrow-releases-and-proofs"><a class="header" href="#57-rent-escrow-releases-and-proofs">5.7 Rent escrow, releases, and proofs</a></h3>
 <ul>
-<li><code>RentEscrow</code> (<code>node/src/storage/fs.rs</code>) persists deposits in <code>SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)</code>. API summary:</li>
+<li><code>RentEscrow</code> (<code>node/src/storage/fs.rs</code>) persists deposits in <code>SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)</code>; default path is <code>blobstore</code> when the env var is unset. API summary:</li>
 <li><code>lock(id, depositor, amount, expiry)</code> writes a record and increments <code>RENT_ESCROW_LOCKED_TOTAL</code>.</li>
 <li><code>release(id)</code> removes the record, refunds 90 % to the depositor, burns 10 % (tracked via <code>RENT_ESCROW_REFUNDED_TOTAL</code>/<code>RENT_ESCROW_BURNED_TOTAL</code>), and returns <code>(account, refund, burn)</code>.
 <ul>
@@ -637,18 +643,18 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <h2 id="7-dex-trust-lines-and-htlcs"><a class="header" href="#7-dex-trust-lines-and-htlcs">7. DEX, Trust Lines, and HTLCs</a></h2>
 <h3 id="71-amm-pool-math"><a class="header" href="#71-amm-pool-math">7.1 AMM pool math</a></h3>
 <ul>
-<li>Constant-product pools live in <code>dex/src/amm.rs</code>.</li>
+<li>Constant-product pools live in <code>dex/src/amm.rs</code> with <code>base_reserve</code> and <code>quote_reserve</code>.</li>
 <li>Share minting:
 <ul>
-<li>First LP: <code>share = sqrt(ct * it)</code>.</li>
-<li>Subsequent LPs: <code>share = min(total_shares * ct / reserve, total_shares * it / reserve_it)</code>.</li>
+<li>First LP: <code>share = sqrt(base * quote)</code>.</li>
+<li>Subsequent LPs: <code>share = min(total_shares * base / base_reserve, total_shares * quote / quote_reserve)</code>.</li>
 </ul>
 </li>
-<li>Swaps preserve <code>k = reserve * reserve_it</code>; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.</li>
+<li>Swaps preserve <code>k = base_reserve * quote_reserve</code>; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.</li>
 </ul>
 <h3 id="72-trust-line-routing"><a class="header" href="#72-trust-line-routing">7.2 Trust-line routing</a></h3>
 <ul>
-<li>Ledger (<code>node/src/dex/trust_lines.rs</code>) keeps a <code>HashMap&lt;(from,to), TrustLine { balance, limit, authorized }&gt;</code> pair.</li>
+<li>Ledger (<code>node/src/dex/trust_lines.rs</code>) keeps a <code>HashMap&lt;(from,to), TrustLine { balance, limit, authorized }&gt;</code>; <code>balance</code> is signed (positive means <code>from</code> owes <code>to</code>, negative means the reverse) and must stay within <code>limit</code>.</li>
 <li>Path finding:
 <ul>
 <li>BFS yields any viable path.</li>
@@ -721,7 +727,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li><code>PendingWithdrawal</code> (<code>node/src/bridge/mod.rs:389</code>) tracks <code>commitment</code>, <code>asset</code>, <code>user</code>, <code>amount</code>, <code>initiated_at</code>, <code>deadline = initiated_at + channel.config.challenge_period_secs</code>, and <code>challenged</code> flags. Default challenge window is 30 s, overrideable per channel.</li>
 <li>Duty timing:
 <ol>
-<li><code>bridge.request_withdrawal</code> locks the relayer bond (<code>bridge_min_bond</code>) and schedules a duty (<code>DutyRecord</code>) with deadline <code>initiated_at + bridge_duty_window_secs</code>.</li>
+<li><code>bridge.request_withdrawal</code> locks the relayer bond (<code>bridge_min_bond</code>, sourced from governance <code>BridgeIncentiveParameters</code>) and schedules a duty (<code>DutyRecord</code>) with deadline <code>initiated_at + bridge_duty_window_secs</code>.</li>
 <li>Challengers call <code>bridge.challenge_withdrawal { commitment, challenger }</code>. If accepted, <code>BridgeError::AlreadyChallenged</code> prevents duplicates and <code>bridge_challenge_slash</code> refunds challengers after burning the bond.</li>
 <li>If no challenge arrives before <code>deadline</code>, <code>bridge.finalize_withdrawal</code> releases funds and credits <code>bridge_duty_reward</code>.</li>
 </ol>
@@ -933,7 +939,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <ul>
 <li><code>governance/src/treasury.rs</code> enforces:
 <ul>
-<li>Non‑negative balances (<code>ct</code>, <code>industrial</code>) tracked in sled.</li>
+<li>Non‑negative unified BLOCK balance tracked in sled.</li>
 <li>Streaming caps and kill switches (<code>kill_switch_subsidy_reduction</code>, <code>treasury_percent</code>).</li>
 <li>Audit log size ≤ 256 entries; older entries roll off but anchor hashes persist.</li>
 </ul>
@@ -1061,16 +1067,16 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <p>See Appendix B for detailed metric descriptions. Key highlights:</p>
 <div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Meaning</th><th>Labels</th><th>Units</th><th>Suggested alert</th></tr></thead><tbody>
 <tr><td><code>base_fee</code></td><td>Current per-byte base fee</td><td>n/a</td><td>micro‑BLOCK</td><td>Alert if <code>&gt;10x</code> baseline for &gt;5 min (congestion).</td></tr>
-<tr><td><code>mempool_fee_floor_{consumer,industrial}</code></td><td>Rolling fee floors</td><td>lane</td><td>micro‑BLOCK</td><td>Alert if consumer floor moves &gt;50 % in &lt;60 s (possible spam).</td></tr>
-<tr><td><code>MEMPOOL_EVICTIONS_TOTAL</code></td><td>Evicted tx count</td><td>lane</td><td>count</td><td>Alert if derivative spikes unexpectedly.</td></tr>
-<tr><td><code>PARTITION_EVENTS_TOTAL</code></td><td>Partition incidents</td><td>n/a</td><td>count</td><td>Alert on increments; cross‑link to runbook.</td></tr>
-<tr><td><code>QUIC_HANDSHAKE_FAIL_TOTAL</code></td><td>Failed QUIC handshakes</td><td>peer,reason</td><td>count</td><td>Alert on surge for specific provider.</td></tr>
-<tr><td><code>RANGE_BOOST_QUEUE_DEPTH</code></td><td>Pending mesh bundles</td><td>n/a</td><td>count</td><td>Alert if &gt; queue cap (default 256).</td></tr>
+<tr><td><code>fee_floor_current</code></td><td>Current fee floor (global); per‑lane floors are in <code>mempool.stats.fee_floor</code>.</td><td>n/a</td><td>micro‑BLOCK</td><td>Alert if the floor moves &gt;50 % in &lt;60 s (possible spam).</td></tr>
+<tr><td><code>mempool_evictions_total</code></td><td>Evicted tx count</td><td>n/a</td><td>count</td><td>Alert if derivative spikes unexpectedly.</td></tr>
+<tr><td><code>partition_events_total</code></td><td>Partition incidents</td><td>n/a</td><td>count</td><td>Alert on increments; cross‑link to runbook.</td></tr>
+<tr><td><code>quic_handshake_fail_total</code></td><td>Failed QUIC handshakes</td><td>peer,reason</td><td>count</td><td>Alert on surge for specific provider.</td></tr>
+<tr><td><code>range_boost_queue_depth</code></td><td>Pending mesh bundles</td><td>n/a</td><td>count</td><td>Alert if &gt; queue cap (default 256).</td></tr>
 <tr><td><code>MOBILE_CACHE_*</code></td><td>Cache hits/misses/sweeps</td><td>action</td><td>count</td><td>Alert on sustained misses and queue overflows.</td></tr>
-<tr><td><code>COMPUTE_SLA_VIOLATIONS_TOTAL</code></td><td>SLA breaches</td><td>reason</td><td>count</td><td>Alert &gt;0 while in <code>SettleMode::Real</code>.</td></tr>
-<tr><td><code>BRIDGE_CHALLENGE_TOTAL</code></td><td>Bridge challenges</td><td>asset</td><td>count</td><td>Alert if &gt;0 without operator action.</td></tr>
-<tr><td><code>TREASURY_BALANCE</code></td><td>Treasury BLOCK balance</td><td>n/a</td><td>BLOCK</td><td>Alert if drops &gt;X% per day outside scheduled disbursements.</td></tr>
-<tr><td><code>WRAPPER_DEPENDENCY_POLICY_VIOLATION</code></td><td>Dependency drift</td><td>wrapper</td><td>count</td><td>Alert immediately; governance override required.</td></tr>
+<tr><td><code>compute_sla_violations_total</code></td><td>SLA breaches</td><td>n/a</td><td>count</td><td>Alert &gt;0 while in <code>SettleMode::Real</code>.</td></tr>
+<tr><td><code>bridge_dispute_outcomes_total</code></td><td>Bridge disputes</td><td>asset</td><td>count</td><td>Alert if &gt;0 without operator action.</td></tr>
+<tr><td><code>treasury_balance_current</code></td><td>Treasury BLOCK balance</td><td>n/a</td><td>BLOCK</td><td>Alert if drops &gt;X% per day outside scheduled disbursements.</td></tr>
+<tr><td><code>dependency_policy_violation_total</code></td><td>Dependency drift</td><td>wrapper</td><td>count</td><td>Alert immediately; governance override required.</td></tr>
 </tbody></table>
 </div>
 <h3 id="132-probe-cli-cookbook"><a class="header" href="#132-probe-cli-cookbook">13.2 Probe CLI cookbook</a></h3>
@@ -1124,7 +1130,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>ad_market.policy_snapshot</code></td><td><code>{epoch}</code></td><td>Snapshot JSON from <code>ad_policy_snapshot::load_snapshot</code> or <code>{status:"not_found"}</code></td><td><code>-32602</code> missing epoch</td></tr>
 <tr><td><code>ad_market.policy_snapshots</code></td><td><code>{start_epoch?,end_epoch?}</code> (<code>end_epoch</code> defaults to <code>chain_height/120</code>)</td><td><code>{snapshots:[PolicySnapshot]}</code></td><td>none (empty list when no snapshots)</td></tr>
 <tr><td><code>ad_market.register_campaign</code></td><td><code>CampaignRegistration</code></td><td><code>{status:"ok"}</code> on success</td><td><code>-32603</code> when market disabled/persistence error, <code>-32602</code> invalid payload, <code>-32000</code> duplicate campaign</td></tr>
-<tr><td><code>ad_market.record_conversion</code></td><td><code>ConversionRecord</code> body + advertiser auth header</td><td><code>{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?,value_totals:{usd_micros?,ct?}}}</code></td><td><code>-32603</code> disabled/internal, <code>-32602</code> invalid payload, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030</code> auth missing, <code>-32031</code> advertiser mismatch, <code>-32032</code> token missing, <code>-32033</code> invalid token, <code>-32039</code> selector weight mismatch</td></tr>
+<tr><td><code>ad_market.record_conversion</code></td><td><code>ConversionRecord</code> body + advertiser auth header</td><td><code>{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?}}</code></td><td><code>-32603</code> disabled/internal, <code>-32602</code> invalid payload, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030</code> auth missing, <code>-32031</code> advertiser mismatch, <code>-32032</code> token missing, <code>-32033</code> invalid token, <code>-32039</code> selector weight mismatch</td></tr>
 <tr><td><code>ad_market.list_presence_cohorts</code></td><td><code>{region?,domain_tier?,min_confidence_bps?,interest_tag?}</code></td><td><code>{status:"ok",cohorts:[PresenceCohortSummary],privacy_budget:{remaining_ppm}}</code></td><td><code>-32602</code> invalid filter, <code>-32034</code> stale bucket, <code>-32037</code> privacy guardrail</td></tr>
 <tr><td><code>ad_market.reserve_presence</code></td><td><code>{campaign_id,String, presence_bucket_id,String, slot_count,u32, expires_at_micros?, selector_budget?:Vec&lt;SelectorBidSpec&gt;}</code></td><td><code>{status:"ok",reservation_id,String,expires_at_micros,u64}</code></td><td><code>-32001</code> unknown campaign, <code>-32034</code> invalid bucket, <code>-32035</code> forbidden selector combo, <code>-32037</code> insufficient privacy budget</td></tr>
 </tbody></table>
@@ -1139,7 +1145,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 </div>
 <h4 id="account-queries-and-ledger-helpers"><a class="header" href="#account-queries-and-ledger-helpers">Account queries and ledger helpers</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
-<tr><td><code>balance</code></td><td><code>{address}</code></td><td><code>{consumer,industrial}</code> balances pulled from <code>accounts</code> map (0 when missing)</td><td>none</td></tr>
+<tr><td><code>balance</code></td><td><code>{address}</code></td><td><code>{amount}</code> balance pulled from <code>accounts</code> map (0 when missing)</td><td>none</td></tr>
 <tr><td><code>ledger.shard_of</code></td><td><code>{address}</code></td><td><code>{shard}</code> numeric shard ID as computed by <code>ledger::shard_of</code></td><td>none</td></tr>
 </tbody></table>
 </div>
@@ -1229,7 +1235,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>compute_market.scheduler_stats</code></td><td>none</td><td>Raw scheduler view (per-lane queues, fairness windows)</td><td>none</td></tr>
 <tr><td><code>compute_market.scheduler_metrics</code></td><td>none</td><td><code>scheduler::Metrics</code> structure (latency, starvation counters, lane deadlines)</td><td>none</td></tr>
 <tr><td><code>compute_market.recent_roots</code></td><td><code>{n?}</code></td><td>Latest <code>n</code> micro-shard roots used for receipts</td><td>none</td></tr>
-<tr><td><code>compute_market.provider_balances</code></td><td>none</td><td><code>{providers:[{id, pending, settled, sla_bond}]}</code></td><td>none</td></tr>
+<tr><td><code>compute_market.provider_balances</code></td><td>none</td><td><code>{providers:[{provider, balance}]}</code></td><td>none</td></tr>
 <tr><td><code>compute_market.audit</code></td><td>none</td><td>Extended audit log incl. fairness window snapshots, outstanding SLA records</td><td><code>MarketError</code> codes</td></tr>
 </tbody></table>
 </div>
@@ -1267,7 +1273,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>light.headers</code></td><td><code>{from_height, count}</code></td><td><code>{headers:[{height,header_fields...}]}</code> chunked for device syncing</td><td>none</td></tr>
 <tr><td><code>light.latest_header</code></td><td>none</td><td><code>{height, header}</code> for best tip</td><td>none</td></tr>
 <tr><td><code>light_client.rebate_status</code></td><td><code>{device_id}</code></td><td><code>{pending, claimed, last_claim_ts, proofs[]}</code></td><td><code>-32030</code> unauthorized when device not registered</td></tr>
-<tr><td><code>light_client.rebate_history</code></td><td><code>{device_id, limit?, cursor?}</code></td><td><code>{items:[{epoch,ct,receipt_hash}], next_cursor?}</code></td><td>same as above</td></tr>
+<tr><td><code>light_client.rebate_history</code></td><td><code>{relayer?, limit?, cursor?}</code></td><td><code>{receipts:[{height, amount, relayers:[{id, amount}]}], next?}</code></td><td>same as above</td></tr>
 <tr><td><code>state_stream.subscribe</code></td><td>WebSocket upgrade, no body</td><td>Streams <code>{height, root, accounts_changed, proofs}</code> batches</td><td>HTTP 429 when subscriber cap reached</td></tr>
 </tbody></table>
 </div>
@@ -1332,8 +1338,8 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>gov_params</code></td><td><code>{epoch?}</code></td><td><code>{params}</code> snapshot from <code>GOV_PARAMS</code></td><td>none</td></tr>
 <tr><td><code>gov_rollback_last</code> / <code>gov_rollback</code></td><td><code>{epoch}</code> / <code>{proposal_id, epoch}</code></td><td><code>{status:"ok"}</code> after reverting governance store</td><td><code>-32043</code> rollback guardrails</td></tr>
 <tr><td><code>gov.release_signers</code></td><td>none</td><td><code>{signers:[{name,pubkey}]} </code></td><td>none</td></tr>
-<tr><td><code>gov.treasury.balance</code></td><td>none</td><td><code>{ct, industrial, usd_estimate}</code> from treasury sled</td><td>none</td></tr>
-<tr><td><code>gov.treasury.balance_history</code></td><td><code>{start?, end?}</code></td><td><code>{entries:[{epoch,ct}], next_cursor?}</code></td><td>none</td></tr>
+<tr><td><code>gov.treasury.balance</code></td><td>none</td><td><code>{balance, last_snapshot?, executor?}</code> from treasury sled</td><td>none</td></tr>
+<tr><td><code>gov.treasury.balance_history</code></td><td><code>{cursor?, limit?}</code></td><td><code>{snapshots:[{id, balance, delta, recorded_at, event, disbursement_id?}], next_cursor?, current_balance}</code></td><td>none</td></tr>
 <tr><td><code>gov.treasury.disbursements</code></td><td><code>{limit?, cursor?}</code></td><td><code>{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>service_badge_issue</code></td><td><code>{subject, badge}</code> (requires signer badge header)</td><td><code>{status:"ok"}</code> and records issuance</td><td><code>-32602</code> invalid payload, <code>-32050</code> when badge invalid</td></tr>
 <tr><td><code>service_badge_revoke</code></td><td><code>{subject, badge}</code></td><td><code>{status:"ok"}</code></td><td>same</td></tr>
@@ -1624,7 +1630,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <div class="table-wrapper"><table><thead><tr><th>Name</th><th>Purpose</th><th>Common prefixes/keys</th></tr></thead><tbody>
 <tr><td><code>default</code></td><td>Legacy chain state (fallback).</td><td><code>chain</code>, <code>accounts</code>.</td></tr>
 <tr><td><code>bridge</code></td><td>Bridge headers, pending withdrawals.</td><td><code>header:&lt;height&gt;</code>, <code>withdrawal:&lt;commitment&gt;</code>.</td></tr>
-<tr><td><code>compute_settlement</code></td><td>Settlement engine state (balances, audit log).</td><td><code>ledger</code>, <code>ledger_it</code>, <code>sla_queue</code>, <code>sla_history</code>.</td></tr>
+<tr><td><code>compute_settlement</code></td><td>Settlement engine state (balances, audit log).</td><td><code>ledger</code>, <code>sla_queue</code>, <code>sla_history</code> (legacy <code>ledger_it</code> no longer used).</td></tr>
 <tr><td><code>dex_storage</code></td><td>Order book, trades, escrow locks, AMM pools.</td><td><code>book</code>, <code>trade:*</code>, <code>escrow</code>, <code>amm/&lt;pool_id&gt;</code>.</td></tr>
 <tr><td><code>gateway_dns</code></td><td>Domain auctions, stakes, ownership.</td><td><code>auction:&lt;domain&gt;</code>, <code>stake:&lt;ref&gt;</code>, <code>ownership:&lt;domain&gt;</code>.</td></tr>
 <tr><td><code>gateway_ad_readiness</code></td><td>Readiness snapshots for ad flows.</td><td><code>snapshot:&lt;epoch&gt;</code>.</td></tr>
@@ -1648,6 +1654,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>Tx</code></td><td><code>SignedTransaction</code> (foundation serialization).</td><td>Used for gossip/broadcast.</td></tr>
 <tr><td><code>BlobTx</code></td><td><code>BlobTx</code> struct (commitment, payload).</td><td>For L2 blobspace.</td></tr>
 <tr><td><code>Block</code></td><td><code>(ShardId, Block)</code></td><td>Shard IDs live under <code>ledger::address::ShardId</code>.</td></tr>
+<tr><td><code>ChainRequest</code></td><td><code>{ from_height }</code></td><td>Chain sync pull requests.</td></tr>
 <tr><td><code>Chain</code></td><td><code>Vec&lt;Block&gt;</code></td><td>Fork resolution snapshots.</td></tr>
 <tr><td><code>BlobChunk</code></td><td><code>root[32], index, total, data</code></td><td>Erasure-coded shard.</td></tr>
 <tr><td><code>Reputation</code></td><td><code>Vec&lt;ReputationUpdate { peer, delta, reason }&gt;</code></td><td>Synchronises overlay reputation.</td></tr>
@@ -1662,8 +1669,20 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>industrial_admission_min_capacity</code></td><td>10</td><td>Minimum queue capacity before opening industrial lane.</td></tr>
 <tr><td><code>fairshare_global_max_ppm</code></td><td>250 000</td><td>QoS cap per account in parts‑per‑million.</td></tr>
 <tr><td><code>burst_refill_rate_per_s_ppm</code></td><td>500 000 (≈30 tx/min)</td><td>Token bucket refill rate.</td></tr>
+<tr><td><code>lane_based_settlement_enabled</code></td><td>0</td><td>Enable lane-based settlement routing.</td></tr>
+<tr><td><code>lane_consumer_capacity</code> / <code>lane_industrial_capacity</code></td><td>1000 / 500</td><td>Lane capacities for utilisation tracking.</td></tr>
+<tr><td><code>lane_consumer_congestion_sensitivity</code> / <code>lane_industrial_congestion_sensitivity</code></td><td>300 / 500</td><td>Congestion sensitivity (k = value / 100).</td></tr>
+<tr><td><code>lane_industrial_min_premium_percent</code></td><td>50</td><td>Minimum industrial premium.</td></tr>
+<tr><td><code>lane_target_utilization_percent</code></td><td>70</td><td>PI target utilisation.</td></tr>
+<tr><td><code>lane_market_signal_half_life</code></td><td>50</td><td>EMA half-life for demand signal (blocks).</td></tr>
+<tr><td><code>lane_market_demand_max_multiplier_percent</code></td><td>300</td><td>Max demand multiplier.</td></tr>
+<tr><td><code>lane_market_demand_sensitivity_percent</code></td><td>200</td><td>Demand sensitivity.</td></tr>
+<tr><td><code>lane_pi_proportional_gain_percent</code> / <code>lane_pi_integral_gain_percent</code></td><td>10 / 1</td><td>PI gains (Kp/Ki).</td></tr>
 <tr><td><code>beta_storage_sub</code>, <code>gamma_read_sub</code>, <code>kappa_cpu_sub</code>, <code>lambda_bytes_out_sub</code></td><td>50/20/10/5</td><td>Subsidy multipliers (basis points).</td></tr>
 <tr><td><code>read_subsidy_*_percent</code></td><td>Derived defaults</td><td>Split <code>READ_SUB</code> across viewer/host/hardware/verifier/liquidity.</td></tr>
+<tr><td><code>treasury_percent</code></td><td>0</td><td>Treasury share of fees.</td></tr>
+<tr><td><code>proof_rebate_limit</code></td><td>1</td><td>Max proof rebate share.</td></tr>
+<tr><td><code>rent_rate_per_byte</code></td><td>0</td><td>Storage rent rate.</td></tr>
 <tr><td><code>kill_switch_subsidy_reduction</code></td><td>0</td><td>Emergency knob to damp multipliers.</td></tr>
 <tr><td><code>miner_reward_logistic_target</code>, <code>logistic_slope_milli</code>, <code>miner_hysteresis</code></td><td>100 / ~230 / 10</td><td>Shape of logistic emission curve.</td></tr>
 <tr><td><code>badge_expiry_secs</code>, <code>badge_issue/revoke_uptime_percent</code></td><td>30 days / 99 % / 95 %</td><td>Service badge policy.</td></tr>
@@ -1686,7 +1705,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 </ol>
 <h3 id="appendix-g--compute-courier-and-sla-quick-reference"><a class="header" href="#appendix-g--compute-courier-and-sla-quick-reference">Appendix G · Compute Courier and SLA Quick Reference</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Component</th><th>Behaviour</th></tr></thead><tbody>
-<tr><td>Courier queue</td><td>sled <code>courier</code> tree storing <code>CourierReceipt</code>. Automatic retries (5 attempts, 100 ms exponential backoff).</td></tr>
+<tr><td>Courier queue</td><td>sled <code>courier</code> tree storing <code>CourierReceipt</code>. Automatic retries (5 attempts, exponential backoff: 100, 200, 400, 800 ms).</td></tr>
 <tr><td>SLA scheduler</td><td><code>Settlement::sla</code> vector holds active deadlines; <code>SLA_HISTORY_LIMIT = 256</code>.</td></tr>
 <tr><td>CLI hooks</td><td><code>contract-cli compute courier status</code>, <code>contract-cli compute settlement audit</code> (future extension) read <code>compute_market.*</code> RPC responses.</td></tr>
 </tbody></table>
@@ -1695,7 +1714,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <ul>
 <li>AMM invariants:
 <ul>
-<li><code>k = reserve * reserve_it</code>.</li>
+<li><code>k = base_reserve * quote_reserve</code>.</li>
 <li>Share minting uses geometric mean for first LP; later LPs mint shares proportional to contributions.</li>
 <li>No fee term yet; add <code>fee_bps</code> multiplier before recomputing <code>k</code> if needed.</li>
 </ul>

@@ -376,7 +376,7 @@
 <ul>
 <li>Outbound clients live in <code>crates/httpd::{client.rs,blocking.rs}</code>. <code>httpd::Client</code> wraps the runtime <code>TcpStream</code>, supports HTTPS via the in-house TLS connector, and exposes:
 <ul>
-<li><code>ClientConfig { connect_timeout, request_timeout, read_timeout?, max_response_bytes, tls }</code>.</li>
+<li><code>ClientConfig { connect_timeout, request_timeout, read_timeout?, tls_handshake_timeout, max_response_bytes, tls }</code>.</li>
 <li><code>Client::with_tls_from_env(&amp;["TB_NODE_TLS","TB_HTTP_TLS"])</code> to reuse the same certs as RPC/gateway surfaces.</li>
 <li><code>RequestBuilder::json(value)</code> for canonical JSON encoding and <code>send()</code> for async execution. Blocking variants offer the same API for CLI tools.</li>
 </ul>

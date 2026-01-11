@@ -112,7 +112,7 @@ Status: ✅ COMPLETE - ZERO SHORTCUTS
 ✅ DOCUMENTATION
 ────────────────────────────────────────────────────────────────────────────
 
-[✓] STRIDE_1_COMPLETE.md (Comprehensive implementation guide)
+[✓] docs/archive/STRIDE_1_COMPLETE.md (Comprehensive implementation guide)
     ├─ Executive summary
     ├─ All changes documented
     ├─ Architecture decisions explained
@@ -197,7 +197,7 @@ Thread Safety:      Lock-free hot path (atomics)
    # In another terminal:
    curl http://localhost:9615/metrics | grep circuit_breaker
 
-4. MANUAL FAILOVER TEST (5 minutes, see STRIDE_1_COMPLETE.md)
+4. MANUAL FAILOVER TEST (5 minutes, see docs/archive/STRIDE_1_COMPLETE.md)
    - Induce RPC failures
    - Verify circuit opens after 5 failures
    - Wait 60s for timeout

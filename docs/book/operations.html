@@ -180,6 +180,43 @@
 <strong>Audience</strong>: Site Reliability Engineers, Launch Operations Team<br />
 <strong>Related</strong>: <code>docs/OBSERVABILITY_MAP.md</code> (mapping questions to metrics)</p>
 <hr />
+<h2 id="telemetry-wiring"><a class="header" href="#telemetry-wiring">Telemetry Wiring</a></h2>
+<h3 id="runtime-reactor"><a class="header" href="#runtime-reactor">Runtime Reactor</a></h3>
+<ul>
+<li><code>runtime_read_without_ready_total</code> increments when reads succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.</li>
+<li><code>runtime_write_without_ready_total</code> increments when writes succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.</li>
+</ul>
+<h3 id="runtime-tuning-knobs"><a class="header" href="#runtime-tuning-knobs">Runtime Tuning Knobs</a></h3>
+<ul>
+<li><code>runtime.reactor_idle_poll_ms</code>: maximum sleep between reactor polls (ms).</li>
+<li><code>runtime.io_read_backoff_ms</code>: fallback delay before retrying reads when readiness is missing (ms).</li>
+<li><code>runtime.io_write_backoff_ms</code>: fallback delay before retrying writes when readiness is missing (ms).</li>
+<li><strong>Defaults:</strong> <code>reactor_idle_poll_ms=100</code>, <code>io_read_backoff_ms=10</code>, <code>io_write_backoff_ms=10</code>.</li>
+<li><strong>When to tune:</strong> Lower the idle poll and backoff values for latency-sensitive testnets; raise them when CPU is saturated by idle peers. Watch <code>runtime_read_without_ready_total</code> / <code>runtime_write_without_ready_total</code> and reactor CPU to validate changes.</li>
+<li><strong>BSD note:</strong> On kqueue platforms we run level-triggered mode (no <code>EV_CLEAR</code>); if wakeups are missed, increase the backoff and ensure <code>update_interest()</code> instrumentation is present.</li>
+<li><strong>Env vars:</strong> <code>TB_REACTOR_IDLE_POLL_MS</code>, <code>TB_IO_READ_BACKOFF_MS</code>, and <code>TB_IO_WRITE_BACKOFF_MS</code> map to the same knobs; config reloads apply without restart.</li>
+</ul>
+<h3 id="p2p-rate-limiting-and-chain-sync"><a class="header" href="#p2p-rate-limiting-and-chain-sync">P2P Rate Limiting and Chain Sync</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Knob</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>p2p_rate_window_secs</code> (<code>TB_P2P_RATE_WINDOW_SECS</code>)</td><td>1</td><td>Sliding window for request counters</td></tr>
+<tr><td><code>p2p_max_per_sec</code> (<code>TB_P2P_MAX_PER_SEC</code>)</td><td>workload-dependent</td><td>Max requests per peer per window</td></tr>
+<tr><td><code>p2p_max_bytes_per_sec</code> (<code>TB_P2P_MAX_BYTES_PER_SEC</code>)</td><td>workload-dependent</td><td>Max bytes per peer per window</td></tr>
+<tr><td><code>p2p_chain_sync_interval_ms</code> (<code>TB_P2P_CHAIN_SYNC_INTERVAL_MS</code>)</td><td>500</td><td>Periodic chain sync pull interval</td></tr>
+</tbody></table>
+</div>
+<ul>
+<li>Use narrow windows and lower maxima during incident response; widen for WAN drills. Keep <code>p2p_chain_sync_interval_ms</code> at 0 in isolation tests to prevent periodic pulls.</li>
+</ul>
+<h3 id="config-hot-reload-fallback"><a class="header" href="#config-hot-reload-fallback">Config Hot-Reload Fallback</a></h3>
+<ul>
+<li>Config watcher prefers inotify/kqueue; when unavailable, it falls back to mtime polling. On platforms without reliable fs events, expect up to one poll interval of delay before reload. Documented in <code>node/src/config.rs</code>; operators can reduce the poll interval for faster propagation.</li>
+</ul>
+<h3 id="tls-handshake-timeouts"><a class="header" href="#tls-handshake-timeouts">TLS Handshake Timeouts</a></h3>
+<ul>
+<li>HTTP servers use <code>ServerConfig.tls_handshake_timeout</code> for TLS handshakes.</li>
+<li>HTTP clients use <code>ClientConfig.tls_handshake_timeout</code> or <code>TlsConnectorBuilder::handshake_timeout</code>.</li>
+<li>Environment override: <code>TB_TLS_HANDSHAKE_TIMEOUT_MS</code> (milliseconds).</li>
+</ul>
 <h2 id="treasury-stuck"><a class="header" href="#treasury-stuck">Treasury Stuck</a></h2>
 <h3 id="symptoms"><a class="header" href="#symptoms">Symptoms</a></h3>
 <ul>

@@ -360,7 +360,7 @@ grep -c "\[\]" MAINNET_READINESS_CHECKLIST.md  # Should show 150+
 1. Study OBSERVABILITY_MAP.md for question-to-runbook mapping
 2. Reference docs/operations.md for step-by-step runbooks
 3. Run `scripts/verify_metrics_coverage.sh` before launch
-4. Use `tb-cli` commands from runbooks for troubleshooting
+4. Use `contract-cli` commands from runbooks for troubleshooting
 
 ---
 

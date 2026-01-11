@@ -39,26 +39,32 @@ This document consolidates the consensus, networking, storage, marketplace, gove
 
 ### 1.4 Hash layout
 
-`node/src/hashlayout.rs` lists the canonical order for block fields. Highlights:
+`node/src/hashlayout.rs` lists the canonical order for block fields. The encoding still uses legacy names (`coin_c`, `coin_i`) but they represent BLOCK‑denominated buckets, not separate tokens.
 
-| Field order | Description |
-| --- | --- |
-| `index`, `prev`, `timestamp`, `nonce`, `difficulty`, `retune_hint`, `base_fee` | Header core; `retune_hint` is a signed byte summarising the Kalman filter trend. |
-| Subsidy buckets (`coin_c`, `coin_i`, `storage_sub`, `read_sub`, `read_sub_{viewer,host,hardware,verifier,liquidity}`, ad* fields, `compute_sub`, `proof_rebate`, industrial sub‑ledgers) | Every reward lane is hashed before state roots so subsidies bind to the ledger. |
-| `read_root`, `fee_checksum`, `state_root` | Merkle roots; `fee_checksum` protects the per‑block fee accumulator. |
-| `l2_roots`, `l2_sizes` (variable length) | Deterministic ordering; lengths are encoded before bytes. |
-| `vdf_commit`, `vdf_output`, `len(vdf_proof)`, `vdf_proof`, `tx_ids` | Final section to keep PoH/VDF data and transaction IDs adjacent. |
+| Order | Field | Description |
+| --- | --- | --- |
+| 1–7 | `index`, `prev`, `timestamp`, `nonce`, `difficulty`, `retune_hint`, `base_fee` | Header core; `retune_hint` is a signed byte summarising the Kalman filter trend. |
+| 8–9 | `coin_c`, `coin_i` | Legacy coinbase labels (BLOCK). |
+| 10–16 | `storage_sub`, `read_sub`, `read_sub_viewer`, `read_sub_host`, `read_sub_hardware`, `read_sub_verifier`, `read_sub_liquidity` | Read/storage subsidy buckets (BLOCK). |
+| 17–23 | `ad_viewer`, `ad_host`, `ad_hardware`, `ad_verifier`, `ad_liquidity`, `ad_miner`, `ad_total_usd_micros` | Ad settlement buckets + USD micros counter. |
+| 24–25 | `ad_settlement_count`, `ad_oracle_price_usd_micros` | Ad settlement counts + oracle price. |
+| 26–27 | `compute_sub`, `proof_rebate` | Compute subsidy + proof rebate (BLOCK). |
+| 28–30 | `read_root`, `fee_checksum`, `state_root` | Merkle roots; `fee_checksum` protects the per‑block fee accumulator. |
+| 31–32 | `l2_roots`, `l2_sizes` | Variable‑length arrays; order is encoded as bytes then sizes. |
+| 33–36 | `vdf_commit`, `vdf_output`, `len(vdf_proof)`, `vdf_proof` | PoH/VDF proof material. |
+| 37–38 | `len(receipts_serialized)`, `receipts_serialized` | Receipts are consensus‑critical and hashed before transactions. |
+| 39 | `tx_ids` | Final section: transaction IDs. |
 
-Never reorder or remove fields; instead add new suffix fields and bump the hash layout tests.
+Never reorder or remove fields; instead add new suffix fields and bump the hash layout tests. If you add or rename a field in `BlockEncoder`, update this table and regenerate schema docs under `docs/spec/`.
 
 ### 1.5 Schema migrations (v7–v10)
 
 | Version | Scope | Pre‑migration state | Post‑migration state | Operator expectations |
 | --- | --- | --- | --- | --- |
-| v7 | Recent timestamp journaling (`docs/schema_migrations/v7_recent_timestamps.md` ➜ `Blockchain::recent_timestamps`) | Mempool entries only tracked `timestamp_millis`; restarts lost ordering guarantees. | `timestamp_ticks` persisted alongside millis so QoS lanes continue after restarts (`node/tests/reopen.rs`). | Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring `telemetry::STARTUP_TTL_DROP_TOTAL`. |
-| v8 | Bridge header persistence (`docs/schema_migrations/v8_bridge_headers.md`) | Bridge proofs not materialised in sled; challenge windows could not replay after crash. | `simple_db::names::BRIDGE` stores verified headers and pending withdrawals; CLI exposes `contract-cli bridge pending | disputes`. | Run the node once per bridge shard after upgrading; watch `bridge_head_commit_total`. |
-| v9 | DEX escrow snapshots | Escrow state stored only in memory; C/R flows risked desync. | `simple_db::names::DEX_STORAGE` now stores `EscrowState` (orders, locks, HTLC proofs). | Before upgrading, pause matching, run `contract-cli dex escrow export`; after upgrade confirm `dex.order_book` RPC matches expectations. |
-| v10 | Industrial subsidy buckets | Subsidy accounting was aggregated; per‑lane reporting missing. | `Block::industrial_subsidies()` writes `storage_sub_it`, `read_sub_it`, `compute_sub_it`; governance surfaces via explorer and CLI. | Update dashboards to use the new metrics (`INDUSTRIAL_SUBSIDY_*`); re-run treasury audits to ensure ledgers reconcile. |
+| v7 | Recent timestamp journaling (`Blockchain::recent_timestamps`) | Mempool entries only tracked `timestamp_millis`; restarts lost ordering guarantees. | `timestamp_ticks` persisted alongside millis so QoS lanes continue after restarts (`node/tests/reopen.rs`). | Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring `telemetry::STARTUP_TTL_DROP_TOTAL`. |
+| v8 | Bridge header persistence (`simple_db::names::BRIDGE`) | Bridge proofs not materialised in sled; challenge windows could not replay after crash. | `simple_db::names::BRIDGE` stores verified headers and pending withdrawals; CLI exposes `contract-cli bridge pending | disputes`. | Run the node once per bridge shard after upgrading; watch `bridge_head_commit_total`. |
+| v9 | DEX escrow snapshots (`simple_db::names::DEX_STORAGE`) | Escrow state stored only in memory; C/R flows risked desync. | `simple_db::names::DEX_STORAGE` now stores `EscrowState` (orders, locks, HTLC proofs). | Before upgrading, pause matching, run `contract-cli dex escrow export`; after upgrade confirm `dex.order_book` RPC matches expectations. |
+| v10 | Unified subsidy buckets | Legacy dual‑token labels removed from on‑disk snapshots; subsidies now serialize as `storage_sub`, `read_sub`, `compute_sub` with read/ad splits preserved. | Ledger + RPC surfaces report unified BLOCK values; lane routing stays in mempool/fee policy. | Update dashboards to use unified metric names and re-run settlement audits to confirm invariants. |
 
 ---
 
@@ -83,7 +89,7 @@ next = max(prev + Δ, 1)
 
 - `TARGET_GAS_PER_BLOCK = 1_000_000`.
 - `Δ` is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑BLOCK per byte).
-- Telemetry: `base_fee` gauge plus `mempool_fee_floor_*` histograms show nudges per block. `node/tests/base_fee.rs` exercises the path.
+- Telemetry: `base_fee` gauge plus `fee_floor_current` and `fee_floor_warning_total` / `fee_floor_override_total` counters show nudges per block. `node/tests/base_fee.rs` exercises the path.
 
 ### 2.3 QoS accounting, TTL math, and RPC surfaces
 
@@ -91,7 +97,7 @@ next = max(prev + Δ, 1)
   - `max_pending_per_account = 16` (overrideable via `contract-cli node mempool set-cap` or `TB_MEMPOOL_ACCOUNT_CAP`).
   - `max_mempool_size_{consumer,industrial} = 1_024` entries each.
   - `min_fee_per_byte_{consumer,industrial}` defaults to 1 µBLOCK/byte but is immediately clamped to the rolling floor.
-- Rolling floor: every admitted transaction records its `fee_per_byte`. The percentile window is configured by governance (`fee_floor_window`, `fee_floor_percentile`) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post `mempool.qos_event` we log overrides (`FEE_FLOOR_WARNING_TOTAL` / `FEE_FLOOR_OVERRIDE_TOTAL`).
+- Rolling floor: every admitted transaction records its `fee_per_byte`. The percentile window is configured by governance (`fee_floor_window`, `fee_floor_percentile`) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post `mempool.qos_event` we log overrides (`fee_floor_warning_total` / `fee_floor_override_total`).
 - TTL ordering: `MempoolEntry::expires_at = timestamp_millis + (tx_ttl * 1000)` (`node/src/lib.rs:806–834`). `mempool_cmp` sorts by:
   1. `tip / serialized_size` (descending),
   2. soonest expiry,
@@ -136,7 +142,7 @@ Example:
 }
 ```
 
-When consumer latency jumps above `comfort_threshold_p90` (governance parameter) the scheduler raises the base fee which in turn bumps lane floors; watch `mempool_fee_floor_current{lane}` for confirmation.
+When consumer latency jumps above `comfort_threshold_p90` (governance parameter) the scheduler raises the base fee which in turn bumps lane floors; watch `fee_floor_current` and `mempool.stats.fee_floor` for confirmation.
 
 ### 2.4 Transaction scheduler, fairness windows, and conflict guards
 
@@ -289,7 +295,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 ### 5.7 Rent escrow, releases, and proofs
 
-- `RentEscrow` (`node/src/storage/fs.rs`) persists deposits in `SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)`. API summary:
+- `RentEscrow` (`node/src/storage/fs.rs`) persists deposits in `SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)`; default path is `blobstore` when the env var is unset. API summary:
 - `lock(id, depositor, amount, expiry)` writes a record and increments `RENT_ESCROW_LOCKED_TOTAL`.
 - `release(id)` removes the record, refunds 90 % to the depositor, burns 10 % (tracked via `RENT_ESCROW_REFUNDED_TOTAL`/`RENT_ESCROW_BURNED_TOTAL`), and returns `(account, refund, burn)`.
   - `purge_expired(now)` sweeps stale locks and emits identical telemetry. Expiry checks happen before every rent escrow lookup so operators only need to call it when clocks skew.
@@ -400,15 +406,15 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 ### 7.1 AMM pool math
 
-- Constant-product pools live in `dex/src/amm.rs`.
+- Constant-product pools live in `dex/src/amm.rs` with `base_reserve` and `quote_reserve`.
 - Share minting:
-  - First LP: `share = sqrt(ct * it)`.
-  - Subsequent LPs: `share = min(total_shares * ct / reserve, total_shares * it / reserve_it)`.
-- Swaps preserve `k = reserve * reserve_it`; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.
+  - First LP: `share = sqrt(base * quote)`.
+  - Subsequent LPs: `share = min(total_shares * base / base_reserve, total_shares * quote / quote_reserve)`.
+- Swaps preserve `k = base_reserve * quote_reserve`; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.
 
 ### 7.2 Trust-line routing
 
-- Ledger (`node/src/dex/trust_lines.rs`) keeps a `HashMap<(from,to), TrustLine { balance, limit, authorized }>` pair.
+- Ledger (`node/src/dex/trust_lines.rs`) keeps a `HashMap<(from,to), TrustLine { balance, limit, authorized }>`; `balance` is signed (positive means `from` owes `to`, negative means the reverse) and must stay within `limit`.
 - Path finding:
   - BFS yields any viable path.
   - `find_best_path` uses Dijkstra for the shortest hop path, then `max_slack_path` to maximise residual capacity (slack = `limit - |balance| - amount`).
@@ -458,7 +464,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 
 - `PendingWithdrawal` (`node/src/bridge/mod.rs:389`) tracks `commitment`, `asset`, `user`, `amount`, `initiated_at`, `deadline = initiated_at + channel.config.challenge_period_secs`, and `challenged` flags. Default challenge window is 30 s, overrideable per channel.
 - Duty timing:
-  1. `bridge.request_withdrawal` locks the relayer bond (`bridge_min_bond`) and schedules a duty (`DutyRecord`) with deadline `initiated_at + bridge_duty_window_secs`.
+  1. `bridge.request_withdrawal` locks the relayer bond (`bridge_min_bond`, sourced from governance `BridgeIncentiveParameters`) and schedules a duty (`DutyRecord`) with deadline `initiated_at + bridge_duty_window_secs`.
   2. Challengers call `bridge.challenge_withdrawal { commitment, challenger }`. If accepted, `BridgeError::AlreadyChallenged` prevents duplicates and `bridge_challenge_slash` refunds challengers after burning the bond.
   3. If no challenge arrives before `deadline`, `bridge.finalize_withdrawal` releases funds and credits `bridge_duty_reward`.
 - Error surface (`BridgeError`):
@@ -612,7 +618,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 ### 10.5 Treasury invariants
 
 - `governance/src/treasury.rs` enforces:
-  - Non‑negative balances (`ct`, `industrial`) tracked in sled.
+  - Non‑negative unified BLOCK balance tracked in sled.
   - Streaming caps and kill switches (`kill_switch_subsidy_reduction`, `treasury_percent`).
   - Audit log size ≤ 256 entries; older entries roll off but anchor hashes persist.
 - Executor snapshots (CLI `contract-cli gov treasury executor`) must show monotonic `last_tick_at`. Settlement anchors are hashed and appended to the audit log for replayability.
@@ -732,16 +738,16 @@ See Appendix B for detailed metric descriptions. Key highlights:
 | Metric | Meaning | Labels | Units | Suggested alert |
 | --- | --- | --- | --- | --- |
 | `base_fee` | Current per-byte base fee | n/a | micro‑BLOCK | Alert if `>10x` baseline for >5 min (congestion). |
-| `mempool_fee_floor_{consumer,industrial}` | Rolling fee floors | lane | micro‑BLOCK | Alert if consumer floor moves >50 % in <60 s (possible spam). |
-| `MEMPOOL_EVICTIONS_TOTAL` | Evicted tx count | lane | count | Alert if derivative spikes unexpectedly. |
-| `PARTITION_EVENTS_TOTAL` | Partition incidents | n/a | count | Alert on increments; cross‑link to runbook. |
-| `QUIC_HANDSHAKE_FAIL_TOTAL` | Failed QUIC handshakes | peer,reason | count | Alert on surge for specific provider. |
-| `RANGE_BOOST_QUEUE_DEPTH` | Pending mesh bundles | n/a | count | Alert if > queue cap (default 256). |
+| `fee_floor_current` | Current fee floor (global); per‑lane floors are in `mempool.stats.fee_floor`. | n/a | micro‑BLOCK | Alert if the floor moves >50 % in <60 s (possible spam). |
+| `mempool_evictions_total` | Evicted tx count | n/a | count | Alert if derivative spikes unexpectedly. |
+| `partition_events_total` | Partition incidents | n/a | count | Alert on increments; cross‑link to runbook. |
+| `quic_handshake_fail_total` | Failed QUIC handshakes | peer,reason | count | Alert on surge for specific provider. |
+| `range_boost_queue_depth` | Pending mesh bundles | n/a | count | Alert if > queue cap (default 256). |
 | `MOBILE_CACHE_*` | Cache hits/misses/sweeps | action | count | Alert on sustained misses and queue overflows. |
-| `COMPUTE_SLA_VIOLATIONS_TOTAL` | SLA breaches | reason | count | Alert >0 while in `SettleMode::Real`. |
-| `BRIDGE_CHALLENGE_TOTAL` | Bridge challenges | asset | count | Alert if >0 without operator action. |
-| `TREASURY_BALANCE` | Treasury BLOCK balance | n/a | BLOCK | Alert if drops >X% per day outside scheduled disbursements. |
-| `WRAPPER_DEPENDENCY_POLICY_VIOLATION` | Dependency drift | wrapper | count | Alert immediately; governance override required. |
+| `compute_sla_violations_total` | SLA breaches | n/a | count | Alert >0 while in `SettleMode::Real`. |
+| `bridge_dispute_outcomes_total` | Bridge disputes | asset | count | Alert if >0 without operator action. |
+| `treasury_balance_current` | Treasury BLOCK balance | n/a | BLOCK | Alert if drops >X% per day outside scheduled disbursements. |
+| `dependency_policy_violation_total` | Dependency drift | wrapper | count | Alert immediately; governance override required. |
 
 ### 13.2 Probe CLI cookbook
 
@@ -802,7 +808,7 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | `ad_market.policy_snapshot` | `{epoch}` | Snapshot JSON from `ad_policy_snapshot::load_snapshot` or `{status:"not_found"}` | `-32602` missing epoch |
 | `ad_market.policy_snapshots` | `{start_epoch?,end_epoch?}` (`end_epoch` defaults to `chain_height/120`) | `{snapshots:[PolicySnapshot]}` | none (empty list when no snapshots) |
 | `ad_market.register_campaign` | `CampaignRegistration` | `{status:"ok"}` on success | `-32603` when market disabled/persistence error, `-32602` invalid payload, `-32000` duplicate campaign |
-| `ad_market.record_conversion` | `ConversionRecord` body + advertiser auth header | `{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?,value_totals:{usd_micros?,ct?}}}` | `-32603` disabled/internal, `-32602` invalid payload, `-32001` unknown campaign, `-32002` unknown creative, `-32030` auth missing, `-32031` advertiser mismatch, `-32032` token missing, `-32033` invalid token, `-32039` selector weight mismatch |
+| `ad_market.record_conversion` | `ConversionRecord` body + advertiser auth header | `{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?}}` | `-32603` disabled/internal, `-32602` invalid payload, `-32001` unknown campaign, `-32002` unknown creative, `-32030` auth missing, `-32031` advertiser mismatch, `-32032` token missing, `-32033` invalid token, `-32039` selector weight mismatch |
 | `ad_market.list_presence_cohorts` | `{region?,domain_tier?,min_confidence_bps?,interest_tag?}` | `{status:"ok",cohorts:[PresenceCohortSummary],privacy_budget:{remaining_ppm}}` | `-32602` invalid filter, `-32034` stale bucket, `-32037` privacy guardrail |
 | `ad_market.reserve_presence` | `{campaign_id,String, presence_bucket_id,String, slot_count,u32, expires_at_micros?, selector_budget?:Vec<SelectorBidSpec>}` | `{status:"ok",reservation_id,String,expires_at_micros,u64}` | `-32001` unknown campaign, `-32034` invalid bucket, `-32035` forbidden selector combo, `-32037` insufficient privacy budget |
 
@@ -811,13 +817,13 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | --- | --- | --- | --- |
 | `analytics` (`node/src/rpc/analytics.rs`) | `{domain?}` filters aggregator buckets | `AnalyticsStats { domain, bytes, requests, distribution }` as defined in `crate::rpc::analytics` | `-32603` when telemetry feature disabled |
 | `anomaly.label` | `{label}` string used for ML feedback | `{status:"ok"}` | none |
-| `settlement_status` | `{provider?}` | `{mode:"dryrun"|"real"|"armed",ct?,industrial?}`; per-provider query also returns `balance` alias of `ct` | none |
+| `settlement_status` | `{provider?}` | `{mode:"dryrun"|"real"|"armed", balance?}` when provider supplied | none |
 | `settlement.audit` | none | Full settlement audit JSON (`compute_market::settlement_audit`) with balances, SLA queue, outstanding receipts | propagates `MarketError` codes (`-32040` range) |
 
 #### Account queries and ledger helpers
 | Method | Request | Response | Error codes |
 | --- | --- | --- | --- |
-| `balance` | `{address}` | `{consumer,industrial}` balances pulled from `accounts` map (0 when missing) | none |
+| `balance` | `{address}` | `{amount}` balance pulled from `accounts` map (0 when missing) | none |
 | `ledger.shard_of` | `{address}` | `{shard}` numeric shard ID as computed by `ledger::shard_of` | none |
 
 #### Bridge (`node/src/rpc/bridge.rs`)
@@ -909,7 +915,7 @@ DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auct
 | `compute_market.scheduler_stats` | none | Raw scheduler view (per-lane queues, fairness windows) | none |
 | `compute_market.scheduler_metrics` | none | `scheduler::Metrics` structure (latency, starvation counters, lane deadlines) | none |
 | `compute_market.recent_roots` | `{n?}` | Latest `n` micro-shard roots used for receipts | none |
-| `compute_market.provider_balances` | none | `{providers:[{id, pending, settled, sla_bond}]}` | none |
+| `compute_market.provider_balances` | none | `{providers:[{provider, balance}]}` | none |
 | `compute_market.audit` | none | Extended audit log incl. fairness window snapshots, outstanding SLA records | `MarketError` codes |
 
 #### Configuration and consensus
@@ -947,7 +953,7 @@ DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auct
 | `light.headers` | `{from_height, count}` | `{headers:[{height,header_fields...}]}` chunked for device syncing | none |
 | `light.latest_header` | none | `{height, header}` for best tip | none |
 | `light_client.rebate_status` | `{device_id}` | `{pending, claimed, last_claim_ts, proofs[]}` | `-32030` unauthorized when device not registered |
-| `light_client.rebate_history` | `{device_id, limit?, cursor?}` | `{items:[{epoch,ct,receipt_hash}], next_cursor?}` | same as above |
+| `light_client.rebate_history` | `{relayer?, limit?, cursor?}` | `{receipts:[{height, amount, relayers:[{id, amount}]}], next?}` | same as above |
 | `state_stream.subscribe` | WebSocket upgrade, no body | Streams `{height, root, accounts_changed, proofs}` batches | HTTP 429 when subscriber cap reached |
 
 #### LocalNet and range-boost helpers
@@ -1013,8 +1019,8 @@ Most methods share the JSON structures defined in `node/src/net/peer.rs`: `PeerM
 | `gov_params` | `{epoch?}` | `{params}` snapshot from `GOV_PARAMS` | none |
 | `gov_rollback_last` / `gov_rollback` | `{epoch}` / `{proposal_id, epoch}` | `{status:"ok"}` after reverting governance store | `-32043` rollback guardrails |
 | `gov.release_signers` | none | `{signers:[{name,pubkey}]} ` | none |
-| `gov.treasury.balance` | none | `{ct, industrial, usd_estimate}` from treasury sled | none |
-| `gov.treasury.balance_history` | `{start?, end?}` | `{entries:[{epoch,ct}], next_cursor?}` | none |
+| `gov.treasury.balance` | none | `{balance, last_snapshot?, executor?}` from treasury sled | none |
+| `gov.treasury.balance_history` | `{cursor?, limit?}` | `{snapshots:[{id, balance, delta, recorded_at, event, disbursement_id?}], next_cursor?, current_balance}` | none |
 | `gov.treasury.disbursements` | `{limit?, cursor?}` | `{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}` | none |
 | `service_badge_issue` | `{subject, badge}` (requires signer badge header) | `{status:"ok"}` and records issuance | `-32602` invalid payload, `-32050` when badge invalid |
 | `service_badge_revoke` | `{subject, badge}` | `{status:"ok"}` | same |
@@ -1308,7 +1314,7 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | --- | --- | --- |
 | `default` | Legacy chain state (fallback). | `chain`, `accounts`. |
 | `bridge` | Bridge headers, pending withdrawals. | `header:<height>`, `withdrawal:<commitment>`. |
-| `compute_settlement` | Settlement engine state (balances, audit log). | `ledger`, `ledger_it`, `sla_queue`, `sla_history`. |
+| `compute_settlement` | Settlement engine state (balances, audit log). | `ledger`, `sla_queue`, `sla_history` (legacy `ledger_it` no longer used). |
 | `dex_storage` | Order book, trades, escrow locks, AMM pools. | `book`, `trade:*`, `escrow`, `amm/<pool_id>`. |
 | `gateway_dns` | Domain auctions, stakes, ownership. | `auction:<domain>`, `stake:<ref>`, `ownership:<domain>`. |
 | `gateway_ad_readiness` | Readiness snapshots for ad flows. | `snapshot:<epoch>`. |
@@ -1333,6 +1339,7 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `Tx` | `SignedTransaction` (foundation serialization). | Used for gossip/broadcast. |
 | `BlobTx` | `BlobTx` struct (commitment, payload). | For L2 blobspace. |
 | `Block` | `(ShardId, Block)` | Shard IDs live under `ledger::address::ShardId`. |
+| `ChainRequest` | `{ from_height }` | Chain sync pull requests. |
 | `Chain` | `Vec<Block>` | Fork resolution snapshots. |
 | `BlobChunk` | `root[32], index, total, data` | Erasure-coded shard. |
 | `Reputation` | `Vec<ReputationUpdate { peer, delta, reason }>` | Synchronises overlay reputation. |
@@ -1349,8 +1356,20 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 | `industrial_admission_min_capacity` | 10 | Minimum queue capacity before opening industrial lane. |
 | `fairshare_global_max_ppm` | 250 000 | QoS cap per account in parts‑per‑million. |
 | `burst_refill_rate_per_s_ppm` | 500 000 (≈30 tx/min) | Token bucket refill rate. |
+| `lane_based_settlement_enabled` | 0 | Enable lane-based settlement routing. |
+| `lane_consumer_capacity` / `lane_industrial_capacity` | 1000 / 500 | Lane capacities for utilisation tracking. |
+| `lane_consumer_congestion_sensitivity` / `lane_industrial_congestion_sensitivity` | 300 / 500 | Congestion sensitivity (k = value / 100). |
+| `lane_industrial_min_premium_percent` | 50 | Minimum industrial premium. |
+| `lane_target_utilization_percent` | 70 | PI target utilisation. |
+| `lane_market_signal_half_life` | 50 | EMA half-life for demand signal (blocks). |
+| `lane_market_demand_max_multiplier_percent` | 300 | Max demand multiplier. |
+| `lane_market_demand_sensitivity_percent` | 200 | Demand sensitivity. |
+| `lane_pi_proportional_gain_percent` / `lane_pi_integral_gain_percent` | 10 / 1 | PI gains (Kp/Ki). |
 | `beta_storage_sub`, `gamma_read_sub`, `kappa_cpu_sub`, `lambda_bytes_out_sub` | 50/20/10/5 | Subsidy multipliers (basis points). |
 | `read_subsidy_*_percent` | Derived defaults | Split `READ_SUB` across viewer/host/hardware/verifier/liquidity. |
+| `treasury_percent` | 0 | Treasury share of fees. |
+| `proof_rebate_limit` | 1 | Max proof rebate share. |
+| `rent_rate_per_byte` | 0 | Storage rent rate. |
 | `kill_switch_subsidy_reduction` | 0 | Emergency knob to damp multipliers. |
 | `miner_reward_logistic_target`, `logistic_slope_milli`, `miner_hysteresis` | 100 / ~230 / 10 | Shape of logistic emission curve. |
 | `badge_expiry_secs`, `badge_issue/revoke_uptime_percent` | 30 days / 99 % / 95 % | Service badge policy. |
@@ -1375,14 +1394,14 @@ All payloads are serialized via `foundation_serialization::binary_cursor` to avo
 
 | Component | Behaviour |
 | --- | --- |
-| Courier queue | sled `courier` tree storing `CourierReceipt`. Automatic retries (5 attempts, 100 ms exponential backoff). |
+| Courier queue | sled `courier` tree storing `CourierReceipt`. Automatic retries (5 attempts, exponential backoff: 100, 200, 400, 800 ms). |
 | SLA scheduler | `Settlement::sla` vector holds active deadlines; `SLA_HISTORY_LIMIT = 256`. |
 | CLI hooks | `contract-cli compute courier status`, `contract-cli compute settlement audit` (future extension) read `compute_market.*` RPC responses. |
 
 ### Appendix H · AMM & HTLC Math Reference
 
 - AMM invariants:
-  - `k = reserve * reserve_it`.
+  - `k = base_reserve * quote_reserve`.
   - Share minting uses geometric mean for first LP; later LPs mint shares proportional to contributions.
   - No fee term yet; add `fee_bps` multiplier before recomputing `k` if needed.
 - HTLC scripts:

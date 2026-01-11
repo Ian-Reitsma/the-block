@@ -110,6 +110,13 @@ rm -rf test-logs/
 - **Benchmarks** - In `*/benches/` directories
 - **Examples** - In `examples/` directory
 
+## Test Isolation Patterns
+
+- **Disable periodic chain pulls**: set `TB_P2P_CHAIN_SYNC_INTERVAL_MS=0` in isolation tests so background sync ticks do not mask ordering bugs.
+- **Timeout scaling**: use `TB_TEST_TIMEOUT_MULT` to widen timeouts under slow CI, keep it near `1` locally.
+- **Fast mining**: `TB_FAST_MINE=1` speeds deterministic fixtures; pair with smaller reactor backoffs when timing matters.
+- **Rate-limit shaping**: adjust `TB_P2P_RATE_WINDOW_SECS`, `TB_P2P_MAX_PER_SEC`, and `TB_P2P_MAX_BYTES_PER_SEC` for deterministic throttling tests.
+
 ## CI/CD
 
 The same test configuration is used in CI:

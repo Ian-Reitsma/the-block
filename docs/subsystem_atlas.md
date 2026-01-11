@@ -121,7 +121,7 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | Path | Description |
 | --- | --- |
 | `node/src/transaction.rs`, `tx/`, `transaction/` | Transaction structs, signatures, serialization formats, and CLI-friendly helpers. |
-| `node/src/fee/`, `node/src/fees.rs`, `node/src/fees/` | Fee-floor enforcement, QoS logic, telemetry for congestion, used by mempool + scheduler. |
+| `node/src/fee/`, `node/src/fees.rs`, `node/src/fees/` (including `lane_pricing.rs`, `congestion.rs`, `market_signals.rs`) | Fee-floor enforcement, lane pricing engine, congestion telemetry, and QoS logic used by mempool + scheduler. |
 | `node/src/accounts/` | Session policies and pluggable account validation (`AccountValidation`, `SessionPolicy`). Useful when building wallet abstractions or remote signers. |
 | `node/src/mempool/` | Admission queues, gossip integration, QoS counters, admissions policies. |
 | `node/src/utxo/`, `node/src/liquidity/` | UTXO tracking and liquidity routing helpers for DEX/treasury integrations. |

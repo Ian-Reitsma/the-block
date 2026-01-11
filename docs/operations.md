@@ -18,11 +18,31 @@
 - `runtime.reactor_idle_poll_ms`: maximum sleep between reactor polls (ms).
 - `runtime.io_read_backoff_ms`: fallback delay before retrying reads when readiness is missing (ms).
 - `runtime.io_write_backoff_ms`: fallback delay before retrying writes when readiness is missing (ms).
+- **Defaults:** `reactor_idle_poll_ms=100`, `io_read_backoff_ms=10`, `io_write_backoff_ms=10`.
+- **When to tune:** Lower the idle poll and backoff values for latency-sensitive testnets; raise them when CPU is saturated by idle peers. Watch `runtime_read_without_ready_total` / `runtime_write_without_ready_total` and reactor CPU to validate changes.
+- **BSD note:** On kqueue platforms we run level-triggered mode (no `EV_CLEAR`); if wakeups are missed, increase the backoff and ensure `update_interest()` instrumentation is present.
+- **Env vars:** `TB_REACTOR_IDLE_POLL_MS`, `TB_IO_READ_BACKOFF_MS`, and `TB_IO_WRITE_BACKOFF_MS` map to the same knobs; config reloads apply without restart.
+
+### P2P Rate Limiting and Chain Sync
+
+| Knob | Default | Description |
+|------|---------|-------------|
+| `p2p_rate_window_secs` (`TB_P2P_RATE_WINDOW_SECS`) | 1 | Sliding window for request counters |
+| `p2p_max_per_sec` (`TB_P2P_MAX_PER_SEC`) | workload-dependent | Max requests per peer per window |
+| `p2p_max_bytes_per_sec` (`TB_P2P_MAX_BYTES_PER_SEC`) | workload-dependent | Max bytes per peer per window |
+| `p2p_chain_sync_interval_ms` (`TB_P2P_CHAIN_SYNC_INTERVAL_MS`) | 500 | Periodic chain sync pull interval |
+
+- Use narrow windows and lower maxima during incident response; widen for WAN drills. Keep `p2p_chain_sync_interval_ms` at 0 in isolation tests to prevent periodic pulls.
+
+### Config Hot-Reload Fallback
+
+- Config watcher prefers inotify/kqueue; when unavailable, it falls back to mtime polling. On platforms without reliable fs events, expect up to one poll interval of delay before reload. Documented in `node/src/config.rs`; operators can reduce the poll interval for faster propagation.
 
 ### TLS Handshake Timeouts
 
 - HTTP servers use `ServerConfig.tls_handshake_timeout` for TLS handshakes.
 - HTTP clients use `ClientConfig.tls_handshake_timeout` or `TlsConnectorBuilder::handshake_timeout`.
+- Environment override: `TB_TLS_HANDSHAKE_TIMEOUT_MS` (milliseconds).
 
 ## Treasury Stuck
 

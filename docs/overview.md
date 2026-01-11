@@ -14,7 +14,7 @@
 
 The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
 
-> **Legacy labels:** Internal metrics now publish names such as `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB`; the `_CT` suffix has been retired, so treat those bucket metrics as the authoritative BLOCK denominators.
+> **Legacy labels:** Internal buckets such as `coin_c`/`coin_i` remain for compatibility, but they are BLOCK-denominated. Treat `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB` as the authoritative subsidy buckets.
 
 ## Mission
 - Operate a one-second base layer that notarizes micro-shard roots while keeping the L1 deterministic and audit-friendly.

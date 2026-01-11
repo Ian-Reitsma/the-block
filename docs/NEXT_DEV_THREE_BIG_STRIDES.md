@@ -65,8 +65,8 @@
    - Successful submissions at line 291-298 should trigger `record_success()` on circuit breaker
 
 4. **Documentation Token Terminology Inconsistency**
-   - 30+ markdown files in `docs/` still reference "BLOCK" and "IT" tokens
-   - Should describe BLOCK as the canonical currency and treat any "TB" flavoring as legacy terminology
+   - 30+ markdown files in `docs/` still reference legacy “consumer/industrial token” wording
+   - Should describe BLOCK as the canonical currency and treat consumer/industrial as lane labels, not separate tokens
    - Files identified: `docs/operations.md`, `docs/economics_and_governance.md`, etc.
    - **LOW PRIORITY** but affects documentation quality
 
@@ -754,10 +754,10 @@ sudo systemctl enable grafana-server
 **Find/Replace Strategy**:
 ```bash
 # Find all occurrences (for review)
-rg -i "consumer token|industrial token|BLOCK|IT" docs/ --glob "*.md" --color always
+rg -i "consumer token|industrial token|dual token|BLOCK/IT" docs/ --glob "*.md" --color always
 
 # CRITICAL: Manual review required - many false positives
-# - "IT" matches "IT infrastructure", "commit", "edit", etc.
+# - Avoid standalone "IT" searches; they match unrelated words.
 # - "BLOCK" matches "CONNECTION", "SELECT", etc.
 
 # Recommended approach:
@@ -768,7 +768,7 @@ rg "Industrial Token" docs/ --glob "*.md"
 # 2. Review each occurrence in context
 # 3. Replace ONLY when referring to token type
 # 4. Prefer "BLOCK" with a parenthetical lane descriptor (e.g., BLOCK (consumer lane))
-# 5. Reserve `IT` as the industrial lane identifier inside code snippets, not as a standalone token
+# 5. Keep lane labels (`consumer`, `industrial`) as routing hints in code snippets, not as standalone tokens
 
 # Example replacements:
 # "Consumer Tokens (BLOCK)" -> "BLOCK (consumer lane share)"

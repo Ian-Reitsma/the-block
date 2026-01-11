@@ -189,7 +189,7 @@
 </blockquote>
 <p>The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in <code>main</code>, not a roadmap.</p>
 <blockquote>
-<p><strong>Legacy labels:</strong> Internal metrics now publish names such as <code>STORAGE_SUB</code>, <code>READ_SUB</code>, and <code>COMPUTE_SUB</code>; the <code>_CT</code> suffix has been retired, so treat those bucket metrics as the authoritative BLOCK denominators.</p>
+<p><strong>Legacy labels:</strong> Internal buckets such as <code>coin_c</code>/<code>coin_i</code> remain for compatibility, but they are BLOCK-denominated. Treat <code>STORAGE_SUB</code>, <code>READ_SUB</code>, and <code>COMPUTE_SUB</code> as the authoritative subsidy buckets.</p>
 </blockquote>
 <h2 id="mission"><a class="header" href="#mission">Mission</a></h2>
 <ul>
@@ -198,6 +198,7 @@
 <li>Treat governance as an engineering surface: the same crate powers the node, CLI, explorer, and telemetry so proposals, fee-floor policies, and service-badge status never drift.</li>
 <li>Ship first-party clients: the in-house HTTP/TLS stack (<code>crates/httpd</code> + <code>crates/transport</code>) fronts every RPC, gateway, and gossip surface, and dependency pivots move through governance before they land in production.</li>
 <li>Automate readiness via the Launch Governor: a streak-based autopilot (<code>node/src/launch_governor</code>) watches chain/DNS (and soon economics/market) telemetry, records signed decisions, and flips runtime gates so testnet/mainnet transitions stay auditable.</li>
+<li>Anchor verified ML compute in a deterministic tensor layer (BlockTorch) so compute-market workloads can be priced, proven, and replayed consistently across heterogeneous hardware.</li>
 </ul>
 <h2 id="responsibility-domains"><a class="header" href="#responsibility-domains">Responsibility Domains</a></h2>
 <div class="table-wrapper"><table><thead><tr><th>Domain</th><th>What It Does (Plain English)</th><th>Repository roots</th><th>In-flight scope</th></tr></thead><tbody>
@@ -245,6 +246,7 @@
 <tr><td><code>metrics-aggregator/</code></td><td>Aggregates Prometheus-style metrics, publishes dashboards, verifies TLS &amp; governance state.</td></tr>
 <tr><td><code>monitoring/</code></td><td>Grafana/Prometheus templates and scripts (build via <code>npm ci --prefix monitoring</code>).</td></tr>
 <tr><td><code>storage_market/</code>, <code>dex/</code>, <code>bridges/</code>, <code>gateway/</code></td><td>Dedicated crates for specialized subsystems referenced throughout the docs.</td></tr>
+<tr><td><code>metal-backend/</code></td><td>BlockTorch tensor runtime (metal-tensor + autograd), profiling hooks, and the PyTorch bridge used for validation.</td></tr>
 <tr><td><code>docs/</code></td><td>The consolidated handbook you are reading (mdBook enabled).</td></tr>
 </tbody></table>
 </div>
@@ -283,6 +285,7 @@
 <tr><td><strong>Mobile cache</strong></td><td>Encrypted on-device cache for offline operation. State syncs once you're back online.</td><td><code>gateway/</code>, <code>node/src/gateway</code></td></tr>
 <tr><td><strong>Light client</strong></td><td>A lightweight client that follows the chain using proofs without storing everything. Good for phones and browsers.</td><td><a href="architecture.html#gateway-and-client-access"><code>architecture.md#gateway-and-client-access</code></a></td></tr>
 <tr><td><strong>Macro-block</strong></td><td>A periodic checkpoint (every N blocks) that makes syncing faster. Contains per-shard state roots.</td><td><a href="architecture.html#ledger-and-consensus"><code>architecture.md#ledger-and-consensus</code></a></td></tr>
+<tr><td><strong>BlockTorch</strong></td><td>Deterministic tensor/autograd framework (metal-backend) for verified compute workloads in the marketplace.</td><td><a href="ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.html#part-xii-blocktorch--the-compute-framework-strategy"><code>ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md</code></a></td></tr>
 <tr><td><strong>Service badge</strong></td><td>A status mark in the ledger showing a node has been "good enough" recently (uptime, service quality). Affects voting weight.</td><td><code>node/src/service_badge.rs</code>, <a href="economics_and_governance.html"><code>economics_and_governance.md</code></a></td></tr>
 <tr><td><strong>Treasury disbursement</strong></td><td>Moving BLOCK from the community fund to a destination. Requires governance votes and a timelock period.</td><td><code>governance/src/treasury.rs</code>, <a href="economics_and_governance.html"><code>economics_and_governance.md</code></a></td></tr>
 </tbody></table>
@@ -298,6 +301,7 @@
 <li><a href="developer_handbook.html"><code>docs/developer_handbook.md</code></a> — environment setup, coding standards, testing/fuzzing, simulation, dependency policy, tooling.</li>
 <li><a href="apis_and_tooling.html"><code>docs/apis_and_tooling.md</code></a> — JSON-RPC, CLI, gateway HTTP &amp; DNS, explorer, probe CLI, metrics endpoints, schema references.</li>
 <li><a href="subsystem_atlas.html"><code>docs/subsystem_atlas.md</code></a> — workspace atlas + node subsystem index that maps every directory/file to plain-English context so newcomers know where to start.</li>
+<li><a href="ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.html"><code>docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md</code></a> — economic strategy deep-dive, including the BlockTorch compute framework roadmap.</li>
 <li><strong>🆕 <a href="../RECEIPT_INTEGRATION_INDEX.html"><code>RECEIPT_INTEGRATION_INDEX.md</code></a> — Receipt integration guide</strong>: Market audit trails, consensus validation, telemetry system, metrics derivation. See this for the complete receipt integration status, implementation guides, and next steps (December 2025).</li>
 </ul>
 <p>For historical breadcrumbs the removed per-subsystem files now redirect through <a href="LEGACY_MAPPING.html"><code>docs/LEGACY_MAPPING.md</code></a>.</p>
@@ -317,6 +321,7 @@
 <li><strong>Spec &amp; Quality guardrails</strong> — All teams must prove spec/implementation alignment (<code>AGENTS.md:93-101</code>) before writing code. File doc diffs first, cite the Document Map owner, and attach the standard test cadence transcript (<code>just lint</code>, <code>just fmt</code>, <code>just test-fast</code>, tiered <code>just test-full</code>, <code>cargo test -p the_block --test replay</code>, settlement audit, <code>scripts/fuzz_coverage.sh</code>) to every review. Observability for new surfaces must route through <code>node/src/telemetry</code>, <code>metrics-aggregator/</code>, and <code>monitoring/</code>, with <code>/wrappers</code> documentation updates in <code>docs/operations.md</code>.</li>
 <li><strong>Governance + treasury</strong> — Governance, ledger, CLI, explorer, and telemetry artifacts need multi-stage treasury approvals, attested release bundles, disbursement lag/failure metrics, and deterministic replay coverage. Work-in-progress lives in <code>governance/</code>, <code>node/src/governance</code>, <code>node/src/treasury_executor.rs</code>, <code>cli/src/governance</code>, <code>docs/economics_and_governance.md</code>, and <code>docs/operations.md</code>.</li>
 <li><strong>Compute-market SLA controls</strong> — <code>node/src/compute_market/**</code>, <code>monitoring/</code>, and explorer dashboards must implement SLA slashing, fairness windows, deterministic receipt replays, and operator remediation tooling. Documentation resides in <code>docs/architecture.md#compute-marketplace</code>.</li>
+<li><strong>BlockTorch compute framework</strong> — The metal-backend stack and coordinator plan follow the Part XII checklist in <code>docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md</code> and the priority ordering in <code>AGENTS.md §15.B.1</code>.</li>
 <li><strong>Networking + range-boost reliability</strong> — <code>node/src/net</code>, <code>node/src/p2p</code>, <code>range_boost/</code>, <code>crates/transport</code>, and <code>metrics-aggregator/</code> must support WAN-scale QUIC chaos drills with runbooks documented in <code>docs/architecture.md#networking-and-propagation</code> and <code>docs/operations.md#bootstrap-and-configuration</code>.</li>
 <li><strong>Wallet/remote signer UX</strong> — <code>cli/src/wallet</code>, <code>node/src/identity</code>, <code>remote_signer/</code>, and <code>tests/remote_signer_*.rs</code> are responsible for batched signer discovery, telemetry, and LE portal updates mirrored into <code>docs/security_and_privacy.md</code> and <code>docs/apis_and_tooling.md</code>.</li>
 <li><strong>Bridges + DEX</strong> — <code>bridges/</code>, <code>dex/</code>, explorer timelines, and <code>docs/architecture.md#token-bridges</code>/<code>#dex-and-trust-lines</code> must cover signer-set payloads, telemetry pipelines, proofs, and release-verifier workflows documented under <code>docs/security_and_privacy.md#release-provenance-and-supply-chain</code>.</li>

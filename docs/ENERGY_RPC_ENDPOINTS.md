@@ -495,16 +495,16 @@ curl -X POST https://oracle.block.test/energy/reading/submit \
 
 ```bash
 # Check provider status
-tb-cli energy provider show provider_usa_001
+contract-cli energy provider show provider_usa_001
 
 # List pending credits
-tb-cli energy credits list --status pending --limit 20
+contract-cli energy credits list --status pending --limit 20
 
 # Check disputes
-tb-cli energy disputes list --status pending
+contract-cli energy disputes list --status pending
 
 # View metrics
-tb-cli metrics summary | grep energy_
+contract-cli metrics summary | grep energy_
 ```
 
 ---

@@ -92,7 +92,7 @@ FILES_TO_CHECK=(
     "node/src/telemetry/receipts.rs"
     "node/src/economics/deterministic_metrics.rs"
     "node/tests/receipt_integration.rs"
-    "RECEIPT_INTEGRATION_COMPLETE.md"
+    "docs/archive/RECEIPT_INTEGRATION_COMPLETE.md"
     "MARKET_RECEIPT_INTEGRATION.md"
 )
 
@@ -149,6 +149,6 @@ else
     echo -e "${RED}✗ $ERRORS error(s) found${NC}"
     echo ""
     echo "Please fix the errors above before proceeding."
-    echo "See RECEIPT_INTEGRATION_COMPLETE.md for details."
+    echo "See docs/archive/RECEIPT_INTEGRATION_COMPLETE.md for details."
     exit 1
 fi

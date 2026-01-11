@@ -79,6 +79,13 @@ BlockTorch is the deterministic tensor/autograd layer that powers verified ML co
 - Chaos: `tests/net_gossip.rs`, `tests/net_quic.rs`, `node/tests/storage_repair.rs`, `node/tests/gateway_rate_limit.rs` simulate packet loss, disk-full, etc.
 - Reviews should include the full gate transcript from `AGENTS.md §0.6` (lint, fmt, `just test-fast`, tiered `just test-full`, replay, settlement audit, fuzz). Attach command output or CI links plus the `.profraw` summary. Ad market touches add the readiness checklist from [`docs/overview.md#ad--targeting-readiness-checklist`](overview.md#ad--targeting-readiness-checklist)—log `npm ci --prefix monitoring && make monitor`, `/wrappers` hashes, and selector dashboards alongside the standard gates.
 
+### Test Isolation Patterns
+- **Per-node keys:** generate unique node/gossip keys per test node to avoid cross-test contamination; never reuse localnet fixtures across parallel runs.
+- **Disable periodic chain pulls:** set `TB_P2P_CHAIN_SYNC_INTERVAL_MS=0` in integration tests that simulate isolated peers so periodic sync ticks do not mask admission bugs.
+- **Rate limit multipliers:** bump `TB_P2P_MAX_PER_SEC`/`TB_P2P_MAX_BYTES_PER_SEC` downward when you need deterministic throttling; raise `TB_P2P_RATE_WINDOW_SECS` for burst tests.
+- **Timeout factors:** `TB_TEST_TIMEOUT_MULT` lets suites scale deadlines when running under slow CI. Keep it close to 1 locally to surface slowness.
+- **Fast mining:** `TB_FAST_MINE=1` enables accelerated mining in deterministic fixtures; combine with reduced idle poll/backoff knobs when timing matters.
+
 ## Debugging and Diagnostics
 - Enable `RUST_LOG=trace` plus the diagnostics subscriber when chasing runtime issues; `diagnostics::tracing` is wired everywhere.
 - `cli/src/debug_cli.rs` and `contract-cli diagnostics …` provide structured dumps for mempool, scheduler, gossip, mesh, TLS, and telemetry state.

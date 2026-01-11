@@ -41,7 +41,7 @@
 #### Ultra-Deep Audit (Second Delivery)
 10. ✅ `ULTRA_DEEP_AUDIT.md` - Found 28 issues
 11. ✅ `CRITICAL_FIXES_APPLIED.md` - Fixed 4 critical issues
-12. ✅ `PHASE_1_COMPLETE.md` - Completion summary
+12. ✅ `docs/archive/PHASE_1_COMPLETE.md` - Completion summary
 13. ✅ `MANIFEST_EVERYTHING_DONE.md` - This document
 
 ---
@@ -348,7 +348,7 @@ cargo test --test treasury_lifecycle_test --release -- --nocapture
 ### Meta Documentation (13 files, 2,500+ lines)
 - [x] `ULTRA_DEEP_AUDIT.md` - All 28 issues identified
 - [x] `CRITICAL_FIXES_APPLIED.md` - All 4 critical fixes documented
-- [x] `PHASE_1_COMPLETE.md` - Completion summary
+- [x] `docs/archive/PHASE_1_COMPLETE.md` - Completion summary
 - [x] Plus 10 other reference documents
 
 **Total**: 29 files, 11,000+ lines of code and documentation

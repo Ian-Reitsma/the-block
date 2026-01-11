@@ -130,7 +130,7 @@ Questions like "Is treasury stuck?"
   → Promql: treasury_disbursement_backlog, treasury_disbursement_lag_seconds
   → Dashboard: Treasury panel "Queue Depth by Status", "Execution Lag"
   → Runbook: docs/operations.md#treasury-stuck
-  → Commands: tb-cli gov treasury list --status queued
+  → Commands: contract-cli gov treasury list --status queued
 ```
 
 ---

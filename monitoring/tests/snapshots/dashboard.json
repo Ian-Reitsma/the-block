@@ -883,7 +883,7 @@
       "targets": [
         {
           "expr": "sum by (result, reason)(increase(bridge_settlement_results_total[5m]))",
-          "legendFormat": "{{result}} · {{reason}}"
+          "legendFormat": "{{result}} \u00b7 {{reason}}"
         }
       ],
       "title": "bridge_settlement_results_total (5m delta)",
@@ -904,7 +904,7 @@
       "targets": [
         {
           "expr": "sum by (kind, outcome)(increase(bridge_dispute_outcomes_total[5m]))",
-          "legendFormat": "{{kind}} · {{outcome}}"
+          "legendFormat": "{{kind}} \u00b7 {{outcome}}"
         }
       ],
       "title": "bridge_dispute_outcomes_total (5m delta)",
@@ -1069,7 +1069,7 @@
       "targets": [
         {
           "expr": "sum by (action, playbook)(increase(bridge_remediation_action_total[5m]))",
-          "legendFormat": "{{action}} · {{playbook}}"
+          "legendFormat": "{{action}} \u00b7 {{playbook}}"
         }
       ],
       "title": "bridge_remediation_action_total (5m delta)",
@@ -1090,7 +1090,7 @@
       "targets": [
         {
           "expr": "sum by (action, playbook, target, status)(increase(bridge_remediation_dispatch_total[5m]))",
-          "legendFormat": "{{action}} · {{target}} · {{status}}"
+          "legendFormat": "{{action}} \u00b7 {{target}} \u00b7 {{status}}"
         }
       ],
       "title": "bridge_remediation_dispatch_total (5m delta)",
@@ -1111,7 +1111,7 @@
       "targets": [
         {
           "expr": "sum by (action, playbook, target, state)(increase(bridge_remediation_dispatch_ack_total[5m]))",
-          "legendFormat": "{{action}} · {{target}} · {{state}}"
+          "legendFormat": "{{action}} \u00b7 {{target}} \u00b7 {{state}}"
         }
       ],
       "title": "bridge_remediation_dispatch_ack_total (5m delta)",
@@ -1132,19 +1132,19 @@
       "targets": [
         {
           "expr": "histogram_quantile(0.50, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))",
-          "legendFormat": "{playbook} · {state} · p50"
+          "legendFormat": "{playbook} \u00b7 {state} \u00b7 p50"
         },
         {
           "expr": "histogram_quantile(0.95, sum by (le, playbook, state)(rate(bridge_remediation_ack_latency_seconds_bucket[5m])))",
-          "legendFormat": "{playbook} · {state} · p95"
+          "legendFormat": "{playbook} \u00b7 {state} \u00b7 p95"
         },
         {
           "expr": "bridge_remediation_ack_target_seconds{phase=\"retry\"}",
-          "legendFormat": "{playbook} · retry target"
+          "legendFormat": "{playbook} \u00b7 retry target"
         },
         {
           "expr": "bridge_remediation_ack_target_seconds{phase=\"escalate\"}",
-          "legendFormat": "{playbook} · escalate target"
+          "legendFormat": "{playbook} \u00b7 escalate target"
         }
       ],
       "title": "bridge_remediation_ack_latency_seconds (p50/p95)",
@@ -1190,7 +1190,7 @@
       "targets": [
         {
           "expr": "chaos_site_readiness",
-          "legendFormat": "{{module}} · {{scenario}} · {{site}} · {{provider}}"
+          "legendFormat": "{{module}} \u00b7 {{scenario}} \u00b7 {{site}} \u00b7 {{provider}}"
         }
       ],
       "title": "Chaos site readiness",
@@ -1297,7 +1297,7 @@
       "targets": [
         {
           "expr": "sum by (prefix, code)(increase(tls_env_warning_total[5m]))",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (5m delta)",
@@ -1318,7 +1318,7 @@
       "targets": [
         {
           "expr": "max by (prefix, code)(tls_env_warning_last_seen_seconds)",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (last seen)",
@@ -1339,7 +1339,7 @@
       "targets": [
         {
           "expr": "clamp_min(time() - max by (prefix, code)(tls_env_warning_last_seen_seconds), 0)",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (age seconds)",
@@ -1360,7 +1360,7 @@
       "targets": [
         {
           "expr": "max by (prefix, code)(tls_env_warning_detail_fingerprint)",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (detail fingerprint hash)",
@@ -1381,7 +1381,7 @@
       "targets": [
         {
           "expr": "max by (prefix, code)(tls_env_warning_variables_fingerprint)",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (variables fingerprint hash)",
@@ -1402,7 +1402,7 @@
       "targets": [
         {
           "expr": "max by (prefix, code)(tls_env_warning_detail_unique_fingerprints)",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (unique detail fingerprints)",
@@ -1423,7 +1423,7 @@
       "targets": [
         {
           "expr": "max by (prefix, code)(tls_env_warning_variables_unique_fingerprints)",
-          "legendFormat": "{{prefix}} · {{code}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}}"
         }
       ],
       "title": "TLS env warnings (unique variables fingerprints)",
@@ -1444,7 +1444,7 @@
       "targets": [
         {
           "expr": "sum by (prefix, code, fingerprint)(increase(tls_env_warning_detail_fingerprint_total[5m]))",
-          "legendFormat": "{{prefix}} · {{code}} · {{fingerprint}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}} \u00b7 {{fingerprint}}"
         }
       ],
       "title": "TLS env warnings (detail fingerprint 5m delta)",
@@ -1465,7 +1465,7 @@
       "targets": [
         {
           "expr": "sum by (prefix, code, fingerprint)(increase(tls_env_warning_variables_fingerprint_total[5m]))",
-          "legendFormat": "{{prefix}} · {{code}} · {{fingerprint}}"
+          "legendFormat": "{{prefix}} \u00b7 {{code}} \u00b7 {{fingerprint}}"
         }
       ],
       "title": "TLS env warnings (variables fingerprint 5m delta)",
@@ -1551,7 +1551,7 @@
       "targets": [
         {
           "expr": "dependency_policy_violation",
-          "legendFormat": "{{crate}} {{version}} · {{kind}}"
+          "legendFormat": "{{crate}} {{version}} \u00b7 {{kind}}"
         }
       ],
       "title": "Dependency policy violations by crate",
@@ -1592,7 +1592,7 @@
       "targets": [
         {
           "expr": "dependency_registry_check_status",
-          "legendFormat": "{{status}} · {{detail}}"
+          "legendFormat": "{{status}} \u00b7 {{detail}}"
         }
       ],
       "title": "Dependency registry check status",
@@ -1654,7 +1654,7 @@
       "targets": [
         {
           "expr": "dependency_policy_violation",
-          "legendFormat": "{{crate}} {{version}} · {{kind}}"
+          "legendFormat": "{{crate}} {{version}} \u00b7 {{kind}}"
         }
       ],
       "title": "Dependency policy violations by crate",
@@ -5008,6 +5008,75 @@
       ],
       "title": "benchmark_ann_soft_intent_verification_seconds_p99",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "title": "Lane fee floor signals",
+      "type": "timeseries",
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "fee_floor_current"
+        },
+        {
+          "expr": "sum by (lane) (rate(fee_floor_warning_total[5m]))"
+        },
+        {
+          "expr": "sum by (lane) (rate(fee_floor_override_total[5m]))"
+        }
+      ],
+      "id": 267
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "title": "Runtime readiness backoff",
+      "type": "timeseries",
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "rate(runtime_read_without_ready_total[5m])"
+        },
+        {
+          "expr": "rate(runtime_write_without_ready_total[5m])"
+        }
+      ],
+      "id": 268
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "title": "P2P request load (chain sync proxy)",
+      "type": "timeseries",
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(peer_request_total[5m]))"
+        },
+        {
+          "expr": "sum(rate(p2p_request_limit_hits_total[5m]))"
+        }
+      ],
+      "id": 269
     }
   ],
   "schemaVersion": 37,

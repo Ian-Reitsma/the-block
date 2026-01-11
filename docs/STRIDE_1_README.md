@@ -15,7 +15,7 @@
 - Troubleshooting if anything fails
 
 ### For Complete Implementation Guide (30 min)
-👉 **Read next:** [STRIDE_1_COMPLETE.md](STRIDE_1_COMPLETE.md)
+👉 **Read next:** [docs/archive/STRIDE_1_COMPLETE.md](docs/archive/STRIDE_1_COMPLETE.md)
 - Executive summary of all changes
 - Configuration rationale
 - Performance analysis
@@ -123,7 +123,7 @@ error[E0560]: struct has no field named `circuit_breaker`
 - ✅ Stress testing
 
 ### Documentation
-- ✅ STRIDE_1_COMPLETE.md - Comprehensive guide
+- ✅ docs/archive/STRIDE_1_COMPLETE.md - Comprehensive guide
 - ✅ STRIDE_1_ARCHITECTURE.md - System design
 - ✅ STRIDE_1_ALL_FIXES.md - All changes listed
 - ✅ CODE_CHANGES_REFERENCE.md - Exact modifications
@@ -200,7 +200,7 @@ cargo test -p governance circuit_breaker_integration_test --nocapture
 ```
 
 ### Manual Failover Test
-See [STRIDE_1_COMPLETE.md](STRIDE_1_COMPLETE.md) for 5-step failover test scenario.
+See [docs/archive/STRIDE_1_COMPLETE.md](docs/archive/STRIDE_1_COMPLETE.md) for 5-step failover test scenario.
 
 ### Automated Validation
 ```bash
@@ -268,7 +268,7 @@ cargo test -p governance circuit_breaker --nocapture
 2. Run all tests
 3. Start node with telemetry
 4. Verify metrics endpoint
-5. Review STRIDE_1_COMPLETE.md
+5. Review docs/archive/STRIDE_1_COMPLETE.md
 
 ### Deployment (1 hour)
 1. Execute manual failover test
@@ -286,7 +286,7 @@ You are here → STRIDE_1_README.md (overview & navigation)
     │
     ├── STRIDE_1_QUICKSTART.md (5-min validation)
     │   │
-    └── STRIDE_1_COMPLETE.md (comprehensive guide)
+    └── docs/archive/STRIDE_1_COMPLETE.md (comprehensive guide)
         │
         ├── STRIDE_1_ARCHITECTURE.md (detailed design)
         │   │
@@ -313,8 +313,8 @@ You are here → STRIDE_1_README.md (overview & navigation)
 - **How does circuit breaker work?** → See STRIDE_1_ARCHITECTURE.md
 - **What code changed?** → See CODE_CHANGES_REFERENCE.md
 - **How do I test it?** → See STRIDE_1_QUICKSTART.md
-- **What if something fails?** → See STRIDE_1_COMPLETE.md troubleshooting
-- **Why these design decisions?** → See STRIDE_1_COMPLETE.md architecture section
+- **What if something fails?** → See docs/archive/STRIDE_1_COMPLETE.md troubleshooting
+- **Why these design decisions?** → See docs/archive/STRIDE_1_COMPLETE.md architecture section
 
 ---
 

@@ -85,11 +85,11 @@ curl -X GET http://localhost:8000/gov/treasury/balance | jq .
 ### 1.5 CLI Round-Trip
 
 - [ ] `cli/src/gov.rs` commands:
-  - [ ] `tb-cli gov treasury submit <file.json>`
-  - [ ] `tb-cli gov treasury show --id <id>`
-  - [ ] `tb-cli gov treasury list [--status] [--limit]`
-  - [ ] `tb-cli gov treasury balance`
-  - [ ] `tb-cli gov treasury list --json > export.json`
+  - [ ] `contract-cli gov treasury submit <file.json>`
+  - [ ] `contract-cli gov treasury show --id <id>`
+  - [ ] `contract-cli gov treasury list [--status] [--limit]`
+  - [ ] `contract-cli gov treasury balance`
+  - [ ] `contract-cli gov treasury list --json > export.json`
 
 **Verification**:
 ```bash
@@ -115,9 +115,9 @@ cat > test_disburse.json << 'EOF'
 }
 EOF
 
-tb-cli gov treasury submit test_disburse.json
+contract-cli gov treasury submit test_disburse.json
 ID=$(curl -s http://localhost:8000/gov/treasury/disbursements | jq -r '.disbursements[0].id')
-tb-cli gov treasury show --id $ID
+contract-cli gov treasury show --id $ID
 ```
 
 ### 1.6 Telemetry & Metrics

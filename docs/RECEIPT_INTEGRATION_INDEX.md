@@ -8,11 +8,11 @@
 
 **If you're just starting:** Read `RECEIPT_QUICKSTART.md`
 
-**If you want full details:** Read `RECEIPT_INTEGRATION_COMPLETE.md`
+**If you want full details:** Read `docs/archive/RECEIPT_INTEGRATION_COMPLETE.md`
 
 **If you need to integrate markets:** Read `MARKET_RECEIPT_INTEGRATION.md`
 
-**If you want to understand what was done:** Read `CODING_SESSION_SUMMARY.md`
+**If you want to understand what was done:** Read `docs/archive/CODING_SESSION_SUMMARY.md`
 
 ---
 
@@ -34,7 +34,7 @@
 
 ---
 
-#### 📝 [RECEIPT_INTEGRATION_COMPLETE.md](./RECEIPT_INTEGRATION_COMPLETE.md)
+#### 📝 [docs/archive/RECEIPT_INTEGRATION_COMPLETE.md](./docs/archive/RECEIPT_INTEGRATION_COMPLETE.md)
 **Purpose:** Complete status and roadmap  
 **Length:** Long (~800 lines)  
 **For:** Project managers, tech leads, developers who want full context  
@@ -100,7 +100,7 @@
 
 ---
 
-#### 📝 [CODING_SESSION_SUMMARY.md](./CODING_SESSION_SUMMARY.md)
+#### 📝 [docs/archive/CODING_SESSION_SUMMARY.md](./docs/archive/CODING_SESSION_SUMMARY.md)
 **Purpose:** Session summary and decisions  
 **Length:** Very Long (~1000 lines)  
 **For:** Future maintainers, auditors  
@@ -225,7 +225,7 @@ START
 - ✅ BlockEncoder + hash integration
 - ✅ Telemetry/drain instrumentation + Grafana dashboard
 - ✅ Stress tests/benchmarks and integration suites
-- ✅ Comprehensive docs (`RECEIPT_INTEGRATION_COMPLETE.md`, `PHASES_2-4_COMPLETE.md`, `RECEIPT_VALIDATION_GUIDE.md`)
+- ✅ Comprehensive docs (`docs/archive/RECEIPT_INTEGRATION_COMPLETE.md`, `docs/archive/PHASES_2-4_COMPLETE.md`, `RECEIPT_VALIDATION_GUIDE.md`)
 
 **Remaining:**
 - ⚙️ Continuous monitoring (telemetry dashboards, alerts, aggregator `/wrappers`)
@@ -239,7 +239,7 @@ START
 → Read: `RECEIPT_QUICKSTART.md`
 
 ### "I need to understand the full scope"
-→ Read: `RECEIPT_INTEGRATION_COMPLETE.md`
+→ Read: `docs/archive/RECEIPT_INTEGRATION_COMPLETE.md`
 
 ### "I need to integrate a market"
 → Read: `MARKET_RECEIPT_INTEGRATION.md`
@@ -248,7 +248,7 @@ START
 → Read: `HASH_INTEGRATION_MANUAL.md`
 
 ### "I need to understand architecture decisions"
-→ Read: `CODING_SESSION_SUMMARY.md`
+→ Read: `docs/archive/CODING_SESSION_SUMMARY.md`
 
 ### "I need detailed status"
 → Read: `RECEIPT_STATUS.md`

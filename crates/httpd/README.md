@@ -17,6 +17,10 @@ AEAD pipeline. [`ServerTlsConfig`] exposes convenience constructors for plain or
 mutual-authentication deployments so callers can swap existing services onto the
 custom stack without rewriting their routing logic.
 
+**Handshake timeouts:** `ServerConfig::tls_handshake_timeout` (default 10s) caps
+TLS handshake latency for servers. Clients use `ClientConfig::tls_handshake_timeout`
+and propagate it into `TlsConnectorBuilder::with_handshake_timeout`.
+
 ```rust
 use httpd::{serve_tls, Response, Router, ServerConfig, ServerTlsConfig, StatusCode};
 use runtime::net::TcpListener;
@@ -35,6 +39,13 @@ serve_tls(listener, router, ServerConfig::default(), tls).await?;
 # Ok(())
 # }
 ```
+
+## Client timeouts
+
+`ClientConfig::read_timeout` defines the socket read timeout for HTTP clients
+(defaults to 15s). Per-request timeouts override it, and the TLS client applies
+the effective timeout after the handshake so slow responses do not stall the
+runtime indefinitely.
 
 ## Testing handlers without sockets
 

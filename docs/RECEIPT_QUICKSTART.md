@@ -16,10 +16,10 @@ The receipt system now ships with:
 - Telemetry counters/gauges for encoding, validation, decoding, pending depths, and drains
 - Grafana dashboard (`monitoring/grafana_receipt_dashboard.json`) with alerts wired through `metrics-aggregator`
 - Benchmarks plus 12 stress tests and integration suite that exercise 10,000 receipts per block
-- Supporting docs (`RECEIPT_INTEGRATION_COMPLETE.md`, `PHASES_2-4_COMPLETE.md`, `RECEIPT_VALIDATION_GUIDE.md`, etc.)
+- Supporting docs (`docs/archive/RECEIPT_INTEGRATION_COMPLETE.md`, `docs/archive/PHASES_2-4_COMPLETE.md`, `RECEIPT_VALIDATION_GUIDE.md`, etc.)
 
 ### 🔍 Status
-The system is **99% production-ready** (see `PHASES_2-4_COMPLETE.md` for the checklist). Remaining work is standard deployment hygiene: keep observability running, follow the release checklists, and watch telemetry for anomalies.
+The system is **99% production-ready** (see `docs/archive/PHASES_2-4_COMPLETE.md` for the checklist). Remaining work is standard deployment hygiene: keep observability running, follow the release checklists, and watch telemetry for anomalies.
 
 ---
 
@@ -67,7 +67,7 @@ Before shipping:
 
 ## Where to go next
 
-1. `PHASES_2-4_COMPLETE.md` for the final deployment checklist and readiness summary.
-2. `RECEIPT_INTEGRATION_COMPLETE.md` for architecture rationale, testing, and FAQs.
+1. `docs/archive/PHASES_2-4_COMPLETE.md` for the final deployment checklist and readiness summary.
+2. `docs/archive/RECEIPT_INTEGRATION_COMPLETE.md` for architecture rationale, testing, and FAQs.
 3. `RECEIPT_VALIDATION_GUIDE.md` if you need to extend or audit validation rules.
 4. `monitoring/grafana_receipt_dashboard.json` to keep alerts and dashboards in sync.
