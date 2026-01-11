@@ -2,7 +2,7 @@
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use foundation_serialization::json::Value;
-use runtime::{io::read_to_end, net::TcpStream};
+use runtime::{io::BufferedTcpStream, net::TcpStream};
 use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 use util::timeout::expect_timeout;
@@ -13,7 +13,7 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let mut req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
     );
     if let Some(t) = token {
@@ -24,13 +24,75 @@ async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     expect_timeout(stream.write_all(req.as_bytes()))
         .await
         .unwrap();
-    let mut resp = Vec::new();
-    expect_timeout(read_to_end(&mut stream, &mut resp))
-        .await
-        .unwrap();
-    let resp = String::from_utf8(resp).unwrap();
-    let body_idx = resp.find("\r\n\r\n").unwrap();
-    foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
+    let body = expect_timeout(read_http_body(stream)).await.unwrap();
+    let body = String::from_utf8(body).unwrap();
+    foundation_serialization::json::from_str(&body).unwrap()
+}
+
+async fn read_http_body(stream: TcpStream) -> std::io::Result<Vec<u8>> {
+    use std::io::{Error, ErrorKind};
+
+    let mut reader = BufferedTcpStream::new(stream);
+    let mut line = String::new();
+    let read = reader.read_line(&mut line).await?;
+    if read == 0 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "missing status line"));
+    }
+    let mut content_length = None;
+    loop {
+        line.clear();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "truncated headers"));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse::<usize>().ok();
+            }
+        }
+    }
+    let len = content_length.unwrap_or(0);
+    let mut body = vec![0u8; len];
+    if len > 0 {
+        reader.read_exact(&mut body).await?;
+    }
+    Ok(body)
+}
+
+async fn read_http_response(stream: TcpStream) -> std::io::Result<(String, Vec<u8>)> {
+    use std::io::{Error, ErrorKind};
+
+    let mut reader = BufferedTcpStream::new(stream);
+    let mut status_line = String::new();
+    let read = reader.read_line(&mut status_line).await?;
+    if read == 0 {
+        return Err(Error::new(ErrorKind::UnexpectedEof, "missing status line"));
+    }
+    let mut content_length = None;
+    loop {
+        let mut line = String::new();
+        let read = reader.read_line(&mut line).await?;
+        if read == 0 {
+            return Err(Error::new(ErrorKind::UnexpectedEof, "truncated headers"));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse::<usize>().ok();
+            }
+        }
+    }
+    let len = content_length.unwrap_or(0);
+    let mut body = vec![0u8; len];
+    if len > 0 {
+        reader.read_exact(&mut body).await?;
+    }
+    Ok((status_line, body))
 }
 
 #[test]
@@ -62,17 +124,13 @@ fn rpc_auth_and_host_filters() {
         let mut stream = expect_timeout(TcpStream::connect(addr_socket))
             .await
             .unwrap();
-        expect_timeout(
-            stream.write_all(b"POST / HTTP/1.1\r\nHost: evil.com\r\nContent-Length: 0\r\n\r\n"),
-        )
+        expect_timeout(stream.write_all(
+            b"POST / HTTP/1.1\r\nHost: evil.com\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        ))
         .await
         .unwrap();
-        let mut buf = Vec::new();
-        expect_timeout(read_to_end(&mut stream, &mut buf))
-            .await
-            .unwrap();
-        let resp = String::from_utf8(buf).unwrap();
-        assert!(resp.starts_with("HTTP/1.1 403"));
+        let (status, _body) = expect_timeout(read_http_response(stream)).await.unwrap();
+        assert!(status.starts_with("HTTP/1.1 403"));
 
         // admin without token
         let val = rpc(

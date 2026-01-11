@@ -480,7 +480,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Serialization requires runtime serde feature
     fn test_presence_cache_basic() {
         let dir = tempfile::tempdir().unwrap();
         let db = sled::open(dir.path()).unwrap();
@@ -506,7 +505,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Serialization requires runtime serde feature
     fn test_presence_cache_expiry() {
         let dir = tempfile::tempdir().unwrap();
         let db = sled::open(dir.path()).unwrap();

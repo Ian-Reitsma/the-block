@@ -9,7 +9,7 @@ pub struct StorageOffer {
     pub provider_id: String,
     /// Available bytes for allocation
     pub capacity_bytes: u64,
-    /// Price per byte per block in CT
+    /// Price per byte per block in BLOCK
     pub price_per_byte: u64,
     /// Retention policy in blocks
     pub retention_blocks: u64,

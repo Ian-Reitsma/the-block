@@ -12,7 +12,7 @@ mod treasury_lifecycle {
     fn create_disbursement(id: u64, amount: u64, memo: &str) -> TreasuryDisbursement {
         TreasuryDisbursement::new(
             id,
-            format!("ct1qqqqqqqq{}", id),
+            format!("tb1qqqqqqqq{}", id),
             amount,
             memo.to_string(),
             1,

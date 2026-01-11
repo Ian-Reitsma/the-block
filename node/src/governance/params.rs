@@ -89,7 +89,6 @@ impl<'a> Runtime<'a> {
             Some(handle) => handle,
             None => return,
         };
-        let current = market.distribution();
         let clamp_percent = |value: i64| value.clamp(0, 100) as u64;
         let policy = DistributionPolicy::new(
             clamp_percent(self.bc.params.read_subsidy_viewer_percent),
@@ -97,9 +96,7 @@ impl<'a> Runtime<'a> {
             clamp_percent(self.bc.params.read_subsidy_hardware_percent),
             clamp_percent(self.bc.params.read_subsidy_verifier_percent),
             clamp_percent(self.bc.params.read_subsidy_liquidity_percent),
-        )
-        .with_liquidity_split(current.liquidity_split_ct_ppm)
-        .with_dual_token_settlement(self.bc.params.dual_token_settlement_enabled > 0);
+        );
         market.update_distribution(policy.normalize());
     }
 
@@ -164,7 +161,7 @@ impl<'a> Runtime<'a> {
         crate::compute_market::admission::set_burst_refill_rate(v);
     }
     pub fn set_rent_rate(&mut self, v: i64) {
-        self.bc.params.rent_rate_ct_per_byte = v;
+        self.bc.params.rent_rate_per_byte = v;
     }
     pub fn set_badge_expiry(&mut self, v: u64) {
         crate::service_badge::set_badge_ttl_secs(v);
@@ -195,8 +192,8 @@ impl<'a> Runtime<'a> {
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
         self.bc.params.ai_diagnostics_enabled = v as i64;
     }
-    pub fn set_dual_token_settlement_enabled(&mut self, v: bool) {
-        self.bc.params.dual_token_settlement_enabled = if v { 1 } else { 0 };
+    pub fn set_lane_based_settlement_enabled(&mut self, v: bool) {
+        self.bc.params.lane_based_settlement_enabled = if v { 1 } else { 0 };
         self.sync_read_subsidy_distribution();
     }
     pub fn set_scheduler_weight(&mut self, class: ServiceClass, weight: u64) {
@@ -277,7 +274,7 @@ pub struct ParamSpec {
 const DEFAULT_TIMELOCK_EPOCHS: u64 = 2;
 const KILL_SWITCH_TIMELOCK_EPOCHS: u64 = 10800; // ≈12h at 4s epochs
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct Params {
     pub snapshot_interval_secs: i64,
@@ -287,10 +284,10 @@ pub struct Params {
     pub industrial_admission_min_capacity: i64,
     pub fairshare_global_max_ppm: i64,
     pub burst_refill_rate_per_s_ppm: i64,
-    pub beta_storage_sub_ct: i64,
-    pub gamma_read_sub_ct: i64,
-    pub kappa_cpu_sub_ct: i64,
-    pub lambda_bytes_out_sub_ct: i64,
+    pub beta_storage_sub: i64,
+    pub gamma_read_sub: i64,
+    pub kappa_cpu_sub: i64,
+    pub lambda_bytes_out_sub: i64,
     #[serde(default = "default_read_subsidy_viewer_percent")]
     pub read_subsidy_viewer_percent: i64,
     #[serde(default = "default_read_subsidy_host_percent")]
@@ -301,8 +298,8 @@ pub struct Params {
     pub read_subsidy_verifier_percent: i64,
     #[serde(default = "default_read_subsidy_liquidity_percent")]
     pub read_subsidy_liquidity_percent: i64,
-    #[serde(default = "default_dual_token_settlement_enabled")]
-    pub dual_token_settlement_enabled: i64,
+    #[serde(default = "default_lane_based_settlement_enabled")]
+    pub lane_based_settlement_enabled: i64,
     #[serde(default)]
     pub launch_operational_flag: i64,
     #[serde(default = "default_dns_rehearsal_enabled")]
@@ -318,10 +315,10 @@ pub struct Params {
     #[serde(default = "default_ad_readiness_min_provider_count")]
     pub ad_readiness_min_provider_count: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub treasury_percent_ct: i64,
-    #[serde(default = "default_proof_rebate_limit_ct")]
-    pub proof_rebate_limit_ct: i64,
-    pub rent_rate_ct_per_byte: i64,
+    pub treasury_percent: i64,
+    #[serde(default = "default_proof_rebate_limit")]
+    pub proof_rebate_limit: i64,
+    pub rent_rate_per_byte: i64,
     pub kill_switch_subsidy_reduction: i64,
     pub miner_reward_logistic_target: i64,
     pub logistic_slope_milli: i64,
@@ -487,6 +484,29 @@ pub struct Params {
     pub tariff_min_bps: i64,
     #[serde(default = "default_tariff_max_bps")]
     pub tariff_max_bps: i64,
+    // Lane-based dynamic pricing parameters
+    #[serde(default = "default_lane_consumer_capacity")]
+    pub lane_consumer_capacity: i64,
+    #[serde(default = "default_lane_industrial_capacity")]
+    pub lane_industrial_capacity: i64,
+    #[serde(default = "default_lane_consumer_congestion_sensitivity")]
+    pub lane_consumer_congestion_sensitivity: i64,
+    #[serde(default = "default_lane_industrial_congestion_sensitivity")]
+    pub lane_industrial_congestion_sensitivity: i64,
+    #[serde(default = "default_lane_industrial_min_premium_percent")]
+    pub lane_industrial_min_premium_percent: i64,
+    #[serde(default = "default_lane_target_utilization_percent")]
+    pub lane_target_utilization_percent: i64,
+    #[serde(default = "default_lane_market_signal_half_life")]
+    pub lane_market_signal_half_life: i64,
+    #[serde(default = "default_lane_market_demand_max_multiplier_percent")]
+    pub lane_market_demand_max_multiplier_percent: i64,
+    #[serde(default = "default_lane_market_demand_sensitivity_percent")]
+    pub lane_market_demand_sensitivity_percent: i64,
+    #[serde(default = "default_lane_pi_proportional_gain_percent")]
+    pub lane_pi_proportional_gain_percent: i64,
+    #[serde(default = "default_lane_pi_integral_gain_percent")]
+    pub lane_pi_integral_gain_percent: i64,
 }
 
 impl Default for Params {
@@ -499,16 +519,16 @@ impl Default for Params {
             industrial_admission_min_capacity: 10,
             fairshare_global_max_ppm: 250_000,
             burst_refill_rate_per_s_ppm: ((30.0 / 60.0) * 1_000_000.0) as i64,
-            beta_storage_sub_ct: 50,
-            gamma_read_sub_ct: 20,
-            kappa_cpu_sub_ct: 10,
-            lambda_bytes_out_sub_ct: 5,
+            beta_storage_sub: 50,
+            gamma_read_sub: 20,
+            kappa_cpu_sub: 10,
+            lambda_bytes_out_sub: 5,
             read_subsidy_viewer_percent: default_read_subsidy_viewer_percent(),
             read_subsidy_host_percent: default_read_subsidy_host_percent(),
             read_subsidy_hardware_percent: default_read_subsidy_hardware_percent(),
             read_subsidy_verifier_percent: default_read_subsidy_verifier_percent(),
             read_subsidy_liquidity_percent: default_read_subsidy_liquidity_percent(),
-            dual_token_settlement_enabled: default_dual_token_settlement_enabled(),
+            lane_based_settlement_enabled: default_lane_based_settlement_enabled(),
             launch_operational_flag: 0,
             dns_rehearsal_enabled: default_dns_rehearsal_enabled(),
             launch_economics_autopilot: default_launch_economics_autopilot(),
@@ -516,9 +536,9 @@ impl Default for Params {
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
             ad_readiness_min_provider_count: default_ad_readiness_min_provider_count(),
-            treasury_percent_ct: 0,
-            proof_rebate_limit_ct: default_proof_rebate_limit_ct(),
-            rent_rate_ct_per_byte: 0,
+            treasury_percent: 0,
+            proof_rebate_limit: default_proof_rebate_limit(),
+            rent_rate_per_byte: 0,
             kill_switch_subsidy_reduction: 0,
             miner_reward_logistic_target: 100,
             logistic_slope_milli: (99f64.ln() / (0.1 * 100.0) * 1000.0) as i64,
@@ -611,6 +631,21 @@ impl Default for Params {
             tariff_drift_rate: default_tariff_drift_rate(),
             tariff_min_bps: default_tariff_min_bps(),
             tariff_max_bps: default_tariff_max_bps(),
+            // Lane-based dynamic pricing
+            lane_consumer_capacity: default_lane_consumer_capacity(),
+            lane_industrial_capacity: default_lane_industrial_capacity(),
+            lane_consumer_congestion_sensitivity: default_lane_consumer_congestion_sensitivity(),
+            lane_industrial_congestion_sensitivity: default_lane_industrial_congestion_sensitivity(
+            ),
+            lane_industrial_min_premium_percent: default_lane_industrial_min_premium_percent(),
+            lane_target_utilization_percent: default_lane_target_utilization_percent(),
+            lane_market_signal_half_life: default_lane_market_signal_half_life(),
+            lane_market_demand_max_multiplier_percent:
+                default_lane_market_demand_max_multiplier_percent(),
+            lane_market_demand_sensitivity_percent: default_lane_market_demand_sensitivity_percent(
+            ),
+            lane_pi_proportional_gain_percent: default_lane_pi_proportional_gain_percent(),
+            lane_pi_integral_gain_percent: default_lane_pi_integral_gain_percent(),
         }
     }
 }
@@ -648,20 +683,20 @@ impl Params {
             Value::Number(self.burst_refill_rate_per_s_ppm.into()),
         );
         map.insert(
-            "beta_storage_sub_ct".into(),
-            Value::Number(self.beta_storage_sub_ct.into()),
+            "beta_storage_sub".into(),
+            Value::Number(self.beta_storage_sub.into()),
         );
         map.insert(
-            "gamma_read_sub_ct".into(),
-            Value::Number(self.gamma_read_sub_ct.into()),
+            "gamma_read_sub".into(),
+            Value::Number(self.gamma_read_sub.into()),
         );
         map.insert(
-            "kappa_cpu_sub_ct".into(),
-            Value::Number(self.kappa_cpu_sub_ct.into()),
+            "kappa_cpu_sub".into(),
+            Value::Number(self.kappa_cpu_sub.into()),
         );
         map.insert(
-            "lambda_bytes_out_sub_ct".into(),
-            Value::Number(self.lambda_bytes_out_sub_ct.into()),
+            "lambda_bytes_out_sub".into(),
+            Value::Number(self.lambda_bytes_out_sub.into()),
         );
         map.insert(
             "read_subsidy_viewer_percent".into(),
@@ -684,8 +719,8 @@ impl Params {
             Value::Number(self.read_subsidy_liquidity_percent.into()),
         );
         map.insert(
-            "dual_token_settlement_enabled".into(),
-            Value::Number(self.dual_token_settlement_enabled.into()),
+            "lane_based_settlement_enabled".into(),
+            Value::Number(self.lane_based_settlement_enabled.into()),
         );
         map.insert(
             "launch_operational_flag".into(),
@@ -712,16 +747,16 @@ impl Params {
             Value::Number(self.ad_readiness_min_provider_count.into()),
         );
         map.insert(
-            "treasury_percent_ct".into(),
-            Value::Number(self.treasury_percent_ct.into()),
+            "treasury_percent".into(),
+            Value::Number(self.treasury_percent.into()),
         );
         map.insert(
-            "proof_rebate_limit_ct".into(),
-            Value::Number(self.proof_rebate_limit_ct.into()),
+            "proof_rebate_limit".into(),
+            Value::Number(self.proof_rebate_limit.into()),
         );
         map.insert(
-            "rent_rate_ct_per_byte".into(),
-            Value::Number(self.rent_rate_ct_per_byte.into()),
+            "rent_rate_per_byte".into(),
+            Value::Number(self.rent_rate_per_byte.into()),
         );
         map.insert(
             "kill_switch_subsidy_reduction".into(),
@@ -943,10 +978,10 @@ impl Params {
             industrial_admission_min_capacity: take_i64("industrial_admission_min_capacity")?,
             fairshare_global_max_ppm: take_i64("fairshare_global_max_ppm")?,
             burst_refill_rate_per_s_ppm: take_i64("burst_refill_rate_per_s_ppm")?,
-            beta_storage_sub_ct: take_i64("beta_storage_sub_ct")?,
-            gamma_read_sub_ct: take_i64("gamma_read_sub_ct")?,
-            kappa_cpu_sub_ct: take_i64("kappa_cpu_sub_ct")?,
-            lambda_bytes_out_sub_ct: take_i64("lambda_bytes_out_sub_ct")?,
+            beta_storage_sub: take_i64("beta_storage_sub")?,
+            gamma_read_sub: take_i64("gamma_read_sub")?,
+            kappa_cpu_sub: take_i64("kappa_cpu_sub")?,
+            lambda_bytes_out_sub: take_i64("lambda_bytes_out_sub")?,
             read_subsidy_viewer_percent: obj
                 .get("read_subsidy_viewer_percent")
                 .and_then(Value::as_i64)
@@ -967,10 +1002,10 @@ impl Params {
                 .get("read_subsidy_liquidity_percent")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_read_subsidy_liquidity_percent),
-            dual_token_settlement_enabled: obj
-                .get("dual_token_settlement_enabled")
+            lane_based_settlement_enabled: obj
+                .get("lane_based_settlement_enabled")
                 .and_then(Value::as_i64)
-                .unwrap_or_else(default_dual_token_settlement_enabled),
+                .unwrap_or_else(default_lane_based_settlement_enabled),
             launch_operational_flag: obj
                 .get("launch_operational_flag")
                 .and_then(Value::as_i64)
@@ -999,9 +1034,9 @@ impl Params {
                 .get("ad_readiness_min_provider_count")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_ad_readiness_min_provider_count),
-            treasury_percent_ct: take_i64("treasury_percent_ct")?,
-            proof_rebate_limit_ct: take_i64("proof_rebate_limit_ct")?,
-            rent_rate_ct_per_byte: take_i64("rent_rate_ct_per_byte")?,
+            treasury_percent: take_i64("treasury_percent")?,
+            proof_rebate_limit: take_i64("proof_rebate_limit")?,
+            rent_rate_per_byte: take_i64("rent_rate_per_byte")?,
             kill_switch_subsidy_reduction: take_i64("kill_switch_subsidy_reduction")?,
             miner_reward_logistic_target: take_i64("miner_reward_logistic_target")?,
             logistic_slope_milli: take_i64("logistic_slope_milli")?,
@@ -1268,12 +1303,56 @@ impl Params {
                 .get("tariff_max_bps")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_tariff_max_bps),
+            lane_consumer_capacity: obj
+                .get("lane_consumer_capacity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_consumer_capacity),
+            lane_industrial_capacity: obj
+                .get("lane_industrial_capacity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_industrial_capacity),
+            lane_consumer_congestion_sensitivity: obj
+                .get("lane_consumer_congestion_sensitivity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_consumer_congestion_sensitivity),
+            lane_industrial_congestion_sensitivity: obj
+                .get("lane_industrial_congestion_sensitivity")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_industrial_congestion_sensitivity),
+            lane_industrial_min_premium_percent: obj
+                .get("lane_industrial_min_premium_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_industrial_min_premium_percent),
+            lane_target_utilization_percent: obj
+                .get("lane_target_utilization_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_target_utilization_percent),
+            lane_market_signal_half_life: obj
+                .get("lane_market_signal_half_life")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_market_signal_half_life),
+            lane_market_demand_max_multiplier_percent: obj
+                .get("lane_market_demand_max_multiplier_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_market_demand_max_multiplier_percent),
+            lane_market_demand_sensitivity_percent: obj
+                .get("lane_market_demand_sensitivity_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_market_demand_sensitivity_percent),
+            lane_pi_proportional_gain_percent: obj
+                .get("lane_pi_proportional_gain_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_pi_proportional_gain_percent),
+            lane_pi_integral_gain_percent: obj
+                .get("lane_pi_integral_gain_percent")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_lane_pi_integral_gain_percent),
         };
         Ok(params)
     }
 }
 
-const fn default_proof_rebate_limit_ct() -> i64 {
+const fn default_proof_rebate_limit() -> i64 {
     1
 }
 
@@ -1297,7 +1376,7 @@ const fn default_read_subsidy_liquidity_percent() -> i64 {
     5
 }
 
-const fn default_dual_token_settlement_enabled() -> i64 {
+const fn default_lane_based_settlement_enabled() -> i64 {
     0
 }
 
@@ -1508,6 +1587,41 @@ const fn default_tariff_max_bps() -> i64 {
     200 // 2%
 }
 
+// Lane-based dynamic pricing defaults
+const fn default_lane_consumer_capacity() -> i64 {
+    1000 // Consumer lane: 1000 tx per block
+}
+const fn default_lane_industrial_capacity() -> i64 {
+    500 // Industrial lane: 500 tx per block (lower capacity, higher priority)
+}
+const fn default_lane_consumer_congestion_sensitivity() -> i64 {
+    300 // k = 3.0 (moderate congestion response)
+}
+const fn default_lane_industrial_congestion_sensitivity() -> i64 {
+    500 // k = 5.0 (aggressive congestion response for priority lane)
+}
+const fn default_lane_industrial_min_premium_percent() -> i64 {
+    50 // Industrial must be ≥ 150% of consumer fee (50% premium)
+}
+const fn default_lane_target_utilization_percent() -> i64 {
+    70 // Target 70% utilization for PI controller
+}
+const fn default_lane_market_signal_half_life() -> i64 {
+    50 // 50 blocks (~10 min) EMA smoothing
+}
+const fn default_lane_market_demand_max_multiplier_percent() -> i64 {
+    300 // Max 4x multiplier at full demand (3 + 1 = 4x)
+}
+const fn default_lane_market_demand_sensitivity_percent() -> i64 {
+    200 // β = 2.0 (exponential curvature)
+}
+const fn default_lane_pi_proportional_gain_percent() -> i64 {
+    10 // Kp = 0.1 (proportional gain)
+}
+const fn default_lane_pi_integral_gain_percent() -> i64 {
+    1 // Ki = 0.01 (integral gain)
+}
+
 fn apply_snapshot_interval(v: i64, p: &mut Params) -> Result<(), ()> {
     p.snapshot_interval_secs = v;
     Ok(())
@@ -1619,12 +1733,12 @@ fn apply_burst_refill_rate(v: i64, p: &mut Params) -> Result<(), ()> {
 }
 
 fn apply_beta_storage_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.beta_storage_sub_ct = v;
+    p.beta_storage_sub = v;
     Ok(())
 }
 
 fn apply_gamma_read_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.gamma_read_sub_ct = v;
+    p.gamma_read_sub = v;
     Ok(())
 }
 
@@ -1653,8 +1767,8 @@ fn apply_read_subsidy_liquidity_percent(v: i64, p: &mut Params) -> Result<(), ()
     Ok(())
 }
 
-fn apply_dual_token_settlement_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.dual_token_settlement_enabled = if v > 0 { 1 } else { 0 };
+fn apply_lane_based_settlement_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.lane_based_settlement_enabled = if v > 0 { 1 } else { 0 };
     Ok(())
 }
 
@@ -1704,12 +1818,12 @@ fn apply_ad_rehearsal_stability_windows(v: i64, p: &mut Params) -> Result<(), ()
 }
 
 fn apply_kappa_cpu_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.kappa_cpu_sub_ct = v;
+    p.kappa_cpu_sub = v;
     Ok(())
 }
 
 fn apply_lambda_bytes_out_sub(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.lambda_bytes_out_sub_ct = v;
+    p.lambda_bytes_out_sub = v;
     Ok(())
 }
 
@@ -1717,7 +1831,7 @@ fn apply_treasury_percent(v: i64, p: &mut Params) -> Result<(), ()> {
     if v < 0 || v > 100 {
         return Err(());
     }
-    p.treasury_percent_ct = v;
+    p.treasury_percent = v;
     Ok(())
 }
 
@@ -1725,12 +1839,12 @@ fn apply_proof_rebate_limit(v: i64, p: &mut Params) -> Result<(), ()> {
     if v < 0 {
         return Err(());
     }
-    p.proof_rebate_limit_ct = v;
+    p.proof_rebate_limit = v;
     Ok(())
 }
 
 fn apply_rent_rate(v: i64, p: &mut Params) -> Result<(), ()> {
-    p.rent_rate_ct_per_byte = v;
+    p.rent_rate_per_byte = v;
     Ok(())
 }
 
@@ -2063,21 +2177,21 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
-            key: ParamKey::BetaStorageSubCt,
+            key: ParamKey::BetaStorageSub,
             default: 50,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_beta_storage_sub,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::GammaReadSubCt,
+            key: ParamKey::GammaReadSub,
             default: 20,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_gamma_read_sub,
             apply_runtime: |_v, _rt| Ok(()),
@@ -2153,15 +2267,15 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
-            key: ParamKey::DualTokenSettlementEnabled,
-            default: default_dual_token_settlement_enabled(),
+            key: ParamKey::LaneBasedSettlementEnabled,
+            default: default_lane_based_settlement_enabled(),
             min: 0,
             max: 1,
             unit: "bool",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
-            apply: apply_dual_token_settlement_enabled,
+            apply: apply_lane_based_settlement_enabled,
             apply_runtime: |v, rt| {
-                rt.set_dual_token_settlement_enabled(v != 0);
+                rt.set_lane_based_settlement_enabled(v != 0);
                 Ok(())
             },
         },
@@ -2248,27 +2362,27 @@ pub fn registry() -> &'static [ParamSpec] {
             },
         },
         ParamSpec {
-            key: ParamKey::KappaCpuSubCt,
+            key: ParamKey::KappaCpuSub,
             default: 10,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per ms",
+            unit: "nBLOCK per ms",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_kappa_cpu_sub,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::LambdaBytesOutSubCt,
+            key: ParamKey::LambdaBytesOutSub,
             default: 5,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_lambda_bytes_out_sub,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::TreasuryPercentCt,
+            key: ParamKey::TreasuryPercent,
             default: 0,
             min: 0,
             max: 100,
@@ -2278,21 +2392,21 @@ pub fn registry() -> &'static [ParamSpec] {
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::ProofRebateLimitCt,
-            default: default_proof_rebate_limit_ct(),
+            key: ParamKey::ProofRebateLimit,
+            default: default_proof_rebate_limit(),
             min: 0,
             max: 1_000_000,
-            unit: "nCT per proof",
+            unit: "nBLOCK per proof",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_proof_rebate_limit,
             apply_runtime: |_v, _rt| Ok(()),
         },
         ParamSpec {
-            key: ParamKey::RentRateCtPerByte,
+            key: ParamKey::RentRatePerByte,
             default: 0,
             min: 0,
             max: 1_000_000,
-            unit: "nCT per byte",
+            unit: "nBLOCK per byte",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_rent_rate,
             apply_runtime: |v, rt| {
@@ -2774,7 +2888,7 @@ pub fn registry() -> &'static [ParamSpec] {
             default: default_energy_min_stake(),
             min: 0,
             max: 1_000_000,
-            unit: "ct",
+            unit: "block",
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_energy_min_stake,
             apply_runtime: |v, rt| {
@@ -2866,10 +2980,10 @@ pub fn retune_multipliers(
     let mut state: KalmanState = if let Ok(bytes) = fs::read(&state_path) {
         json::from_slice(&bytes).unwrap_or(KalmanState {
             x: [
-                params.beta_storage_sub_ct as f64,
-                params.gamma_read_sub_ct as f64,
-                params.kappa_cpu_sub_ct as f64,
-                params.lambda_bytes_out_sub_ct as f64,
+                params.beta_storage_sub as f64,
+                params.gamma_read_sub as f64,
+                params.kappa_cpu_sub as f64,
+                params.lambda_bytes_out_sub as f64,
                 0.0,
                 0.0,
                 0.0,
@@ -2880,10 +2994,10 @@ pub fn retune_multipliers(
     } else {
         KalmanState {
             x: [
-                params.beta_storage_sub_ct as f64,
-                params.gamma_read_sub_ct as f64,
-                params.kappa_cpu_sub_ct as f64,
-                params.lambda_bytes_out_sub_ct as f64,
+                params.beta_storage_sub as f64,
+                params.gamma_read_sub as f64,
+                params.kappa_cpu_sub as f64,
+                params.lambda_bytes_out_sub as f64,
                 0.0,
                 0.0,
                 0.0,
@@ -3028,10 +3142,10 @@ pub fn retune_multipliers(
         };
         (v as f64 + noise).round() as i64
     });
-    params.beta_storage_sub_ct = noisy[0];
-    params.gamma_read_sub_ct = noisy[1];
-    params.kappa_cpu_sub_ct = noisy[2];
-    params.lambda_bytes_out_sub_ct = noisy[3];
+    params.beta_storage_sub = noisy[0];
+    params.gamma_read_sub = noisy[1];
+    params.kappa_cpu_sub = noisy[2];
+    params.lambda_bytes_out_sub = noisy[3];
 
     let _ = json::to_vec(&state).map(|bytes| fs::write(&state_path, bytes));
     let _ = json::to_vec(&hist).map(|bytes| fs::write(&hist_path, bytes));
@@ -3056,11 +3170,10 @@ pub fn retune_multipliers(
                 current_epoch, rolling_inflation
             );
         }
-        params.beta_storage_sub_ct = (params.beta_storage_sub_ct as f64 * 0.95).round() as i64;
-        params.gamma_read_sub_ct = (params.gamma_read_sub_ct as f64 * 0.95).round() as i64;
-        params.kappa_cpu_sub_ct = (params.kappa_cpu_sub_ct as f64 * 0.95).round() as i64;
-        params.lambda_bytes_out_sub_ct =
-            (params.lambda_bytes_out_sub_ct as f64 * 0.95).round() as i64;
+        params.beta_storage_sub = (params.beta_storage_sub as f64 * 0.95).round() as i64;
+        params.gamma_read_sub = (params.gamma_read_sub as f64 * 0.95).round() as i64;
+        params.kappa_cpu_sub = (params.kappa_cpu_sub as f64 * 0.95).round() as i64;
+        params.lambda_bytes_out_sub = (params.lambda_bytes_out_sub as f64 * 0.95).round() as i64;
     }
     if params.kill_switch_subsidy_reduction > 0 {
         #[cfg(feature = "telemetry")]
@@ -3083,11 +3196,10 @@ pub fn retune_multipliers(
             );
         }
         let factor = 1.0 - (params.kill_switch_subsidy_reduction as f64 / 100.0);
-        params.beta_storage_sub_ct = (params.beta_storage_sub_ct as f64 * factor).round() as i64;
-        params.gamma_read_sub_ct = (params.gamma_read_sub_ct as f64 * factor).round() as i64;
-        params.kappa_cpu_sub_ct = (params.kappa_cpu_sub_ct as f64 * factor).round() as i64;
-        params.lambda_bytes_out_sub_ct =
-            (params.lambda_bytes_out_sub_ct as f64 * factor).round() as i64;
+        params.beta_storage_sub = (params.beta_storage_sub as f64 * factor).round() as i64;
+        params.gamma_read_sub = (params.gamma_read_sub as f64 * factor).round() as i64;
+        params.kappa_cpu_sub = (params.kappa_cpu_sub as f64 * factor).round() as i64;
+        params.lambda_bytes_out_sub = (params.lambda_bytes_out_sub as f64 * factor).round() as i64;
     }
     if let Ok(mut f) = OpenOptions::new()
         .create(true)
@@ -3098,10 +3210,10 @@ pub fn retune_multipliers(
             f,
             "{} retune {} {} {} {}",
             current_epoch,
-            params.beta_storage_sub_ct,
-            params.gamma_read_sub_ct,
-            params.kappa_cpu_sub_ct,
-            params.lambda_bytes_out_sub_ct,
+            params.beta_storage_sub,
+            params.gamma_read_sub,
+            params.kappa_cpu_sub,
+            params.lambda_bytes_out_sub,
         );
     }
     let snap_path = hist_dir.join(format!("inflation_{}.json", current_epoch));
@@ -3115,19 +3227,19 @@ pub fn retune_multipliers(
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["storage"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.beta_storage_sub_ct);
+            .set(params.beta_storage_sub);
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["read"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.gamma_read_sub_ct);
+            .set(params.gamma_read_sub);
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["cpu"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.kappa_cpu_sub_ct);
+            .set(params.kappa_cpu_sub);
         SUBSIDY_MULTIPLIER
             .ensure_handle_for_label_values(&["bytes_out"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
-            .set(params.lambda_bytes_out_sub_ct);
+            .set(params.lambda_bytes_out_sub);
         SUBSIDY_MULTIPLIER_RAW
             .ensure_handle_for_label_values(&["storage"])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)

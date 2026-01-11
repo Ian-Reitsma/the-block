@@ -44,7 +44,7 @@ fn node_treasury_accrual_flow() -> Result<()> {
     assert!(history
         .iter()
         .any(|snap| matches!(snap.event, TreasuryBalanceEventKind::Cancelled)));
-    // Rollbacks credit the treasury (docs/economics_and_governance.md#ct-supply-and-sub-ledgers).
+    // Rollbacks credit the treasury (docs/economics_and_governance.md#block-supply-and-sub-ledgers).
     assert_eq!(history.last().map(|snap| snap.balance).unwrap(), 64);
     Ok(())
 }
@@ -56,7 +56,7 @@ fn mining_diverts_treasury_share() -> Result<()> {
     let start_len = NODE_GOV_STORE.treasury_balance_history()?.len();
 
     let mut chain = Blockchain::default();
-    chain.params.treasury_percent_ct = 25;
+    chain.params.treasury_percent = 25;
     chain
         .mine_block("miner")
         .map_err(|e| format!("mine block: {e}"))?;
@@ -91,13 +91,9 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
             "treasury".into(),
             Account {
                 address: "treasury".into(),
-                balance: TokenBalance {
-                    consumer: 5_000,
-                    industrial: 5_000,
-                },
+                balance: TokenBalance { amount: 10_000 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),

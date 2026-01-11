@@ -112,12 +112,15 @@ impl SubsidyAllocator {
             self.params.ad_margin_target_bps,
         );
 
-        // Softmax: φ_j = exp(s_j / τ) / Σ_k exp(s_k / τ)
-        let tau = self.params.temperature;
-        let exp_storage = (s_storage / tau).exp();
-        let exp_compute = (s_compute / tau).exp();
-        let exp_energy = (s_energy / tau).exp();
-        let exp_ad = (s_ad / tau).exp();
+        // Numerically stable softmax: subtract max before exp to prevent overflow
+        // φ_j = exp((s_j - max_s) / τ) / Σ_k exp((s_k - max_s) / τ)
+        let tau = self.params.temperature.max(0.001); // Prevent division by zero
+        let max_s = s_storage.max(s_compute).max(s_energy).max(s_ad);
+
+        let exp_storage = ((s_storage - max_s) / tau).exp();
+        let exp_compute = ((s_compute - max_s) / tau).exp();
+        let exp_energy = ((s_energy - max_s) / tau).exp();
+        let exp_ad = ((s_ad - max_s) / tau).exp();
 
         let sum_exp = exp_storage + exp_compute + exp_energy + exp_ad;
 

@@ -65,7 +65,7 @@ use crate::{
 };
 use base64_fp::{decode_standard, encode_standard};
 use coding::default_encryptor;
-use concurrency::{Bytes, Lazy, MutexExt, OnceCell};
+use concurrency::{Bytes, Lazy, MutexExt};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::anyhow::anyhow;
@@ -84,9 +84,11 @@ use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+#[cfg(feature = "integration-tests")]
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sys::paths;
 
 use runtime::fs::watch::{
@@ -109,20 +111,24 @@ use transport::{
     ProviderRegistry as TransportProviderRegistry, TransportCallbacks,
 };
 
+#[cfg(feature = "integration-tests")]
+static ACCEPT_RATE: OnceLock<Mutex<HashMap<SocketAddr, (Instant, u32)>>> = OnceLock::new();
+
 pub use crate::p2p::handshake::{Hello, Transport, SUPPORTED_VERSION};
 pub use message::{BlobChunk, Message, Payload};
 pub use peer::ReputationUpdate;
 pub use peer::{
     clear_peer_metrics, clear_throttle, export_all_peer_stats, export_peer_stats, known_peers,
-    load_peer_metrics, p2p_max_bytes_per_sec, p2p_max_per_sec, peer_reputation_decay, peer_stats,
-    peer_stats_all, peer_stats_map, persist_peer_metrics, publish_telemetry_summary,
-    recent_handshake_failures, record_request, reset_peer_metrics, rotate_peer_key,
-    set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
-    set_p2p_max_bytes_per_sec, set_p2p_max_per_sec, set_peer_metrics_compress,
-    set_peer_metrics_export, set_peer_metrics_export_quota, set_peer_metrics_path,
-    set_peer_metrics_retention, set_peer_metrics_sample_rate, set_peer_reputation_decay,
-    set_track_drop_reasons, set_track_handshake_fail, throttle_peer, DropReason, HandshakeError,
-    PeerMetrics, PeerReputation, PeerSet, PeerStat,
+    load_peer_metrics, p2p_chain_sync_interval_ms, p2p_max_bytes_per_sec, p2p_max_per_sec,
+    peer_reputation_decay, peer_stats, peer_stats_all, peer_stats_map, persist_peer_metrics,
+    publish_telemetry_summary, recent_handshake_failures, record_request, reset_peer_metrics,
+    rotate_peer_key, set_max_peer_metrics, set_metrics_aggregator, set_metrics_export_dir,
+    set_p2p_chain_sync_interval_ms, set_p2p_max_bytes_per_sec, set_p2p_max_per_sec,
+    set_p2p_rate_window_secs, set_peer_metrics_compress, set_peer_metrics_export,
+    set_peer_metrics_export_quota, set_peer_metrics_path, set_peer_metrics_retention,
+    set_peer_metrics_sample_rate, set_peer_reputation_decay, set_track_drop_reasons,
+    set_track_handshake_fail, throttle_peer, DropReason, HandshakeError, PeerMetrics,
+    PeerReputation, PeerSet, PeerStat,
 };
 
 pub use peer::simulate_handshake_fail;
@@ -713,7 +719,6 @@ static PEER_CERT_MAX_AGE: Lazy<AtomicU64> = Lazy::new(|| AtomicU64::new(DEFAULT_
 static PEER_CERT_WATCH_PATH: Lazy<Mutex<Option<PathBuf>>> = Lazy::new(|| Mutex::new(None));
 static PEER_CERT_PERSIST_DISABLED: Lazy<bool> =
     Lazy::new(|| std::env::var_os(DISABLE_PERSIST_ENV).is_some());
-static PEER_CERT_ENC_KEY: OnceCell<Option<[u8; 32]>> = OnceCell::new();
 static GOSSIP_RELAY: Lazy<RwLock<Option<std::sync::Arc<Relay>>>> = Lazy::new(|| RwLock::new(None));
 
 pub fn set_gossip_relay(relay: std::sync::Arc<Relay>) {
@@ -854,36 +859,32 @@ fn peer_cert_encryption_key() -> Option<[u8; 32]> {
     if !peer_cert_persistence_enabled() {
         return None;
     }
-    PEER_CERT_ENC_KEY
-        .get_or_init(|| {
-            if let Ok(key_hex) = std::env::var("TB_PEER_CERT_KEY_HEX") {
-                if let Ok(bytes) = crypto_suite::hex::decode(key_hex.trim()) {
-                    if bytes.len() == 32 {
-                        let mut key = [0u8; 32];
-                        key.copy_from_slice(&bytes);
-                        return Some(key);
-                    }
-                    let hash = blake3::hash(&bytes);
-                    let mut key = [0u8; 32];
-                    key.copy_from_slice(hash.as_bytes());
-                    return Some(key);
-                }
+    if let Ok(key_hex) = std::env::var("TB_PEER_CERT_KEY_HEX") {
+        if let Ok(bytes) = crypto_suite::hex::decode(key_hex.trim()) {
+            if bytes.len() == 32 {
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&bytes);
+                return Some(key);
             }
-            if let Ok(node_hex) = std::env::var("TB_NODE_KEY_HEX") {
-                if let Ok(bytes) = crypto_suite::hex::decode(node_hex.trim()) {
-                    let hash = blake3::hash(&bytes);
-                    let mut key = [0u8; 32];
-                    key.copy_from_slice(hash.as_bytes());
-                    return Some(key);
-                }
-            }
-            let key = load_net_key();
-            Some(blake3::derive_key(
-                "the-block:quic-peer-cert-store",
-                &key.to_keypair_bytes(),
-            ))
-        })
-        .clone()
+            let hash = blake3::hash(&bytes);
+            let mut key = [0u8; 32];
+            key.copy_from_slice(hash.as_bytes());
+            return Some(key);
+        }
+    }
+    if let Ok(node_hex) = std::env::var("TB_NODE_KEY_HEX") {
+        if let Ok(bytes) = crypto_suite::hex::decode(node_hex.trim()) {
+            let hash = blake3::hash(&bytes);
+            let mut key = [0u8; 32];
+            key.copy_from_slice(hash.as_bytes());
+            return Some(key);
+        }
+    }
+    let key = load_net_key();
+    Some(blake3::derive_key(
+        "the-block:quic-peer-cert-store",
+        &key.to_keypair_bytes(),
+    ))
 }
 
 fn encrypt_cert_blob(cert: &[u8]) -> Option<String> {
@@ -1538,7 +1539,12 @@ pub fn reputation_sync() {
         return;
     }
     let sk = load_net_key();
-    turbine::broadcast_reputation(&entries, &sk, &peers);
+    #[cfg(feature = "quic")]
+    let cert_fingerprint = transport_quic::current_advertisement()
+        .map(|advert| Bytes::from(advert.fingerprint.to_vec()));
+    #[cfg(not(feature = "quic"))]
+    let cert_fingerprint = None;
+    turbine::broadcast_reputation(&entries, &sk, cert_fingerprint, &peers);
 }
 
 /// Return current reputation score for `peer`.
@@ -1612,10 +1618,17 @@ impl Node {
                     }),
                 )
             }
-            None => {
-                let _ = transport_quic::initialize(&key);
-                (None, transport_quic::current_advertisement())
-            }
+            None => match transport_quic::initialize(&key) {
+                Ok(advert) => (None, Some(advert)),
+                Err(err) => {
+                    diagnostics::tracing::warn!(
+                        target = "net",
+                        reason = %err,
+                        "quic_advertisement_init_failed"
+                    );
+                    (None, None)
+                }
+            },
         };
         #[cfg(not(feature = "quic"))]
         let (quic_addr, quic_cert) = match quic {
@@ -1631,9 +1644,23 @@ impl Node {
         }
         let relay = std::sync::Arc::new(Relay::default());
         set_gossip_relay(std::sync::Arc::clone(&relay));
+        let peers = PeerSet::new_with_key_and_addr(peers, key.clone(), Some(addr));
+        // Only include cert_fingerprint in messages when actually using QUIC transport.
+        // When quic_addr is None, we're using TCP and shouldn't require fingerprint validation.
+        #[cfg(feature = "quic")]
+        let local_fingerprint = if quic_addr.is_some() {
+            quic_advert
+                .as_ref()
+                .map(|advert| Bytes::from(advert.fingerprint.to_vec()))
+        } else {
+            None
+        };
+        #[cfg(not(feature = "quic"))]
+        let local_fingerprint = None;
+        peers.set_cert_fingerprint(local_fingerprint);
         Self {
             addr,
-            peers: PeerSet::new(peers),
+            peers,
             chain: Arc::new(Mutex::new(bc)),
             key,
             relay,
@@ -1645,75 +1672,7 @@ impl Node {
         }
     }
 
-    /// Start the listener thread handling inbound gossip.
-    pub fn start(&self) -> io::Result<thread::JoinHandle<()>> {
-        let flag = ShutdownFlag::new();
-        self.start_with_flag(&flag)
-    }
-
-    /// Start the listener thread handling inbound gossip that stops when `shutdown` is triggered.
-    pub fn start_with_flag(&self, shutdown: &ShutdownFlag) -> io::Result<thread::JoinHandle<()>> {
-        let listener = bind_tcp_listener(self.addr)?;
-        listener.set_nonblocking(true)?;
-        let stop = shutdown.as_arc();
-        let peers = self.peers.clone();
-        let chain = Arc::clone(&self.chain);
-        Ok(thread::spawn(move || loop {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            match listener.accept() {
-                Ok((mut stream, addr)) => {
-                    let addr = Some(addr);
-                    let mut buf = Vec::new();
-                    if stream.read_to_end(&mut buf).is_ok() {
-                        #[cfg(feature = "telemetry")]
-                        if crate::telemetry::should_log("p2p") {
-                            let trace = crate::telemetry::log_context();
-                            let span = crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
-                            span.in_scope(|| {
-                                diagnostics::tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
-                            });
-                        }
-                        if let Ok(msg) = message::decode(&buf) {
-                            peers.handle_message(msg, addr, &chain);
-                        }
-                    }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Err(_) => break,
-            }
-        }))
-    }
-
-    /// Broadcast a transaction to all known peers.
-    pub fn broadcast_tx(&self, tx: SignedTransaction) {
-        self.broadcast_payload(Payload::Tx(tx));
-    }
-
-    /// Broadcast a blob transaction to all known peers.
-    pub fn broadcast_blob_tx(&self, tx: BlobTx) {
-        self.broadcast_payload(Payload::BlobTx(tx));
-    }
-
-    /// Broadcast a blob shard to all known peers.
-    pub fn broadcast_blob_chunk(&self, chunk: BlobChunk) {
-        self.broadcast_payload(Payload::BlobChunk(chunk));
-    }
-
-    /// Broadcast the current chain to all known peers.
-    pub fn broadcast_chain(&self) {
-        if let Ok(bc) = self.chain.lock() {
-            self.broadcast_payload(Payload::Chain(bc.chain.clone()));
-        }
-    }
-
-    /// Perform peer discovery by handshaking with known peers and exchanging address lists.
-    pub fn discover_peers(&self) {
-        let peers = self.peers.bootstrap();
-        // send handshake to each peer
+    fn handshake_message(&self) -> Option<Message> {
         let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
         let nonce = OsRng::default().next_u64();
         let transport = if self.quic_addr.is_some() {
@@ -1758,6 +1717,7 @@ impl Node {
             agent,
             nonce,
             transport,
+            gossip_addr: Some(self.addr),
             quic_addr: self.quic_addr,
             #[cfg(feature = "quic")]
             quic_cert,
@@ -1780,7 +1740,251 @@ impl Node {
             #[cfg(not(feature = "quic"))]
             quic_capabilities: Vec::new(),
         };
-        if let Some(hs_msg) = self.sign_payload(Payload::Handshake(hello), "handshake") {
+        self.sign_payload(Payload::Handshake(hello), "handshake")
+    }
+
+    /// Start the listener thread handling inbound gossip.
+    pub fn start(&self) -> io::Result<thread::JoinHandle<()>> {
+        let flag = ShutdownFlag::new();
+        self.start_with_flag(&flag)
+    }
+
+    /// Start the listener thread handling inbound gossip that stops when `shutdown` is triggered.
+    pub fn start_with_flag(&self, shutdown: &ShutdownFlag) -> io::Result<thread::JoinHandle<()>> {
+        let listener = bind_tcp_listener(self.addr)?;
+        listener.set_nonblocking(true)?;
+        let stop = shutdown.as_arc();
+        let peers = self.peers.clone();
+        let chain = Arc::clone(&self.chain);
+        let sync_interval = peer::p2p_chain_sync_interval_ms();
+        if sync_interval > 0 {
+            let sync_stop = shutdown.as_arc();
+            let sync_peers = peers.clone();
+            let sync_chain = Arc::clone(&chain);
+            std::thread::spawn(move || {
+                let mut rng = rand::thread_rng();
+                while !sync_stop.load(Ordering::Relaxed) {
+                    let interval = peer::p2p_chain_sync_interval_ms();
+                    if interval == 0 {
+                        break;
+                    }
+                    let peers_snapshot = sync_peers.list();
+                    if !peers_snapshot.is_empty() {
+                        let idx = rng.gen_range(0..peers_snapshot.len());
+                        let target = peers_snapshot[idx];
+                        let current_len = sync_chain
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .chain
+                            .len() as u64;
+                        sync_peers.request_chain_from(target, current_len);
+                    }
+                    let jitter = if interval > 10 {
+                        rng.gen_range(0..=interval / 5)
+                    } else {
+                        0
+                    };
+                    std::thread::sleep(Duration::from_millis(interval + jitter));
+                }
+            });
+        }
+        Ok(thread::spawn(move || loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            match listener.accept() {
+                Ok((mut stream, addr)) => {
+                    #[cfg(feature = "integration-tests")]
+                    {
+                        let now = Instant::now();
+                        let rate = ACCEPT_RATE.get_or_init(|| Mutex::new(HashMap::new()));
+                        let mut guard = rate.lock().unwrap();
+                        let entry = guard.entry(addr).or_insert((now, 0));
+                        if now.duration_since(entry.0) > Duration::from_secs(1) {
+                            *entry = (now, 0);
+                        }
+                        entry.1 = entry.1.saturating_add(1);
+                        // Drop connections exceeding 25/sec from any single address to prevent
+                        // handshake storms from overwhelming the listener.
+                        if entry.1 > 25 {
+                            eprintln!("listener: rate limit exceeded for {}; dropping", addr);
+                            drop(stream);
+                            continue;
+                        }
+                    }
+                    let local = stream.local_addr().ok();
+                    #[cfg(feature = "integration-tests")]
+                    match local {
+                        Some(local) => {
+                            eprintln!(
+                                "listener: ACCEPTED connection local {} from {}",
+                                local, addr
+                            );
+                        }
+                        None => eprintln!("listener: ACCEPTED connection from {}", addr),
+                    }
+                    let peers = peers.clone();
+                    let chain = Arc::clone(&chain);
+                    let task = move || {
+                        let addr = Some(addr);
+                        let mut buf = Vec::new();
+                        // Listener is non-blocking; switch accepted sockets back to blocking mode
+                        // so read_to_end can wait for EOF without spurious WouldBlock errors.
+                        let _ = stream.set_nonblocking(false);
+                        // Avoid blocking indefinitely on peers that never close the socket.
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                        match stream.read_to_end(&mut buf) {
+                            Ok(_) => {
+                                #[cfg(feature = "integration-tests")]
+                                match local {
+                                    Some(local) => eprintln!(
+                                        "listener: READ {} bytes local {} from {:?}",
+                                        buf.len(),
+                                        local,
+                                        addr
+                                    ),
+                                    None => eprintln!(
+                                        "listener: READ {} bytes from {:?}",
+                                        buf.len(),
+                                        addr
+                                    ),
+                                }
+                                #[cfg(feature = "telemetry")]
+                                if crate::telemetry::should_log("p2p") {
+                                    let trace = crate::telemetry::log_context();
+                                    let span =
+                                        crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
+                                    span.in_scope(|| {
+                                        diagnostics::tracing::info!(
+                                            parent: &trace,
+                                            peer = ?addr,
+                                            len = buf.len(),
+                                            "recv_msg"
+                                        );
+                                    });
+                                }
+                                match message::decode(&buf) {
+                                    Ok(msg) => {
+                                        #[cfg(feature = "integration-tests")]
+                                        {
+                                            let payload_name = match &msg.body {
+                                                Payload::Chain(c) => {
+                                                    format!("Chain(len={})", c.len())
+                                                }
+                                                Payload::Handshake(_) => "Handshake".to_string(),
+                                                Payload::Hello(_) => "Hello".to_string(),
+                                                Payload::ChainRequest(_) => {
+                                                    "ChainRequest".to_string()
+                                                }
+                                                _ => "Other".to_string(),
+                                            };
+                                            match local {
+                                                Some(local) => eprintln!(
+                                                    "listener: DECODED {} local {} from {:?}",
+                                                    payload_name, local, addr
+                                                ),
+                                                None => eprintln!(
+                                                    "listener: DECODED {} from {:?}",
+                                                    payload_name, addr
+                                                ),
+                                            }
+                                        }
+                                        peers.handle_message(msg, addr, &chain);
+                                    }
+                                    Err(err) => {
+                                        #[cfg(feature = "integration-tests")]
+                                        eprintln!(
+                                            "listener: DECODE FAILED from {:?}: {:?}",
+                                            addr, err
+                                        );
+                                        diagnostics::tracing::warn!(
+                                            target = "net",
+                                            peer = ?addr,
+                                            reason = ?err,
+                                            "message_decode_failed"
+                                        );
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                #[cfg(feature = "integration-tests")]
+                                match local {
+                                    Some(local) => eprintln!(
+                                        "listener: READ ERROR local {} from {:?}: {}",
+                                        local, addr, err
+                                    ),
+                                    None => {
+                                        eprintln!("listener: READ ERROR from {:?}: {}", addr, err)
+                                    }
+                                }
+                                diagnostics::tracing::warn!(
+                                    target = "net",
+                                    peer = ?addr,
+                                    reason = %err,
+                                    "message_read_failed"
+                                );
+                            }
+                        }
+                    };
+                    #[cfg(feature = "integration-tests")]
+                    {
+                        std::thread::spawn(task);
+                    }
+                    #[cfg(not(feature = "integration-tests"))]
+                    {
+                        runtime::spawn_blocking(task);
+                    }
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) => {
+                    diagnostics::tracing::warn!(
+                        target = "net",
+                        %err,
+                        "gossip_accept_failed"
+                    );
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }))
+    }
+
+    /// Broadcast a transaction to all known peers.
+    pub fn broadcast_tx(&self, tx: SignedTransaction) {
+        self.broadcast_payload(Payload::Tx(tx));
+    }
+
+    /// Broadcast a blob transaction to all known peers.
+    pub fn broadcast_blob_tx(&self, tx: BlobTx) {
+        self.broadcast_payload(Payload::BlobTx(tx));
+    }
+
+    /// Broadcast a blob shard to all known peers.
+    pub fn broadcast_blob_chunk(&self, chunk: BlobChunk) {
+        self.broadcast_payload(Payload::BlobChunk(chunk));
+    }
+
+    /// Explicitly request a chain snapshot from `addr` starting at `from_height`.
+    pub fn request_chain_from(&self, addr: SocketAddr, from_height: u64) {
+        self.peers.request_chain_from(addr, from_height);
+    }
+
+    /// Broadcast the current chain to all known peers.
+    pub fn broadcast_chain(&self) {
+        let chain = match self.chain.lock() {
+            Ok(bc) => bc.chain.clone(),
+            Err(_) => return,
+        };
+        self.peers.broadcast_chain_snapshot(chain);
+    }
+
+    /// Perform peer discovery by handshaking with known peers and exchanging address lists.
+    pub fn discover_peers(&self) {
+        let peers = self.peers.bootstrap();
+        // send handshake to each peer
+        if let Some(hs_msg) = self.handshake_message() {
             for p in &peers {
                 let _ = send_msg(*p, &hs_msg);
             }
@@ -1802,7 +2006,34 @@ impl Node {
 
     /// Add a peer address to this node.
     pub fn add_peer(&self, addr: SocketAddr) {
+        let already_known = self.peers.list().contains(&addr);
+        let already_mapped = self.peers.is_mapped(addr);
         self.peers.add(addr);
+        if addr == self.addr {
+            return;
+        }
+        // Force the next chain broadcast to include newly added peers even if our height
+        // has not advanced, so late joiners receive the current tip immediately.
+        if !already_known || !already_mapped {
+            self.peers.reset_broadcast_watermark();
+        }
+        if already_known && already_mapped {
+            #[cfg(feature = "integration-tests")]
+            eprintln!("add_peer: SKIP repeat handshake/hello to {}", addr);
+            return;
+        }
+        if let Some(hs_msg) = self.handshake_message() {
+            let _ = send_msg(addr, &hs_msg);
+        }
+        // Send Hello only when we are adding a genuinely new address to avoid flooding the
+        // network with redundant address lists during aggressive reconnection.
+        if !already_known || !already_mapped {
+            let mut addrs = self.peers.list();
+            addrs.push(self.addr);
+            if let Some(hello_msg) = self.sign_payload(Payload::Hello(addrs), "hello") {
+                let _ = send_msg(addr, &hello_msg);
+            }
+        }
     }
 
     /// Remove a peer address from this node.
@@ -1844,7 +2075,14 @@ impl Node {
     }
 
     fn sign_payload(&self, body: Payload, context: &str) -> Option<Message> {
-        match Message::new(body, &self.key) {
+        #[cfg(feature = "quic")]
+        let cert_fingerprint = self
+            .quic_advert
+            .as_ref()
+            .map(|advert| Bytes::from(advert.fingerprint.to_vec()));
+        #[cfg(not(feature = "quic"))]
+        let cert_fingerprint = None;
+        match Message::new_with_cert_fingerprint(body, &self.key, cert_fingerprint) {
             Ok(msg) => Some(msg),
             Err(err) => {
                 diagnostics::tracing::error!(
@@ -1903,12 +2141,10 @@ pub(crate) fn send_msg(addr: SocketAddr, msg: &Message) -> std::io::Result<()> {
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(1))?;
     let bytes = message::encode_message(msg)
         .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("serialize: {err}")))?;
-    #[cfg(feature = "telemetry")]
-    if crate::telemetry::should_log("p2p") {
-        let span = crate::log_context!(tx = *blake3::hash(&bytes).as_bytes());
-        diagnostics::tracing::info!(parent: &span, peer = %addr, len = bytes.len(), "send_msg");
-    }
     stream.write_all(&bytes)?;
+    // Explicitly shutdown the write half to signal EOF to the reader
+    use std::net::Shutdown;
+    let _ = stream.shutdown(Shutdown::Write);
     crate::net::peer::record_send(addr, bytes.len());
     Ok(())
 }
@@ -1991,7 +2227,18 @@ pub fn load_net_key() -> SigningKey {
             );
         }
     }
-    if let Err(err) = fs::write(&path, sk.to_keypair_bytes()) {
+    let key_bytes = sk.to_keypair_bytes();
+    let mut wrote = fs::write(&path, key_bytes);
+    if let Err(err) = &wrote {
+        let missing = err.kind() == io::ErrorKind::NotFound || err.raw_os_error() == Some(2);
+        if missing {
+            if let Some(parent) = path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            wrote = fs::write(&path, key_bytes);
+        }
+    }
+    if let Err(err) = wrote {
         diagnostics::tracing::error!(
             path = %path.display(),
             reason = %err,

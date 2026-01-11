@@ -1,9 +1,10 @@
 #![cfg(feature = "integration-tests")]
+mod settlement_util;
 mod util;
 use crypto_suite::hashing::blake3::Hasher;
+use settlement_util::SettlementCtx;
 use testkit::prop::Runner;
 use the_block::compute_market::{scheduler, *};
-use util::settlement::SettlementCtx;
 
 #[test]
 fn match_and_finalize_payout() {
@@ -22,7 +23,7 @@ fn match_and_finalize_payout() {
                 consumer_bond: 1,
                 units: slices as u64,
                 price_per_unit: price,
-                fee_pct_ct: 100,
+                fee_pct: 100,
                 capability: scheduler::Capability::default(),
                 reputation: 0,
                 reputation_multiplier: 1.0,

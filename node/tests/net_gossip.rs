@@ -261,6 +261,7 @@ fn invalid_gossip_tx_rejected() {
         agent: "test".into(),
         nonce: 0,
         transport: Transport::Tcp,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: None,
         quic_fingerprint: None,
@@ -278,7 +279,7 @@ fn invalid_gossip_tx_rejected() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -309,6 +310,7 @@ fn invalid_gossip_block_rejected() {
         agent: "test".into(),
         nonce: 0,
         transport: Transport::Tcp,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: None,
         quic_fingerprint: None,
@@ -381,6 +383,7 @@ fn handshake_version_mismatch_rejected() {
         agent: "test".into(),
         nonce: 0,
         transport: Transport::Tcp,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: None,
         quic_fingerprint: None,
@@ -399,7 +402,7 @@ fn handshake_version_mismatch_rejected() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -430,6 +433,7 @@ fn handshake_feature_mismatch_rejected() {
         agent: "test".into(),
         nonce: 0,
         transport: Transport::Tcp,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: None,
         quic_fingerprint: None,
@@ -448,7 +452,7 @@ fn handshake_feature_mismatch_rejected() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -484,8 +488,8 @@ fn peer_rate_limit_and_ban() {
     let dir = init_env();
     let addr = free_addr();
     let mut bc = Blockchain::default();
-    bc.add_account("alice".into(), 100, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 100).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     let node = make_node(&dir, 1, addr, vec![], bc);
     let flag = ShutdownFlag::new();
     let jh = node.start_with_flag(&flag).expect("start gossip node");
@@ -503,6 +507,7 @@ fn peer_rate_limit_and_ban() {
             agent: "test".into(),
             nonce: 0,
             transport: Transport::Tcp,
+            gossip_addr: None,
             quic_addr: None,
             quic_cert: None,
             quic_fingerprint: None,
@@ -523,7 +528,7 @@ fn peer_rate_limit_and_ban() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 1000,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -547,10 +552,10 @@ fn partition_state_replay() {
 
         let mut bc1 = Blockchain::default();
         let mut bc2 = Blockchain::default();
-        bc1.add_account("alice".into(), 5000, 0).unwrap();
-        bc1.add_account("bob".into(), 0, 0).unwrap();
-        bc2.add_account("alice".into(), 5000, 0).unwrap();
-        bc2.add_account("bob".into(), 0, 0).unwrap();
+        bc1.add_account("alice".into(), 5000).unwrap();
+        bc1.add_account("bob".into(), 0).unwrap();
+        bc2.add_account("alice".into(), 5000).unwrap();
+        bc2.add_account("bob".into(), 0).unwrap();
 
         let node1 = make_node(&dir, 1, addr1, vec![addr2], bc1);
         let node2 = make_node(&dir, 2, addr2, vec![addr1], bc2);
@@ -568,7 +573,7 @@ fn partition_state_replay() {
             amount_consumer: 5,
             amount_industrial: 0,
             fee: 1000,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -599,13 +604,13 @@ fn partition_state_replay() {
             .blockchain()
             .accounts
             .get("bob")
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         let bal2 = node2
             .blockchain()
             .accounts
             .get("bob")
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         assert_eq!(bal1, 0);
         assert_eq!(bal2, 0);

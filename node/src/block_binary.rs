@@ -42,26 +42,21 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
         struct_writer.field_i64("retune_hint", i64::from(block.retune_hint));
         struct_writer.field_u64("nonce", block.nonce);
         struct_writer.field_string("hash", &block.hash);
-        struct_writer.field_u64("coinbase_consumer", block.coinbase_consumer.get());
+        struct_writer.field_u64("coinbase_block", block.coinbase_block.get());
         struct_writer.field_u64("coinbase_industrial", block.coinbase_industrial.get());
-        struct_writer.field_u64("storage_sub_ct", block.storage_sub_ct.get());
-        struct_writer.field_u64("read_sub_ct", block.read_sub_ct.get());
-        struct_writer.field_u64("read_sub_viewer_ct", block.read_sub_viewer_ct.get());
-        struct_writer.field_u64("read_sub_host_ct", block.read_sub_host_ct.get());
-        struct_writer.field_u64("read_sub_hardware_ct", block.read_sub_hardware_ct.get());
-        struct_writer.field_u64("read_sub_verifier_ct", block.read_sub_verifier_ct.get());
-        struct_writer.field_u64("read_sub_liquidity_ct", block.read_sub_liquidity_ct.get());
-        struct_writer.field_u64("ad_viewer_ct", block.ad_viewer_ct.get());
-        struct_writer.field_u64("ad_host_ct", block.ad_host_ct.get());
-        struct_writer.field_u64("ad_hardware_ct", block.ad_hardware_ct.get());
-        struct_writer.field_u64("ad_verifier_ct", block.ad_verifier_ct.get());
-        struct_writer.field_u64("ad_liquidity_ct", block.ad_liquidity_ct.get());
-        struct_writer.field_u64("ad_miner_ct", block.ad_miner_ct.get());
-        struct_writer.field_u64("ad_host_it", block.ad_host_it.get());
-        struct_writer.field_u64("ad_hardware_it", block.ad_hardware_it.get());
-        struct_writer.field_u64("ad_verifier_it", block.ad_verifier_it.get());
-        struct_writer.field_u64("ad_liquidity_it", block.ad_liquidity_it.get());
-        struct_writer.field_u64("ad_miner_it", block.ad_miner_it.get());
+        struct_writer.field_u64("storage_sub", block.storage_sub.get());
+        struct_writer.field_u64("read_sub", block.read_sub.get());
+        struct_writer.field_u64("read_sub_viewer", block.read_sub_viewer.get());
+        struct_writer.field_u64("read_sub_host", block.read_sub_host.get());
+        struct_writer.field_u64("read_sub_hardware", block.read_sub_hardware.get());
+        struct_writer.field_u64("read_sub_verifier", block.read_sub_verifier.get());
+        struct_writer.field_u64("read_sub_liquidity", block.read_sub_liquidity.get());
+        struct_writer.field_u64("ad_viewer", block.ad_viewer.get());
+        struct_writer.field_u64("ad_host", block.ad_host.get());
+        struct_writer.field_u64("ad_hardware", block.ad_hardware.get());
+        struct_writer.field_u64("ad_verifier", block.ad_verifier.get());
+        struct_writer.field_u64("ad_liquidity", block.ad_liquidity.get());
+        struct_writer.field_u64("ad_miner", block.ad_miner.get());
         struct_writer.field_with("treasury_events", |field_writer| {
             if result.is_ok() {
                 if let Err(err) = write_treasury_events(field_writer, &block.treasury_events) {
@@ -72,18 +67,11 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
         struct_writer.field_u64("ad_total_usd_micros", block.ad_total_usd_micros);
         struct_writer.field_u64("ad_settlement_count", block.ad_settlement_count);
         struct_writer.field_u64(
-            "ad_oracle_ct_price_usd_micros",
-            block.ad_oracle_ct_price_usd_micros,
+            "ad_oracle_price_usd_micros",
+            block.ad_oracle_price_usd_micros,
         );
-        struct_writer.field_u64(
-            "ad_oracle_it_price_usd_micros",
-            block.ad_oracle_it_price_usd_micros,
-        );
-        struct_writer.field_u64("compute_sub_ct", block.compute_sub_ct.get());
-        struct_writer.field_u64("proof_rebate_ct", block.proof_rebate_ct.get());
-        struct_writer.field_u64("storage_sub_it", block.storage_sub_it.get());
-        struct_writer.field_u64("read_sub_it", block.read_sub_it.get());
-        struct_writer.field_u64("compute_sub_it", block.compute_sub_it.get());
+        struct_writer.field_u64("compute_sub", block.compute_sub.get());
+        struct_writer.field_u64("proof_rebate", block.proof_rebate.get());
         struct_writer.field_with("read_root", |field_writer| {
             write_fixed(field_writer, &block.read_root);
         });
@@ -158,36 +146,27 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
     let mut retune_hint = None;
     let mut nonce = None;
     let mut hash = None;
-    let mut coinbase_consumer = None;
+    let mut coinbase_block = None;
     let mut coinbase_industrial = None;
-    let mut storage_sub_ct = None;
-    let mut read_sub_ct = None;
-    let mut read_sub_viewer_ct = None;
-    let mut read_sub_host_ct = None;
-    let mut read_sub_hardware_ct = None;
-    let mut read_sub_verifier_ct = None;
-    let mut read_sub_liquidity_ct = None;
-    let mut ad_viewer_ct = None;
-    let mut ad_host_ct = None;
-    let mut ad_hardware_ct = None;
-    let mut ad_verifier_ct = None;
-    let mut ad_liquidity_ct = None;
-    let mut ad_miner_ct = None;
-    let mut ad_host_it = None;
-    let mut ad_hardware_it = None;
-    let mut ad_verifier_it = None;
-    let mut ad_liquidity_it = None;
-    let mut ad_miner_it = None;
+    let mut storage_sub = None;
+    let mut read_sub = None;
+    let mut read_sub_viewer = None;
+    let mut read_sub_host = None;
+    let mut read_sub_hardware = None;
+    let mut read_sub_verifier = None;
+    let mut read_sub_liquidity = None;
+    let mut ad_viewer = None;
+    let mut ad_host = None;
+    let mut ad_hardware = None;
+    let mut ad_verifier = None;
+    let mut ad_liquidity = None;
+    let mut ad_miner = None;
     let mut treasury_events: Option<Vec<BlockTreasuryEvent>> = None;
     let mut ad_total_usd_micros = None;
     let mut ad_settlement_count = None;
-    let mut ad_oracle_ct_price_usd_micros = None;
-    let mut ad_oracle_it_price_usd_micros = None;
-    let mut compute_sub_ct = None;
-    let mut proof_rebate_ct = None;
-    let mut storage_sub_it = None;
-    let mut read_sub_it = None;
-    let mut compute_sub_it = None;
+    let mut ad_oracle_price_usd_micros = None;
+    let mut compute_sub = None;
+    let mut proof_rebate = None;
     let mut read_root = None;
     let mut fee_checksum = None;
     let mut state_root = None;
@@ -220,58 +199,39 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         "retune_hint" => assign_once(&mut retune_hint, read_retune_hint(reader)?, "retune_hint"),
         "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
         "hash" => assign_once(&mut hash, reader.read_string()?, "hash"),
-        "coinbase_consumer" => assign_once(
-            &mut coinbase_consumer,
-            reader.read_u64()?,
-            "coinbase_consumer",
-        ),
+        "coinbase_block" => assign_once(&mut coinbase_block, reader.read_u64()?, "coinbase_block"),
         "coinbase_industrial" => assign_once(
             &mut coinbase_industrial,
             reader.read_u64()?,
             "coinbase_industrial",
         ),
-        "storage_sub_ct" => assign_once(&mut storage_sub_ct, reader.read_u64()?, "storage_sub_ct"),
-        "read_sub_ct" => assign_once(&mut read_sub_ct, reader.read_u64()?, "read_sub_ct"),
-        "read_sub_viewer_ct" => assign_once(
-            &mut read_sub_viewer_ct,
-            reader.read_u64()?,
-            "read_sub_viewer_ct",
-        ),
-        "read_sub_host_ct" => assign_once(
-            &mut read_sub_host_ct,
-            reader.read_u64()?,
-            "read_sub_host_ct",
-        ),
-        "read_sub_hardware_ct" => assign_once(
-            &mut read_sub_hardware_ct,
-            reader.read_u64()?,
-            "read_sub_hardware_ct",
-        ),
-        "read_sub_verifier_ct" => assign_once(
-            &mut read_sub_verifier_ct,
-            reader.read_u64()?,
-            "read_sub_verifier_ct",
-        ),
-        "read_sub_liquidity_ct" => assign_once(
-            &mut read_sub_liquidity_ct,
-            reader.read_u64()?,
-            "read_sub_liquidity_ct",
-        ),
-        "ad_viewer_ct" => assign_once(&mut ad_viewer_ct, reader.read_u64()?, "ad_viewer_ct"),
-        "ad_host_ct" => assign_once(&mut ad_host_ct, reader.read_u64()?, "ad_host_ct"),
-        "ad_hardware_ct" => assign_once(&mut ad_hardware_ct, reader.read_u64()?, "ad_hardware_ct"),
-        "ad_verifier_ct" => assign_once(&mut ad_verifier_ct, reader.read_u64()?, "ad_verifier_ct"),
-        "ad_liquidity_ct" => {
-            assign_once(&mut ad_liquidity_ct, reader.read_u64()?, "ad_liquidity_ct")
+        "storage_sub" => assign_once(&mut storage_sub, reader.read_u64()?, "storage_sub"),
+        "read_sub" => assign_once(&mut read_sub, reader.read_u64()?, "read_sub"),
+        "read_sub_viewer" => {
+            assign_once(&mut read_sub_viewer, reader.read_u64()?, "read_sub_viewer")
         }
-        "ad_miner_ct" => assign_once(&mut ad_miner_ct, reader.read_u64()?, "ad_miner_ct"),
-        "ad_host_it" => assign_once(&mut ad_host_it, reader.read_u64()?, "ad_host_it"),
-        "ad_hardware_it" => assign_once(&mut ad_hardware_it, reader.read_u64()?, "ad_hardware_it"),
-        "ad_verifier_it" => assign_once(&mut ad_verifier_it, reader.read_u64()?, "ad_verifier_it"),
-        "ad_liquidity_it" => {
-            assign_once(&mut ad_liquidity_it, reader.read_u64()?, "ad_liquidity_it")
-        }
-        "ad_miner_it" => assign_once(&mut ad_miner_it, reader.read_u64()?, "ad_miner_it"),
+        "read_sub_host" => assign_once(&mut read_sub_host, reader.read_u64()?, "read_sub_host"),
+        "read_sub_hardware" => assign_once(
+            &mut read_sub_hardware,
+            reader.read_u64()?,
+            "read_sub_hardware",
+        ),
+        "read_sub_verifier" => assign_once(
+            &mut read_sub_verifier,
+            reader.read_u64()?,
+            "read_sub_verifier",
+        ),
+        "read_sub_liquidity" => assign_once(
+            &mut read_sub_liquidity,
+            reader.read_u64()?,
+            "read_sub_liquidity",
+        ),
+        "ad_viewer" => assign_once(&mut ad_viewer, reader.read_u64()?, "ad_viewer"),
+        "ad_host" => assign_once(&mut ad_host, reader.read_u64()?, "ad_host"),
+        "ad_hardware" => assign_once(&mut ad_hardware, reader.read_u64()?, "ad_hardware"),
+        "ad_verifier" => assign_once(&mut ad_verifier, reader.read_u64()?, "ad_verifier"),
+        "ad_liquidity" => assign_once(&mut ad_liquidity, reader.read_u64()?, "ad_liquidity"),
+        "ad_miner" => assign_once(&mut ad_miner, reader.read_u64()?, "ad_miner"),
         "treasury_events" => assign_once(
             &mut treasury_events,
             read_treasury_events(reader)?,
@@ -287,23 +247,13 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
             reader.read_u64()?,
             "ad_settlement_count",
         ),
-        "ad_oracle_ct_price_usd_micros" => assign_once(
-            &mut ad_oracle_ct_price_usd_micros,
+        "ad_oracle_price_usd_micros" => assign_once(
+            &mut ad_oracle_price_usd_micros,
             reader.read_u64()?,
-            "ad_oracle_ct_price_usd_micros",
+            "ad_oracle_price_usd_micros",
         ),
-        "ad_oracle_it_price_usd_micros" => assign_once(
-            &mut ad_oracle_it_price_usd_micros,
-            reader.read_u64()?,
-            "ad_oracle_it_price_usd_micros",
-        ),
-        "compute_sub_ct" => assign_once(&mut compute_sub_ct, reader.read_u64()?, "compute_sub_ct"),
-        "proof_rebate_ct" => {
-            assign_once(&mut proof_rebate_ct, reader.read_u64()?, "proof_rebate_ct")
-        }
-        "storage_sub_it" => assign_once(&mut storage_sub_it, reader.read_u64()?, "storage_sub_it"),
-        "read_sub_it" => assign_once(&mut read_sub_it, reader.read_u64()?, "read_sub_it"),
-        "compute_sub_it" => assign_once(&mut compute_sub_it, reader.read_u64()?, "compute_sub_it"),
+        "compute_sub" => assign_once(&mut compute_sub, reader.read_u64()?, "compute_sub"),
+        "proof_rebate" => assign_once(&mut proof_rebate, reader.read_u64()?, "proof_rebate"),
         "read_root" => assign_once(&mut read_root, read_fixed(reader)?, "read_root"),
         "fee_checksum" => assign_once(&mut fee_checksum, reader.read_string()?, "fee_checksum"),
         "state_root" => assign_once(&mut state_root, reader.read_string()?, "state_root"),
@@ -334,36 +284,27 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         retune_hint: retune_hint.unwrap_or_default(),
         nonce: nonce.ok_or(DecodeError::MissingField("nonce"))?,
         hash: hash.ok_or(DecodeError::MissingField("hash"))?,
-        coinbase_consumer: TokenAmount::new(coinbase_consumer.unwrap_or_default()),
+        coinbase_block: TokenAmount::new(coinbase_block.unwrap_or_default()),
         coinbase_industrial: TokenAmount::new(coinbase_industrial.unwrap_or_default()),
-        storage_sub_ct: TokenAmount::new(storage_sub_ct.unwrap_or_default()),
-        read_sub_ct: TokenAmount::new(read_sub_ct.unwrap_or_default()),
-        read_sub_viewer_ct: TokenAmount::new(read_sub_viewer_ct.unwrap_or_default()),
-        read_sub_host_ct: TokenAmount::new(read_sub_host_ct.unwrap_or_default()),
-        read_sub_hardware_ct: TokenAmount::new(read_sub_hardware_ct.unwrap_or_default()),
-        read_sub_verifier_ct: TokenAmount::new(read_sub_verifier_ct.unwrap_or_default()),
-        read_sub_liquidity_ct: TokenAmount::new(read_sub_liquidity_ct.unwrap_or_default()),
-        ad_viewer_ct: TokenAmount::new(ad_viewer_ct.unwrap_or_default()),
-        ad_host_ct: TokenAmount::new(ad_host_ct.unwrap_or_default()),
-        ad_hardware_ct: TokenAmount::new(ad_hardware_ct.unwrap_or_default()),
-        ad_verifier_ct: TokenAmount::new(ad_verifier_ct.unwrap_or_default()),
-        ad_liquidity_ct: TokenAmount::new(ad_liquidity_ct.unwrap_or_default()),
-        ad_miner_ct: TokenAmount::new(ad_miner_ct.unwrap_or_default()),
-        ad_host_it: TokenAmount::new(ad_host_it.unwrap_or_default()),
-        ad_hardware_it: TokenAmount::new(ad_hardware_it.unwrap_or_default()),
-        ad_verifier_it: TokenAmount::new(ad_verifier_it.unwrap_or_default()),
-        ad_liquidity_it: TokenAmount::new(ad_liquidity_it.unwrap_or_default()),
-        ad_miner_it: TokenAmount::new(ad_miner_it.unwrap_or_default()),
+        storage_sub: TokenAmount::new(storage_sub.unwrap_or_default()),
+        read_sub: TokenAmount::new(read_sub.unwrap_or_default()),
+        read_sub_viewer: TokenAmount::new(read_sub_viewer.unwrap_or_default()),
+        read_sub_host: TokenAmount::new(read_sub_host.unwrap_or_default()),
+        read_sub_hardware: TokenAmount::new(read_sub_hardware.unwrap_or_default()),
+        read_sub_verifier: TokenAmount::new(read_sub_verifier.unwrap_or_default()),
+        read_sub_liquidity: TokenAmount::new(read_sub_liquidity.unwrap_or_default()),
+        ad_viewer: TokenAmount::new(ad_viewer.unwrap_or_default()),
+        ad_host: TokenAmount::new(ad_host.unwrap_or_default()),
+        ad_hardware: TokenAmount::new(ad_hardware.unwrap_or_default()),
+        ad_verifier: TokenAmount::new(ad_verifier.unwrap_or_default()),
+        ad_liquidity: TokenAmount::new(ad_liquidity.unwrap_or_default()),
+        ad_miner: TokenAmount::new(ad_miner.unwrap_or_default()),
         treasury_events: treasury_events.unwrap_or_default(),
         ad_total_usd_micros: ad_total_usd_micros.unwrap_or_default(),
         ad_settlement_count: ad_settlement_count.unwrap_or_default(),
-        ad_oracle_ct_price_usd_micros: ad_oracle_ct_price_usd_micros.unwrap_or_default(),
-        ad_oracle_it_price_usd_micros: ad_oracle_it_price_usd_micros.unwrap_or_default(),
-        compute_sub_ct: TokenAmount::new(compute_sub_ct.unwrap_or_default()),
-        proof_rebate_ct: TokenAmount::new(proof_rebate_ct.unwrap_or_default()),
-        storage_sub_it: TokenAmount::new(storage_sub_it.unwrap_or_default()),
-        read_sub_it: TokenAmount::new(read_sub_it.unwrap_or_default()),
-        compute_sub_it: TokenAmount::new(compute_sub_it.unwrap_or_default()),
+        ad_oracle_price_usd_micros: ad_oracle_price_usd_micros.unwrap_or_default(),
+        compute_sub: TokenAmount::new(compute_sub.unwrap_or_default()),
+        proof_rebate: TokenAmount::new(proof_rebate.unwrap_or_default()),
         read_root: read_root.unwrap_or([0; 32]),
         fee_checksum: fee_checksum.unwrap_or_default(),
         state_root: state_root.unwrap_or_default(),
@@ -449,7 +390,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("contract_id", &r.contract_id);
                 struct_writer.field_string("provider", &r.provider);
                 struct_writer.field_u64("bytes", r.bytes);
-                struct_writer.field_u64("price_ct", r.price_ct);
+                struct_writer.field_u64("price", r.price);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("provider_escrow", r.provider_escrow);
                 struct_writer.field_with("provider_signature", |field_writer| {
@@ -463,7 +404,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("job_id", &r.job_id);
                 struct_writer.field_string("provider", &r.provider);
                 struct_writer.field_u64("compute_units", r.compute_units);
-                struct_writer.field_u64("payment_ct", r.payment_ct);
+                struct_writer.field_u64("payment", r.payment);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("verified", if r.verified { 1 } else { 0 });
                 struct_writer.field_with("provider_signature", |field_writer| {
@@ -477,7 +418,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("contract_id", &r.contract_id);
                 struct_writer.field_string("provider", &r.provider);
                 struct_writer.field_u64("energy_units", r.energy_units);
-                struct_writer.field_u64("price_ct", r.price_ct);
+                struct_writer.field_u64("price", r.price);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_with("proof_hash", |field_writer| {
                     write_fixed(field_writer, &r.proof_hash);
@@ -493,7 +434,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_string("campaign_id", &r.campaign_id);
                 struct_writer.field_string("publisher", &r.publisher);
                 struct_writer.field_u64("impressions", r.impressions);
-                struct_writer.field_u64("spend_ct", r.spend_ct);
+                struct_writer.field_u64("spend", r.spend);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("conversions", r.conversions as u64);
                 struct_writer.field_with("publisher_signature", |field_writer| {
@@ -519,9 +460,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut compute_units = None;
         let mut energy_units = None;
         let mut impressions = None;
-        let mut price_ct = None;
-        let mut payment_ct = None;
-        let mut spend_ct = None;
+        let mut price = None;
+        let mut payment = None;
+        let mut spend = None;
         let mut block_height = None;
         let mut provider_escrow = None;
         let mut verified = None;
@@ -542,9 +483,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "compute_units" => assign_once(&mut compute_units, reader.read_u64()?, "compute_units"),
             "energy_units" => assign_once(&mut energy_units, reader.read_u64()?, "energy_units"),
             "impressions" => assign_once(&mut impressions, reader.read_u64()?, "impressions"),
-            "price_ct" => assign_once(&mut price_ct, reader.read_u64()?, "price_ct"),
-            "payment_ct" => assign_once(&mut payment_ct, reader.read_u64()?, "payment_ct"),
-            "spend_ct" => assign_once(&mut spend_ct, reader.read_u64()?, "spend_ct"),
+            "price" => assign_once(&mut price, reader.read_u64()?, "price"),
+            "payment" => assign_once(&mut payment, reader.read_u64()?, "payment"),
+            "spend" => assign_once(&mut spend, reader.read_u64()?, "spend"),
             "block_height" => assign_once(&mut block_height, reader.read_u64()?, "block_height"),
             "provider_escrow" => {
                 assign_once(&mut provider_escrow, reader.read_u64()?, "provider_escrow")
@@ -574,7 +515,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,
                 bytes: bytes.ok_or(DecodeError::MissingField("bytes"))?,
-                price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
+                price: price.ok_or(DecodeError::MissingField("price"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 provider_escrow: provider_escrow
                     .ok_or(DecodeError::MissingField("provider_escrow"))?,
@@ -587,7 +528,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,
                 compute_units: compute_units.ok_or(DecodeError::MissingField("compute_units"))?,
-                payment_ct: payment_ct.ok_or(DecodeError::MissingField("payment_ct"))?,
+                payment: payment.ok_or(DecodeError::MissingField("payment"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 verified: verified.ok_or(DecodeError::MissingField("verified"))? != 0,
                 provider_signature: provider_signature
@@ -599,7 +540,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,
                 energy_units: energy_units.ok_or(DecodeError::MissingField("energy_units"))?,
-                price_ct: price_ct.ok_or(DecodeError::MissingField("price_ct"))?,
+                price: price.ok_or(DecodeError::MissingField("price"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 proof_hash: proof_hash.ok_or(DecodeError::MissingField("proof_hash"))?,
                 provider_signature: provider_signature
@@ -611,7 +552,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 campaign_id: campaign_id.ok_or(DecodeError::MissingField("campaign_id"))?,
                 publisher: publisher.ok_or(DecodeError::MissingField("publisher"))?,
                 impressions: impressions.ok_or(DecodeError::MissingField("impressions"))?,
-                spend_ct: spend_ct.ok_or(DecodeError::MissingField("spend_ct"))?,
+                spend: spend.ok_or(DecodeError::MissingField("spend"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 conversions: conversions.ok_or(DecodeError::MissingField("conversions"))? as u32,
                 publisher_signature: publisher_signature
@@ -774,7 +715,7 @@ mod tests {
                 amount_consumer: 1,
                 amount_industrial: 2,
                 fee: 3,
-                pct_ct: 50,
+                pct: 50,
                 nonce: 7,
                 memo: vec![1, 2, 3],
             },
@@ -805,36 +746,27 @@ mod tests {
             retune_hint: -2,
             nonce: 42,
             hash: "hash".into(),
-            coinbase_consumer: TokenAmount::new(10),
+            coinbase_block: TokenAmount::new(10),
             coinbase_industrial: TokenAmount::new(11),
-            storage_sub_ct: TokenAmount::new(12),
-            read_sub_ct: TokenAmount::new(13),
-            read_sub_viewer_ct: TokenAmount::new(2),
-            read_sub_host_ct: TokenAmount::new(3),
-            read_sub_hardware_ct: TokenAmount::new(4),
-            read_sub_verifier_ct: TokenAmount::new(1),
-            read_sub_liquidity_ct: TokenAmount::new(3),
-            ad_viewer_ct: TokenAmount::new(6),
-            ad_host_ct: TokenAmount::new(7),
-            ad_hardware_ct: TokenAmount::new(8),
-            ad_verifier_ct: TokenAmount::new(9),
-            ad_liquidity_ct: TokenAmount::new(10),
-            ad_miner_ct: TokenAmount::new(11),
-            ad_host_it: TokenAmount::new(12),
-            ad_hardware_it: TokenAmount::new(13),
-            ad_verifier_it: TokenAmount::new(14),
-            ad_liquidity_it: TokenAmount::new(15),
-            ad_miner_it: TokenAmount::new(16),
+            storage_sub: TokenAmount::new(12),
+            read_sub: TokenAmount::new(13),
+            read_sub_viewer: TokenAmount::new(2),
+            read_sub_host: TokenAmount::new(3),
+            read_sub_hardware: TokenAmount::new(4),
+            read_sub_verifier: TokenAmount::new(1),
+            read_sub_liquidity: TokenAmount::new(3),
+            ad_viewer: TokenAmount::new(6),
+            ad_host: TokenAmount::new(7),
+            ad_hardware: TokenAmount::new(8),
+            ad_verifier: TokenAmount::new(9),
+            ad_liquidity: TokenAmount::new(10),
+            ad_miner: TokenAmount::new(11),
             treasury_events: Vec::new(),
             ad_total_usd_micros: 123_000,
             ad_settlement_count: 2,
-            ad_oracle_ct_price_usd_micros: 456,
-            ad_oracle_it_price_usd_micros: 789,
-            compute_sub_ct: TokenAmount::new(14),
-            proof_rebate_ct: TokenAmount::new(15),
-            storage_sub_it: TokenAmount::new(16),
-            read_sub_it: TokenAmount::new(17),
-            compute_sub_it: TokenAmount::new(18),
+            ad_oracle_price_usd_micros: 456,
+            compute_sub: TokenAmount::new(14),
+            proof_rebate: TokenAmount::new(15),
             read_root: [1u8; 32],
             fee_checksum: "fee".into(),
             state_root: "state".into(),
@@ -865,21 +797,15 @@ mod tests {
         assert_eq!(decoded.retune_hint, block.retune_hint);
         assert_eq!(decoded.nonce, block.nonce);
         assert_eq!(decoded.hash, block.hash);
-        assert_eq!(
-            decoded.coinbase_consumer.get(),
-            block.coinbase_consumer.get()
-        );
+        assert_eq!(decoded.coinbase_block.get(), block.coinbase_block.get());
         assert_eq!(
             decoded.coinbase_industrial.get(),
             block.coinbase_industrial.get()
         );
-        assert_eq!(decoded.storage_sub_ct.get(), block.storage_sub_ct.get());
-        assert_eq!(decoded.read_sub_ct.get(), block.read_sub_ct.get());
-        assert_eq!(decoded.compute_sub_ct.get(), block.compute_sub_ct.get());
-        assert_eq!(decoded.proof_rebate_ct.get(), block.proof_rebate_ct.get());
-        assert_eq!(decoded.storage_sub_it.get(), block.storage_sub_it.get());
-        assert_eq!(decoded.read_sub_it.get(), block.read_sub_it.get());
-        assert_eq!(decoded.compute_sub_it.get(), block.compute_sub_it.get());
+        assert_eq!(decoded.storage_sub.get(), block.storage_sub.get());
+        assert_eq!(decoded.read_sub.get(), block.read_sub.get());
+        assert_eq!(decoded.compute_sub.get(), block.compute_sub.get());
+        assert_eq!(decoded.proof_rebate.get(), block.proof_rebate.get());
         assert_eq!(decoded.read_root, block.read_root);
         assert_eq!(decoded.fee_checksum, block.fee_checksum);
         assert_eq!(decoded.state_root, block.state_root);

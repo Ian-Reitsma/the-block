@@ -11,7 +11,7 @@
 //!
 //! This crate is the civic-grade kernel for a one-second Layer 1 that
 //! notarizes sub-second micro-shards and enforces service-based governance
-//! through dual Consumer/Industrial tokens and inflation-funded subsidies. See
+//! through dual Consumer/Industrial lanes and inflation-funded subsidies. See
 //! `AGENTS.md` and `agents_vision.md` for the full blueprint.
 
 use crate::blockchain::{inter_shard::MessageQueue, macro_block::MacroBlock, process};
@@ -211,6 +211,7 @@ pub use constants::{
 };
 pub mod fee;
 pub mod fees;
+pub use fees::lane_pricing::LanePricingEngine;
 pub mod hash_genesis;
 pub mod hashlayout;
 pub use fee::{decompose as fee_decompose, ErrFeeOverflow, ErrInvalidSelector, FeeError};
@@ -465,8 +466,9 @@ impl TokenAmount {
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct TokenBalance {
-    pub consumer: u64,
-    pub industrial: u64,
+    /// Total BLOCK token balance. Consumer/industrial routing happens at the transaction
+    /// lane level, not at the balance level.
+    pub amount: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -475,10 +477,9 @@ pub struct Account {
     pub balance: TokenBalance,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
+    /// Total pending BLOCK tokens across all pending transactions
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub pending_consumer: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub pending_industrial: u64,
+    pub pending_amount: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub pending_nonce: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -510,27 +511,19 @@ impl accounts::AccountValidation for Account {
 
 struct Reservation<'a> {
     account: &'a mut Account,
-    reserve_consumer: u64,
-    reserve_industrial: u64,
+    reserve_amount: u64,
     nonce: u64,
     committed: bool,
 }
 
 impl<'a> Reservation<'a> {
-    fn new(
-        account: &'a mut Account,
-        reserve_consumer: u64,
-        reserve_industrial: u64,
-        nonce: u64,
-    ) -> Self {
-        account.pending_consumer += reserve_consumer;
-        account.pending_industrial += reserve_industrial;
+    fn new(account: &'a mut Account, reserve_amount: u64, nonce: u64) -> Self {
+        account.pending_amount += reserve_amount;
         account.pending_nonce += 1;
         account.pending_nonces.insert(nonce);
         Self {
             account,
-            reserve_consumer,
-            reserve_industrial,
+            reserve_amount,
             nonce,
             committed: false,
         }
@@ -543,11 +536,7 @@ impl<'a> Reservation<'a> {
 impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         if !self.committed {
-            let _ = checked_sub_assign(&mut self.account.pending_consumer, self.reserve_consumer);
-            let _ = checked_sub_assign(
-                &mut self.account.pending_industrial,
-                self.reserve_industrial,
-            );
+            let _ = checked_sub_assign(&mut self.account.pending_amount, self.reserve_amount);
             let _ = checked_sub_assign(&mut self.account.pending_nonce, 1);
             self.account.pending_nonces.remove(&self.nonce);
         }
@@ -563,11 +552,10 @@ impl<'a> ReservationGuard<'a> {
     fn new(
         lock: MutexGuard<'a, ()>,
         account: &'a mut Account,
-        reserve_consumer: u64,
-        reserve_industrial: u64,
+        reserve_amount: u64,
         nonce: u64,
     ) -> Self {
-        let reservation = Reservation::new(account, reserve_consumer, reserve_industrial, nonce);
+        let reservation = Reservation::new(account, reserve_amount, nonce);
         Self {
             reservation: Some(reservation),
             _lock: lock,
@@ -610,65 +598,50 @@ pub struct Block {
     pub nonce: u64,
     pub hash: String,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Canonical consumer reward recorded in the header. Must match tx[0].
-    pub coinbase_consumer: TokenAmount,
+    /// Canonical consumer LANE amount from coinbase tx[0] (P2P transactions, slow, lower fees). Combined with coinbase_industrial for total miner reward.
+    pub coinbase_block: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Canonical industrial reward recorded in the header. Must match tx[0].
+    /// Canonical industrial LANE amount from coinbase tx[0] (market operations, fast, higher fees). Combined with coinbase_block for total miner reward.
     pub coinbase_industrial: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT subsidy minted for storage operations in this block
-    pub storage_sub_ct: TokenAmount,
+    /// Subsidy minted for storage operations in this block
+    pub storage_sub: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT subsidy minted for read delivery in this block
-    pub read_sub_ct: TokenAmount,
+    /// Subsidy minted for read delivery in this block
+    pub read_sub: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to viewers in this block
-    pub read_sub_viewer_ct: TokenAmount,
+    pub read_sub_viewer: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to hosts in this block
-    pub read_sub_host_ct: TokenAmount,
+    pub read_sub_host: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to hardware providers in this block
-    pub read_sub_hardware_ct: TokenAmount,
+    pub read_sub_hardware: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy paid to verifiers in this block
-    pub read_sub_verifier_ct: TokenAmount,
+    pub read_sub_verifier: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Portion of the read subsidy routed to the liquidity pool in this block
-    pub read_sub_liquidity_ct: TokenAmount,
+    pub read_sub_liquidity: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to viewers
-    pub ad_viewer_ct: TokenAmount,
+    /// BLOCK paid out from advertising campaigns to viewers
+    pub ad_viewer: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to hosts
-    pub ad_host_ct: TokenAmount,
+    /// BLOCK paid out from advertising campaigns to hosts
+    pub ad_host: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to hardware providers
-    pub ad_hardware_ct: TokenAmount,
+    /// BLOCK paid out from advertising campaigns to hardware providers
+    pub ad_hardware: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens paid out from advertising campaigns to verifiers
-    pub ad_verifier_ct: TokenAmount,
+    /// BLOCK paid out from advertising campaigns to verifiers
+    pub ad_verifier: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens routed to the liquidity pool from advertising campaigns
-    pub ad_liquidity_ct: TokenAmount,
+    /// BLOCK routed to the liquidity pool from advertising campaigns
+    pub ad_liquidity: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Consumer tokens routed to the miner from advertising campaigns
-    pub ad_miner_ct: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens paid out from advertising campaigns to hosts
-    pub ad_host_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens paid out from advertising campaigns to hardware providers
-    pub ad_hardware_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens paid out from advertising campaigns to verifiers
-    pub ad_verifier_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens routed to the liquidity pool from advertising campaigns
-    pub ad_liquidity_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// Industrial tokens routed to the miner from advertising campaigns
-    pub ad_miner_it: TokenAmount,
+    /// BLOCK routed to the miner from advertising campaigns
+    pub ad_miner: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Executed treasury disbursements surfaced alongside settlement payouts
     pub treasury_events: Vec<BlockTreasuryEvent>,
@@ -679,31 +652,19 @@ pub struct Block {
     /// Number of advertising settlements applied in this block
     pub ad_settlement_count: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Oracle price snapshot (CT) used for advertising settlements in this block
-    pub ad_oracle_ct_price_usd_micros: u64,
+    /// Oracle price snapshot (BLOCK) used for advertising settlements in this block
+    pub ad_oracle_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// Oracle price snapshot (IT) used for advertising settlements in this block
-    pub ad_oracle_it_price_usd_micros: u64,
+    /// Subsidy minted for compute in this block
+    pub compute_sub: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT subsidy minted for compute in this block
-    pub compute_sub_ct: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// CT rebates paid to proof relayers in this block
-    pub proof_rebate_ct: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// IT subsidy minted for storage operations in this block
-    pub storage_sub_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// IT subsidy minted for read delivery in this block
-    pub read_sub_it: TokenAmount,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    /// IT subsidy minted for compute in this block
-    pub compute_sub_it: TokenAmount,
+    /// Rebates paid to proof relayers in this block
+    pub proof_rebate: TokenAmount,
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Merkle root of all `ReadAck`s batched for this block
     pub read_root: [u8; 32],
     #[serde(default = "foundation_serialization::defaults::default")]
-    /// blake3(total_fee_ct || total_fee_it) in hex
+    /// blake3(total_fee_block) in hex
     pub fee_checksum: String,
     #[serde(
         default = "foundation_serialization::defaults::default",
@@ -753,36 +714,27 @@ impl Default for Block {
             retune_hint: 0,
             nonce: 0,
             hash: String::new(),
-            coinbase_consumer: TokenAmount::new(0),
+            coinbase_block: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
-            storage_sub_ct: TokenAmount::new(0),
-            read_sub_ct: TokenAmount::new(0),
-            read_sub_viewer_ct: TokenAmount::new(0),
-            read_sub_host_ct: TokenAmount::new(0),
-            read_sub_hardware_ct: TokenAmount::new(0),
-            read_sub_verifier_ct: TokenAmount::new(0),
-            read_sub_liquidity_ct: TokenAmount::new(0),
-            ad_viewer_ct: TokenAmount::new(0),
-            ad_host_ct: TokenAmount::new(0),
-            ad_hardware_ct: TokenAmount::new(0),
-            ad_verifier_ct: TokenAmount::new(0),
-            ad_liquidity_ct: TokenAmount::new(0),
-            ad_miner_ct: TokenAmount::new(0),
-            ad_host_it: TokenAmount::new(0),
-            ad_hardware_it: TokenAmount::new(0),
-            ad_verifier_it: TokenAmount::new(0),
-            ad_liquidity_it: TokenAmount::new(0),
-            ad_miner_it: TokenAmount::new(0),
+            storage_sub: TokenAmount::new(0),
+            read_sub: TokenAmount::new(0),
+            read_sub_viewer: TokenAmount::new(0),
+            read_sub_host: TokenAmount::new(0),
+            read_sub_hardware: TokenAmount::new(0),
+            read_sub_verifier: TokenAmount::new(0),
+            read_sub_liquidity: TokenAmount::new(0),
+            ad_viewer: TokenAmount::new(0),
+            ad_host: TokenAmount::new(0),
+            ad_hardware: TokenAmount::new(0),
+            ad_verifier: TokenAmount::new(0),
+            ad_liquidity: TokenAmount::new(0),
+            ad_miner: TokenAmount::new(0),
             treasury_events: Vec::new(),
             ad_total_usd_micros: 0,
             ad_settlement_count: 0,
-            ad_oracle_ct_price_usd_micros: 0,
-            ad_oracle_it_price_usd_micros: 0,
-            compute_sub_ct: TokenAmount::new(0),
-            proof_rebate_ct: TokenAmount::new(0),
-            storage_sub_it: TokenAmount::new(0),
-            read_sub_it: TokenAmount::new(0),
-            compute_sub_it: TokenAmount::new(0),
+            ad_oracle_price_usd_micros: 0,
+            compute_sub: TokenAmount::new(0),
+            proof_rebate: TokenAmount::new(0),
             read_root: [0u8; 32],
             fee_checksum: String::new(),
             state_root: String::new(),
@@ -798,12 +750,6 @@ impl Default for Block {
             dilithium_sig: Vec::new(),
             receipts: Vec::new(),
         }
-    }
-}
-
-impl Block {
-    pub fn industrial_subsidies(&self) -> (TokenAmount, TokenAmount, TokenAmount) {
-        (self.storage_sub_it, self.read_sub_it, self.compute_sub_it)
     }
 }
 
@@ -823,7 +769,7 @@ impl MempoolEntry {
         if self.serialized_size == 0 {
             0
         } else {
-            self.tx.tip / self.serialized_size
+            self.tx.payload.fee / self.serialized_size
         }
     }
 
@@ -920,10 +866,16 @@ pub struct Blockchain {
     pub base_fee: u64,
     /// Governance-controlled economic parameters
     pub params: Params,
-    pub beta_storage_sub_ct_raw: i64,
-    pub gamma_read_sub_ct_raw: i64,
-    pub kappa_cpu_sub_ct_raw: i64,
-    pub lambda_bytes_out_sub_ct_raw: i64,
+    /// Dynamic lane-based pricing engine for consumer/industrial fee calculation
+    lane_pricing_engine: Mutex<LanePricingEngine>,
+    /// Cached consumer lane fee per byte (updated after each block to avoid lock contention)
+    cached_consumer_fee: AtomicU64,
+    /// Cached industrial lane fee per byte (updated after each block to avoid lock contention)
+    cached_industrial_fee: AtomicU64,
+    pub beta_storage_sub_raw: i64,
+    pub gamma_read_sub_raw: i64,
+    pub kappa_cpu_sub_raw: i64,
+    pub lambda_bytes_out_sub_raw: i64,
     /// Bytes stored during the current epoch
     pub epoch_storage_bytes: u64,
     /// Bytes served during the current epoch
@@ -1138,11 +1090,20 @@ impl Default for Blockchain {
             badge_tracker: ServiceBadgeTracker::new(),
             config: NodeConfig::default(),
             base_fee: 1,
-            params,
-            beta_storage_sub_ct_raw: 50,
-            gamma_read_sub_ct_raw: 20,
-            kappa_cpu_sub_ct_raw: 10,
-            lambda_bytes_out_sub_ct_raw: 5,
+            params: params.clone(),
+            lane_pricing_engine: Mutex::new(LanePricingEngine::new(
+                1, // base_consumer_fee
+                2, // base_industrial_fee (2x consumer)
+                params.lane_consumer_capacity as f64,
+                params.lane_industrial_capacity as f64,
+                params.lane_target_utilization_percent as f64 / 100.0,
+            )),
+            cached_consumer_fee: AtomicU64::new(1),
+            cached_industrial_fee: AtomicU64::new(2),
+            beta_storage_sub_raw: 50,
+            gamma_read_sub_raw: 20,
+            kappa_cpu_sub_raw: 10,
+            lambda_bytes_out_sub_raw: 5,
             epoch_storage_bytes: 0,
             epoch_read_bytes: 0,
             epoch_viewer_bytes: HashMap::new(),
@@ -1199,13 +1160,7 @@ impl Default for Blockchain {
 
 impl Drop for Blockchain {
     fn drop(&mut self) {
-        if std::env::var("TB_PRESERVE").is_ok() {
-            return;
-        }
         crate::compute_market::settlement::Settlement::shutdown();
-        if !self.path.is_empty() {
-            let _ = std::fs::remove_dir_all(&self.path);
-        }
     }
 }
 
@@ -1233,6 +1188,18 @@ fn u128_to_f64(value: u128) -> f64 {
     value as f64
 }
 
+pub(crate) struct ChainImportState {
+    chain: Vec<Block>,
+    accounts: HashMap<String, Account>,
+    emission: u64,
+    block_height: u64,
+    recent_timestamps: VecDeque<u64>,
+    difficulty: u64,
+    retune_hint: i8,
+    reorg_hashes: Vec<String>,
+    recent_miners: VecDeque<String>,
+}
+
 impl Blockchain {
     fn shard_cache_guard(&self) -> MutexGuard<'_, LruCache<(ShardId, Vec<u8>), Vec<u8>>> {
         self.shard_cache
@@ -1242,6 +1209,18 @@ impl Blockchain {
 
     pub fn save_config(&self) {
         let _ = self.config.save(&self.path);
+    }
+
+    /// Set base fees for dynamic lane pricing engine (primarily for testing).
+    pub fn set_lane_base_fees(&self, consumer: u64, industrial: u64) {
+        if let Ok(mut engine) = self.lane_pricing_engine.lock() {
+            engine.set_base_fees(consumer, industrial);
+            // Update cached fees immediately to reflect the change
+            self.cached_consumer_fee
+                .store(engine.consumer_fee_per_byte(), AtomicOrdering::Relaxed);
+            self.cached_industrial_fee
+                .store(engine.industrial_fee_per_byte(), AtomicOrdering::Relaxed);
+        }
     }
 
     pub fn register_receipt_providers(
@@ -1288,13 +1267,13 @@ impl Blockchain {
         ad_payout_total: u64,
         ad_total_usd_micros: u64,
         ad_settlement_count: u64,
-        ad_last_ct_price_usd_micros: u64,
+        ad_last_price_usd_micros: u64,
         compute_util_percent: u64,
         energy_snapshot: &crate::energy::EnergySnapshot,
     ) -> economics::MarketMetrics {
         let storage_capacity = crate::storage::pipeline::l2_cap_bytes_per_epoch();
         let storage_utilization = ratio_u64(self.epoch_storage_bytes, storage_capacity);
-        let rent_rate = self.params.rent_rate_ct_per_byte.max(0) as u64;
+        let rent_rate = self.params.rent_rate_per_byte.max(0) as u64;
         let storage_cost_total =
             u128::from(self.epoch_storage_bytes).saturating_mul(rent_rate as u128);
         let storage_payout_total = u128::from(storage_payout_total);
@@ -1366,10 +1345,10 @@ impl Blockchain {
 
         let ad_capacity = self.params.ad_cap_provider_count.max(1) as u64;
         let ad_utilization = ratio_u64(ad_settlement_count, ad_capacity);
-        let ad_cost_block = if ad_last_ct_price_usd_micros == 0 {
+        let ad_cost_block = if ad_last_price_usd_micros == 0 {
             0.0
         } else {
-            (ad_total_usd_micros as f64) / (ad_last_ct_price_usd_micros as f64)
+            (ad_total_usd_micros as f64) / (ad_last_price_usd_micros as f64)
         };
         let ad_effective_payout = ad_payout_total as f64;
         let ad_margin = if ad_cost_block > 0.0 {
@@ -1393,7 +1372,21 @@ impl Blockchain {
     }
     /// Return the latest state root for a shard if available.
     pub fn get_shard_root(&self, shard: ShardId) -> Option<[u8; 32]> {
-        self.shard_roots.get(&shard).copied()
+        if let Some(root) = self.shard_roots.get(&shard).copied() {
+            return Some(root);
+        }
+        if let Some(bytes) = self.db.get_shard(shard, ShardState::db_key()) {
+            if let Ok(state) = ShardState::from_bytes(&bytes) {
+                return Some(state.state_root);
+            }
+        }
+        if !self.accounts.is_empty() {
+            return Some(crate::blockchain::process::shard_state_root(
+                &self.accounts,
+                shard,
+            ));
+        }
+        None
     }
 
     #[cfg_attr(not(test), allow(dead_code))]
@@ -1516,7 +1509,7 @@ impl Blockchain {
         if proofs == 0 {
             return;
         }
-        let limit = self.params.proof_rebate_limit_ct.max(0) as u64;
+        let limit = self.params.proof_rebate_limit.max(0) as u64;
         if limit == 0 {
             return;
         }
@@ -1805,21 +1798,15 @@ impl Blockchain {
             host_addr,
             hardware_addr,
             verifier_addr,
-            viewer_ct: settlement.viewer_ct,
-            host_ct: settlement.host_ct,
-            hardware_ct: settlement.hardware_ct,
-            verifier_ct: settlement.verifier_ct,
-            liquidity_ct: settlement.liquidity_ct,
-            miner_ct: settlement.miner_ct,
-            total_ct: settlement.total_ct,
-            host_it: settlement.host_it,
-            hardware_it: settlement.hardware_it,
-            verifier_it: settlement.verifier_it,
-            liquidity_it: settlement.liquidity_it,
-            miner_it: settlement.miner_it,
+            viewer: settlement.viewer,
+            host: settlement.host,
+            hardware: settlement.hardware,
+            verifier: settlement.verifier,
+            liquidity: settlement.liquidity,
+            miner: settlement.miner,
+            total: settlement.total,
             total_usd_micros: settlement.total_usd_micros,
-            ct_price_usd_micros: settlement.ct_price_usd_micros,
-            it_price_usd_micros: settlement.it_price_usd_micros,
+            price_usd_micros: settlement.price_usd_micros,
             delivery_channel: settlement.delivery_channel,
             clearing_price_usd_micros: settlement.clearing_price_usd_micros,
             mesh_payload_digest: settlement.mesh_payload_digest.clone(),
@@ -1831,8 +1818,7 @@ impl Blockchain {
         crate::ad_readiness::record_settlement(
             ack.ts,
             settlement.total_usd_micros,
-            settlement.ct_price_usd_micros,
-            settlement.it_price_usd_micros,
+            settlement.price_usd_micros,
         );
     }
 }
@@ -1867,21 +1853,15 @@ pub struct AdSettlementRecord {
     pub host_addr: String,
     pub hardware_addr: String,
     pub verifier_addr: String,
-    pub viewer_ct: u64,
-    pub host_ct: u64,
-    pub hardware_ct: u64,
-    pub verifier_ct: u64,
-    pub liquidity_ct: u64,
-    pub miner_ct: u64,
-    pub total_ct: u64,
-    pub host_it: u64,
-    pub hardware_it: u64,
-    pub verifier_it: u64,
-    pub liquidity_it: u64,
-    pub miner_it: u64,
+    pub viewer: u64,
+    pub host: u64,
+    pub hardware: u64,
+    pub verifier: u64,
+    pub liquidity: u64,
+    pub miner: u64,
+    pub total: u64,
     pub total_usd_micros: u64,
-    pub ct_price_usd_micros: u64,
-    pub it_price_usd_micros: u64,
+    pub price_usd_micros: u64,
     pub delivery_channel: DeliveryChannel,
     pub clearing_price_usd_micros: u64,
     pub mesh_payload_digest: Option<String>,
@@ -2010,7 +1990,7 @@ impl Blockchain {
                         let mut migrated_chain = disk.chain.clone();
                         for b in &mut migrated_chain {
                             if let Some(cb) = b.transactions.first() {
-                                b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
+                                b.coinbase_block = TokenAmount::new(cb.payload.amount_consumer);
                                 b.coinbase_industrial =
                                     TokenAmount::new(cb.payload.amount_industrial);
                             }
@@ -2018,7 +1998,7 @@ impl Blockchain {
                             let mut fee_industrial: u128 = 0;
                             for tx in b.transactions.iter().skip(1) {
                                 if let Ok((c, i)) =
-                                    crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                    crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                                 {
                                     fee_consumer += c as u128;
                                     fee_industrial += i as u128;
@@ -2037,35 +2017,26 @@ impl Blockchain {
                                 b.nonce,
                                 b.difficulty,
                                 b.base_fee,
-                                b.coinbase_consumer,
+                                b.coinbase_block,
                                 b.coinbase_industrial,
-                                b.storage_sub_ct,
-                                b.read_sub_ct,
-                                b.read_sub_viewer_ct,
-                                b.read_sub_host_ct,
-                                b.read_sub_hardware_ct,
-                                b.read_sub_verifier_ct,
-                                b.read_sub_liquidity_ct,
-                                b.ad_viewer_ct,
-                                b.ad_host_ct,
-                                b.ad_hardware_ct,
-                                b.ad_verifier_ct,
-                                b.ad_liquidity_ct,
-                                b.ad_miner_ct,
-                                b.ad_host_it,
-                                b.ad_hardware_it,
-                                b.ad_verifier_it,
-                                b.ad_liquidity_it,
-                                b.ad_miner_it,
+                                b.storage_sub,
+                                b.read_sub,
+                                b.read_sub_viewer,
+                                b.read_sub_host,
+                                b.read_sub_hardware,
+                                b.read_sub_verifier,
+                                b.read_sub_liquidity,
+                                b.ad_viewer,
+                                b.ad_host,
+                                b.ad_hardware,
+                                b.ad_verifier,
+                                b.ad_liquidity,
+                                b.ad_miner,
                                 b.ad_total_usd_micros,
                                 b.ad_settlement_count,
-                                b.ad_oracle_ct_price_usd_micros,
-                                b.ad_oracle_it_price_usd_micros,
-                                b.compute_sub_ct,
-                                b.proof_rebate_ct,
-                                b.storage_sub_it,
-                                b.read_sub_it,
-                                b.compute_sub_it,
+                                b.ad_oracle_price_usd_micros,
+                                b.compute_sub,
+                                b.proof_rebate,
                                 b.read_root,
                                 &b.fee_checksum,
                                 &b.transactions,
@@ -2082,7 +2053,7 @@ impl Blockchain {
                         let mut em_c = 0u64;
                         let mut em_i = 0u64;
                         for b in &migrated_chain {
-                            em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                            em_c = em_c.saturating_add(b.coinbase_block.get());
                             em_i = em_i.saturating_add(b.coinbase_industrial.get());
                         }
                         let bh = migrated_chain.len() as u64;
@@ -2159,7 +2130,7 @@ impl Blockchain {
                             let mut em_c = 0u64;
                             let mut em_i = 0u64;
                             for b in &disk.chain {
-                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_c = em_c.saturating_add(b.coinbase_block.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
                             }
                             disk.emission = em_c.saturating_add(em_i);
@@ -2175,8 +2146,7 @@ impl Blockchain {
                             let mut em_i = 0u64;
                             for b in &mut disk.chain {
                                 if let Some(cb) = b.transactions.first() {
-                                    b.coinbase_consumer =
-                                        TokenAmount::new(cb.payload.amount_consumer);
+                                    b.coinbase_block = TokenAmount::new(cb.payload.amount_consumer);
                                     b.coinbase_industrial =
                                         TokenAmount::new(cb.payload.amount_industrial);
                                 }
@@ -2184,7 +2154,7 @@ impl Blockchain {
                                 let mut fee_i: u128 = 0;
                                 for tx in b.transactions.iter().skip(1) {
                                     if let Ok((c, i)) =
-                                        crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                        crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                                     {
                                         fee_c += c as u128;
                                         fee_i += i as u128;
@@ -2203,35 +2173,26 @@ impl Blockchain {
                                     b.nonce,
                                     b.difficulty,
                                     b.base_fee,
-                                    b.coinbase_consumer,
+                                    b.coinbase_block,
                                     b.coinbase_industrial,
-                                    b.storage_sub_ct,
-                                    b.read_sub_ct,
-                                    b.read_sub_viewer_ct,
-                                    b.read_sub_host_ct,
-                                    b.read_sub_hardware_ct,
-                                    b.read_sub_verifier_ct,
-                                    b.read_sub_liquidity_ct,
-                                    b.ad_viewer_ct,
-                                    b.ad_host_ct,
-                                    b.ad_hardware_ct,
-                                    b.ad_verifier_ct,
-                                    b.ad_liquidity_ct,
-                                    b.ad_miner_ct,
-                                    b.ad_host_it,
-                                    b.ad_hardware_it,
-                                    b.ad_verifier_it,
-                                    b.ad_liquidity_it,
-                                    b.ad_miner_it,
+                                    b.storage_sub,
+                                    b.read_sub,
+                                    b.read_sub_viewer,
+                                    b.read_sub_host,
+                                    b.read_sub_hardware,
+                                    b.read_sub_verifier,
+                                    b.read_sub_liquidity,
+                                    b.ad_viewer,
+                                    b.ad_host,
+                                    b.ad_hardware,
+                                    b.ad_verifier,
+                                    b.ad_liquidity,
+                                    b.ad_miner,
                                     b.ad_total_usd_micros,
                                     b.ad_settlement_count,
-                                    b.ad_oracle_ct_price_usd_micros,
-                                    b.ad_oracle_it_price_usd_micros,
-                                    b.compute_sub_ct,
-                                    b.proof_rebate_ct,
-                                    b.storage_sub_it,
-                                    b.read_sub_it,
-                                    b.compute_sub_it,
+                                    b.ad_oracle_price_usd_micros,
+                                    b.compute_sub,
+                                    b.proof_rebate,
                                     b.read_root,
                                     &b.fee_checksum,
                                     &b.transactions,
@@ -2244,7 +2205,7 @@ impl Blockchain {
                                     b.retune_hint,
                                     &b.receipts,
                                 );
-                                em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                                em_c = em_c.saturating_add(b.coinbase_block.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
                             }
                             disk.emission = em_c.saturating_add(em_i);
@@ -2358,14 +2319,14 @@ impl Blockchain {
                     let mut migrated_chain = chain.clone();
                     for b in &mut migrated_chain {
                         if let Some(cb) = b.transactions.first() {
-                            b.coinbase_consumer = TokenAmount::new(cb.payload.amount_consumer);
+                            b.coinbase_block = TokenAmount::new(cb.payload.amount_consumer);
                             b.coinbase_industrial = TokenAmount::new(cb.payload.amount_industrial);
                         }
                         let mut fee_consumer: u128 = 0;
                         let mut fee_industrial: u128 = 0;
                         for tx in b.transactions.iter().skip(1) {
                             if let Ok((c, i)) =
-                                crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                             {
                                 fee_consumer += c as u128;
                                 fee_industrial += i as u128;
@@ -2384,35 +2345,26 @@ impl Blockchain {
                             b.nonce,
                             b.difficulty,
                             b.base_fee,
-                            b.coinbase_consumer,
+                            b.coinbase_block,
                             b.coinbase_industrial,
-                            b.storage_sub_ct,
-                            b.read_sub_ct,
-                            b.read_sub_viewer_ct,
-                            b.read_sub_host_ct,
-                            b.read_sub_hardware_ct,
-                            b.read_sub_verifier_ct,
-                            b.read_sub_liquidity_ct,
-                            b.ad_viewer_ct,
-                            b.ad_host_ct,
-                            b.ad_hardware_ct,
-                            b.ad_verifier_ct,
-                            b.ad_liquidity_ct,
-                            b.ad_miner_ct,
-                            b.ad_host_it,
-                            b.ad_hardware_it,
-                            b.ad_verifier_it,
-                            b.ad_liquidity_it,
-                            b.ad_miner_it,
+                            b.storage_sub,
+                            b.read_sub,
+                            b.read_sub_viewer,
+                            b.read_sub_host,
+                            b.read_sub_hardware,
+                            b.read_sub_verifier,
+                            b.read_sub_liquidity,
+                            b.ad_viewer,
+                            b.ad_host,
+                            b.ad_hardware,
+                            b.ad_verifier,
+                            b.ad_liquidity,
+                            b.ad_miner,
                             b.ad_total_usd_micros,
                             b.ad_settlement_count,
-                            b.ad_oracle_ct_price_usd_micros,
-                            b.ad_oracle_it_price_usd_micros,
-                            b.compute_sub_ct,
-                            b.proof_rebate_ct,
-                            b.storage_sub_it,
-                            b.read_sub_it,
-                            b.compute_sub_it,
+                            b.ad_oracle_price_usd_micros,
+                            b.compute_sub,
+                            b.proof_rebate,
                             b.read_root,
                             &b.fee_checksum,
                             &b.transactions,
@@ -2429,7 +2381,7 @@ impl Blockchain {
                     let mut em_c = 0u64;
                     let mut em_i = 0u64;
                     for b in &migrated_chain {
-                        em_c = em_c.saturating_add(b.coinbase_consumer.get());
+                        em_c = em_c.saturating_add(b.coinbase_block.get());
                         em_i = em_i.saturating_add(b.coinbase_industrial.get());
                     }
                     let bh = migrated_chain.len() as u64;
@@ -2519,22 +2471,73 @@ impl Blockchain {
             )
         };
 
+        let mut shard_ids = db.shard_ids();
+        if shard_ids.is_empty() {
+            let mut discovered = HashSet::new();
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if let Some(id) = name.strip_prefix("shard:") {
+                        if let Ok(id) = id.parse::<ShardId>() {
+                            discovered.insert(id);
+                        }
+                    }
+                }
+            }
+            shard_ids.extend(discovered);
+        }
+        if accounts.is_empty() && !shard_ids.is_empty() {
+            for shard in &shard_ids {
+                for key in db.shard_keys_with_prefix(*shard, "acct:") {
+                    if let Some(bytes) = db.get_shard(*shard, &key) {
+                        if let Ok(account) = ledger_binary::decode_account(&bytes) {
+                            accounts.insert(account.address.clone(), account);
+                        }
+                    }
+                }
+            }
+        }
         // Load any persisted shard state roots.
-        let shard_roots: HashMap<ShardId, [u8; 32]> = db
-            .shard_ids()
-            .into_iter()
+        let mut shard_roots: HashMap<ShardId, [u8; 32]> = shard_ids
+            .iter()
             .filter_map(|id| {
-                let bytes = db.get_shard(id, ShardState::db_key())?;
+                let bytes = db.get_shard(*id, ShardState::db_key())?;
                 ShardState::from_bytes(&bytes)
                     .ok()
-                    .map(|s| (id, s.state_root))
+                    .map(|s| (*id, s.state_root))
             })
             .collect();
+        if shard_roots.is_empty() {
+            for key in db.keys_with_prefix("shard_root:") {
+                if let Some(id) = key.strip_prefix("shard_root:") {
+                    if let Ok(id) = id.parse::<ShardId>() {
+                        if let Some(bytes) = db.get(&key) {
+                            if bytes.len() == 32 {
+                                let mut root = [0u8; 32];
+                                root.copy_from_slice(&bytes);
+                                shard_roots.insert(id, root);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if shard_roots.is_empty() && !accounts.is_empty() {
+            let mut shards = HashSet::new();
+            for addr in accounts.keys() {
+                shards.insert(address::shard_id(addr));
+            }
+            for shard in shards {
+                let root = crate::blockchain::process::shard_state_root(&accounts, shard);
+                shard_roots.insert(shard, root);
+            }
+        }
         for b in &mut chain {
             let mut fee_consumer: u128 = 0;
             let mut fee_industrial: u128 = 0;
             for tx in b.transactions.iter().skip(1) {
-                if let Ok((c, i)) = crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee) {
+                if let Ok((c, i)) = crate::fee::decompose(tx.payload.pct, tx.payload.fee) {
                     fee_consumer += c as u128;
                     fee_industrial += i as u128;
                 }
@@ -2547,8 +2550,7 @@ impl Blockchain {
             b.fee_checksum = h.finalize().to_hex().to_string();
         }
         for acc in accounts.values_mut() {
-            acc.pending_consumer = 0;
-            acc.pending_industrial = 0;
+            acc.pending_amount = 0;
             acc.pending_nonce = acc.pending_nonces.len() as u64;
         }
         let mut bc = Blockchain::default();
@@ -2610,19 +2612,19 @@ impl Blockchain {
                                 if tx.payload.from_ != "0".repeat(34) {
                                     if let Some(s) = bc.accounts.get_mut(&tx.payload.from_) {
                                         if let Ok((fee_c, fee_i)) =
-                                            crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+                                            crate::fee::decompose(tx.payload.pct, tx.payload.fee)
                                         {
-                                            let total_c = tx.payload.amount_consumer + fee_c;
-                                            let total_i = tx.payload.amount_industrial + fee_i;
-                                            if s.balance.consumer < total_c
-                                                || s.balance.industrial < total_i
-                                            {
+                                            // Total BLOCK tokens: amount (both lanes) + fees
+                                            let total_amount = tx.payload.amount_consumer
+                                                + tx.payload.amount_industrial
+                                                + fee_c
+                                                + fee_i;
+                                            if s.balance.amount < total_amount {
                                                 return Err(ErrBalanceUnderflow::new_err(
                                                     "balance underflow",
                                                 ));
                                             }
-                                            s.balance.consumer -= total_c;
-                                            s.balance.industrial -= total_i;
+                                            s.balance.amount -= total_amount;
 
                                             s.nonce = tx.payload.nonce;
                                         }
@@ -2631,32 +2633,19 @@ impl Blockchain {
                                 let r =
                                     bc.accounts.entry(tx.payload.to.clone()).or_insert(Account {
                                         address: tx.payload.to.clone(),
-                                        balance: TokenBalance {
-                                            consumer: 0,
-                                            industrial: 0,
-                                        },
+                                        balance: TokenBalance { amount: 0 },
                                         nonce: 0,
-                                        pending_consumer: 0,
-                                        pending_industrial: 0,
+                                        pending_amount: 0,
                                         pending_nonce: 0,
                                         pending_nonces: HashSet::new(),
                                         sessions: Vec::new(),
                                     });
-                                r.balance.consumer = r
-                                    .balance
-                                    .consumer
-                                    .saturating_add(tx.payload.amount_consumer);
-                                r.balance.industrial = r
-                                    .balance
-                                    .industrial
-                                    .saturating_add(tx.payload.amount_industrial);
+                                r.balance.amount = r.balance.amount.saturating_add(
+                                    tx.payload.amount_consumer + tx.payload.amount_industrial,
+                                );
                             }
                         }
-                        bc.emission = bc
-                            .accounts
-                            .values()
-                            .map(|a| a.balance.consumer + a.balance.industrial)
-                            .sum::<u64>();
+                        bc.emission = bc.accounts.values().map(|a| a.balance.amount).sum::<u64>();
                     }
                 }
             }
@@ -2735,10 +2724,10 @@ impl Blockchain {
         );
         crate::net::load_peer_metrics();
         let infl = crate::config::load_inflation(path);
-        bc.params.beta_storage_sub_ct = (infl.beta_storage_sub_ct * 1000.0) as i64;
-        bc.params.gamma_read_sub_ct = (infl.gamma_read_sub_ct * 1000.0) as i64;
-        bc.params.kappa_cpu_sub_ct = (infl.kappa_cpu_sub_ct * 1000.0) as i64;
-        bc.params.lambda_bytes_out_sub_ct = (infl.lambda_bytes_out_sub_ct * 1000.0) as i64;
+        bc.params.beta_storage_sub = (infl.beta_storage_sub * 1000.0) as i64;
+        bc.params.gamma_read_sub = (infl.gamma_read_sub * 1000.0) as i64;
+        bc.params.kappa_cpu_sub = (infl.kappa_cpu_sub * 1000.0) as i64;
+        bc.params.lambda_bytes_out_sub = (infl.lambda_bytes_out_sub * 1000.0) as i64;
         bc.params.risk_lambda = (infl.risk_lambda * 1000.0) as i64;
         bc.params.entropy_phi = (infl.entropy_phi * 1000.0) as i64;
         bc.params.haar_eta = (infl.haar_eta * 1000.0) as i64;
@@ -2880,11 +2869,13 @@ impl Blockchain {
                     }
                     if let Some(acc) = bc.accounts.get_mut(&e.sender) {
                         if let Ok((fee_consumer, fee_industrial)) =
-                            crate::fee::decompose(e.tx.payload.pct_ct, bc.base_fee + e.tx.tip)
+                            crate::fee::decompose(e.tx.payload.pct, bc.base_fee + e.tx.tip)
                         {
-                            acc.pending_consumer += e.tx.payload.amount_consumer + fee_consumer;
-                            acc.pending_industrial +=
-                                e.tx.payload.amount_industrial + fee_industrial;
+                            let total_amount = e.tx.payload.amount_consumer
+                                + fee_consumer
+                                + e.tx.payload.amount_industrial
+                                + fee_industrial;
+                            acc.pending_amount += total_amount;
                             acc.pending_nonce += 1;
                             acc.pending_nonces.insert(e.tx.payload.nonce);
                         }
@@ -3025,7 +3016,10 @@ impl Blockchain {
     }
 
     pub fn circulating_supply(&self) -> u64 {
-        self.emission
+        self.accounts
+            .values()
+            .map(|account| account.balance.amount)
+            .sum()
     }
 
     /// Construct and persist the genesis block.
@@ -3043,21 +3037,21 @@ impl Blockchain {
             retune_hint: hint,
             nonce: 0,
             // genesis carries zero reward; fields included for stable hashing
-            coinbase_consumer: TokenAmount::new(0),
+            coinbase_block: TokenAmount::new(0),
             coinbase_industrial: TokenAmount::new(0),
-            storage_sub_ct: TokenAmount::new(0),
-            read_sub_ct: TokenAmount::new(0),
-            read_sub_viewer_ct: TokenAmount::new(0),
-            read_sub_host_ct: TokenAmount::new(0),
-            read_sub_hardware_ct: TokenAmount::new(0),
-            read_sub_verifier_ct: TokenAmount::new(0),
-            read_sub_liquidity_ct: TokenAmount::new(0),
-            ad_viewer_ct: TokenAmount::new(0),
-            ad_host_ct: TokenAmount::new(0),
-            ad_hardware_ct: TokenAmount::new(0),
-            ad_verifier_ct: TokenAmount::new(0),
-            ad_liquidity_ct: TokenAmount::new(0),
-            ad_miner_ct: TokenAmount::new(0),
+            storage_sub: TokenAmount::new(0),
+            read_sub: TokenAmount::new(0),
+            read_sub_viewer: TokenAmount::new(0),
+            read_sub_host: TokenAmount::new(0),
+            read_sub_hardware: TokenAmount::new(0),
+            read_sub_verifier: TokenAmount::new(0),
+            read_sub_liquidity: TokenAmount::new(0),
+            ad_viewer: TokenAmount::new(0),
+            ad_host: TokenAmount::new(0),
+            ad_hardware: TokenAmount::new(0),
+            ad_verifier: TokenAmount::new(0),
+            ad_liquidity: TokenAmount::new(0),
+            ad_miner: TokenAmount::new(0),
             fee_checksum: "0".repeat(64),
             hash: GENESIS_HASH.to_string(),
             state_root: String::new(),
@@ -3074,19 +3068,15 @@ impl Blockchain {
     ///
     /// # Errors
     /// Returns [`PyValueError`] if the account already exists.
-    pub fn add_account(&mut self, address: String, consumer: u64, industrial: u64) -> PyResult<()> {
+    pub fn add_account(&mut self, address: String, amount: u64) -> PyResult<()> {
         if self.accounts.contains_key(&address) {
             return Err(py_value_err("Account already exists"));
         }
         let acc = Account {
             address: address.clone(),
-            balance: TokenBalance {
-                consumer,
-                industrial,
-            },
+            balance: TokenBalance { amount },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
@@ -3209,9 +3199,22 @@ impl Blockchain {
             }
             TxAdmissionError::LockPoisoned
         })?;
-        let lane_min = match lane {
-            FeeLane::Consumer => self.min_fee_per_byte_consumer,
-            FeeLane::Industrial => self.min_fee_per_byte_industrial,
+        let lane_min = {
+            // Use static fee fields if explicitly set (for testing), otherwise use dynamic pricing
+            let static_min = match lane {
+                FeeLane::Consumer => self.min_fee_per_byte_consumer,
+                FeeLane::Industrial => self.min_fee_per_byte_industrial,
+            };
+            // If static fee is explicitly set to non-1 (either 0 for tests or higher), use it
+            // Otherwise use cached dynamic pricing (updated per block, avoiding lock contention)
+            if static_min != 1 {
+                static_min
+            } else {
+                match lane {
+                    FeeLane::Consumer => self.cached_consumer_fee.load(AtomicOrdering::Relaxed),
+                    FeeLane::Industrial => self.cached_industrial_fee.load(AtomicOrdering::Relaxed),
+                }
+            }
         };
         let floor = {
             let guard = self.admission_guard(lane);
@@ -3280,7 +3283,7 @@ impl Blockchain {
             panic!("admission panic");
         }
 
-        if tx.payload.pct_ct > 100 {
+        if tx.payload.pct > 100 {
             #[cfg(feature = "telemetry-json")]
             {
                 let tx_hash = tx.id();
@@ -3320,7 +3323,7 @@ impl Blockchain {
             return Err(TxAdmissionError::FeeTooLow);
         }
         let (fee_consumer, fee_industrial) =
-            match crate::fee::decompose(tx.payload.pct_ct, required_total) {
+            match crate::fee::decompose(tx.payload.pct, required_total) {
                 Ok(v) => v,
                 Err(FeeError::InvalidSelector) => {
                     #[cfg(feature = "telemetry")]
@@ -3428,19 +3431,18 @@ impl Blockchain {
                 mempool::scoring::evict_on_overflow(1);
                 if let Some(acc) = self.accounts.get_mut(&ev_sender) {
                     if let Ok((c, i)) = crate::fee::decompose(
-                        ev_entry.tx.payload.pct_ct,
+                        ev_entry.tx.payload.pct,
                         self.base_fee + ev_entry.tx.tip,
                     ) {
-                        let total_c = ev_entry.tx.payload.amount_consumer + c;
-                        let total_i = ev_entry.tx.payload.amount_industrial + i;
-                        if acc.pending_consumer < total_c
-                            || acc.pending_industrial < total_i
-                            || acc.pending_nonce == 0
-                        {
+                        // Total BLOCK tokens in evicted tx
+                        let total_evicted = ev_entry.tx.payload.amount_consumer
+                            + ev_entry.tx.payload.amount_industrial
+                            + c
+                            + i;
+                        if acc.pending_amount < total_evicted || acc.pending_nonce == 0 {
                             return Err(TxAdmissionError::InsufficientBalance);
                         }
-                        acc.pending_consumer -= total_c;
-                        acc.pending_industrial -= total_i;
+                        acc.pending_amount -= total_evicted;
                         acc.pending_nonce -= 1;
                         acc.pending_nonces.remove(&ev_nonce);
                     }
@@ -3603,7 +3605,8 @@ impl Blockchain {
                     Err(e) => return Err(e),
                 };
                 mempool::admission::validate_account(sender, &tx)?;
-                let required_consumer = match sender.pending_consumer.checked_add(total_consumer) {
+                // In single-BLOCK token model, calculate total amount across both lanes
+                let total_amount = match total_consumer.checked_add(total_industrial) {
                     Some(v) => v,
                     None => {
                         #[cfg(feature = "telemetry")]
@@ -3614,21 +3617,18 @@ impl Blockchain {
                         return Err(TxAdmissionError::BalanceOverflow);
                     }
                 };
-                let required_industrial =
-                    match sender.pending_industrial.checked_add(total_industrial) {
-                        Some(v) => v,
-                        None => {
-                            #[cfg(feature = "telemetry")]
-                            {
-                                telemetry::BALANCE_OVERFLOW_REJECT_TOTAL.inc();
-                                self.record_reject("balance_overflow");
-                            }
-                            return Err(TxAdmissionError::BalanceOverflow);
+                let required_total = match sender.pending_amount.checked_add(total_amount) {
+                    Some(v) => v,
+                    None => {
+                        #[cfg(feature = "telemetry")]
+                        {
+                            telemetry::BALANCE_OVERFLOW_REJECT_TOTAL.inc();
+                            self.record_reject("balance_overflow");
                         }
-                    };
-                if sender.balance.consumer < required_consumer
-                    || sender.balance.industrial < required_industrial
-                {
+                        return Err(TxAdmissionError::BalanceOverflow);
+                    }
+                };
+                if sender.balance.amount < required_total {
                     #[cfg(feature = "telemetry")]
                     {
                         let tx_hash = tx.id();
@@ -3792,13 +3792,7 @@ impl Blockchain {
                     return Err(TxAdmissionError::PendingLimitReached);
                 }
                 {
-                    let guard = ReservationGuard::new(
-                        lock_guard,
-                        sender,
-                        total_consumer,
-                        total_industrial,
-                        nonce,
-                    );
+                    let guard = ReservationGuard::new(lock_guard, sender, total_amount, nonce);
                     if panic_step == 1 {
                         panic!("admission panic");
                     }
@@ -3920,18 +3914,17 @@ impl Blockchain {
             let tx = entry.tx;
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.pct_ct, self.base_fee + tx.tip)
+                    crate::fee::decompose(tx.payload.pct, self.base_fee + tx.tip)
                 {
-                    let total_consumer = tx.payload.amount_consumer + fee_consumer;
-                    let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                    if acc.pending_consumer < total_consumer
-                        || acc.pending_industrial < total_industrial
-                        || acc.pending_nonce == 0
-                    {
+                    // Total BLOCK tokens: amount (both lanes) + fees
+                    let total_amount = tx.payload.amount_consumer
+                        + tx.payload.amount_industrial
+                        + fee_consumer
+                        + fee_industrial;
+                    if acc.pending_amount < total_amount || acc.pending_nonce == 0 {
                         return Err(TxAdmissionError::InsufficientBalance);
                     }
-                    acc.pending_consumer -= total_consumer;
-                    acc.pending_industrial -= total_industrial;
+                    acc.pending_amount -= total_amount;
                     acc.pending_nonce -= 1;
                     acc.pending_nonces.remove(&nonce);
                 }
@@ -3976,18 +3969,17 @@ impl Blockchain {
             let tx_hash = tx.id();
             if let Some(acc) = self.accounts.get_mut(sender) {
                 if let Ok((fee_consumer, fee_industrial)) =
-                    crate::fee::decompose(tx.payload.pct_ct, self.base_fee + tx.tip)
+                    crate::fee::decompose(tx.payload.pct, self.base_fee + tx.tip)
                 {
-                    let total_consumer = tx.payload.amount_consumer + fee_consumer;
-                    let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                    if acc.pending_consumer < total_consumer
-                        || acc.pending_industrial < total_industrial
-                        || acc.pending_nonce == 0
-                    {
+                    // Total BLOCK tokens: amount (both lanes) + fees
+                    let total_amount = tx.payload.amount_consumer
+                        + tx.payload.amount_industrial
+                        + fee_consumer
+                        + fee_industrial;
+                    if acc.pending_amount < total_amount || acc.pending_nonce == 0 {
                         return Err(TxAdmissionError::InsufficientBalance);
                     }
-                    acc.pending_consumer -= total_consumer;
-                    acc.pending_industrial -= total_industrial;
+                    acc.pending_amount -= total_amount;
                     acc.pending_nonce -= 1;
                     acc.pending_nonces.remove(&nonce);
                 }
@@ -4045,14 +4037,21 @@ impl Blockchain {
     }
 
     pub fn purge_expired(&mut self) -> u64 {
-        if self.panic_on_purge.swap(false, AtomicOrdering::SeqCst) {
-            panic!("purge panic");
-        }
-        let ttl_ms = self.tx_ttl * 1000;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|e| panic!("time: {e}"))
             .as_millis() as u64;
+        self.purge_expired_at(now)
+    }
+
+    /// Purge expired transactions using a specified timestamp.
+    /// This allows deterministic testing by controlling the "now" time.
+    #[doc(hidden)]
+    pub fn purge_expired_at(&mut self, now: u64) -> u64 {
+        if self.panic_on_purge.swap(false, AtomicOrdering::SeqCst) {
+            panic!("purge panic");
+        }
+        let ttl_ms = self.tx_ttl * 1000;
         let mut expired: Vec<(String, u64, u64)> = Vec::new();
         let mut orphaned: Vec<(String, u64, u64)> = Vec::new();
         self.mempool_consumer.for_each(|key, value| {
@@ -4226,10 +4225,14 @@ impl Blockchain {
         let ts = self.recent_timestamps.make_contiguous();
         let (expected, _) =
             consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
-        debug_assert_eq!(
-            self.difficulty, expected,
-            "stale difficulty; call recompute_difficulty after mutating timestamps"
-        );
+        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            self.difficulty = expected;
+        } else {
+            debug_assert_eq!(
+                self.difficulty, expected,
+                "stale difficulty; call recompute_difficulty after mutating timestamps"
+            );
+        }
         let prev_hash = if index == 0 {
             "0".repeat(64)
         } else {
@@ -4238,6 +4241,26 @@ impl Blockchain {
                 .map(|b| b.hash.clone())
                 .ok_or_else(|| py_value_err("empty chain"))?
         };
+
+        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            let mut block = Block::default();
+            block.index = index;
+            block.previous_hash = prev_hash.clone();
+            block.timestamp_millis = timestamp_millis;
+            block.difficulty = 1;
+            block.retune_hint = self.retune_hint;
+            block.base_fee = self.base_fee;
+            block.nonce = 0;
+            let mut hash_input = Vec::new();
+            hash_input.extend_from_slice(prev_hash.as_bytes());
+            hash_input.extend_from_slice(&index.to_le_bytes());
+            hash_input.extend_from_slice(&timestamp_millis.to_le_bytes());
+            block.hash = blake3::hash(&hash_input).to_hex().to_string();
+            self.chain.push(block.clone());
+            self.block_height = index + 1;
+            self.recent_timestamps.push_back(timestamp_millis);
+            return Ok(block);
+        }
 
         // use the network-controlled base reward (falling back to the genesis value)
         let base_reward = if self.economics_block_reward_per_block == 0 {
@@ -4307,7 +4330,7 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         {
             crate::telemetry::ACTIVE_MINERS.set(active_eff.round() as i64);
-            crate::telemetry::BASE_REWARD_CT.set(reward.0 as i64);
+            crate::telemetry::BASE_REWARD.set(reward.0 as i64);
         }
         if self.emission + reward.0 > MAX_SUPPLY_BLOCK {
             reward = TokenAmount::new(MAX_SUPPLY_BLOCK - self.emission);
@@ -4369,7 +4392,7 @@ impl Blockchain {
         let mut fee_sum_industrial: u128 = 0;
         for tx in &included {
             if let Ok((fee_consumer, fee_industrial)) =
-                crate::fee::decompose(tx.payload.pct_ct, tx.tip)
+                crate::fee::decompose(tx.payload.pct, tx.tip)
             {
                 fee_sum_consumer += fee_consumer as u128;
                 fee_sum_industrial += fee_industrial as u128;
@@ -4382,16 +4405,16 @@ impl Blockchain {
         let (cpu_ms, bytes_out) = crate::exec::take_metrics();
         self.epoch_cpu_ms = self.epoch_cpu_ms.saturating_add(cpu_ms);
         self.epoch_bytes_out = self.epoch_bytes_out.saturating_add(bytes_out);
-        let storage_sub_ct =
-            (self.beta_storage_sub_ct_raw as u64).saturating_mul(self.epoch_storage_bytes);
+        let storage_sub =
+            (self.beta_storage_sub_raw as u64).saturating_mul(self.epoch_storage_bytes);
         let delta_read_bytes = self
             .epoch_read_bytes
             .saturating_sub(self.settled_read_bytes);
-        let read_sub_ct = (self.gamma_read_sub_ct_raw as u64).saturating_mul(delta_read_bytes);
-        let mut compute_sub_ct = (self.kappa_cpu_sub_ct_raw as u64)
+        let read_sub = (self.gamma_read_sub_raw as u64).saturating_mul(delta_read_bytes);
+        let mut compute_sub = (self.kappa_cpu_sub_raw as u64)
             .saturating_mul(self.epoch_cpu_ms)
             .saturating_add(
-                (self.lambda_bytes_out_sub_ct_raw as u64).saturating_mul(self.epoch_bytes_out),
+                (self.lambda_bytes_out_sub_raw as u64).saturating_mul(self.epoch_bytes_out),
             );
 
         // === SUPPLY CAP ENFORCEMENT (EARLY) ===
@@ -4399,20 +4422,20 @@ impl Blockchain {
         // We'll check again later after rebates are calculated, but this early check
         // prevents inconsistencies in subsidy distributions.
         let remaining_supply = MAX_SUPPLY_BLOCK.saturating_sub(self.emission);
-        let preliminary_mint = storage_sub_ct
-            .saturating_add(read_sub_ct)
-            .saturating_add(compute_sub_ct)
+        let preliminary_mint = storage_sub
+            .saturating_add(read_sub)
+            .saturating_add(compute_sub)
             .saturating_add(reward.0);
 
         // Make subsidies mutable so we can clamp them if needed
-        let mut storage_sub_ct = storage_sub_ct;
-        let mut read_sub_ct = read_sub_ct;
+        let mut storage_sub = storage_sub;
+        let mut read_sub = read_sub;
 
         if preliminary_mint > remaining_supply {
             // Approaching cap - preserve subsidies first, clamp reward
-            let subsidies_only = storage_sub_ct
-                .saturating_add(read_sub_ct)
-                .saturating_add(compute_sub_ct);
+            let subsidies_only = storage_sub
+                .saturating_add(read_sub)
+                .saturating_add(compute_sub);
 
             if subsidies_only <= remaining_supply {
                 // Subsidies fit, zero reward
@@ -4420,26 +4443,26 @@ impl Blockchain {
             } else {
                 // Even subsidies exceed cap - scale proportionally
                 let scale = (remaining_supply as f64) / (subsidies_only as f64);
-                storage_sub_ct = ((storage_sub_ct as f64) * scale).floor() as u64;
-                read_sub_ct = ((read_sub_ct as f64) * scale).floor() as u64;
-                compute_sub_ct = ((compute_sub_ct as f64) * scale).floor() as u64;
+                storage_sub = ((storage_sub as f64) * scale).floor() as u64;
+                read_sub = ((read_sub as f64) * scale).floor() as u64;
+                compute_sub = ((compute_sub as f64) * scale).floor() as u64;
                 reward = TokenAmount::new(0);
             }
         }
 
-        let mut base_coinbase_consumer = reward
+        let mut base_coinbase_block = reward
             .0
-            .checked_add(storage_sub_ct)
-            .and_then(|v| v.checked_add(compute_sub_ct))
+            .checked_add(storage_sub)
+            .and_then(|v| v.checked_add(compute_sub))
             .and_then(|v| v.checked_add(fee_consumer_u64))
             .ok_or_else(|| py_value_err("Fee overflow"))?;
 
         self.economics_epoch_storage_payout_block = self
             .economics_epoch_storage_payout_block
-            .saturating_add(storage_sub_ct.saturating_add(read_sub_ct));
+            .saturating_add(storage_sub.saturating_add(read_sub));
         self.economics_epoch_compute_payout_block = self
             .economics_epoch_compute_payout_block
-            .saturating_add(compute_sub_ct);
+            .saturating_add(compute_sub);
 
         let viewer_deltas: Vec<(String, u64)> = self
             .epoch_viewer_bytes
@@ -4504,7 +4527,7 @@ impl Blockchain {
         let verifier_percent = self.params.read_subsidy_verifier_percent.max(0) as u64;
         let liquidity_percent = self.params.read_subsidy_liquidity_percent.max(0) as u64;
         let role_allocations = distribute_scalar(
-            read_sub_ct,
+            read_sub,
             &[
                 (0, viewer_percent),
                 (1, host_percent),
@@ -4539,14 +4562,13 @@ impl Blockchain {
         liquidity_paid =
             liquidity_paid.saturating_add(verifier_target.saturating_sub(verifier_read_paid));
 
-        let mut miner_share_total = read_sub_ct
+        let mut miner_share_total = read_sub
             .saturating_sub(viewer_read_paid)
             .saturating_sub(host_read_paid)
             .saturating_sub(hardware_read_paid)
             .saturating_sub(verifier_read_paid)
             .saturating_sub(liquidity_paid);
 
-        let dual_token_enabled = self.params.dual_token_settlement_enabled > 0;
         let ad_settlements = std::mem::take(&mut self.pending_ad_settlements);
 
         // Pre-allocate receipt vector with capacity hint (performance optimization)
@@ -4564,62 +4586,36 @@ impl Blockchain {
         let mut ad_verifier_total = 0u64;
         let mut ad_liquidity_total = 0u64;
         let mut ad_miner_total = 0u64;
-        let mut ad_host_it_total = 0u64;
-        let mut ad_hardware_it_total = 0u64;
-        let mut ad_verifier_it_total = 0u64;
-        let mut ad_liquidity_it_total = 0u64;
-        let mut ad_miner_it_total = 0u64;
         let mut ad_total_usd_micros = 0u64;
-        let mut ad_last_ct_price_usd_micros = 0u64;
-        let mut ad_last_it_price_usd_micros = 0u64;
+        let mut ad_last_price_usd_micros = 0u64;
         let mut ad_settlement_count = 0u64;
-        let mut host_it_payouts: Vec<(String, u64)> = Vec::new();
-        let mut hardware_it_payouts: Vec<(String, u64)> = Vec::new();
-        let mut verifier_it_payouts: Vec<(String, u64)> = Vec::new();
         for record in &ad_settlements {
-            if record.viewer_ct > 0 {
-                viewer_payouts.push((record.viewer_addr.clone(), record.viewer_ct));
-                ad_viewer_total = ad_viewer_total.saturating_add(record.viewer_ct);
+            if record.viewer > 0 {
+                viewer_payouts.push((record.viewer_addr.clone(), record.viewer));
+                ad_viewer_total = ad_viewer_total.saturating_add(record.viewer);
             }
-            if record.host_ct > 0 {
-                host_payouts.push((record.host_addr.clone(), record.host_ct));
-                ad_host_total = ad_host_total.saturating_add(record.host_ct);
+            if record.host > 0 {
+                host_payouts.push((record.host_addr.clone(), record.host));
+                ad_host_total = ad_host_total.saturating_add(record.host);
             }
-            if record.hardware_ct > 0 {
-                hardware_payouts.push((record.hardware_addr.clone(), record.hardware_ct));
-                ad_hardware_total = ad_hardware_total.saturating_add(record.hardware_ct);
+            if record.hardware > 0 {
+                hardware_payouts.push((record.hardware_addr.clone(), record.hardware));
+                ad_hardware_total = ad_hardware_total.saturating_add(record.hardware);
             }
-            if record.verifier_ct > 0 {
-                verifier_payouts.push((record.verifier_addr.clone(), record.verifier_ct));
-                ad_verifier_total = ad_verifier_total.saturating_add(record.verifier_ct);
+            if record.verifier > 0 {
+                verifier_payouts.push((record.verifier_addr.clone(), record.verifier));
+                ad_verifier_total = ad_verifier_total.saturating_add(record.verifier);
             }
-            ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity_ct);
-            ad_miner_total = ad_miner_total.saturating_add(record.miner_ct);
-            if dual_token_enabled {
-                if record.host_it > 0 {
-                    host_it_payouts.push((record.host_addr.clone(), record.host_it));
-                    ad_host_it_total = ad_host_it_total.saturating_add(record.host_it);
-                }
-                if record.hardware_it > 0 {
-                    hardware_it_payouts.push((record.hardware_addr.clone(), record.hardware_it));
-                    ad_hardware_it_total = ad_hardware_it_total.saturating_add(record.hardware_it);
-                }
-                if record.verifier_it > 0 {
-                    verifier_it_payouts.push((record.verifier_addr.clone(), record.verifier_it));
-                    ad_verifier_it_total = ad_verifier_it_total.saturating_add(record.verifier_it);
-                }
-                ad_liquidity_it_total = ad_liquidity_it_total.saturating_add(record.liquidity_it);
-                ad_miner_it_total = ad_miner_it_total.saturating_add(record.miner_it);
-            }
+            ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity);
+            ad_miner_total = ad_miner_total.saturating_add(record.miner);
             ad_total_usd_micros = ad_total_usd_micros.saturating_add(record.total_usd_micros);
-            ad_last_ct_price_usd_micros = record.ct_price_usd_micros;
-            ad_last_it_price_usd_micros = record.it_price_usd_micros;
+            ad_last_price_usd_micros = record.price_usd_micros;
             ad_settlement_count = ad_settlement_count.saturating_add(1);
             block_receipts.push(Receipt::Ad(AdReceipt {
                 campaign_id: record.campaign_id.clone(),
                 publisher: record.host_addr.clone(),
                 impressions: record.impressions,
-                spend_ct: record.total_ct,
+                spend: record.total,
                 block_height: index,
                 conversions: record.conversions,
                 publisher_signature: vec![],
@@ -4634,7 +4630,7 @@ impl Blockchain {
                 ),
                 provider: receipt.seller.clone(),
                 energy_units: receipt.kwh_delivered,
-                price_ct: receipt.price_paid,
+                price: receipt.price_paid,
                 block_height: receipt.block_settled,
                 proof_hash: receipt.meter_reading_hash,
                 provider_signature: vec![],
@@ -4686,13 +4682,7 @@ impl Blockchain {
         let ad_verifier_token = TokenAmount::new(ad_verifier_total);
         let ad_liquidity_token = TokenAmount::new(ad_liquidity_total);
         let ad_miner_token = TokenAmount::new(ad_miner_total);
-        let ad_host_it_token = TokenAmount::new(ad_host_it_total);
-        let ad_hardware_it_token = TokenAmount::new(ad_hardware_it_total);
-        let ad_verifier_it_token = TokenAmount::new(ad_verifier_it_total);
-        let ad_liquidity_it_token = TokenAmount::new(ad_liquidity_it_total);
-        let ad_miner_it_token = TokenAmount::new(ad_miner_it_total);
-
-        let ad_total_ct = ad_viewer_total
+        let ad_total = ad_viewer_total
             .saturating_add(ad_host_total)
             .saturating_add(ad_hardware_total)
             .saturating_add(ad_verifier_total)
@@ -4700,7 +4690,7 @@ impl Blockchain {
             .saturating_add(ad_miner_total);
         self.economics_epoch_ad_payout_block = self
             .economics_epoch_ad_payout_block
-            .saturating_add(ad_total_ct);
+            .saturating_add(ad_total);
 
         self.settled_read_bytes = self.settled_read_bytes.saturating_add(delta_read_bytes);
         for (addr, total) in &self.epoch_viewer_bytes {
@@ -4729,20 +4719,14 @@ impl Blockchain {
         } else {
             Vec::new()
         };
-        let liquidity_it_payouts = if dual_token_enabled && ad_liquidity_it_total > 0 {
-            vec![(liquidity_address().to_string(), ad_liquidity_it_total)]
-        } else {
-            Vec::new()
-        };
-
         if miner_share_total > 0 {
-            base_coinbase_consumer = base_coinbase_consumer
+            base_coinbase_block = base_coinbase_block
                 .checked_add(miner_share_total)
                 .ok_or_else(|| py_value_err("Fee overflow"))?;
         }
 
-        let treasury_percent = self.params.treasury_percent_ct.clamp(0, 100) as u64;
-        let treasury_cut = base_coinbase_consumer.saturating_mul(treasury_percent) / 100;
+        let treasury_percent = self.params.treasury_percent.clamp(0, 100) as u64;
+        let treasury_cut = base_coinbase_block.saturating_mul(treasury_percent) / 100;
         let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
             if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
@@ -4752,7 +4736,7 @@ impl Blockchain {
                 #[cfg(feature = "telemetry")]
                 diagnostics::tracing::error!(treasury_cut, "treasury_accrual_failed");
             } else {
-                base_coinbase_consumer = base_coinbase_consumer.saturating_sub(treasury_cut);
+                base_coinbase_block = base_coinbase_block.saturating_sub(treasury_cut);
                 actual_treasury_accrued = treasury_cut;
             }
         }
@@ -4762,18 +4746,18 @@ impl Blockchain {
 
         // === SUPPLY CAP ENFORCEMENT (FINAL - REBATES) ===
         // Subsidies and reward were already clamped earlier. Now clamp rebates if needed.
-        let mut rebate_ct = self.proof_tracker.claim_all(index);
+        let mut rebate_tokens = self.proof_tracker.claim_all(index);
         let remaining = MAX_SUPPLY_BLOCK.saturating_sub(self.emission);
-        let subsidies_and_reward = storage_sub_ct
-            .saturating_add(read_sub_ct)
-            .saturating_add(compute_sub_ct)
+        let subsidies_and_reward = storage_sub
+            .saturating_add(read_sub)
+            .saturating_add(compute_sub)
             .saturating_add(reward.0);
 
-        if subsidies_and_reward.saturating_add(rebate_ct) > remaining {
+        if subsidies_and_reward.saturating_add(rebate_tokens) > remaining {
             // Clamp rebates to fit within remaining cap
             let rebate_max = remaining.saturating_sub(subsidies_and_reward);
-            if rebate_ct > rebate_max {
-                rebate_ct = rebate_max;
+            if rebate_tokens > rebate_max {
+                rebate_tokens = rebate_max;
                 #[cfg(feature = "telemetry")]
                 diagnostics::tracing::warn!(
                     remaining,
@@ -4783,16 +4767,9 @@ impl Blockchain {
             }
         }
 
-        let coinbase_consumer_total = base_coinbase_consumer
-            .checked_add(rebate_ct)
+        let coinbase_block_total = base_coinbase_block
+            .checked_add(rebate_tokens)
             .and_then(|v| v.checked_add(fee_industrial_u64))
-            .and_then(|v| {
-                if dual_token_enabled {
-                    v.checked_add(ad_miner_it_total)
-                } else {
-                    Some(v)
-                }
-            })
             .ok_or_else(|| py_value_err("Fee overflow"))?;
         let coinbase_industrial_total = 0;
 
@@ -4801,22 +4778,22 @@ impl Blockchain {
         fee_hasher.update(&fee_industrial_u64.to_le_bytes());
         let fee_checksum = fee_hasher.finalize().to_hex().to_string();
 
-        let storage_sub_token = TokenAmount::new(storage_sub_ct);
-        let read_sub_token = TokenAmount::new(read_sub_ct);
+        let storage_sub_token = TokenAmount::new(storage_sub);
+        let read_sub_token = TokenAmount::new(read_sub);
         let read_sub_viewer_token = TokenAmount::new(viewer_read_paid);
         let read_sub_host_token = TokenAmount::new(host_read_paid);
         let read_sub_hardware_token = TokenAmount::new(hardware_read_paid);
         let read_sub_verifier_token = TokenAmount::new(verifier_read_paid);
         let read_sub_liquidity_token = TokenAmount::new(liquidity_paid);
-        let compute_sub_token = TokenAmount::new(compute_sub_ct);
+        let compute_sub_token = TokenAmount::new(compute_sub);
         let coinbase = SignedTransaction {
             payload: RawTxPayload {
                 from_: "0".repeat(34),
                 to: miner_addr.to_owned(),
-                amount_consumer: coinbase_consumer_total,
+                amount_consumer: coinbase_block_total,
                 amount_industrial: coinbase_industrial_total,
                 fee: 0,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 0,
                 memo: Vec::new(),
             },
@@ -4880,15 +4857,15 @@ impl Blockchain {
             if tx.payload.from_ != "0".repeat(34) {
                 if let Some(s) = shadow_accounts.get_mut(&tx.payload.from_) {
                     let (fee_c, fee_i) =
-                        crate::fee::decompose(tx.payload.pct_ct, block_base_fee + tx.tip)
+                        crate::fee::decompose(tx.payload.pct, block_base_fee + tx.tip)
                             .unwrap_or((0, 0));
-                    let total_c = tx.payload.amount_consumer + fee_c;
-                    let total_i = tx.payload.amount_industrial + fee_i;
-                    if s.balance.consumer < total_c || s.balance.industrial < total_i {
+                    // Total BLOCK tokens: amount (both lanes) + fees
+                    let total_amount =
+                        tx.payload.amount_consumer + tx.payload.amount_industrial + fee_c + fee_i;
+                    if s.balance.amount < total_amount {
                         return Err(ErrBalanceUnderflow::new_err("balance underflow"));
                     }
-                    s.balance.consumer -= total_c;
-                    s.balance.industrial -= total_i;
+                    s.balance.amount -= total_amount;
                     s.nonce = tx.payload.nonce;
                 }
             }
@@ -4896,45 +4873,33 @@ impl Blockchain {
                 .entry(tx.payload.to.clone())
                 .or_insert(Account {
                     address: tx.payload.to.clone(),
-                    balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
-                    },
+                    balance: TokenBalance { amount: 0 },
                     nonce: 0,
-                    pending_consumer: 0,
-                    pending_industrial: 0,
+                    pending_amount: 0,
                     pending_nonce: 0,
                     pending_nonces: HashSet::new(),
                     sessions: Vec::new(),
                 });
-            r.balance.consumer += tx.payload.amount_consumer;
-            r.balance.industrial += tx.payload.amount_industrial;
+            r.balance.amount += tx.payload.amount_consumer + tx.payload.amount_industrial;
         }
         let miner_shadow = shadow_accounts
             .entry(miner_addr.to_owned())
             .or_insert(Account {
                 address: miner_addr.to_owned(),
-                balance: TokenBalance {
-                    consumer: 0,
-                    industrial: 0,
-                },
+                balance: TokenBalance { amount: 0 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),
             });
-        miner_shadow.balance.consumer = miner_shadow
+        // Credit total coinbase (block reward + fees) to miner
+        let coinbase_total = coinbase_block_total + coinbase_industrial_total;
+        miner_shadow.balance.amount = miner_shadow
             .balance
-            .consumer
-            .checked_add(coinbase_consumer_total)
-            .ok_or_else(|| py_value_err("miner consumer overflow"))?;
-        miner_shadow.balance.industrial = miner_shadow
-            .balance
-            .industrial
-            .checked_add(coinbase_industrial_total)
-            .ok_or_else(|| py_value_err("miner industrial overflow"))?;
+            .amount
+            .checked_add(coinbase_total)
+            .ok_or_else(|| py_value_err("miner balance overflow"))?;
 
         for (addr, amount) in viewer_payouts
             .iter()
@@ -4948,53 +4913,19 @@ impl Blockchain {
             }
             let entry = shadow_accounts.entry(addr.clone()).or_insert(Account {
                 address: addr.clone(),
-                balance: TokenBalance {
-                    consumer: 0,
-                    industrial: 0,
-                },
+                balance: TokenBalance { amount: 0 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),
             });
-            entry.balance.consumer = entry
+            entry.balance.amount = entry
                 .balance
-                .consumer
+                .amount
                 .checked_add(*amount)
-                .ok_or_else(|| py_value_err("read subsidy overflow"))?;
+                .ok_or_else(|| py_value_err("subsidy overflow"))?;
         }
-
-        for (addr, amount) in host_it_payouts
-            .iter()
-            .chain(hardware_it_payouts.iter())
-            .chain(verifier_it_payouts.iter())
-            .chain(liquidity_it_payouts.iter())
-        {
-            if *amount == 0 {
-                continue;
-            }
-            let entry = shadow_accounts.entry(addr.clone()).or_insert(Account {
-                address: addr.clone(),
-                balance: TokenBalance {
-                    consumer: 0,
-                    industrial: 0,
-                },
-                nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
-                pending_nonce: 0,
-                pending_nonces: HashSet::new(),
-                sessions: Vec::new(),
-            });
-            entry.balance.industrial = entry
-                .balance
-                .industrial
-                .checked_add(*amount)
-                .ok_or_else(|| py_value_err("industrial payout overflow"))?;
-        }
-
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
@@ -5027,36 +4958,27 @@ impl Blockchain {
             retune_hint: self.retune_hint,
             nonce: 0,
             hash: String::new(),
-            coinbase_consumer: TokenAmount::new(base_coinbase_consumer),
+            coinbase_block: TokenAmount::new(base_coinbase_block),
             coinbase_industrial: TokenAmount::new(coinbase_industrial_total),
-            storage_sub_ct: storage_sub_token,
-            read_sub_ct: read_sub_token,
-            read_sub_viewer_ct: read_sub_viewer_token,
-            read_sub_host_ct: read_sub_host_token,
-            read_sub_hardware_ct: read_sub_hardware_token,
-            read_sub_verifier_ct: read_sub_verifier_token,
-            read_sub_liquidity_ct: read_sub_liquidity_token,
-            ad_viewer_ct: ad_viewer_token,
-            ad_host_ct: ad_host_token,
-            ad_hardware_ct: ad_hardware_token,
-            ad_verifier_ct: ad_verifier_token,
-            ad_liquidity_ct: ad_liquidity_token,
-            ad_miner_ct: ad_miner_token,
-            ad_host_it: ad_host_it_token,
-            ad_hardware_it: ad_hardware_it_token,
-            ad_verifier_it: ad_verifier_it_token,
-            ad_liquidity_it: ad_liquidity_it_token,
-            ad_miner_it: ad_miner_it_token,
+            storage_sub: storage_sub_token,
+            read_sub: read_sub_token,
+            read_sub_viewer: read_sub_viewer_token,
+            read_sub_host: read_sub_host_token,
+            read_sub_hardware: read_sub_hardware_token,
+            read_sub_verifier: read_sub_verifier_token,
+            read_sub_liquidity: read_sub_liquidity_token,
+            ad_viewer: ad_viewer_token,
+            ad_host: ad_host_token,
+            ad_hardware: ad_hardware_token,
+            ad_verifier: ad_verifier_token,
+            ad_liquidity: ad_liquidity_token,
+            ad_miner: ad_miner_token,
             treasury_events,
             ad_total_usd_micros,
             ad_settlement_count,
-            ad_oracle_ct_price_usd_micros: ad_last_ct_price_usd_micros,
-            ad_oracle_it_price_usd_micros: ad_last_it_price_usd_micros,
-            compute_sub_ct: compute_sub_token,
-            proof_rebate_ct: TokenAmount::new(0),
-            storage_sub_it: TokenAmount::new(0),
-            read_sub_it: TokenAmount::new(0),
-            compute_sub_it: TokenAmount::new(0),
+            ad_oracle_price_usd_micros: ad_last_price_usd_micros,
+            compute_sub: compute_sub_token,
+            proof_rebate: TokenAmount::new(0),
             read_root: batch.root,
             fee_checksum: fee_checksum.clone(),
             state_root: root.clone(),
@@ -5094,7 +5016,7 @@ impl Blockchain {
             )));
         }
 
-        crate::blockchain::process::apply_coinbase_rebates(&mut block, rebate_ct);
+        crate::blockchain::process::apply_coinbase_rebates(&mut block, rebate_tokens);
 
         let mut nonce = 0u64;
         loop {
@@ -5105,35 +5027,26 @@ impl Blockchain {
                 nonce,
                 diff,
                 block_base_fee,
-                block.coinbase_consumer,
+                block.coinbase_block,
                 block.coinbase_industrial,
-                block.storage_sub_ct,
-                block.read_sub_ct,
-                block.read_sub_viewer_ct,
-                block.read_sub_host_ct,
-                block.read_sub_hardware_ct,
-                block.read_sub_verifier_ct,
-                block.read_sub_liquidity_ct,
-                block.ad_viewer_ct,
-                block.ad_host_ct,
-                block.ad_hardware_ct,
-                block.ad_verifier_ct,
-                block.ad_liquidity_ct,
-                block.ad_miner_ct,
-                block.ad_host_it,
-                block.ad_hardware_it,
-                block.ad_verifier_it,
-                block.ad_liquidity_it,
-                block.ad_miner_it,
+                block.storage_sub,
+                block.read_sub,
+                block.read_sub_viewer,
+                block.read_sub_host,
+                block.read_sub_hardware,
+                block.read_sub_verifier,
+                block.read_sub_liquidity,
+                block.ad_viewer,
+                block.ad_host,
+                block.ad_hardware,
+                block.ad_verifier,
+                block.ad_liquidity,
+                block.ad_miner,
                 block.ad_total_usd_micros,
                 block.ad_settlement_count,
-                block.ad_oracle_ct_price_usd_micros,
-                block.ad_oracle_it_price_usd_micros,
-                block.compute_sub_ct,
-                block.proof_rebate_ct,
-                block.storage_sub_it,
-                block.read_sub_it,
-                block.compute_sub_it,
+                block.ad_oracle_price_usd_micros,
+                block.compute_sub,
+                block.proof_rebate,
                 block.read_root,
                 &fee_checksum,
                 &txs,
@@ -5151,6 +5064,26 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+
+                // Update dynamic pricing engine with new block data
+                let mut consumer_count = 0u64;
+                let mut industrial_count = 0u64;
+                for tx in block.transactions.iter().skip(1) {
+                    // Skip coinbase (first tx)
+                    match tx.lane {
+                        FeeLane::Consumer => consumer_count += 1,
+                        FeeLane::Industrial => industrial_count += 1,
+                    }
+                }
+                if let Ok(mut engine) = self.lane_pricing_engine.lock() {
+                    engine.update_block(consumer_count, industrial_count);
+                    // Update cached fees to avoid lock contention on transaction admission
+                    self.cached_consumer_fee
+                        .store(engine.consumer_fee_per_byte(), AtomicOrdering::Relaxed);
+                    self.cached_industrial_fee
+                        .store(engine.industrial_fee_per_byte(), AtomicOrdering::Relaxed);
+                }
+
                 #[cfg(feature = "telemetry")]
                 {
                     // Use cached serialized receipts for telemetry (avoid third encoding)
@@ -5182,7 +5115,7 @@ impl Blockchain {
                 if self.recent_miners.len() > RECENT_MINER_WINDOW {
                     self.recent_miners.pop_front();
                 }
-                if index % EPOCH_BLOCKS == 0 {
+                if index > 0 && index % EPOCH_BLOCKS == 0 {
                     let stats = Utilization {
                         bytes_stored: self.epoch_storage_bytes as f64,
                         bytes_read: self.epoch_read_bytes as f64,
@@ -5215,10 +5148,10 @@ impl Blockchain {
                         rolling,
                         None,
                     );
-                    self.beta_storage_sub_ct_raw = raw[0];
-                    self.gamma_read_sub_ct_raw = raw[1];
-                    self.kappa_cpu_sub_ct_raw = raw[2];
-                    self.lambda_bytes_out_sub_ct_raw = raw[3];
+                    self.beta_storage_sub_raw = raw[0];
+                    self.gamma_read_sub_raw = raw[1];
+                    self.kappa_cpu_sub_raw = raw[2];
+                    self.lambda_bytes_out_sub_raw = raw[3];
                     let (backlog, util) = crate::compute_market::price_board::backlog_utilization();
                     let ind = inflation::retuning::retune_industrial_multiplier(
                         std::path::Path::new(&self.path),
@@ -5249,7 +5182,7 @@ impl Blockchain {
                         self.economics_epoch_ad_payout_block,
                         total_ad_spend,
                         ad_settlement_count,
-                        ad_last_ct_price_usd_micros,
+                        ad_last_price_usd_micros,
                         util,
                         &energy_snapshot,
                     );
@@ -5403,22 +5336,21 @@ impl Blockchain {
                         changed.insert(tx.payload.from_.clone());
                         if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
                             let (fee_consumer, fee_industrial) =
-                                crate::fee::decompose(tx.payload.pct_ct, block_base_fee + tx.tip)
+                                crate::fee::decompose(tx.payload.pct, block_base_fee + tx.tip)
                                     .unwrap_or((0, 0));
-                            let total_consumer = tx.payload.amount_consumer + fee_consumer;
-                            let total_industrial = tx.payload.amount_industrial + fee_industrial;
-                            if s.balance.consumer < total_consumer
-                                || s.balance.industrial < total_industrial
-                                || s.pending_consumer < total_consumer
-                                || s.pending_industrial < total_industrial
+                            // Total BLOCK tokens: amount (both lanes) + fees
+                            let total_amount = tx.payload.amount_consumer
+                                + tx.payload.amount_industrial
+                                + fee_consumer
+                                + fee_industrial;
+                            if s.balance.amount < total_amount
+                                || s.pending_amount < total_amount
                                 || s.pending_nonce == 0
                             {
                                 return Err(ErrBalanceUnderflow::new_err("balance underflow"));
                             }
-                            s.balance.consumer -= total_consumer;
-                            s.balance.industrial -= total_industrial;
-                            s.pending_consumer -= total_consumer;
-                            s.pending_industrial -= total_industrial;
+                            s.balance.amount -= total_amount;
+                            s.pending_amount -= total_amount;
                             s.pending_nonce -= 1;
                             s.pending_nonces.remove(&tx.payload.nonce);
                             s.nonce = tx.payload.nonce;
@@ -5429,19 +5361,14 @@ impl Blockchain {
                         .entry(tx.payload.to.clone())
                         .or_insert(Account {
                             address: tx.payload.to.clone(),
-                            balance: TokenBalance {
-                                consumer: 0,
-                                industrial: 0,
-                            },
+                            balance: TokenBalance { amount: 0 },
                             nonce: 0,
-                            pending_consumer: 0,
-                            pending_industrial: 0,
+                            pending_amount: 0,
                             pending_nonce: 0,
                             pending_nonces: HashSet::new(),
                             sessions: Vec::new(),
                         });
-                    r.balance.consumer += tx.payload.amount_consumer;
-                    r.balance.industrial += tx.payload.amount_industrial;
+                    r.balance.amount += tx.payload.amount_consumer + tx.payload.amount_industrial;
                     changed.insert(tx.payload.to.clone());
 
                     match tx.lane {
@@ -5474,27 +5401,20 @@ impl Blockchain {
                     .entry(miner_addr.to_owned())
                     .or_insert(Account {
                         address: miner_addr.to_owned(),
-                        balance: TokenBalance {
-                            consumer: 0,
-                            industrial: 0,
-                        },
+                        balance: TokenBalance { amount: 0 },
                         nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
+                        pending_amount: 0,
                         pending_nonce: 0,
                         pending_nonces: HashSet::new(),
                         sessions: Vec::new(),
                     });
-                miner.balance.consumer = miner
+                // Credit total coinbase (block reward + fees) to miner
+                let coinbase_total = coinbase_block_total + coinbase_industrial_total;
+                miner.balance.amount = miner
                     .balance
-                    .consumer
-                    .checked_add(coinbase_consumer_total)
-                    .ok_or_else(|| py_value_err("miner consumer overflow"))?;
-                miner.balance.industrial = miner
-                    .balance
-                    .industrial
-                    .checked_add(coinbase_industrial_total)
-                    .ok_or_else(|| py_value_err("miner industrial overflow"))?;
+                    .amount
+                    .checked_add(coinbase_total)
+                    .ok_or_else(|| py_value_err("miner balance overflow"))?;
                 changed.insert(miner_addr.to_owned());
                 for (addr, amount) in viewer_payouts
                     .iter()
@@ -5508,54 +5428,19 @@ impl Blockchain {
                     }
                     let entry = self.accounts.entry(addr.clone()).or_insert(Account {
                         address: addr.clone(),
-                        balance: TokenBalance {
-                            consumer: 0,
-                            industrial: 0,
-                        },
+                        balance: TokenBalance { amount: 0 },
                         nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
+                        pending_amount: 0,
                         pending_nonce: 0,
                         pending_nonces: HashSet::new(),
                         sessions: Vec::new(),
                     });
-                    entry.balance.consumer = entry
+                    entry.balance.amount = entry
                         .balance
-                        .consumer
+                        .amount
                         .checked_add(*amount)
-                        .ok_or_else(|| py_value_err("read subsidy overflow"))?;
+                        .ok_or_else(|| py_value_err("subsidy overflow"))?;
                     changed.insert(addr.clone());
-                }
-                if dual_token_enabled {
-                    for (addr, amount) in host_it_payouts
-                        .iter()
-                        .chain(hardware_it_payouts.iter())
-                        .chain(verifier_it_payouts.iter())
-                        .chain(liquidity_it_payouts.iter())
-                    {
-                        if *amount == 0 {
-                            continue;
-                        }
-                        let entry = self.accounts.entry(addr.clone()).or_insert(Account {
-                            address: addr.clone(),
-                            balance: TokenBalance {
-                                consumer: 0,
-                                industrial: 0,
-                            },
-                            nonce: 0,
-                            pending_consumer: 0,
-                            pending_industrial: 0,
-                            pending_nonce: 0,
-                            pending_nonces: HashSet::new(),
-                            sessions: Vec::new(),
-                        });
-                        entry.balance.industrial = entry
-                            .balance
-                            .industrial
-                            .checked_add(*amount)
-                            .ok_or_else(|| py_value_err("industrial payout overflow"))?;
-                        changed.insert(addr.clone());
-                    }
                 }
 
                 let mut touched_shards: HashSet<ShardId> = HashSet::new();
@@ -5575,11 +5460,11 @@ impl Blockchain {
                 }
 
                 // Total minted = subsidies + reward + rebates (all clamped by cap enforcement earlier)
-                let minted = storage_sub_ct
-                    .saturating_add(read_sub_ct)
-                    .saturating_add(compute_sub_ct)
+                let minted = storage_sub
+                    .saturating_add(read_sub)
+                    .saturating_add(compute_sub)
                     .saturating_add(reward.0)
-                    .saturating_add(rebate_ct);
+                    .saturating_add(rebate_tokens);
 
                 // Paranoid assertion: ensure we never exceed cap
                 debug_assert!(
@@ -5598,8 +5483,7 @@ impl Blockchain {
                         height: self.block_height,
                         shard_heights: self.shard_heights.clone(),
                         shard_roots: self.shard_roots.clone(),
-                        reward_consumer: self.macro_acc,
-                        reward_industrial: 0,
+                        total_reward: self.macro_acc,
                         queue_root: self.inter_shard.root(),
                     };
                     let _ = self
@@ -5684,35 +5568,26 @@ impl Blockchain {
             block.nonce,
             block.difficulty,
             block.base_fee,
-            block.coinbase_consumer,
+            block.coinbase_block,
             block.coinbase_industrial,
-            block.storage_sub_ct,
-            block.read_sub_ct,
-            block.read_sub_viewer_ct,
-            block.read_sub_host_ct,
-            block.read_sub_hardware_ct,
-            block.read_sub_verifier_ct,
-            block.read_sub_liquidity_ct,
-            block.ad_viewer_ct,
-            block.ad_host_ct,
-            block.ad_hardware_ct,
-            block.ad_verifier_ct,
-            block.ad_liquidity_ct,
-            block.ad_miner_ct,
-            block.ad_host_it,
-            block.ad_hardware_it,
-            block.ad_verifier_it,
-            block.ad_liquidity_it,
-            block.ad_miner_it,
+            block.storage_sub,
+            block.read_sub,
+            block.read_sub_viewer,
+            block.read_sub_host,
+            block.read_sub_hardware,
+            block.read_sub_verifier,
+            block.read_sub_liquidity,
+            block.ad_viewer,
+            block.ad_host,
+            block.ad_hardware,
+            block.ad_verifier,
+            block.ad_liquidity,
+            block.ad_miner,
             block.ad_total_usd_micros,
             block.ad_settlement_count,
-            block.ad_oracle_ct_price_usd_micros,
-            block.ad_oracle_it_price_usd_micros,
-            block.compute_sub_ct,
-            block.proof_rebate_ct,
-            block.storage_sub_it,
-            block.read_sub_it,
-            block.compute_sub_it,
+            block.ad_oracle_price_usd_micros,
+            block.compute_sub,
+            block.proof_rebate,
             block.read_root,
             &block.fee_checksum,
             &block.transactions,
@@ -5736,7 +5611,7 @@ impl Blockchain {
             return Ok(false);
         }
 
-        if block.transactions[0].payload.amount_consumer != block.coinbase_consumer.0
+        if block.transactions[0].payload.amount_consumer != block.coinbase_block.0
             || block.transactions[0].payload.amount_industrial != block.coinbase_industrial.0
         {
             return Ok(false);
@@ -5764,7 +5639,7 @@ impl Blockchain {
                 return Ok(false);
             }
             *exp += 1;
-            match crate::fee::decompose(tx.payload.pct_ct, tx.tip) {
+            match crate::fee::decompose(tx.payload.pct, tx.tip) {
                 Ok((fee_consumer, fee_industrial)) => {
                     fee_tot_consumer += fee_consumer as u128;
                     fee_tot_industrial += fee_industrial as u128;
@@ -5782,31 +5657,30 @@ impl Blockchain {
         if h.finalize().to_hex().to_string() != block.fee_checksum {
             return Ok(false);
         }
-        let coinbase_consumer_total = block.coinbase_consumer.0 as u128;
+        let coinbase_block_total = block.coinbase_block.0 as u128;
         let coinbase_industrial_total = block.coinbase_industrial.0 as u128;
-        if coinbase_consumer_total < fee_tot_consumer
-            || coinbase_industrial_total < fee_tot_industrial
+        if coinbase_block_total < fee_tot_consumer || coinbase_industrial_total < fee_tot_industrial
         {
             return Ok(false);
         }
-        let read_role_sum = block.read_sub_viewer_ct.0 as u128
-            + block.read_sub_host_ct.0 as u128
-            + block.read_sub_hardware_ct.0 as u128
-            + block.read_sub_verifier_ct.0 as u128
-            + block.read_sub_liquidity_ct.0 as u128;
-        if read_role_sum > block.read_sub_ct.0 as u128 {
+        let read_role_sum = block.read_sub_viewer.0 as u128
+            + block.read_sub_host.0 as u128
+            + block.read_sub_hardware.0 as u128
+            + block.read_sub_verifier.0 as u128
+            + block.read_sub_liquidity.0 as u128;
+        if read_role_sum > block.read_sub.0 as u128 {
             return Ok(false);
         }
-        let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
+        let read_miner_share = block.read_sub.0 as u128 - read_role_sum;
         let expected_consumer = self.block_reward.0 as u128
-            + block.storage_sub_ct.0 as u128
+            + block.storage_sub.0 as u128
             + read_miner_share
-            + block.compute_sub_ct.0 as u128
-            + block.proof_rebate_ct.0 as u128
+            + block.compute_sub.0 as u128
+            + block.proof_rebate.0 as u128
             + fee_tot_consumer
             + fee_tot_industrial;
         let expected_industrial = 0u128;
-        if coinbase_consumer_total != expected_consumer
+        if coinbase_block_total != expected_consumer
             || coinbase_industrial_total != expected_industrial
         {
             return Ok(false);
@@ -5821,50 +5695,18 @@ impl Blockchain {
         Ok(self.is_valid_chain_rust(&self.chain))
     }
 
-    pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
-        if new_chain.len() <= self.chain.len() {
-            return Err(py_value_err("Incoming chain not longer"));
-        }
-        if !self.is_valid_chain_rust(&new_chain) {
-            return Err(py_value_err("Invalid incoming chain"));
-        }
-
-        // Replay economics from the incoming chain to get the correct economics state
-        // This is consensus-critical: we must use the chain's own economics, not local state
-        let replayed_econ = replay_economics_to_tip(&new_chain, &self.params);
-
-        let old_chain = self.chain.clone();
-        let lca = old_chain
-            .iter()
-            .zip(&new_chain)
-            .take_while(|(a, b)| a.hash == b.hash)
-            .count();
-        let depth = old_chain.len().saturating_sub(lca);
-        if depth > 0 {
-            #[cfg(feature = "telemetry")]
-            observer::record_reorg(depth as u64);
-        }
-        if depth > 0 {
-            for block in old_chain.iter().rev().take(depth) {
-                self.proof_tracker.rollback_claim(block.index);
-            }
-        }
-        self.chain.clear();
-        self.accounts.clear();
-        self.emission = 0;
-        self.block_height = 0;
-        self.economics_epoch_tx_volume_block = 0;
-        self.economics_epoch_tx_count = 0;
-        self.economics_epoch_treasury_inflow_block = 0;
-        self.economics_epoch_storage_payout_block = 0;
-        self.economics_epoch_compute_payout_block = 0;
-        self.economics_epoch_ad_payout_block = 0;
-        let mut epoch_tx_window: VecDeque<(u64, u64)> =
-            VecDeque::with_capacity(EPOCH_BLOCKS as usize + 1);
+    pub(crate) fn build_chain_import_state(
+        new_chain: Vec<Block>,
+        params: &Params,
+        replayed_econ: &ReplayedEconomicsState,
+    ) -> PyResult<ChainImportState> {
+        let mut accounts: HashMap<String, Account> = HashMap::new();
+        let mut emission = 0u64;
+        let mut block_height = 0u64;
+        let mut recent_timestamps: VecDeque<u64> = VecDeque::with_capacity(DIFFICULTY_WINDOW);
+        let mut reorg_hashes: Vec<String> = Vec::with_capacity(new_chain.len());
 
         for block in &new_chain {
-            let mut block_tx_count = 0u64;
-            let mut block_tx_volume = 0u64;
             let miner_addr = block
                 .transactions
                 .first()
@@ -5873,58 +5715,34 @@ impl Blockchain {
             let mut fee_tot_consumer: u128 = 0;
             let mut fee_tot_industrial: u128 = 0;
             for tx in block.transactions.iter().skip(1) {
-                block_tx_count = block_tx_count.saturating_add(1);
-                block_tx_volume = block_tx_volume
-                    .saturating_add(tx.payload.amount_consumer)
-                    .saturating_add(tx.payload.amount_industrial)
-                    .saturating_add(tx.tip);
                 if tx.payload.from_ != "0".repeat(34) {
-                    let pk = to_array_32(&tx.public_key)
-                        .ok_or_else(|| py_value_err("Invalid pubkey in chain"))?;
-                    let vk = VerifyingKey::from_bytes(&pk)
-                        .map_err(|_| py_value_err("Invalid pubkey in chain"))?;
-                    let sig_bytes = to_array_64(&tx.signature.ed25519)
-                        .ok_or_else(|| py_value_err("Invalid signature in chain"))?;
-                    let sig = Signature::from_bytes(&sig_bytes);
-                    let mut msg = domain_tag().to_vec();
-                    msg.extend(canonical_payload_bytes(&tx.payload));
-                    if vk.verify(&msg, &sig).is_err() {
-                        return Err(py_value_err("Bad tx signature in chain"));
-                    }
-                    if let Some(s) = self.accounts.get_mut(&tx.payload.from_) {
+                    if let Some(s) = accounts.get_mut(&tx.payload.from_) {
                         let (fee_consumer, fee_industrial) =
-                            crate::fee::decompose(tx.payload.pct_ct, block.base_fee + tx.tip)
+                            crate::fee::decompose(tx.payload.pct, block.base_fee + tx.tip)
                                 .unwrap_or((0, 0));
-                        let total_c = tx.payload.amount_consumer + fee_consumer;
-                        let total_i = tx.payload.amount_industrial + fee_industrial;
-                        if s.balance.consumer < total_c || s.balance.industrial < total_i {
+                        let total_amount = tx.payload.amount_consumer
+                            + tx.payload.amount_industrial
+                            + fee_consumer
+                            + fee_industrial;
+                        if s.balance.amount < total_amount {
                             return Err(ErrBalanceUnderflow::new_err("balance underflow"));
                         }
-                        s.balance.consumer -= total_c;
-                        s.balance.industrial -= total_i;
+                        s.balance.amount -= total_amount;
                         s.nonce = tx.payload.nonce;
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
                     }
                 }
-                let r = self
-                    .accounts
-                    .entry(tx.payload.to.clone())
-                    .or_insert(Account {
-                        address: tx.payload.to.clone(),
-                        balance: TokenBalance {
-                            consumer: 0,
-                            industrial: 0,
-                        },
-                        nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
-                        pending_nonce: 0,
-                        pending_nonces: HashSet::new(),
-                        sessions: Vec::new(),
-                    });
-                r.balance.consumer += tx.payload.amount_consumer;
-                r.balance.industrial += tx.payload.amount_industrial;
+                let r = accounts.entry(tx.payload.to.clone()).or_insert(Account {
+                    address: tx.payload.to.clone(),
+                    balance: TokenBalance { amount: 0 },
+                    nonce: 0,
+                    pending_amount: 0,
+                    pending_nonce: 0,
+                    pending_nonces: HashSet::new(),
+                    sessions: Vec::new(),
+                });
+                r.balance.amount += tx.payload.amount_consumer + tx.payload.amount_industrial;
             }
             let mut h = blake3::Hasher::new();
             let fee_consumer_u64 =
@@ -5936,109 +5754,224 @@ impl Blockchain {
             if h.finalize().to_hex().to_string() != block.fee_checksum {
                 return Err(py_value_err("Fee checksum mismatch"));
             }
-            let coinbase_consumer_total = block.coinbase_consumer.0 as u128;
+            let coinbase_block_total = block.coinbase_block.0 as u128;
             let coinbase_industrial_total = block.coinbase_industrial.0 as u128;
-            if coinbase_consumer_total < fee_tot_consumer
+            if coinbase_block_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
             {
                 return Err(py_value_err("Fee mismatch"));
             }
-            // Validate read subsidy role splits
-            let read_role_sum = block.read_sub_viewer_ct.0 as u128
-                + block.read_sub_host_ct.0 as u128
-                + block.read_sub_hardware_ct.0 as u128
-                + block.read_sub_verifier_ct.0 as u128
-                + block.read_sub_liquidity_ct.0 as u128;
-            if read_role_sum > block.read_sub_ct.0 as u128 {
+            let read_role_sum = block.read_sub_viewer.0 as u128
+                + block.read_sub_host.0 as u128
+                + block.read_sub_hardware.0 as u128
+                + block.read_sub_verifier.0 as u128
+                + block.read_sub_liquidity.0 as u128;
+            if read_role_sum > block.read_sub.0 as u128 {
                 return Err(py_value_err("Read subsidy role sum exceeds total"));
             }
-            let read_miner_share = block.read_sub_ct.0 as u128 - read_role_sum;
-            // Use REPLAYED economics from the incoming chain, not local self.block_reward
-            // This is consensus-critical: chain economics must be deterministic
+            let read_miner_share = block.read_sub.0 as u128 - read_role_sum;
             let expected_consumer = replayed_econ.block_reward_per_block as u128
-                + block.storage_sub_ct.0 as u128
+                + block.storage_sub.0 as u128
                 + read_miner_share
-                + block.compute_sub_ct.0 as u128
-                + block.proof_rebate_ct.0 as u128
+                + block.compute_sub.0 as u128
+                + block.proof_rebate.0 as u128
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
-            if coinbase_consumer_total != expected_consumer
+            if coinbase_block_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
                 return Err(py_value_err("Coinbase mismatch"));
             }
-            let miner = self.accounts.entry(miner_addr.clone()).or_insert(Account {
+            let miner = accounts.entry(miner_addr.clone()).or_insert(Account {
                 address: miner_addr.clone(),
-                balance: TokenBalance {
-                    consumer: 0,
-                    industrial: 0,
-                },
+                balance: TokenBalance { amount: 0 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),
             });
-            miner.balance.consumer = miner
+            let coinbase_total = block.coinbase_block.0 + block.coinbase_industrial.0;
+            miner.balance.amount = miner
                 .balance
-                .consumer
-                .checked_add(block.coinbase_consumer.0)
-                .ok_or_else(|| py_value_err("miner consumer overflow"))?;
-            miner.balance.industrial = miner
-                .balance
-                .industrial
-                .checked_add(block.coinbase_industrial.0)
-                .ok_or_else(|| py_value_err("miner industrial overflow"))?;
+                .amount
+                .checked_add(coinbase_total)
+                .ok_or_else(|| py_value_err("miner balance overflow"))?;
             if let Some(cb) = block.transactions.first() {
-                if cb.payload.amount_consumer != block.coinbase_consumer.0
+                if cb.payload.amount_consumer != block.coinbase_block.0
                     || cb.payload.amount_industrial != block.coinbase_industrial.0
                 {
-                    // reject forks that tamper with recorded coinbase totals
                     return Err(py_value_err("Coinbase mismatch"));
                 }
             }
-            self.emission += block.coinbase_consumer.0 + block.coinbase_industrial.0;
-            self.chain.push(block.clone());
-            state::append_difficulty(
-                &std::path::Path::new(&self.path).join("diff_history"),
-                block.index,
-                block.difficulty,
-            );
-            self.reorg.record(&block.hash);
-            self.recent_timestamps.push_back(block.timestamp_millis);
-            if self.recent_timestamps.len() > DIFFICULTY_WINDOW {
-                self.recent_timestamps.pop_front();
+            emission = emission
+                .saturating_add(block.coinbase_block.0)
+                .saturating_add(block.coinbase_industrial.0);
+            recent_timestamps.push_back(block.timestamp_millis);
+            if recent_timestamps.len() > DIFFICULTY_WINDOW {
+                recent_timestamps.pop_front();
             }
-            let last = self.chain.last().map_or(1, |b| b.difficulty);
-            let ts = self.recent_timestamps.make_contiguous();
-            let (next, hint) =
-                consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
-            self.difficulty = next;
-            self.retune_hint = hint;
-            self.block_height += 1;
-            epoch_tx_window.push_back((block_tx_count, block_tx_volume));
-            if epoch_tx_window.len() > EPOCH_BLOCKS as usize {
-                epoch_tx_window.pop_front();
+            reorg_hashes.push(block.hash.clone());
+            block_height = block_height.saturating_add(1);
+        }
+
+        let mut recent_miners: VecDeque<String> = VecDeque::with_capacity(RECENT_MINER_WINDOW);
+        for blk in new_chain.iter().rev().take(RECENT_MINER_WINDOW) {
+            if let Some(tx0) = blk.transactions.first() {
+                recent_miners.push_front(tx0.payload.to.clone());
             }
         }
 
-        let last = self.chain.last().map_or(1, |b| b.difficulty);
-        let ts = self.recent_timestamps.make_contiguous();
-        let (next, hint) =
-            consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
-        self.difficulty = next;
-        self.retune_hint = hint;
+        let (difficulty, retune_hint) = if let Some(last) = new_chain.last() {
+            let ts = recent_timestamps.make_contiguous();
+            consensus::difficulty_retune::retune(last.difficulty, ts, last.retune_hint, params)
+        } else {
+            (1, 0)
+        };
 
-        // Update economics state from the replayed chain economics (not preserved local state)
+        Ok(ChainImportState {
+            chain: new_chain,
+            accounts,
+            emission,
+            block_height,
+            recent_timestamps,
+            difficulty,
+            retune_hint,
+            reorg_hashes,
+            recent_miners,
+        })
+    }
+
+    pub(crate) fn apply_import_state(
+        &mut self,
+        state: ChainImportState,
+        replayed_econ: ReplayedEconomicsState,
+        rollback_indices: &[u64],
+    ) -> PyResult<()> {
+        if state.chain.len() <= self.chain.len() {
+            return Err(py_value_err("Incoming chain not longer"));
+        }
+        if !rollback_indices.is_empty() {
+            #[cfg(feature = "telemetry")]
+            observer::record_reorg(rollback_indices.len() as u64);
+            for index in rollback_indices {
+                self.proof_tracker.rollback_claim(*index);
+            }
+        }
+        self.chain = state.chain;
+        self.accounts = state.accounts;
+        self.emission = state.emission;
+        self.block_height = state.block_height;
+        self.recent_timestamps = state.recent_timestamps;
+        self.difficulty = state.difficulty;
+        self.retune_hint = state.retune_hint;
+        self.reorg.hashes = state.reorg_hashes;
+        self.recent_miners = state.recent_miners;
+
+        self.economics_epoch_tx_volume_block = 0;
+        self.economics_epoch_tx_count = 0;
+        self.economics_epoch_treasury_inflow_block = 0;
+        self.economics_epoch_storage_payout_block = 0;
+        self.economics_epoch_compute_payout_block = 0;
+        self.economics_epoch_ad_payout_block = 0;
+
         self.block_reward = TokenAmount::new(replayed_econ.block_reward_per_block);
         self.economics_block_reward_per_block = replayed_econ.block_reward_per_block;
         self.economics_prev_subsidy = replayed_econ.prev_subsidy;
         self.economics_prev_tariff = replayed_econ.prev_tariff;
         self.economics_prev_annual_issuance_block = replayed_econ.prev_annual_issuance;
+        self.economics_baseline_tx_count = replayed_econ.baseline_tx_count;
+        self.economics_baseline_tx_volume = replayed_econ.baseline_tx_volume;
+        self.economics_baseline_miners = replayed_econ.baseline_miners;
+
+        let diff_path = std::path::Path::new(&self.path).join("diff_history");
+        for block in &self.chain {
+            state::append_difficulty(&diff_path, block.index, block.difficulty);
+        }
 
         Ok(())
+    }
+
+    pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
+        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            // Track reorg even in fast mine mode
+            #[cfg(feature = "telemetry")]
+            {
+                let lca = self
+                    .chain
+                    .iter()
+                    .zip(&new_chain)
+                    .take_while(|(a, b)| a.hash == b.hash)
+                    .count();
+                let depth = self.chain.len().saturating_sub(lca);
+                if depth > 0 {
+                    consensus::observer::record_reorg(depth as u64);
+                }
+            }
+            self.chain = new_chain;
+            self.block_height = self.chain.len() as u64;
+            self.recent_timestamps.clear();
+            for b in self.chain.iter().rev().take(DIFFICULTY_WINDOW) {
+                self.recent_timestamps.push_front(b.timestamp_millis);
+            }
+            return Ok(());
+        }
+        if new_chain.len() <= self.chain.len() {
+            return Err(py_value_err("Incoming chain not longer"));
+        }
+        let replayed_econ = Self::validate_chain_with_params(&new_chain, &self.params)
+            .map_err(|_| py_value_err("Invalid incoming chain"))?;
+        self.import_chain_validated(new_chain, replayed_econ)
+    }
+
+    pub(crate) fn import_chain_validated(
+        &mut self,
+        new_chain: Vec<Block>,
+        replayed_econ: ReplayedEconomicsState,
+    ) -> PyResult<()> {
+        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            // Track reorg even in fast mine mode
+            #[cfg(feature = "telemetry")]
+            {
+                let lca = self
+                    .chain
+                    .iter()
+                    .zip(&new_chain)
+                    .take_while(|(a, b)| a.hash == b.hash)
+                    .count();
+                let depth = self.chain.len().saturating_sub(lca);
+                if depth > 0 {
+                    consensus::observer::record_reorg(depth as u64);
+                }
+            }
+            self.chain = new_chain;
+            self.block_height = self.chain.len() as u64;
+            self.recent_timestamps.clear();
+            for b in self.chain.iter().rev().take(DIFFICULTY_WINDOW) {
+                self.recent_timestamps.push_front(b.timestamp_millis);
+            }
+            return Ok(());
+        }
+        if new_chain.len() <= self.chain.len() {
+            return Err(py_value_err("Incoming chain not longer"));
+        }
+        let lca = self
+            .chain
+            .iter()
+            .zip(&new_chain)
+            .take_while(|(a, b)| a.hash == b.hash)
+            .count();
+        let depth = self.chain.len().saturating_sub(lca);
+        let rollback_indices: Vec<u64> = self
+            .chain
+            .iter()
+            .rev()
+            .take(depth)
+            .map(|b| b.index)
+            .collect();
+        let state = Self::build_chain_import_state(new_chain, &self.params, &replayed_econ)?;
+        self.apply_import_state(state, replayed_econ, &rollback_indices)
     }
 
     /// Return the current state root and Merkle proof for the given account.
@@ -6065,10 +5998,17 @@ impl Blockchain {
 
     #[allow(dead_code)]
     fn is_valid_chain_rust(&self, chain: &[Block]) -> bool {
+        Self::validate_chain_with_params(chain, &self.params).is_ok()
+    }
+
+    pub(crate) fn validate_chain_with_params(
+        chain: &[Block],
+        params: &Params,
+    ) -> Result<ReplayedEconomicsState, &'static str> {
         // Replay economics from genesis to validate coinbase rewards deterministically
         // This ensures two nodes seeing the same chain compute identical economics
         let replayed_econ = if !chain.is_empty() {
-            replay_economics_to_tip(chain, &self.params)
+            replay_economics_to_tip(chain, params)
         } else {
             ReplayedEconomicsState::default()
         };
@@ -6081,21 +6021,21 @@ impl Blockchain {
                 chain[i - 1].hash.clone()
             };
             if b.previous_hash != expected_prev {
-                return false;
+                return Err("invalid_previous_hash");
             }
             if b.difficulty != difficulty::expected_difficulty_from_chain(&chain[..i]) {
-                return false;
+                return Err("invalid_difficulty");
             }
             if b.transactions.is_empty() {
-                return false;
+                return Err("missing_coinbase");
             }
             if b.transactions[0].payload.from_ != "0".repeat(34) {
-                return false;
+                return Err("invalid_coinbase_sender");
             }
-            if b.transactions[0].payload.amount_consumer != b.coinbase_consumer.0
+            if b.transactions[0].payload.amount_consumer != b.coinbase_block.0
                 || b.transactions[0].payload.amount_industrial != b.coinbase_industrial.0
             {
-                return false;
+                return Err("coinbase_mismatch");
             }
             let calc = calculate_hash(
                 b.index,
@@ -6104,35 +6044,26 @@ impl Blockchain {
                 b.nonce,
                 b.difficulty,
                 b.base_fee,
-                b.coinbase_consumer,
+                b.coinbase_block,
                 b.coinbase_industrial,
-                b.storage_sub_ct,
-                b.read_sub_ct,
-                b.read_sub_viewer_ct,
-                b.read_sub_host_ct,
-                b.read_sub_hardware_ct,
-                b.read_sub_verifier_ct,
-                b.read_sub_liquidity_ct,
-                b.ad_viewer_ct,
-                b.ad_host_ct,
-                b.ad_hardware_ct,
-                b.ad_verifier_ct,
-                b.ad_liquidity_ct,
-                b.ad_miner_ct,
-                b.ad_host_it,
-                b.ad_hardware_it,
-                b.ad_verifier_it,
-                b.ad_liquidity_it,
-                b.ad_miner_it,
+                b.storage_sub,
+                b.read_sub,
+                b.read_sub_viewer,
+                b.read_sub_host,
+                b.read_sub_hardware,
+                b.read_sub_verifier,
+                b.read_sub_liquidity,
+                b.ad_viewer,
+                b.ad_host,
+                b.ad_hardware,
+                b.ad_verifier,
+                b.ad_liquidity,
+                b.ad_miner,
                 b.ad_total_usd_micros,
                 b.ad_settlement_count,
-                b.ad_oracle_ct_price_usd_micros,
-                b.ad_oracle_it_price_usd_micros,
-                b.compute_sub_ct,
-                b.proof_rebate_ct,
-                b.storage_sub_it,
-                b.read_sub_it,
-                b.compute_sub_it,
+                b.ad_oracle_price_usd_micros,
+                b.compute_sub,
+                b.proof_rebate,
                 b.read_root,
                 &b.fee_checksum,
                 &b.transactions,
@@ -6146,13 +6077,13 @@ impl Blockchain {
                 &b.receipts,
             );
             if calc != b.hash {
-                return false;
+                return Err("hash_mismatch");
             }
             let bytes = hex_to_bytes(&b.hash);
             if leading_zero_bits(&bytes)
                 < difficulty::expected_difficulty_from_chain(&chain[..i]) as u32
             {
-                return false;
+                return Err("difficulty_mismatch");
             }
             let mut expected_nonce: HashMap<String, u64> = HashMap::new();
             let mut seen: HashSet<[u8; 32]> = HashSet::new();
@@ -6163,90 +6094,99 @@ impl Blockchain {
                 if tx.payload.from_ != "0".repeat(34) {
                     let pk = match to_array_32(&tx.public_key) {
                         Some(p) => p,
-                        None => return false,
+                        None => return Err("invalid_pubkey"),
                     };
                     let vk = match VerifyingKey::from_bytes(&pk) {
                         Ok(vk) => vk,
-                        Err(_) => return false,
+                        Err(_) => return Err("invalid_pubkey"),
                     };
                     let sig_bytes = match to_array_64(&tx.signature.ed25519) {
                         Some(b) => b,
-                        None => return false,
+                        None => return Err("invalid_signature"),
                     };
                     let sig = Signature::from_bytes(&sig_bytes);
                     let mut bytes = domain_tag().to_vec();
                     bytes.extend(canonical_payload_bytes(&tx.payload));
                     if vk.verify(&bytes, &sig).is_err() {
-                        return false;
+                        return Err("signature_mismatch");
                     }
                     let entry = expected_nonce.entry(tx.payload.from_.clone()).or_insert(0);
                     *entry += 1;
                     if tx.payload.nonce != *entry {
-                        return false;
+                        return Err("nonce_mismatch");
                     }
                     if !seen_nonce.insert((tx.payload.from_.clone(), tx.payload.nonce)) {
-                        return false;
+                        return Err("duplicate_nonce");
                     }
                 }
                 if !seen.insert(tx.id()) {
-                    return false;
+                    return Err("duplicate_tx");
                 }
-                match crate::fee::decompose(tx.payload.pct_ct, tx.tip) {
+                match crate::fee::decompose(tx.payload.pct, tx.tip) {
                     Ok((fee_consumer, fee_industrial)) => {
                         fee_tot_consumer += fee_consumer as u128;
                         fee_tot_industrial += fee_industrial as u128;
                     }
-                    Err(_) => return false,
+                    Err(_) => return Err("fee_decompose_failed"),
                 }
             }
             let mut h = blake3::Hasher::new();
             let fee_consumer_u64 = match u64::try_from(fee_tot_consumer) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return Err("fee_overflow"),
             };
             let fee_industrial_u64 = match u64::try_from(fee_tot_industrial) {
                 Ok(v) => v,
-                Err(_) => return false,
+                Err(_) => return Err("fee_overflow"),
             };
             h.update(&fee_consumer_u64.to_le_bytes());
             h.update(&fee_industrial_u64.to_le_bytes());
             if h.finalize().to_hex().to_string() != b.fee_checksum {
-                return false;
+                return Err("fee_checksum_mismatch");
             }
-            let coinbase_consumer_total = b.coinbase_consumer.0 as u128;
+            let coinbase_block_total = b.coinbase_block.0 as u128;
             let coinbase_industrial_total = b.coinbase_industrial.0 as u128;
-            if coinbase_consumer_total < fee_tot_consumer
+            if coinbase_block_total < fee_tot_consumer
                 || coinbase_industrial_total < fee_tot_industrial
             {
-                return false;
+                return Err("fee_mismatch");
             }
             // Validate read subsidy role splits
-            let read_role_sum = b.read_sub_viewer_ct.0 as u128
-                + b.read_sub_host_ct.0 as u128
-                + b.read_sub_hardware_ct.0 as u128
-                + b.read_sub_verifier_ct.0 as u128
-                + b.read_sub_liquidity_ct.0 as u128;
-            if read_role_sum > b.read_sub_ct.0 as u128 {
-                return false;
+            let read_role_sum = b.read_sub_viewer.0 as u128
+                + b.read_sub_host.0 as u128
+                + b.read_sub_hardware.0 as u128
+                + b.read_sub_verifier.0 as u128
+                + b.read_sub_liquidity.0 as u128;
+            if read_role_sum > b.read_sub.0 as u128 {
+                return Err("read_subsidy_split_mismatch");
             }
-            let read_miner_share = b.read_sub_ct.0 as u128 - read_role_sum;
+            let read_miner_share = b.read_sub.0 as u128 - read_role_sum;
             // Use REPLAYED economics state, not local self.block_reward
             // This is consensus-critical: two nodes must agree on expected rewards
             let expected_consumer = replayed_econ.block_reward_per_block as u128
-                + b.storage_sub_ct.0 as u128
+                + b.storage_sub.0 as u128
                 + read_miner_share
-                + b.compute_sub_ct.0 as u128
-                + b.proof_rebate_ct.0 as u128
+                + b.compute_sub.0 as u128
+                + b.proof_rebate.0 as u128
                 + fee_tot_consumer
                 + fee_tot_industrial;
             let expected_industrial = 0u128;
-            if coinbase_consumer_total != expected_consumer
+            if coinbase_block_total != expected_consumer
                 || coinbase_industrial_total != expected_industrial
             {
-                return false;
+                diagnostics::tracing::warn!(
+                    target = "consensus",
+                    height = b.index,
+                    expected_consumer,
+                    actual_consumer = coinbase_block_total,
+                    expected_industrial,
+                    actual_industrial = coinbase_industrial_total,
+                    "coinbase_mismatch"
+                );
+                return Err("coinbase_mismatch");
             }
         }
-        true
+        Ok(replayed_econ)
     }
 }
 
@@ -6610,12 +6550,13 @@ mod tests {
     #[test]
     fn read_subsidy_split_distribution() {
         let mut bc = Blockchain::default();
+        bc.config.read_ack_privacy = crate::config::ReadAckPrivacyMode::Disabled;
         bc.block_reward = TokenAmount::new(0);
         bc.economics_block_reward_per_block = 1; // Set to 1 to avoid INITIAL_BLOCK_REWARD fallback, but effectively zero after logistic factor
-        bc.beta_storage_sub_ct_raw = 0;
-        bc.kappa_cpu_sub_ct_raw = 0;
-        bc.lambda_bytes_out_sub_ct_raw = 0;
-        bc.gamma_read_sub_ct_raw = 1;
+        bc.beta_storage_sub_raw = 0;
+        bc.kappa_cpu_sub_raw = 0;
+        bc.lambda_bytes_out_sub_raw = 0;
+        bc.gamma_read_sub_raw = 1;
         bc.params.read_subsidy_viewer_percent = 40;
         bc.params.read_subsidy_host_percent = 30;
         bc.params.read_subsidy_hardware_percent = 15;
@@ -6627,21 +6568,21 @@ mod tests {
         bc.submit_read_ack(ack).expect("ack accepted");
 
         let miner = "miner.test";
-        bc.add_account(miner.to_string(), 0, 0).unwrap();
+        bc.add_account(miner.to_string(), 0).unwrap();
         let block = bc.mine_block_at(miner, 1).expect("mined");
 
-        assert_eq!(block.read_sub_ct.0, 100);
-        assert_eq!(block.read_sub_viewer_ct.0, 40);
-        assert_eq!(block.read_sub_host_ct.0, 30);
-        assert_eq!(block.read_sub_hardware_ct.0, 15);
-        assert_eq!(block.read_sub_verifier_ct.0, 10);
-        assert_eq!(block.read_sub_liquidity_ct.0, 5);
-        assert_eq!(block.ad_viewer_ct.0, 0);
-        assert_eq!(block.ad_host_ct.0, 0);
-        assert_eq!(block.ad_hardware_ct.0, 0);
-        assert_eq!(block.ad_verifier_ct.0, 0);
-        assert_eq!(block.ad_liquidity_ct.0, 0);
-        assert_eq!(block.ad_miner_ct.0, 0);
+        assert_eq!(block.read_sub.0, 100);
+        assert_eq!(block.read_sub_viewer.0, 40);
+        assert_eq!(block.read_sub_host.0, 30);
+        assert_eq!(block.read_sub_hardware.0, 15);
+        assert_eq!(block.read_sub_verifier.0, 10);
+        assert_eq!(block.read_sub_liquidity.0, 5);
+        assert_eq!(block.ad_viewer.0, 0);
+        assert_eq!(block.ad_host.0, 0);
+        assert_eq!(block.ad_hardware.0, 0);
+        assert_eq!(block.ad_verifier.0, 0);
+        assert_eq!(block.ad_liquidity.0, 0);
+        assert_eq!(block.ad_miner.0, 0);
 
         let pk = signing.verifying_key().to_bytes();
         let viewer_address = super::viewer_address_from_pk(&pk);
@@ -6653,42 +6594,42 @@ mod tests {
         let viewer_balance = bc
             .accounts
             .get(&viewer_address)
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         assert_eq!(viewer_balance, 40);
 
         let host_balance = bc
             .accounts
             .get(&host_address)
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         assert_eq!(host_balance, 30);
 
         let hardware_balance = bc
             .accounts
             .get(&hardware_address)
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         assert_eq!(hardware_balance, 15);
 
         let verifier_balance = bc
             .accounts
             .get(&verifier_address)
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         assert_eq!(verifier_balance, 10);
 
         let liquidity_balance = bc
             .accounts
             .get(&liquidity_address)
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         assert_eq!(liquidity_balance, 5);
 
         let miner_balance = bc
             .accounts
             .get(miner)
-            .map(|a| a.balance.consumer)
+            .map(|a| a.balance.amount)
             .unwrap_or(0);
         // Miner gets 1 from minimal base reward (economics_block_reward_per_block=1)
         // The test sets this to 1 to avoid INITIAL_BLOCK_REWARD fallback while keeping reward minimal
@@ -6785,7 +6726,7 @@ mod market_metric_tests {
         bc.economics_epoch_storage_payout_block = 5_000;
         bc.economics_epoch_compute_payout_block = 3_000;
         bc.economics_epoch_ad_payout_block = 1_000;
-        bc.params.rent_rate_ct_per_byte = 5;
+        bc.params.rent_rate_per_byte = 5;
         bc.params.ad_cap_provider_count = 10;
 
         crate::compute_market::price_board::record_price(FeeLane::Industrial, 100, 1.0);
@@ -6871,20 +6812,11 @@ fn calculate_hash_with_cached_receipts(
     ad_verifier: TokenAmount,
     ad_liquidity: TokenAmount,
     ad_miner: TokenAmount,
-    ad_host_it: TokenAmount,
-    ad_hardware_it: TokenAmount,
-    ad_verifier_it: TokenAmount,
-    ad_liquidity_it: TokenAmount,
-    ad_miner_it: TokenAmount,
     ad_total_usd_micros: u64,
     ad_settlement_count: u64,
-    ad_oracle_ct_price_usd_micros: u64,
-    ad_oracle_it_price_usd_micros: u64,
+    ad_oracle_price_usd_micros: u64,
     compute_sub: TokenAmount,
     proof_rebate: TokenAmount,
-    storage_sub_it: TokenAmount,
-    read_sub_it: TokenAmount,
-    compute_sub_it: TokenAmount,
     read_root: [u8; 32],
     fee_checksum: &str,
     txs: &[SignedTransaction],
@@ -6924,20 +6856,11 @@ fn calculate_hash_with_cached_receipts(
         ad_verifier: ad_verifier.0,
         ad_liquidity: ad_liquidity.0,
         ad_miner: ad_miner.0,
-        ad_host_it: ad_host_it.0,
-        ad_hardware_it: ad_hardware_it.0,
-        ad_verifier_it: ad_verifier_it.0,
-        ad_liquidity_it: ad_liquidity_it.0,
-        ad_miner_it: ad_miner_it.0,
         ad_total_usd_micros,
         ad_settlement_count,
-        ad_oracle_ct_price_usd_micros,
-        ad_oracle_it_price_usd_micros,
+        ad_oracle_price_usd_micros,
         compute_sub: compute_sub.0,
         proof_rebate: proof_rebate.0,
-        storage_sub_it: storage_sub_it.0,
-        read_sub_it: read_sub_it.0,
-        compute_sub_it: compute_sub_it.0,
         read_root,
         fee_checksum,
         state_root,
@@ -6977,20 +6900,11 @@ fn calculate_hash(
     ad_verifier: TokenAmount,
     ad_liquidity: TokenAmount,
     ad_miner: TokenAmount,
-    ad_host_it: TokenAmount,
-    ad_hardware_it: TokenAmount,
-    ad_verifier_it: TokenAmount,
-    ad_liquidity_it: TokenAmount,
-    ad_miner_it: TokenAmount,
     ad_total_usd_micros: u64,
     ad_settlement_count: u64,
-    ad_oracle_ct_price_usd_micros: u64,
-    ad_oracle_it_price_usd_micros: u64,
+    ad_oracle_price_usd_micros: u64,
     compute_sub: TokenAmount,
     proof_rebate: TokenAmount,
-    storage_sub_it: TokenAmount,
-    read_sub_it: TokenAmount,
-    compute_sub_it: TokenAmount,
     read_root: [u8; 32],
     fee_checksum: &str,
     txs: &[SignedTransaction],
@@ -7039,20 +6953,11 @@ fn calculate_hash(
         ad_verifier,
         ad_liquidity,
         ad_miner,
-        ad_host_it,
-        ad_hardware_it,
-        ad_verifier_it,
-        ad_liquidity_it,
-        ad_miner_it,
         ad_total_usd_micros,
         ad_settlement_count,
-        ad_oracle_ct_price_usd_micros,
-        ad_oracle_it_price_usd_micros,
+        ad_oracle_price_usd_micros,
         compute_sub,
         proof_rebate,
-        storage_sub_it,
-        read_sub_it,
-        compute_sub_it,
         read_root,
         fee_checksum,
         txs,
@@ -7071,14 +6976,29 @@ fn calculate_hash(
 ///
 /// Returns the private and public key as raw byte vectors. The keys are
 /// suitable for both transaction signing and simple message authentication.
+///
+/// Includes a self-test to ensure the generated key verifies with the in-house
+/// Ed25519 implementation.
 #[must_use]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
-    rng.fill_bytes(&mut priv_bytes);
-    let sk = SigningKey::from_bytes(&priv_bytes);
-    let vk = sk.verifying_key();
-    (priv_bytes.to_vec(), vk.to_bytes().to_vec())
+    for _ in 0..128 {
+        rng.fill_bytes(&mut priv_bytes);
+        let sk = SigningKey::from_bytes(&priv_bytes);
+        let vk = sk.verifying_key();
+        let vk_bytes = vk.to_bytes();
+        let sig = sk.sign(b"the_block_keypair_self_test");
+        if let Ok(vk_parsed) = VerifyingKey::from_bytes(&vk_bytes) {
+            if vk_parsed
+                .verify(b"the_block_keypair_self_test", &sig)
+                .is_ok()
+            {
+                return (priv_bytes.to_vec(), vk_bytes.to_vec());
+            }
+        }
+    }
+    panic!("generate_keypair failed to produce a verifiable key after 128 attempts");
 }
 
 /// Sign an arbitrary message with a 32-byte Ed25519 private key.
@@ -7121,7 +7041,7 @@ pub fn mine_block_py(txs: Vec<SignedTransaction>) -> PyResult<Block> {
     for tx in txs {
         let sender = tx.payload.from_.clone();
         if sender != "0".repeat(34) && !bc.accounts.contains_key(&sender) {
-            bc.add_account(sender.clone(), u64::MAX / 2, u64::MAX / 2)?;
+            bc.add_account(sender.clone(), u64::MAX / 2)?;
         }
         bc.submit_transaction(tx).map_err(PyError::from)?;
     }
@@ -7290,24 +7210,19 @@ mod reservation_tests {
     tb_prop_test!(reservation_rollback_on_panic, |runner| {
         runner
             .add_random_case("reservation rollback", 32, |rng| {
-                let cons = rng.range_u64(0..=5_000);
-                let ind = rng.range_u64(0..=5_000);
+                let amount = rng.range_u64(0..=10_000);
                 let mut acc = Account {
                     address: "a".into(),
-                    balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
-                    },
+                    balance: TokenBalance { amount: 0 },
                     nonce: 0,
-                    pending_consumer: 0,
-                    pending_industrial: 0,
+                    pending_amount: 0,
                     pending_nonce: 0,
                     pending_nonces: HashSet::new(),
                     sessions: Vec::new(),
                 };
                 let lock = Mutex::new(());
                 let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-                let res = ReservationGuard::new(guard, &mut acc, cons, ind, 1);
+                let res = ReservationGuard::new(guard, &mut acc, amount, 1);
 
                 // Silence the expected panic to avoid noisy output when telemetry is enabled.
                 let hook = std::panic::take_hook();
@@ -7319,8 +7234,7 @@ mod reservation_tests {
                 std::panic::set_hook(hook);
 
                 assert!(result.is_err());
-                assert_eq!(acc.pending_consumer, 0);
-                assert_eq!(acc.pending_industrial, 0);
+                assert_eq!(acc.pending_amount, 0);
                 assert_eq!(acc.pending_nonce, 0);
                 assert!(acc.pending_nonces.is_empty());
             })

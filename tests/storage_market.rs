@@ -26,7 +26,7 @@ fn sample_contract_with_root() -> (StorageContract, Vec<Vec<u8>>, MerkleTree) {
         retention_blocks: 10,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 0,
+        total_deposit: 0,
         last_payment_block: None,
         storage_root: tree.root,
     };
@@ -88,7 +88,7 @@ fn payments_accrue() {
         retention_blocks: 4,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 0,
+        total_deposit: 0,
         last_payment_block: None,
         storage_root: tree.root,
     };

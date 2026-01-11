@@ -41,6 +41,8 @@ pub struct Hello {
     pub nonce: u64,
     pub transport: Transport,
     #[serde(default = "foundation_serialization::defaults::default")]
+    pub gossip_addr: Option<std::net::SocketAddr>,
+    #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_addr: Option<std::net::SocketAddr>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub quic_cert: Option<Bytes>,
@@ -387,6 +389,7 @@ mod tests {
             agent: "test-node".into(),
             nonce: 0,
             transport: Transport::Tcp,
+            gossip_addr: None,
             quic_addr: None,
             quic_cert: None,
             quic_fingerprint: None,

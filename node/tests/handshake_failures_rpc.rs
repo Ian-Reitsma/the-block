@@ -1,13 +1,10 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
-use runtime::{io::read_to_end, net::TcpStream};
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::net::{self, Hello, Message, Payload, PROTOCOL_VERSION};
 use the_block::p2p::handshake::Transport;
-use the_block::{generate_keypair, rpc::run_rpc_server, Blockchain};
-use util::timeout::expect_timeout;
+use the_block::{generate_keypair, Blockchain};
 
 mod util;
 
@@ -20,26 +17,6 @@ fn init_env() -> sys::tempfile::TempDir {
     std::env::remove_var("HTTPS_PROXY");
     std::env::remove_var("https_proxy");
     dir
-}
-
-async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
-    let addr: SocketAddr = addr.parse().unwrap();
-    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
-    let req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    expect_timeout(stream.write_all(req.as_bytes()))
-        .await
-        .unwrap();
-    let mut resp = Vec::new();
-    expect_timeout(read_to_end(&mut stream, &mut resp))
-        .await
-        .unwrap();
-    let resp = String::from_utf8(resp).unwrap();
-    let body_idx = resp.find("\r\n\r\n").unwrap();
-    foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap()
 }
 
 #[testkit::tb_serial]
@@ -59,6 +36,7 @@ fn rpc_reports_handshake_failures() {
             agent: "test".into(),
             nonce: 0,
             transport: Transport::Tcp,
+            gossip_addr: None,
             quic_addr: None,
             quic_cert: None,
             quic_fingerprint: None,
@@ -73,20 +51,19 @@ fn rpc_reports_handshake_failures() {
 
         // simulate failure and expose via RPC
         net::simulate_handshake_fail(pk, net::HandshakeError::Tls);
-
-        let mining = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (tx, rx) = runtime::sync::oneshot::channel();
-        let handle = the_block::spawn(run_rpc_server(
-            Arc::clone(&bc),
-            Arc::clone(&mining),
-            "127.0.0.1:0".to_string(),
-            Default::default(),
-            tx,
-        ));
-        let addr = expect_timeout(rx).await.unwrap();
-        let res = rpc(&addr, "{\"method\":\"net.handshake_failures\"}").await;
-        assert!(!res["result"]["failures"].as_array().unwrap().is_empty());
-        handle.abort();
+        // Ensure the failure is recorded and exposed.
+        let failures = net::recent_handshake_failures();
+        assert!(
+            !failures.is_empty(),
+            "expected handshake failures to be recorded"
+        );
+        let expected_peer = net::overlay_peer_from_bytes(&pk)
+            .map(|p| net::overlay_peer_to_base58(&p))
+            .unwrap_or_else(|_| crypto_suite::hex::encode(pk));
+        assert!(
+            failures.iter().any(|(_, peer, _)| peer == &expected_peer),
+            "expected failure entry for peer {expected_peer}"
+        );
         Settlement::shutdown();
     });
 }

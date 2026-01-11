@@ -383,7 +383,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "description": "Aggregated CT amount for treasury disbursements by status",
+      "description": "Aggregated BLOCK amount for treasury disbursements by status",
       "id": 23,
       "options": {
         "legend": {
@@ -396,7 +396,7 @@
           "legendFormat": "{{status}}"
         }
       ],
-      "title": "Treasury disbursement CT by status",
+      "title": "Treasury disbursement BLOCK by status",
       "type": "timeseries"
     },
     {
@@ -641,7 +641,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "description": "Read subsidy CT routed to each role from finalized blocks",
+      "description": "Read subsidy BLOCK routed to each role from finalized blocks",
       "id": 37,
       "options": {
         "legend": {
@@ -662,7 +662,7 @@
         "type": "foundation-telemetry",
         "uid": "foundation"
       },
-      "description": "Advertising CT routed to each role from finalized blocks",
+      "description": "Advertising BLOCK routed to each role from finalized blocks",
       "id": 38,
       "options": {
         "legend": {
@@ -1963,10 +1963,10 @@
       },
       "targets": [
         {
-          "expr": "base_reward_ct"
+          "expr": "base_reward"
         }
       ],
-      "title": "base_reward_ct",
+      "title": "base_reward",
       "type": "timeseries"
     },
     {
@@ -3958,10 +3958,10 @@
       },
       "targets": [
         {
-          "expr": "rent_escrow_burned_ct_total"
+          "expr": "rent_escrow_burned_total"
         }
       ],
-      "title": "rent_escrow_burned_ct_total",
+      "title": "rent_escrow_burned_total",
       "type": "timeseries"
     },
     {
@@ -3977,10 +3977,10 @@
       },
       "targets": [
         {
-          "expr": "rent_escrow_locked_ct_total"
+          "expr": "rent_escrow_locked_total"
         }
       ],
-      "title": "rent_escrow_locked_ct_total",
+      "title": "rent_escrow_locked_total",
       "type": "timeseries"
     },
     {
@@ -3996,10 +3996,10 @@
       },
       "targets": [
         {
-          "expr": "rent_escrow_refunded_ct_total"
+          "expr": "rent_escrow_refunded_total"
         }
       ],
-      "title": "rent_escrow_refunded_ct_total",
+      "title": "rent_escrow_refunded_total",
       "type": "timeseries"
     },
     {
@@ -4300,10 +4300,10 @@
       },
       "targets": [
         {
-          "expr": "slashing_burn_ct_total"
+          "expr": "slashing_burn_total"
         }
       ],
-      "title": "slashing_burn_ct_total",
+      "title": "slashing_burn_total",
       "type": "timeseries"
     },
     {

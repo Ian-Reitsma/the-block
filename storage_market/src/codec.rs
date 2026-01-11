@@ -75,10 +75,7 @@ fn storage_contract_to_value(contract: &StorageContract) -> Value {
         Value::from(contract.next_payment_block),
     );
     map.insert("accrued".into(), Value::from(contract.accrued));
-    map.insert(
-        "total_deposit_ct".into(),
-        Value::from(contract.total_deposit_ct),
-    );
+    map.insert("total_deposit".into(), Value::from(contract.total_deposit));
     map.insert(
         "last_payment_block".into(),
         contract
@@ -111,7 +108,7 @@ fn storage_contract_from_value(value: Value) -> Result<StorageContract, StorageM
     let retention_blocks = take_u64(&mut map, "retention_blocks", "storage contract")?;
     let next_payment_block = take_u64(&mut map, "next_payment_block", "storage contract")?;
     let accrued = take_u64(&mut map, "accrued", "storage contract")?;
-    let total_deposit_ct = take_u64_default(&mut map, "total_deposit_ct", "storage contract", 0)?;
+    let total_deposit = take_u64_default(&mut map, "total_deposit", "storage contract", 0)?;
     let last_payment_block = take_optional_u64(&mut map, "last_payment_block", "storage contract")?;
     let storage_root_bytes = take_storage_root_bytes(&mut map, "storage_root", "storage contract")?;
     Ok(StorageContract {
@@ -124,7 +121,7 @@ fn storage_contract_from_value(value: Value) -> Result<StorageContract, StorageM
         retention_blocks,
         next_payment_block,
         accrued,
-        total_deposit_ct,
+        total_deposit,
         last_payment_block,
         storage_root: MerkleRoot::new(storage_root_bytes),
     })
@@ -144,7 +141,7 @@ fn replica_to_value(replica: &ReplicaIncentive) -> Value {
         "price_per_block".into(),
         Value::from(replica.price_per_block),
     );
-    map.insert("deposit_ct".into(), Value::from(replica.deposit_ct));
+    map.insert("deposit".into(), Value::from(replica.deposit));
     map.insert(
         "proof_successes".into(),
         Value::from(replica.proof_successes),
@@ -173,7 +170,7 @@ fn replica_from_value(value: Value) -> Result<ReplicaIncentive, StorageMarketErr
     let provider_id = take_string(&mut map, "provider_id", "replica")?;
     let allocated_shares = take_u16(&mut map, "allocated_shares", "replica")?;
     let price_per_block = take_u64(&mut map, "price_per_block", "replica")?;
-    let deposit_ct = take_u64(&mut map, "deposit_ct", "replica")?;
+    let deposit = take_u64(&mut map, "deposit", "replica")?;
     let proof_successes = take_u64_default(&mut map, "proof_successes", "replica", 0)?;
     let proof_failures = take_u64_default(&mut map, "proof_failures", "replica", 0)?;
     let last_proof_block = take_optional_u64(&mut map, "last_proof_block", "replica")?;
@@ -182,7 +179,7 @@ fn replica_from_value(value: Value) -> Result<ReplicaIncentive, StorageMarketErr
         provider_id,
         allocated_shares,
         price_per_block,
-        deposit_ct,
+        deposit,
         proof_successes,
         proof_failures,
         last_proof_block,

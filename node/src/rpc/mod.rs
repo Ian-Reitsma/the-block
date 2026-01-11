@@ -46,6 +46,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -94,6 +95,20 @@ fn json_map(pairs: Vec<(&str, Value)>) -> Value {
         map.insert(key.to_string(), value);
     }
     Value::Object(map)
+}
+
+fn strip_null_last_claim_height(value: &mut Value) {
+    if let Value::Object(map) = value {
+        if let Some(Value::Array(relayers)) = map.get_mut("relayers") {
+            for relayer in relayers {
+                if let Value::Object(rel_map) = relayer {
+                    if matches!(rel_map.get("last_claim_height"), Some(Value::Null)) {
+                        rel_map.remove("last_claim_height");
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn deterministic_chunks_for_object(object_id: &str, chunk_count: usize) -> Vec<Vec<u8>> {
@@ -417,14 +432,29 @@ impl RpcState {
         let Some(host) = host else {
             return false;
         };
+        let normalized = normalize_host_header(host);
         self.runtime_cfg
             .allowed_hosts
             .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(host.trim()))
+            .any(|allowed| allowed.eq_ignore_ascii_case(normalized.as_str()))
     }
 
     fn runtime(&self) -> Arc<RpcRuntimeConfig> {
         Arc::clone(&self.runtime_cfg)
+    }
+}
+
+fn normalize_host_header(host: &str) -> String {
+    let trimmed = host.trim();
+    if let Some(rest) = trimmed.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return rest[..end].to_string();
+        }
+    }
+    if let Some((name, _)) = trimmed.split_once(':') {
+        name.trim().to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -1195,21 +1225,12 @@ fn dispatch(
                 .unwrap_or("");
             let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(acct) = guard.accounts.get(addr) {
-                json_map(vec![
-                    (
-                        "consumer",
-                        Value::Number(Number::from(acct.balance.consumer)),
-                    ),
-                    (
-                        "industrial",
-                        Value::Number(Number::from(acct.balance.industrial)),
-                    ),
-                ])
+                json_map(vec![(
+                    "amount",
+                    Value::Number(Number::from(acct.balance.amount)),
+                )])
             } else {
-                json_map(vec![
-                    ("consumer", Value::Number(Number::from(0))),
-                    ("industrial", Value::Number(Number::from(0))),
-                ])
+                json_map(vec![("amount", Value::Number(Number::from(0)))])
             }
         }
         "ledger.shard_of" => {
@@ -1243,7 +1264,6 @@ fn dispatch(
                 json_map(vec![
                     ("mode", Value::String(mode.to_string())),
                     ("balance", Value::Number(Number::from(balance))),
-                    ("ct", Value::Number(Number::from(balance))),
                 ])
             } else {
                 json_map(vec![("mode", Value::String(mode.to_string()))])
@@ -2066,7 +2086,7 @@ fn dispatch(
                 let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
                 light::rebate_status(&guard)
             };
-            match foundation_serialization::json::to_value(status) {
+            let mut val = match foundation_serialization::json::to_value(status) {
                 Ok(val) => val,
                 Err(e) => {
                     #[cfg(feature = "telemetry")]
@@ -2079,7 +2099,9 @@ fn dispatch(
                     let _ = e;
                     return Err(rpc_error(-32603, "serialization error".into()));
                 }
-            }
+            };
+            strip_null_last_claim_height(&mut val);
+            val
         }
         "light_client.rebate_history" => {
             let relayer = if let Some(hex) = req.params.get("relayer").and_then(|v| v.as_str()) {
@@ -2738,7 +2760,7 @@ fn dispatch(
                 retention_blocks,
                 next_payment_block: start_block + 1,
                 accrued: 0,
-                total_deposit_ct: 0,
+                total_deposit: 0,
                 last_payment_block: None,
                 storage_root: tree.root,
             };
@@ -3116,8 +3138,30 @@ pub async fn run_rpc_server_with_market(
     let _ = ready.send(local);
 
     let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
-    let handles = Arc::new(Mutex::new(HandleRegistry::open("identity_db")));
-    let did_path = DidRegistry::default_path();
+    let identity_dir = {
+        let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+        PathBuf::from(&guard.path)
+    };
+    if !identity_dir.as_os_str().is_empty() {
+        let _ = fs::create_dir_all(&identity_dir);
+    }
+    let handle_path = if identity_dir.as_os_str().is_empty() {
+        PathBuf::from("identity_db")
+    } else {
+        identity_dir.join("identity_db")
+    };
+    let handles = Arc::new(Mutex::new(HandleRegistry::open(
+        handle_path.to_str().unwrap_or_else(|| "identity_db"),
+    )));
+    let did_path = std::env::var("TB_DID_DB_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            if identity_dir.as_os_str().is_empty() {
+                PathBuf::from("identity_did_db")
+            } else {
+                identity_dir.join("identity_did_db")
+            }
+        });
     let dids = Arc::new(Mutex::new(DidRegistry::open(&did_path)));
     let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
     let tokens_per_sec = std::env::var("TB_RPC_TOKENS_PER_SEC")

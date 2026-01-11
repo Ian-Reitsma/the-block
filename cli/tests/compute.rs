@@ -148,7 +148,10 @@ fn provider_balances_response_json() -> String {
         "provider".to_string(),
         JsonValue::String("alice".to_string()),
     );
-    alice.insert("ct".to_string(), JsonValue::Number(JsonNumber::from(42)));
+    alice.insert(
+        "consumer".to_string(),
+        JsonValue::Number(JsonNumber::from(42)),
+    );
     alice.insert(
         "industrial".to_string(),
         JsonValue::Number(JsonNumber::from(7)),
@@ -156,8 +159,14 @@ fn provider_balances_response_json() -> String {
 
     let mut bob = JsonMap::new();
     bob.insert("provider".to_string(), JsonValue::String("bob".to_string()));
-    bob.insert("ct".to_string(), JsonValue::Number(JsonNumber::from(1)));
-    bob.insert("it".to_string(), JsonValue::Number(JsonNumber::from(2)));
+    bob.insert(
+        "consumer".to_string(),
+        JsonValue::Number(JsonNumber::from(1)),
+    );
+    bob.insert(
+        "industrial".to_string(),
+        JsonValue::Number(JsonNumber::from(2)),
+    );
 
     let mut providers = Vec::new();
     providers.push(JsonValue::Object(alice));
@@ -230,8 +239,8 @@ fn provider_balances_writer_formats_rows() {
     let mut buffer = Vec::new();
     write_provider_balances_from_str(&json, &mut buffer).expect("write balances");
     let expected = [
-        "provider: alice ct: 42 it: 7".to_string(),
-        "provider: bob ct: 1 it: 2".to_string(),
+        "provider: alice consumer: 42 industrial: 7".to_string(),
+        "provider: bob consumer: 1 industrial: 2".to_string(),
     ]
     .join(
         "
@@ -493,12 +502,9 @@ fn mock_sla_history_response(bundle: &ProofBundle) -> String {
         "outcome".to_string(),
         JsonValue::String("completed".to_string()),
     );
+    entry.insert("burned".to_string(), JsonValue::Number(JsonNumber::from(0)));
     entry.insert(
-        "burned_ct".to_string(),
-        JsonValue::Number(JsonNumber::from(0)),
-    );
-    entry.insert(
-        "refunded_ct".to_string(),
+        "refunded".to_string(),
         JsonValue::Number(JsonNumber::from(0)),
     );
     entry.insert(

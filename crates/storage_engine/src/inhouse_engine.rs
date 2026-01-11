@@ -453,6 +453,8 @@ impl InhouseEngine {
         F: FnOnce(&mut CfState, &Path, &EngineInner) -> StorageResult<R>,
     {
         let handle = self.cf_handle(cf)?;
+        // Recreate directories if the backing temp path was cleaned up mid-run.
+        fs::create_dir_all(&handle.path).map_err(StorageError::from)?;
         let mut guard = handle.state.lock().unwrap();
         let result = f(&mut guard, &handle.path, &self.inner);
         if result.is_ok() {
@@ -462,6 +464,7 @@ impl InhouseEngine {
     }
 
     fn persist_manifest(&self, cf: &str, manifest: &CfManifest) -> StorageResult<()> {
+        fs::create_dir_all(self.root.as_ref()).map_err(StorageError::from)?;
         let mut manifest_guard = self.inner.manifest.write().unwrap();
         manifest_guard.cfs.insert(cf.to_string(), manifest.clone());
         manifest_guard.store(&self.root)
@@ -529,7 +532,13 @@ impl CfState {
         self.manifest.sequence
     }
 
-    fn append_wal(&mut self, cf_path: &Path, record: &WalRecord, engine: &EngineInner) -> StorageResult<()> {
+    fn append_wal(
+        &mut self,
+        cf_path: &Path,
+        record: &WalRecord,
+        engine: &EngineInner,
+    ) -> StorageResult<()> {
+        fs::create_dir_all(cf_path).map_err(StorageError::from)?;
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -565,6 +574,7 @@ impl CfState {
         if self.memtable.is_empty() {
             return Ok(());
         }
+        fs::create_dir_all(cf_path).map_err(StorageError::from)?;
         let mut entries: Vec<TableEntry> = self.memtable.values().cloned().collect();
         entries.sort_by(|a, b| a.key.cmp(&b.key).then(a.sequence.cmp(&b.sequence)));
         let filename = format!("sst-{:020}.bin", self.manifest.next_file_id);

@@ -65,8 +65,8 @@
    - Successful submissions at line 291-298 should trigger `record_success()` on circuit breaker
 
 4. **Documentation Token Terminology Inconsistency**
-   - 30+ markdown files in `docs/` still reference "CT" and "IT" tokens
-   - Should be "TB Token" (The Block Token) consistently
+   - 30+ markdown files in `docs/` still reference "BLOCK" and "IT" tokens
+   - Should describe BLOCK as the canonical currency and treat any "TB" flavoring as legacy terminology
    - Files identified: `docs/operations.md`, `docs/economics_and_governance.md`, etc.
    - **LOW PRIORITY** but affects documentation quality
 
@@ -754,11 +754,11 @@ sudo systemctl enable grafana-server
 **Find/Replace Strategy**:
 ```bash
 # Find all occurrences (for review)
-rg -i "consumer token|industrial token|CT|IT" docs/ --glob "*.md" --color always
+rg -i "consumer token|industrial token|BLOCK|IT" docs/ --glob "*.md" --color always
 
 # CRITICAL: Manual review required - many false positives
 # - "IT" matches "IT infrastructure", "commit", "edit", etc.
-# - "CT" matches "CONNECTION", "SELECT", etc.
+# - "BLOCK" matches "CONNECTION", "SELECT", etc.
 
 # Recommended approach:
 # 1. Search for full phrases first:
@@ -767,13 +767,13 @@ rg "Industrial Token" docs/ --glob "*.md"
 
 # 2. Review each occurrence in context
 # 3. Replace ONLY when referring to token type
-# 4. Replace with "The Block Token (TB)" on first mention per document
-# 5. Replace with "TB Token" on subsequent mentions
+# 4. Prefer "BLOCK" with a parenthetical lane descriptor (e.g., BLOCK (consumer lane))
+# 5. Reserve `IT` as the industrial lane identifier inside code snippets, not as a standalone token
 
 # Example replacements:
-# "Consumer Tokens (CT)" -> "The Block Tokens (TB)"
-# "CT balance" -> "TB balance"
-# "Industrial Token allocation" -> "TB Token allocation"
+# "Consumer Tokens (BLOCK)" -> "BLOCK (consumer lane share)"
+# "BLOCK balance" -> "BLOCK balance"
+# "Industrial Token allocation" -> "BLOCK (industrial lane share)"
 ```
 
 **Validation**:
@@ -783,16 +783,17 @@ rg -i "consumer token|industrial token" docs/ --glob "*.md" | wc -l
 # Should be 0 or very close to 0
 
 # Check for consistent terminology
-rg "The Block Token|TB Token" docs/ --glob "*.md" | wc -l
-# Should be high (100+)
+# Ensure no "TB" or "The Block Token" references remain
+rg -i "The Block Token|TB Token" docs/ --glob "*.md" | wc -l
+# Should be zero
 ```
 
 **Documentation Update PR Checklist**:
-1. [ ] All "Consumer Token" -> "The Block Token (TB)" (first mention)
-2. [ ] All "Industrial Token" -> "The Block Token (TB)" (first mention)
-3. [ ] All "CT" -> "TB" (when referring to token, NOT in code examples)
-4. [ ] All "IT" -> "TB" (when referring to token, NOT in code examples)
-5. [ ] Updated glossary (if exists) with TB definition
+1. [ ] All "Consumer Token" -> "BLOCK (consumer lane share)" (first mention)
+2. [ ] All "Industrial Token" -> "BLOCK (industrial lane share)" (first mention)
+3. [ ] All references to the ledger currency use BLOCK (not legacy token nicknames)
+4. [ ] Reserve `IT` for the industrial lane label in code examples, not as a standalone token
+5. [ ] Updated glossary (if exists) with BLOCK definition
 6. [ ] Reviewed diffs manually (no false positive replacements)
 7. [ ] Built documentation locally (check for broken links)
 8. [ ] Ran spellcheck (no new typos introduced)
@@ -1125,7 +1126,7 @@ echo "Failover completed in <70 seconds (lease TTL)"
 - [ ] Monitoring stack deployed (Prometheus + AlertManager + Grafana running)
 - [ ] Multi-node cluster deployed (3 nodes communicating)
 - [ ] DR drill executed (report generated, RTO/RPO verified)
-- [ ] Documentation audit complete (no "CT" or "IT" token references remain)
+- [ ] Documentation audit complete (no "BLOCK" or "IT" token references remain)
 
 ---
 

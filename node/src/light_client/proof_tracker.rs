@@ -159,7 +159,7 @@ impl ProofTracker {
         }
     }
 
-    /// Record `proofs` delivered by `id`, crediting `amount` CT micro-rebates.
+    /// Record `proofs` delivered by `id`, crediting `amount` BLOCK micro-rebates.
     /// Returns the amount actually recorded (0 if suppressed).
     pub fn record(&mut self, id: &[u8], proofs: u64, amount: u64) -> u64 {
         if proofs == 0 || amount == 0 {
@@ -357,12 +357,10 @@ impl Default for ProofTracker {
 /// Apply `amount` rebates to block coinbase.
 pub fn apply_rebates(block: &mut Block, amount: u64) {
     if amount > 0 {
-        block.coinbase_consumer = block
-            .coinbase_consumer
+        block.coinbase_block = block
+            .coinbase_block
             .saturating_add(TokenAmount::new(amount));
-        block.proof_rebate_ct = block
-            .proof_rebate_ct
-            .saturating_add(TokenAmount::new(amount));
+        block.proof_rebate = block.proof_rebate.saturating_add(TokenAmount::new(amount));
     }
 }
 

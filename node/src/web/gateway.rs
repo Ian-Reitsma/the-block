@@ -3,7 +3,7 @@
 //! This server exposes zero-fee static file hosting backed by blob storage
 //! along with optional dynamic endpoints powered by WASM. Every response
 //! records a `ReadAck` that gateways later batch and anchor on-chain to claim
-//! CT subsidies.
+//! BLOCK subsidies.
 
 #![deny(warnings)]
 
@@ -877,7 +877,7 @@ pub fn install_blocklist_reload() {
 
 pub fn ip_key(ip: &SocketAddr) -> u64 {
     match ip.ip() {
-        IpAddr::V4(v4) => u32::from(v4) as u64,
+        IpAddr::V4(v4) => u32::from(v4).swap_bytes() as u64,
         IpAddr::V6(v6) => {
             let o = v6.octets();
             let mut b = [0u8; 8];

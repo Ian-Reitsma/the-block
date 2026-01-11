@@ -2,42 +2,42 @@
 
 This backlog catalogues every documentation stretch that is currently out of sync with the codebase and/or the README’s “BLOCK = single transferable currency” story. Each entry points to the exact file/line range, explains why it is misleading or obsolete, and lists the code surface (or other docs) that now define the ground truth. Update the referenced docs (and, if needed, the schema/json snippets they embed) before changing any corresponding behaviour so the “spec-first” contract stays intact.
 
-## 1. Naming & terminology drift (CT vs. BLOCK)
+## 1. Naming & terminology drift (BLOCK vs. BLOCK)
 
 ### `README.md:25-47`, `README.md:117-134`, `README.md:170-189`
-- **What’s wrong**: The README introduces BLOCK as the new fixed-supply currency, but the “quick demo” commands and supporting sentences still talk about “sending CT” (see `tb-cli tx send --help` comment and the “docs/economics...” description on lines 170‑179). The README needs to consistently refer to the currency as BLOCK (the codebase still tracks `amount` internally, but `README` is the “public spec” and the place where fresh contributors learn the contract).
+- **What’s wrong**: The README introduces BLOCK as the new fixed-supply currency, but the “quick demo” commands and supporting sentences still talk about “sending BLOCK” (see `tb-cli tx send --help` comment and the “docs/economics...” description on lines 170‑179). The README needs to consistently refer to the currency as BLOCK (the codebase still tracks `amount` internally, but `README` is the “public spec” and the place where fresh contributors learn the contract).
 - **Fix**:
-  1. Replace `“sending CT”` and similar comments on lines 129‑132 with “sending BLOCK” (including the CLI help comment and any other quick-start samples that mention CT or CT sub-ledger tokens).
-  2. Update the “Documentation guide” text so it briefly notes that the canonical token name is BLOCK but the code still uses historical `CT/IT` field names for traceability (reference `governance/src/treasury.rs` and `node/src/treasury_executor.rs` as proof that only one token is ever moved).
-  3. Confirm the remainder of the README (the “Key features” table, doc map, etc.) speaks in BLOCK terms; add a sentence referencing `docs/economics_and_governance.md#ct-supply-and-sub-ledgers` to explain that “CT” now just means the ledger slot/blockchain unit for BLOCK.
-  - **Status**: ✅ Completed this week—README now uses BLOCK in the quick-start sample, documents the legacy CT labels, and points readers to the BLOCK-focused economics doc (the note references `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, and `metrics-aggregator/src/lib.rs` for context).
+  1. Replace `“sending BLOCK”` and similar comments on lines 129‑132 with “sending BLOCK” (including the CLI help comment and any other quick-start samples that mention BLOCK or BLOCK sub-ledger tokens).
+  2. Update the “Documentation guide” text so it briefly notes that the canonical token name is BLOCK but the code still uses historical `BLOCK/IT` field names for traceability (reference `governance/src/treasury.rs` and `node/src/treasury_executor.rs` as proof that only one token is ever moved).
+  3. Confirm the remainder of the README (the “Key features” table, doc map, etc.) speaks in BLOCK terms; add a sentence referencing `docs/economics_and_governance.md#block-supply-and-sub-ledgers` to explain that “BLOCK” now just means the ledger slot/blockchain unit for BLOCK.
+  - **Status**: ✅ Completed this week—README now uses BLOCK in the quick-start sample, documents the legacy BLOCK labels, and points readers to the BLOCK-focused economics doc (the note references `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, and `metrics-aggregator/src/lib.rs` for context).
 
 ### `AGENTS.md:251-299`, `AGENTS.md:173-185`, `AGENTS.md:269-299`
-- **What’s wrong**: AGENTS is still describing the network as a “single-token (CT)” system, calls the subsidy engine “CT ledger”, and repeatedly cites `CT Supply`/`Fee Lanes` docs (lines 251‑299). This conflicts with README and the glossary that now emphasize BLOCK; we should update the operational bible to say BLOCK everywhere and explicitly note that fields like `amount`, `amount_it` and the `_CT` suffixes are legacy naming conventions for ledger buckets.
+-- **What’s wrong**: AGENTS is still describing the network as a “single-token (BLOCK)” system, calls the subsidy engine “BLOCK ledger”, and repeatedly cites `BLOCK Supply`/`Fee Lanes` docs (lines 251‑299). This conflicts with README and the glossary that now emphasize BLOCK; we should highlight that subsidy buckets such as `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB` are the canonical BLOCK-denominated ledgers, and mention that any `_CT` suffix references are historical.
 - **Fix**:
-  1. Change the Project Mission / Economic Model section (lines 251‑299) to call BLOCK the single supply and mention CT/IT as backward-compatible field names in the code (reference `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `node/src/governance/codec.rs` for why `amount`/`amount_it` still exist).
-  2. Update every reference to the CT subsidy buckets (`STORAGE_SUB_CT`, etc.) to note that they are **BLOCK-denominated subsidy buckets**; keep the suffix for code clarity but make it clear to readers that BLOCK is the token that flows.
-  3. Adjust the governance/fee-floor change walkthrough (lines 119‑144) so the prose says “BLOCK fee floors” rather than “CT fee floors” and links to the `governance` crate and `node/src/fee` for the live policy knobs.
-  - **Status**: ✅ Mission section now emphasises BLOCK, includes a legacy CT label note, and the governance walkthrough plus subsidy bullets mention BLOCK explicitly.
+  1. Change the Project Mission / Economic Model section (lines 251‑299) to call BLOCK the single supply and mention BLOCK/IT as backward-compatible field names in the code (reference `governance/src/treasury.rs`, `node/src/treasury_executor.rs`, `node/src/governance/codec.rs` for why `amount`/`amount_it` still exist).
+  2. Update every reference to the BLOCK subsidy buckets (`STORAGE_SUB`, `READ_SUB`, `COMPUTE_SUB`) to note that they are **BLOCK-denominated subsidy buckets** and ensure the old `_CT` suffixed aliases are described as legacy names.
+  3. Adjust the governance/fee-floor change walkthrough (lines 119‑144) so the prose says “BLOCK fee floors” rather than “BLOCK fee floors” and links to the `governance` crate and `node/src/fee` for the live policy knobs.
+  - **Status**: ✅ Mission section now emphasises BLOCK, includes a legacy BLOCK label note, and the governance walkthrough plus subsidy bullets mention BLOCK explicitly.
 
 ### `docs/overview.md:5-12`, `docs/overview.md:30-53`
-- **What’s wrong**: The “If you’re brand new” callout still calls CT the single currency (“CT (Consumer Token)” and the “The Block is the unification layer for storage/compute/..., turning work into CT rewards” claim at lines 5‑12 and 30‑53). That contradicts the README’s BLOCK messaging and leaves new contributors wondering whether there are two tokens.
+- **What’s wrong**: The “If you’re brand new” callout still mixes the canonical BLOCK currency with the legacy “Consumer Token” label (lines 5‑12 and 30‑53). That contradicts the README’s BLOCK messaging and leaves new contributors wondering whether there are two tokens.
 - **Fix**:
-  1. Reword the top-level concepts to say “BLOCK is the single currency; CT/IT are legacy ledger labels”. The table needs to mention BLOCK everywhere, and you can point to the “legacy mapping” note to explain why CT is still visible in the code (link to `docs/LEGACY_MAPPING.md` and `governance/src/treasury.rs`).
-  2. Add a short paragraph under the paragraph starting “The Block is the unification layer...” that references `README.md:25-47` and clarifies that the “CT” terminology still appears in code and telemetry because of historical field names (`governance::store::TreasuryBalances`, `metrics-aggregator` gauges, etc.).
+  1. Reword the top-level concepts to say “BLOCK is the single currency; BLOCK/IT are legacy ledger labels”. The table needs to mention BLOCK everywhere, and you can point to the “legacy mapping” note to explain why BLOCK is still visible in the code (link to `docs/LEGACY_MAPPING.md` and `governance/src/treasury.rs`).
+  2. Add a short paragraph under the paragraph starting “The Block is the unification layer...” that references `README.md:25-47` and clarifies that the “BLOCK” terminology still appears in code and telemetry because of historical field names (`governance::store::TreasuryBalances`, `metrics-aggregator` gauges, etc.).
 
   - **Status**: ✅ Added a BLOCK-focused concept table and a legacy label note pointing at the governance/metrics sources.
 ### `docs/operations.md:26-27`, `docs/operations.md:166`
-- **What’s wrong**: The quick “Testnet/Mainnet” definitions (lines 26‑27) still talk about “fake CT” versus “real CT”, and later sections (line 166) mention “CT amount” when describing treasury dashboards. Since the operational guidance is the reference for deployers, it must speak in BLOCK and explain that CT is only the ledger nomenclature inside the codebase.
+- **What’s wrong**: The quick “Testnet/Mainnet” definitions (lines 26‑27) still talk about “fake BLOCK” versus “real BLOCK”, and later sections (line 166) mention “BLOCK amount” when describing treasury dashboards. Since the operational guidance is the reference for deployers, it must speak in BLOCK and explain that BLOCK is only the ledger nomenclature inside the codebase.
 - **Fix**:
-  1. Replace “fake CT/real CT” with “BLOCK (test versus production)”. Mention that `CT` is the internal field name (`governance`: `amount`, `metrics-aggregator`: `treasury_disbursement_amount`) but operators still think BLOCK.
-  2. In the dashboard paragraph, rename `CT amount` to `BLOCK amount` and note that the metrics aggregator emits `treasury_disbursement_amount` as a BLOCK-denominated gauge.
+  1. Replace “fake BLOCK/real BLOCK” with “BLOCK (test versus production)”. Mention that `BLOCK` is the internal field name (`governance`: `amount`, `metrics-aggregator`: `treasury_disbursement_amount`) but operators still think BLOCK.
+  2. In the dashboard paragraph, rename `BLOCK amount` to `BLOCK amount` and note that the metrics aggregator emits `treasury_disbursement_amount` as a BLOCK-denominated gauge.
   - **Status**: ✅ Updated the testnet/mainnet explainer and treasury dashboard note so both call out BLOCK with a pointer to `treasury_disbursement_amount`.
 
 ### `docs/security_and_privacy.md:11`
-- **What’s wrong**: The threat-model table starts by saying defenders are protecting “CT” (line 11). This conflicts with README and README‑level messaging and creates unnecessary friction when security reviewers search for BLOCK. 
-- **Fix**: Reword the threat-model intro to say “BLOCK” (e.g., `Token thieves | Steal BLOCK...`). Add a parenthetical that `CT` is the field name in the ledger code (`governance/src/store.rs`, `governance/src/treasury.rs`). That ensures the security narrative aligned with the canonical token name while still acknowledging the code terms.
-  - **Status**: ✅ Reworded the threat-model entry so it mentions BLOCK with a nod to the CT field labels in `governance/src/store.rs`.
+- **What’s wrong**: The threat-model table starts by saying defenders are protecting “BLOCK” (line 11). This conflicts with README and README‑level messaging and creates unnecessary friction when security reviewers search for BLOCK. 
+- **Fix**: Reword the threat-model intro to say “BLOCK” (e.g., `Token thieves | Steal BLOCK...`). Add a parenthetical that `BLOCK` is the field name in the ledger code (`governance/src/store.rs`, `governance/src/treasury.rs`). That ensures the security narrative aligned with the canonical token name while still acknowledging the code terms.
+  - **Status**: ✅ Reworded the threat-model entry so it mentions BLOCK with a nod to the BLOCK field labels in `governance/src/store.rs`.
 
 ## 2. Stale references / missing source files
 
@@ -73,12 +73,12 @@ This backlog catalogues every documentation stretch that is currently out of syn
   - **Status**: ✅ Legacy-map rows now link to the updated handbook anchors so the map stays accurate.
 
 ### `docs/system_reference.md` (optional future work)
-- **Note**: The system reference still describes metrics in `CT` units (see the metric table around the middle of the file). Once the naming of CT → BLOCK is settled, sweep this reference (and the metric names) as part of the rename effort so the system reference reflects the same terminology as the rest of the docs.
+- **Note**: The system reference still describes metrics in `BLOCK` units (see the metric table around the middle of the file). Once the naming of BLOCK → BLOCK is settled, sweep this reference (and the metric names) as part of the rename effort so the system reference reflects the same terminology as the rest of the docs.
 
 ---
 
 ## Next steps
-1. Align the README/overview/AGENTS/operations/security docs so they all refer to BLOCK as the canonical token and describe CT/IT as legacy ledger fields. 
+1. Align the README/overview/AGENTS/operations/security docs so they all refer to BLOCK as the canonical token and describe BLOCK/IT as legacy ledger fields. 
 2. Remove the duplicate treasury section from `docs/apis_and_tooling.md` and reconcile the schema snippet with `governance/src/codec.rs`.
 3. Replace the dead `docs/*.md` references in `docs/developer_handbook.md` with pointers to existing content (`config/benchmarks`, `docs/architecture`, `docs/security_and_privacy`, etc.) and keep `docs/LEGACY_MAPPING.md` in sync.
 4. Re-run `mdbook build docs` and skim the output for broken links after every change; we should not ship doc edits with unresolved references.

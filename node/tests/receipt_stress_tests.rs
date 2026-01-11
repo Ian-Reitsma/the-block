@@ -45,7 +45,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             contract_id: format!("sc_{}", id),
             provider: provider_for_index(id).to_string(),
             bytes: 1024,
-            price_ct: 100,
+            price: 100,
             block_height: id,
             provider_escrow: 1000,
             provider_signature: vec![0u8; 64],
@@ -55,7 +55,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             job_id: format!("job_{}", id),
             provider: provider_for_index(id).to_string(),
             compute_units: 1000,
-            payment_ct: 50,
+            payment: 50,
             block_height: id,
             verified: true,
             provider_signature: vec![0u8; 64],
@@ -65,7 +65,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             contract_id: format!("energy_{}", id),
             provider: provider_for_index(id).to_string(),
             energy_units: 500,
-            price_ct: 75,
+            price: 75,
             block_height: id,
             proof_hash: [0u8; 32],
             provider_signature: vec![0u8; 64],
@@ -75,7 +75,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             campaign_id: format!("campaign_{}", id),
             publisher: publisher_for_index(id).to_string(),
             impressions: 1000,
-            spend_ct: 20,
+            spend: 20,
             block_height: id,
             conversions: 10,
             publisher_signature: vec![0u8; 64],
@@ -126,7 +126,7 @@ fn stress_large_receipt_payload() {
                 contract_id: format!("{}_{}", long_id, i),
                 provider: format!("{}_{}", long_id, i),
                 bytes: u64::MAX / 2,
-                price_ct: u64::MAX / 2,
+                price: u64::MAX / 2,
                 block_height: i,
                 provider_escrow: u64::MAX / 2,
                 provider_signature: vec![0u8; 64],
@@ -238,7 +238,7 @@ fn stress_validation_at_scale() {
                 .register_provider(provider_id.to_string(), vk.clone(), 0)
                 .expect("register provider");
         }
-        if validate_receipt(&receipt, i as u64, &registry, &mut nonce_tracker).is_ok() {
+        if validate_receipt(&receipt, i, &registry, &mut nonce_tracker).is_ok() {
             valid_count += 1;
         }
         if (i + 1) % 1000 == 0 {
@@ -283,7 +283,7 @@ fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
     hasher.update(receipt.contract_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.bytes.to_le_bytes());
-    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.price.to_le_bytes());
     hasher.update(&receipt.provider_escrow.to_le_bytes());
     hasher.update(&receipt.signature_nonce.to_le_bytes());
     hasher.finalize().as_bytes().to_vec()
@@ -296,7 +296,7 @@ fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
     hasher.update(receipt.job_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.compute_units.to_le_bytes());
-    hasher.update(&receipt.payment_ct.to_le_bytes());
+    hasher.update(&receipt.payment.to_le_bytes());
     hasher.update(&[u8::from(receipt.verified)]);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
     hasher.finalize().as_bytes().to_vec()
@@ -309,7 +309,7 @@ fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
     hasher.update(receipt.contract_id.as_bytes());
     hasher.update(receipt.provider.as_bytes());
     hasher.update(&receipt.energy_units.to_le_bytes());
-    hasher.update(&receipt.price_ct.to_le_bytes());
+    hasher.update(&receipt.price.to_le_bytes());
     hasher.update(&receipt.proof_hash);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
     hasher.finalize().as_bytes().to_vec()
@@ -322,7 +322,7 @@ fn build_ad_preimage(receipt: &AdReceipt) -> Vec<u8> {
     hasher.update(receipt.campaign_id.as_bytes());
     hasher.update(receipt.publisher.as_bytes());
     hasher.update(&receipt.impressions.to_le_bytes());
-    hasher.update(&receipt.spend_ct.to_le_bytes());
+    hasher.update(&receipt.spend.to_le_bytes());
     hasher.update(&receipt.conversions.to_le_bytes());
     hasher.update(&receipt.signature_nonce.to_le_bytes());
     hasher.finalize().as_bytes().to_vec()
@@ -364,7 +364,7 @@ fn stress_all_storage_receipts() {
                 contract_id: format!("contract_{}", i),
                 provider: format!("provider_{}", i),
                 bytes: i * 1024,
-                price_ct: i * 10,
+                price: i * 10,
                 block_height: i,
                 provider_escrow: i * 100,
                 provider_signature: vec![0u8; 64],

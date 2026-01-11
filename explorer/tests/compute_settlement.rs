@@ -14,7 +14,7 @@ fn provider_balances_round_trip() {
     let explorer = Explorer::open(&db_path).expect("open explorer");
     let records = vec![ProviderSettlementRecord {
         provider: "alice".to_string(),
-        ct: 42,
+        consumer: 42,
         industrial: 7,
         updated_at: 123,
     }];
@@ -38,8 +38,8 @@ fn sla_history_round_trip() {
         provider: "alice".to_string(),
         buyer: "buyer".to_string(),
         outcome: SlaResolutionKind::Completed,
-        burned_ct: 0,
-        refunded_ct: 0,
+        burned: 0,
+        refunded: 0,
         deadline: 1,
         resolved_at: 2,
         proofs: vec![proof.clone()],

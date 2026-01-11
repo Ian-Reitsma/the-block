@@ -606,26 +606,26 @@ fn read_locks(
 
 fn write_pool(writer: &mut Writer, pool: &Pool) {
     writer.write_u64(3);
-    writer.write_string("ct_reserve");
-    writer.write_u128(pool.ct_reserve);
-    writer.write_string("it_reserve");
-    writer.write_u128(pool.it_reserve);
+    writer.write_string("base_reserve");
+    writer.write_u128(pool.base_reserve);
+    writer.write_string("quote_reserve");
+    writer.write_u128(pool.quote_reserve);
     writer.write_string("total_shares");
     writer.write_u128(pool.total_shares);
 }
 
 fn read_pool(reader: &mut Reader<'_>) -> binary_struct::Result<Pool> {
-    let mut ct_reserve = None;
-    let mut it_reserve = None;
+    let mut base_reserve = None;
+    let mut quote_reserve = None;
     let mut total_shares = None;
     decode_struct(reader, Some(3), |key, reader| match key {
-        "ct_reserve" => {
+        "base_reserve" => {
             let value = reader.read_u128()?;
-            assign_once(&mut ct_reserve, value, "ct_reserve")
+            assign_once(&mut base_reserve, value, "base_reserve")
         }
-        "it_reserve" => {
+        "quote_reserve" => {
             let value = reader.read_u128()?;
-            assign_once(&mut it_reserve, value, "it_reserve")
+            assign_once(&mut quote_reserve, value, "quote_reserve")
         }
         "total_shares" => {
             let value = reader.read_u128()?;
@@ -634,8 +634,8 @@ fn read_pool(reader: &mut Reader<'_>) -> binary_struct::Result<Pool> {
         other => Err(binary_struct::DecodeError::UnknownField(other.to_owned())),
     })?;
     Ok(Pool {
-        ct_reserve: ct_reserve.ok_or(DecodeError::MissingField("ct_reserve"))?,
-        it_reserve: it_reserve.ok_or(DecodeError::MissingField("it_reserve"))?,
+        base_reserve: base_reserve.ok_or(DecodeError::MissingField("base_reserve"))?,
+        quote_reserve: quote_reserve.ok_or(DecodeError::MissingField("quote_reserve"))?,
         total_shares: total_shares.ok_or(DecodeError::MissingField("total_shares"))?,
     })
 }
@@ -977,23 +977,23 @@ mod tests {
     #[test]
     fn pool_matches_legacy() {
         let mut pool = Pool::default();
-        pool.ct_reserve = 1_000;
-        pool.it_reserve = 2_000;
+        pool.base_reserve = 1_000;
+        pool.quote_reserve = 2_000;
         pool.total_shares = 500;
 
         let encoded = encode_pool(&pool).expect("manual encode");
         let mut reader = Reader::new(&encoded);
         assert_eq!(reader.read_u64().expect("field count"), 3);
-        assert_eq!(reader.read_string().expect("ct key"), "ct_reserve");
-        assert_eq!(reader.read_u128().expect("ct reserve"), 1_000);
-        assert_eq!(reader.read_string().expect("it key"), "it_reserve");
-        assert_eq!(reader.read_u128().expect("it reserve"), 2_000);
+        assert_eq!(reader.read_string().expect("base key"), "base_reserve");
+        assert_eq!(reader.read_u128().expect("base reserve"), 1_000);
+        assert_eq!(reader.read_string().expect("quote key"), "quote_reserve");
+        assert_eq!(reader.read_u128().expect("quote reserve"), 2_000);
         assert_eq!(reader.read_string().expect("shares key"), "total_shares");
         assert_eq!(reader.read_u128().expect("shares"), 500);
 
         let decoded = decode_pool(&encoded).expect("decode");
-        assert_eq!(decoded.ct_reserve, 1_000);
-        assert_eq!(decoded.it_reserve, 2_000);
+        assert_eq!(decoded.base_reserve, 1_000);
+        assert_eq!(decoded.quote_reserve, 2_000);
         assert_eq!(decoded.total_shares, 500);
     }
 }

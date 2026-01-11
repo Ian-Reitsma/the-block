@@ -23,7 +23,7 @@ fn cannot_prove_without_data() {
         retention_blocks: 1000,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 100000,
+        total_deposit: 100000,
         last_payment_block: None,
         storage_root: tree.root,
     };
@@ -80,7 +80,7 @@ fn proof_for_wrong_index_fails() {
         retention_blocks: 1000,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 100000,
+        total_deposit: 100000,
         last_payment_block: None,
         storage_root: tree.root,
     };
@@ -116,7 +116,7 @@ fn modified_chunk_detected() {
         retention_blocks: 1000,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 100000,
+        total_deposit: 100000,
         last_payment_block: None,
         storage_root: tree.root,
     };
@@ -149,7 +149,7 @@ fn expired_contract_rejects_proofs() {
         retention_blocks: 50, // Expires at block 150
         next_payment_block: 101,
         accrued: 0,
-        total_deposit_ct: 5000,
+        total_deposit: 5000,
         last_payment_block: None,
         storage_root: tree.root,
     };
@@ -200,7 +200,7 @@ fn random_challenges_unpredictable() {
         retention_blocks: 1000,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 100000,
+        total_deposit: 100000,
         last_payment_block: None,
         storage_root: tree.root,
     };

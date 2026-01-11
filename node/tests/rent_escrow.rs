@@ -20,7 +20,7 @@ fn rent_escrow_deposit_refund() {
 
     let dir = tempdir().unwrap();
     let mut pipeline = StoragePipeline::open(dir.path().to_str().unwrap());
-    pipeline.set_rent_rate(1); // 1 CT per byte
+    pipeline.set_rent_rate(1); // 1 BLOCK per byte
 
     let mut catalog = NodeCatalog::new();
     catalog.register(DummyProvider { id: "p1".into() });

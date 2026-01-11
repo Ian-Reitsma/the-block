@@ -9,17 +9,18 @@ If you're new to blockchain development, here's a quick reference:
 | Concept | Plain English | Code/Docs |
 |---------|---------------|-----------|
 | **Block** | A batch of transactions bundled together and added to the chain every ~1 second | `node/src/blockchain`, [`architecture.md#ledger-and-consensus`](architecture.md#ledger-and-consensus) |
-| **Transaction** | A signed message (transfer CT, store data, run compute, etc.) | `node/src/transaction.rs`, [`architecture.md#transaction-and-execution-pipeline`](architecture.md#transaction-and-execution-pipeline) |
+| **Transaction** | A signed message (transfer BLOCK, store data, run compute, etc.) | `node/src/transaction.rs`, [`architecture.md#transaction-and-execution-pipeline`](architecture.md#transaction-and-execution-pipeline) |
 | **Mempool** | The "waiting room" for transactions before they're included in a block | `node/src/mempool`, [`architecture.md#mempool-admission-and-eviction`](architecture.md#mempool-admission-and-eviction) |
 | **Fee lane** | Priority tier (consumer, industrial, priority, treasury) affecting which transactions get included first | `node/src/fee`, [`economics_and_governance.md#fee-lanes-and-rebates`](economics_and_governance.md#fee-lanes-and-rebates) |
-| **Subsidy bucket** | How new CT is allocated (storage, read, compute rewards) | `node/src/blockchain/block_binary.rs`, [`economics_and_governance.md#ct-supply-and-sub-ledgers`](economics_and_governance.md#ct-supply-and-sub-ledgers) |
+| **Subsidy bucket** | How new BLOCK is allocated (storage, read, compute rewards) | `node/src/blockchain/block_binary.rs`, [`economics_and_governance.md#block-supply-and-sub-ledgers`](economics_and_governance.md#block-supply-and-sub-ledgers) |
 | **Proposal** | A governance request to change parameters or spend treasury funds | `governance/src/proposals.rs`, [`economics_and_governance.md#proposal-lifecycle`](economics_and_governance.md#proposal-lifecycle) |
 | **Macro-block** | Periodic checkpoint summarizing state for faster syncing | `node/src/macro_block.rs`, [`architecture.md#macro-blocks-and-finality`](architecture.md#macro-blocks-and-finality) |
 | **SNARK** | Small proof that computation was done correctly (without re-running it) | `node/src/compute_market/snark.rs`, [`architecture.md#compute-marketplace`](architecture.md#compute-marketplace) |
+| **BlockTorch** | Deterministic tensor/autograd framework (metal-backend) for verified ML compute workloads | [`ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy) |
 | **Bridge** | Mechanism for moving assets between blockchains | `bridges/`, [`architecture.md#token-bridges`](architecture.md#token-bridges) |
 | **Trust line** | Credit relationship between parties for DEX trading | `dex/`, [`architecture.md#dex-and-trust-lines`](architecture.md#dex-and-trust-lines) |
 | **Read acknowledgement** | Proof that data was served to a client | `node/src/gateway/read_receipt.rs`, [`architecture.md#read-receipts`](architecture.md#read-receipts) |
-| **Treasury disbursement** | Moving CT from community fund (requires governance vote) | `governance/src/treasury.rs`, [`economics_and_governance.md#treasury-and-disbursements`](economics_and_governance.md#treasury-and-disbursements) |
+| **Treasury disbursement** | Moving BLOCK from community fund (requires governance vote) | `governance/src/treasury.rs`, [`economics_and_governance.md#treasury-and-disbursements`](economics_and_governance.md#treasury-and-disbursements) |
 | **SimpleDb** | Our key-value store with crash-safe writes (atomic rename) | `node/src/simple_db.rs`, [`operations.md`](operations.md) |
 | **Wrapper telemetry** | Metrics about which runtime/transport/storage providers are active | `node/src/telemetry.rs`, [`architecture.md#telemetry-and-instrumentation`](architecture.md#telemetry-and-instrumentation) |
 
@@ -34,7 +35,11 @@ If you're new to blockchain development, here's a quick reference:
 - `cli/` – user-facing CLI with governance, wallet, bridge, compute, telemetry, and remediation commands.
 - `metrics-aggregator/`, `monitoring/`, `explorer/` – ops tooling.
 - `bridges/`, `dex/`, `storage_market/`, `gateway/` – specialised crates referenced by the node.
+- `metal-backend/` – BlockTorch tensor runtime (metal-tensor + autograd), profiling hooks, and the PyTorch bridge used for validation.
 - `docs/` – this handbook (mdBook). Run `mdbook build docs` before submitting docs changes.
+
+## BlockTorch onboarding summary
+BlockTorch is the deterministic tensor/autograd layer that powers verified ML compute in the marketplace. The `metal-backend/` stack provides Metal and CPU backends, profiling hooks (`ORCHARD_TENSOR_PROFILE`), and an experimental PyTorch bridge for validation while the native kernel set reaches full parity. The strategic roadmap and coordinator workflow are documented in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy) and the priority checklist lives in `AGENTS.md §15.B.1`.
 
 ## Spec, Docs, and Owners
 - Read `AGENTS.md` + this handbook once, then operate as if you authored them. Implementation never outruns docs: diff behaviour vs `AGENTS.md §0.6` + [`docs/overview.md`](overview.md) before touching code, patch the spec first, route it through the Document Map owner, and cite the doc PR/issue in the code review.
@@ -63,7 +68,7 @@ If you're new to blockchain development, here's a quick reference:
 > |-----------|--------------|-------------|
 > | **Unit tests** | Test individual functions in isolation | `just test-fast` — always before commits |
 > | **Replay tests** | Re-run historical blocks to verify determinism (same input = same output, even on different CPUs) | `cargo test -p the_block --test replay` — when touching consensus/ledger |
-> | **Settlement audit** | Double-entry accounting check — ensures CT doesn't magically appear or disappear | `cargo test -p the_block --test settlement_audit --release` — when touching economics |
+> | **Settlement audit** | Double-entry accounting check — ensures BLOCK doesn't magically appear or disappear | `cargo test -p the_block --test settlement_audit --release` — when touching economics |
 > | **Fuzzing** | Throws random inputs at the code to find edge cases | `scripts/fuzz_coverage.sh` — for critical paths |
 > | **Chaos tests** | Simulate failures (packet loss, disk full, network partition) | Specific test files — when touching networking/storage |
 
@@ -132,7 +137,7 @@ If you're new to blockchain development, here's a quick reference:
   contract-cli energy submit-reading --reading-json @reading.json
   contract-cli energy settle energy-0x00 400 --meter-hash <hex> --buyer acct_consumer
   ```
-- **Telemetry & metrics** — The crate emits `energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`, `energy_signature_failure_total{provider,reason}`, `energy_provider_fulfillment_ms`, `energy_avg_price`, `energy_kwh_traded_total`, and `oracle_reading_latency_seconds`. Gate pending-credit health via `node::energy::check_energy_market_health` logs; dashboards ingest the same metrics via the metrics-aggregator.
+- **Telemetry & metrics** — The crate emits `energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_total`, `energy_dispute_{open,resolve}_total`, `energy_signature_failure_total{provider,reason}`, `energy_provider_fulfillment_ms`, `energy_avg_price`, `energy_kwh_traded_total`, and `oracle_reading_latency_seconds`. Gate pending-credit health via `node::energy::check_energy_market_health` logs; dashboards ingest the same metrics via the metrics-aggregator.
 - **Testing** — Run `cargo test -p energy-market` for unit coverage and `cargo test -p node --test gov_param_wiring` to ensure governance parameters round-trip correctly. Use `scripts/deploy-worldos-testnet.sh` + `docs/testnet/ENERGY_QUICKSTART.md` for integration drills (node + mock oracle + telemetry). When altering serialization, add vectors under `crates/energy-market/tests` and extend the CLI tests in `cli/tests/` to keep JSON schemas stable.
 - **Oracle adapters** — `crates/oracle-adapter` now ships the production `Ed25519SignatureVerifier`. Register provider public keys (pulled from governance or ops config) before forwarding readings; any provider without a key remains in shadow mode so you can roll out gradually. Signing keys still come from env/KMS (`TB_ORACLE_SIGNING_KEY`, etc.). The mock oracle service (`services/mock-energy-oracle`) exposes `/meter/:id/reading` and `/meter/:id/submit` endpoints over the in-house `httpd` router so you can simulate both fetching and submitting readings without third-party stacks.
 - **Next steps** — Oracle quorum/expiry policy, ledger anchoring for receipts, explorer visualisations, and deterministic replay coverage are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks` and summarised in `AGENTS.md`. Treat those bullets as blocking work items whenever you touch the energy crates.

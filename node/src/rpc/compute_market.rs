@@ -266,12 +266,12 @@ fn sla_resolution_to_value(resolution: &SlaResolution) -> Value {
         map.insert("outcome_reason".to_string(), Value::String(reason.clone()));
     }
     map.insert(
-        "burned_ct".to_string(),
-        Value::Number(Number::from(resolution.burned_ct)),
+        "burned".to_string(),
+        Value::Number(Number::from(resolution.burned)),
     );
     map.insert(
-        "refunded_ct".to_string(),
-        Value::Number(Number::from(resolution.refunded_ct)),
+        "refunded".to_string(),
+        Value::Number(Number::from(resolution.refunded)),
     );
     map.insert(
         "deadline".to_string(),
@@ -347,25 +347,13 @@ fn audit_record_to_value(record: &AuditRecord) -> Value {
     map.insert("entity".to_string(), Value::String(record.entity.clone()));
     map.insert("memo".to_string(), Value::String(record.memo.clone()));
     map.insert(
-        "delta_ct".to_string(),
-        Value::Number(Number::from(record.delta_ct)),
+        "delta".to_string(),
+        Value::Number(Number::from(record.delta)),
     );
-    if let Some(delta_it) = record.delta_it {
-        map.insert(
-            "delta_it".to_string(),
-            Value::Number(Number::from(delta_it)),
-        );
-    }
     map.insert(
         "balance".to_string(),
         Value::Number(Number::from(record.balance)),
     );
-    if let Some(balance_it) = record.balance_it {
-        map.insert(
-            "balance_it".to_string(),
-            Value::Number(Number::from(balance_it)),
-        );
-    }
     if let Some(anchor) = &record.anchor {
         map.insert("anchor".to_string(), Value::String(anchor.clone()));
     }

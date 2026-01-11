@@ -1,7 +1,9 @@
 #![cfg(feature = "integration-tests")]
 
 use std::sync::{atomic::AtomicBool, Arc, Mutex, Once};
+use std::time::Duration;
 
+use concurrency::Lazy;
 use diagnostics::anyhow::Result;
 use runtime::net::TcpStream;
 use runtime::sync::oneshot;
@@ -9,6 +11,14 @@ use runtime::ws;
 use the_block::config::RpcConfig;
 use the_block::rpc::run_rpc_server;
 use the_block::Blockchain;
+
+struct RpcServerState {
+    addr: std::net::SocketAddr,
+    _handle: runtime::JoinHandle<Result<(), std::io::Error>>,
+    _dir: sys::tempfile::TempDir,
+}
+
+static RPC_SERVER: Lazy<Mutex<Option<RpcServerState>>> = Lazy::new(|| Mutex::new(None));
 
 fn configure_runtime() {
     static INIT: Once = Once::new();
@@ -19,6 +29,17 @@ fn configure_runtime() {
             overrides: Default::default(),
         });
     });
+}
+
+async fn expect_timeout_with<F, T, E>(fut: F, context: &str) -> Result<T>
+where
+    F: std::future::Future<Output = std::result::Result<T, E>>,
+    E: Into<diagnostics::anyhow::Error>,
+{
+    let fut = async { fut.await.map_err(Into::into) };
+    the_block::timeout(Duration::from_secs(30), fut)
+        .await
+        .map_err(|_| diagnostics::anyhow::anyhow!("operation timed out: {context}"))?
 }
 
 async fn read_response_headers(stream: &mut TcpStream) -> Result<String> {
@@ -66,56 +87,87 @@ async fn spawn_rpc_server() -> (
     (socket, handle, dir)
 }
 
-#[test]
-fn state_stream_upgrade_requires_headers() -> Result<()> {
-    runtime::block_on(async {
-        configure_runtime();
-        let (addr, server, _dir) = spawn_rpc_server().await;
+async fn rpc_server_addr() -> Result<std::net::SocketAddr> {
+    configure_runtime();
+    if let Some(addr) = RPC_SERVER
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|state| state.addr)
+    {
+        return Ok(addr);
+    }
 
-        let mut client = TcpStream::connect(addr).await?;
+    let (addr, handle, dir) = spawn_rpc_server().await;
+    let mut guard = RPC_SERVER.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(existing_addr) = guard.as_ref().map(|state| state.addr) {
+        drop(guard);
+        handle.abort();
+        let _ = handle.await;
+        return Ok(existing_addr);
+    }
+    *guard = Some(RpcServerState {
+        addr,
+        _handle: handle,
+        _dir: dir,
+    });
+    Ok(addr)
+}
+
+#[testkit::tb_serial]
+fn state_stream_upgrade_requires_headers() -> Result<()> {
+    configure_runtime();
+    runtime::block_on(async {
+        let addr = rpc_server_addr().await?;
+
+        let mut client = expect_timeout_with(TcpStream::connect(addr), "connect").await?;
         let key = ws::handshake_key();
         let request = format!(
         "GET /state_stream HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
     );
-        client
-            .write_all(request.as_bytes())
+        expect_timeout_with(client.write_all(request.as_bytes()), "write")
             .await
             .expect("write handshake");
-        let headers = read_response_headers(&mut client).await?;
+        let headers =
+            expect_timeout_with(read_response_headers(&mut client), "read headers").await?;
         assert!(
             headers.starts_with("HTTP/1.1 101"),
             "unexpected response: {headers}"
         );
-        client.shutdown().await.expect("shutdown");
-        server.abort();
-        let _ = server.await;
+        if let Err(err) = client.shutdown().await {
+            if err.kind() != std::io::ErrorKind::NotConnected {
+                return Err(err.into());
+            }
+        }
         Ok(())
     })
 }
 
-#[test]
+#[testkit::tb_serial]
 fn missing_upgrade_header_is_rejected() -> Result<()> {
+    configure_runtime();
     runtime::block_on(async {
-        configure_runtime();
-        let (addr, server, _dir) = spawn_rpc_server().await;
+        let addr = rpc_server_addr().await?;
 
-        let mut client = TcpStream::connect(addr).await?;
+        let mut client = expect_timeout_with(TcpStream::connect(addr), "connect").await?;
         let key = ws::handshake_key();
         let request = format!(
         "GET /state_stream HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
     );
-        client
-            .write_all(request.as_bytes())
+        expect_timeout_with(client.write_all(request.as_bytes()), "write")
             .await
             .expect("write handshake");
-        let headers = read_response_headers(&mut client).await?;
+        let headers =
+            expect_timeout_with(read_response_headers(&mut client), "read headers").await?;
         assert!(
             headers.starts_with("HTTP/1.1 400"),
             "unexpected response: {headers}"
         );
-        client.shutdown().await.expect("shutdown");
-        server.abort();
-        let _ = server.await;
+        if let Err(err) = client.shutdown().await {
+            if err.kind() != std::io::ErrorKind::NotConnected {
+                return Err(err.into());
+            }
+        }
         Ok(())
     })
 }

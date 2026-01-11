@@ -5,8 +5,8 @@ pub fn run_spike() {
     let (sk, _) = generate_keypair();
     let mut bc = Blockchain::default();
     bc.base_fee = 1;
-    bc.add_account("a".into(), 10_000_000, 0).unwrap();
-    bc.add_account("miner".into(), 0, 0).unwrap();
+    bc.add_account("a".into(), 10_000_000).unwrap();
+    bc.add_account("miner".into(), 0).unwrap();
     for n in 1..=20 {
         let payload = RawTxPayload {
             from_: "a".into(),
@@ -14,7 +14,7 @@ pub fn run_spike() {
             amount_consumer: 0,
             amount_industrial: 0,
             fee: bc.base_fee + 100,
-            pct_ct: 100,
+            pct: 100,
             nonce: n,
             memo: vec![],
         };

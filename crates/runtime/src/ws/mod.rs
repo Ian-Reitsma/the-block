@@ -480,8 +480,21 @@ impl WebSocketStream {
                 OpCode::Pong => return Ok(Some(Message::Pong(frame.payload))),
                 OpCode::Close => {
                     if !self.closing {
-                        self.write_frame(OpCode::Close, true, &frame.payload)
-                            .await?;
+                        // Peers frequently drop immediately after sending a Close frame; treat
+                        // write errors as a clean shutdown so we still surface the close reason.
+                        if let Err(err) =
+                            self.write_frame(OpCode::Close, true, &frame.payload).await
+                        {
+                            if !matches!(
+                                err.kind(),
+                                ErrorKind::BrokenPipe
+                                    | ErrorKind::ConnectionReset
+                                    | ErrorKind::ConnectionAborted
+                                    | ErrorKind::NotConnected
+                            ) {
+                                return Err(err);
+                            }
+                        }
                     }
                     self.closed = true;
                     let close = self.ensure_close_frame(&frame.payload).await?;

@@ -3,6 +3,7 @@ use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::compute_market::snark::ProofBundle;
@@ -12,7 +13,7 @@ use crate::simple_db::{names, SimpleDb, SimpleDbBatch};
 use crate::telemetry::{
     COMPUTE_SLA_AUTOMATED_SLASH_TOTAL, COMPUTE_SLA_NEXT_DEADLINE_TS, COMPUTE_SLA_PENDING_TOTAL,
     COMPUTE_SLA_VIOLATIONS_TOTAL, SETTLE_APPLIED_TOTAL, SETTLE_FAILED_TOTAL,
-    SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_CT_TOTAL,
+    SETTLE_MODE_CHANGE_TOTAL, SLASHING_BURN_TOTAL,
 };
 use concurrency::{mutex, Lazy, MutexExt, MutexGuard, MutexT};
 #[cfg(feature = "telemetry")]
@@ -26,8 +27,7 @@ use ledger::utxo_account::AccountLedger;
 const AUDIT_CAP: usize = 256;
 const ROOT_HISTORY: usize = 32;
 
-const KEY_LEDGER_CT: &str = "ledger_ct";
-const KEY_LEDGER_IT: &str = "ledger_it";
+const KEY_LEDGER: &str = "ledger";
 const KEY_MODE: &str = "mode";
 const KEY_METADATA: &str = "metadata";
 const KEY_AUDIT: &str = "audit_log";
@@ -71,18 +71,8 @@ pub struct AuditRecord {
     pub timestamp: u64,
     pub entity: String,
     pub memo: String,
-    pub delta_ct: i64,
-    #[serde(
-        default,
-        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-    )]
-    pub delta_it: Option<i64>,
+    pub delta: i64,
     pub balance: u64,
-    #[serde(
-        default,
-        skip_serializing_if = "foundation_serialization::skip::option_is_none"
-    )]
-    pub balance_it: Option<u64>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub anchor: Option<String>,
 }
@@ -123,8 +113,8 @@ pub struct SlaResolution {
     pub provider: String,
     pub buyer: String,
     pub outcome: SlaResolutionKind,
-    pub burned_ct: u64,
-    pub refunded_ct: u64,
+    pub burned: u64,
+    pub refunded: u64,
     pub deadline: u64,
     pub resolved_at: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -148,9 +138,11 @@ pub struct SettlementEngineInfo {
 struct SettlementState {
     db: SimpleDb,
     base: PathBuf,
+    db_path: PathBuf,
     mode: SettleMode,
+    workspace_id: Option<String>,
     metadata: Metadata,
-    ct: AccountLedger,
+    ledger: AccountLedger,
     audit: VecDeque<AuditRecord>,
     roots: VecDeque<[u8; 32]>,
     next_seq: u64,
@@ -159,16 +151,22 @@ struct SettlementState {
 }
 
 impl SettlementState {
-    fn new(base: PathBuf, mut mode: SettleMode, mut db: SimpleDb) -> Self {
-        let mut ct = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_CT, AccountLedger::new);
-        let legacy_it = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER_IT, AccountLedger::new);
-        if !legacy_it.balances.is_empty() {
-            for (provider, amount) in legacy_it.balances {
-                let entry = ct.balances.entry(provider).or_insert(0);
-                *entry = entry.saturating_add(amount);
-            }
-            let _ = db.delete(KEY_LEDGER_IT);
+    fn ensure_storage_dirs(&self) -> io::Result<()> {
+        fs::create_dir_all(&self.base)?;
+        if let Some(parent) = self.db_path.parent() {
+            fs::create_dir_all(parent)?;
         }
+        Ok(())
+    }
+
+    fn new(
+        base: PathBuf,
+        workspace_id: Option<String>,
+        mut mode: SettleMode,
+        db_path: PathBuf,
+        db: SimpleDb,
+    ) -> Self {
+        let ledger = load_or_default::<AccountLedger, _>(&db, KEY_LEDGER, AccountLedger::new);
         let stored_mode = load_or_default::<SettleMode, _>(&db, KEY_MODE, || mode);
         mode = stored_mode;
         let metadata = load_or_default::<Metadata, _>(&db, KEY_METADATA, Metadata::default);
@@ -179,11 +177,13 @@ impl SettlementState {
         let sla_history =
             load_or_default::<VecDeque<SlaResolution>, _>(&db, KEY_SLA_HISTORY, VecDeque::new);
         Self {
-            db,
             base,
+            db_path,
+            db,
             mode,
+            workspace_id,
             metadata,
-            ct,
+            ledger,
             audit,
             roots,
             next_seq,
@@ -192,7 +192,7 @@ impl SettlementState {
         }
     }
 
-    fn record_event(&mut self, entity: &str, memo: &str, delta_ct: i64, delta_it: Option<i64>) {
+    fn record_event(&mut self, entity: &str, memo: &str, delta: i64) {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -203,10 +203,8 @@ impl SettlementState {
             timestamp,
             entity: entity.to_string(),
             memo: memo.to_string(),
-            delta_ct,
-            delta_it,
+            delta,
             balance,
-            balance_it: None,
             anchor: None,
         };
         self.next_seq = self.next_seq.wrapping_add(1);
@@ -227,10 +225,8 @@ impl SettlementState {
             timestamp,
             entity: "__anchor__".to_string(),
             memo: "anchor".to_string(),
-            delta_ct: 0,
-            delta_it: None,
+            delta: 0,
             balance: 0,
-            balance_it: None,
             anchor: Some(hash_hex),
         };
         self.next_seq = self.next_seq.wrapping_add(1);
@@ -241,7 +237,7 @@ impl SettlementState {
     }
 
     fn update_root(&mut self) {
-        let root = compute_root(&self.ct);
+        let root = compute_root(&self.ledger);
         if self.roots.back().copied() == Some(root) {
             return;
         }
@@ -252,11 +248,11 @@ impl SettlementState {
     }
 
     fn balance(&self, provider: &str) -> u64 {
-        self.ct.balances.get(provider).copied().unwrap_or(0)
+        self.ledger.balances.get(provider).copied().unwrap_or(0)
     }
 
     fn balances(&self) -> Vec<BalanceSnapshot> {
-        let providers: BTreeSet<&str> = self.ct.balances.keys().map(|s| s.as_str()).collect();
+        let providers: BTreeSet<&str> = self.ledger.balances.keys().map(|s| s.as_str()).collect();
         providers
             .into_iter()
             .map(|provider| BalanceSnapshot {
@@ -268,27 +264,75 @@ impl SettlementState {
 
     fn persist_all(&mut self) {
         self.refresh_sla_metrics();
-        let mut batch = self.db.batch();
-        let mut encode = || -> io::Result<()> {
-            enqueue_value(&mut batch, KEY_LEDGER_CT, &self.ct)?;
-            enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
-            enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
-            enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
-            enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
-            enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
-            enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
-            enqueue_value(&mut batch, KEY_SLA_HISTORY, &self.sla_history)?;
-            Ok(())
-        };
+        let mut attempts = 0;
+        let max_attempts = 7;
+        loop {
+            let mut batch = self.db.batch();
+            let mut encode = || -> io::Result<()> {
+                self.ensure_storage_dirs()?;
+                enqueue_value(&mut batch, KEY_LEDGER, &self.ledger)?;
+                enqueue_value(&mut batch, KEY_MODE, &self.mode)?;
+                enqueue_value(&mut batch, KEY_METADATA, &self.metadata)?;
+                enqueue_value(&mut batch, KEY_AUDIT, &self.audit)?;
+                enqueue_value(&mut batch, KEY_ROOTS, &self.roots)?;
+                enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
+                enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
+                enqueue_value(&mut batch, KEY_SLA_HISTORY, &self.sla_history)?;
+                Ok(())
+            };
 
-        if let Err(err) = encode().and_then(|_| self.db.write_batch(batch)) {
-            #[cfg(feature = "telemetry")]
-            {
-                error!(?err, "persist settlement state");
-            }
-            #[cfg(not(feature = "telemetry"))]
-            {
-                let _ = err;
+            match encode().and_then(|_| self.db.write_batch(batch)) {
+                Ok(_) => break,
+                Err(err) => {
+                    let is_missing =
+                        err.kind() == io::ErrorKind::NotFound || err.raw_os_error() == Some(2);
+                    if is_missing && attempts + 1 < max_attempts {
+                        let fallback = if let Some(id) = &self.workspace_id {
+                            settlement_workspace_root().join(format!("{id}-retry-{}", attempts + 1))
+                        } else {
+                            let base_name = self
+                                .base
+                                .file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| "settlement".to_string());
+                            self.base
+                                .parent()
+                                .map(|parent| {
+                                    parent.join(format!("{base_name}-retry-{}", attempts + 1))
+                                })
+                                .unwrap_or_else(|| {
+                                    self.base.join(format!("retry-{}", attempts + 1))
+                                })
+                        };
+                        let _ = fs::create_dir_all(&fallback);
+                        self.base = fallback;
+                        self.db_path = self.base.join("compute_settlement.db");
+                        if let Some(parent) = self.db_path.parent() {
+                            let _ = fs::create_dir_all(parent);
+                        }
+                        // Reopen the DB in case the underlying file vanished.
+                        self.db = SimpleDb::open_named(
+                            names::COMPUTE_SETTLEMENT,
+                            self.db_path.to_str().unwrap_or_else(|| {
+                                panic!("non-utf8 settlement db path: {}", self.db_path.display())
+                            }),
+                        );
+                        attempts += 1;
+                        // Give the filesystem a moment to settle on platforms where temp dirs
+                        // are pruned aggressively.
+                        std::thread::sleep(std::time::Duration::from_millis(25 * attempts));
+                        continue;
+                    }
+                    #[cfg(feature = "telemetry")]
+                    {
+                        error!(?err, "persist settlement state");
+                    }
+                    #[cfg(not(feature = "telemetry"))]
+                    {
+                        let _ = err;
+                    }
+                    break;
+                }
             }
         }
     }
@@ -347,13 +391,13 @@ impl SettlementState {
         let mut refunded = 0;
         let outcome_kind = match outcome {
             SlaOutcome::Completed => {
-                self.record_event(&record.provider, "sla_completed", 0, None);
+                self.record_event(&record.provider, "sla_completed", 0);
                 self.metadata.last_sla_violation = None;
                 SlaResolutionKind::Completed
             }
             SlaOutcome::Cancelled { reason } => {
                 let memo = format!("sla_cancelled_{reason}");
-                self.record_event(&record.provider, &memo, 0, None);
+                self.record_event(&record.provider, &memo, 0);
                 self.metadata.last_cancel_reason = Some(reason.to_string());
                 SlaResolutionKind::Cancelled {
                     reason: reason.to_string(),
@@ -363,18 +407,13 @@ impl SettlementState {
                 #[cfg(not(feature = "telemetry"))]
                 let _ = automated;
                 let memo = format!("sla_violation_{reason}");
-                match self.ct.debit(&record.provider, record.provider_bond) {
+                match self.ledger.debit(&record.provider, record.provider_bond) {
                     Ok(_) => {
                         burned = record.provider_bond;
-                        self.record_event(
-                            &record.provider,
-                            &memo,
-                            -(record.provider_bond as i64),
-                            None,
-                        );
+                        self.record_event(&record.provider, &memo, -(record.provider_bond as i64));
                         #[cfg(feature = "telemetry")]
                         {
-                            SLASHING_BURN_CT_TOTAL.inc_by(burned);
+                            SLASHING_BURN_TOTAL.inc_by(burned);
                             COMPUTE_SLA_VIOLATIONS_TOTAL
                                 .ensure_handle_for_label_values(&[record.provider.as_str()])
                                 .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
@@ -390,17 +429,16 @@ impl SettlementState {
                             .ensure_handle_for_label_values(&["penalize"])
                             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
                             .inc();
-                        self.record_event(&record.provider, &format!("{memo}_failed"), 0, None);
+                        self.record_event(&record.provider, &format!("{memo}_failed"), 0);
                     }
                 }
                 if record.consumer_bond > 0 {
-                    self.ct.deposit(&record.buyer, record.consumer_bond);
+                    self.ledger.deposit(&record.buyer, record.consumer_bond);
                     refunded = record.consumer_bond;
                     self.record_event(
                         &record.buyer,
                         "sla_consumer_refund",
                         record.consumer_bond as i64,
-                        None,
                     );
                 }
                 self.metadata.last_sla_violation = Some(format!(
@@ -418,8 +456,8 @@ impl SettlementState {
             provider: record.provider,
             buyer: record.buyer,
             outcome: outcome_kind,
-            burned_ct: burned,
-            refunded_ct: refunded,
+            burned,
+            refunded,
             deadline: record.deadline,
             resolved_at,
             proofs: record.proofs,
@@ -496,6 +534,7 @@ fn compute_root(ledger: &AccountLedger) -> [u8; 32] {
 }
 
 static STATE: Lazy<MutexT<Option<SettlementState>>> = Lazy::new(|| mutex(None));
+static BALANCE_SNAPSHOT: Lazy<MutexT<Vec<BalanceSnapshot>>> = Lazy::new(|| mutex(Vec::new()));
 
 fn settlement_state() -> MutexGuard<'static, Option<SettlementState>> {
     STATE.guard()
@@ -515,6 +554,32 @@ fn with_state<R>(f: impl FnOnce(&SettlementState) -> R) -> R {
         .as_ref()
         .expect("Settlement::init must be called before use");
     f(state)
+}
+
+fn settlement_workspace_root() -> PathBuf {
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join("target_tmp")
+        .join("compute_settlement")
+}
+
+fn settlement_identifier(path: &str) -> String {
+    if path.is_empty() {
+        format!("default-{}", process::id())
+    } else {
+        blake3::hash(path.as_bytes()).to_hex().to_string()
+    }
+}
+
+fn settlement_base_for(path: &str) -> (PathBuf, Option<String>) {
+    let path_buf = PathBuf::from(path);
+    let tmp_root = std::env::temp_dir();
+    if path.is_empty() || path_buf.starts_with(&tmp_root) {
+        let id = settlement_identifier(path);
+        (settlement_workspace_root().join(&id), Some(id))
+    } else {
+        (path_buf, None)
+    }
 }
 
 pub struct Settlement;
@@ -537,20 +602,23 @@ impl Settlement {
             *guard = None;
         }
 
-        let base = if path.is_empty() {
-            sys::tempfile::tempdir()
-                .expect("create settlement tempdir")
-                .keep()
-        } else {
-            PathBuf::from(path)
-        };
+        // Avoid system temp directories that can be pruned mid-run; default to a
+        // workspace-local scratch path scoped by PID so concurrent test runs do
+        // not collide. If the caller points at a tempdir (common in tests), pivot
+        // to the workspace scratch as well.
+        let (base, workspace_id) = settlement_base_for(path);
         fs::create_dir_all(&base).unwrap_or_else(|e| panic!("create settlement dir: {e}"));
         let db_path = base.join("compute_settlement.db");
         let db_path_str = db_path
             .to_str()
             .unwrap_or_else(|| panic!("non-utf8 settlement db path: {}", db_path.display()));
-        let mut state =
-            SettlementState::new(base, mode, factory(names::COMPUTE_SETTLEMENT, db_path_str));
+        let mut state = SettlementState::new(
+            base,
+            workspace_id,
+            mode,
+            db_path.clone(),
+            factory(names::COMPUTE_SETTLEMENT, db_path_str),
+        );
         state.persist_all();
         state.flush();
         *settlement_state() = Some(state);
@@ -565,15 +633,23 @@ impl Settlement {
         *guard = None;
     }
 
+    /// Returns the directory currently hosting settlement persistence files.
+    /// This reflects any fallback path chosen after transport errors so callers
+    /// can observe the real storage directory regardless of their original
+    /// configuration.
+    pub fn storage_path() -> PathBuf {
+        with_state(|state| state.base.clone())
+    }
+
     pub fn penalize_sla(provider: &str, amount: u64) -> Result<(), ()> {
         #[cfg(feature = "telemetry")]
         let _span = crate::log_context!(provider = provider);
-        with_state_mut(|state| match state.ct.debit(provider, amount) {
+        with_state_mut(|state| match state.ledger.debit(provider, amount) {
             Ok(_) => {
-                state.record_event(provider, "penalize_sla", -(amount as i64), None);
+                state.record_event(provider, "penalize_sla", -(amount as i64));
                 #[cfg(feature = "telemetry")]
                 {
-                    SLASHING_BURN_CT_TOTAL.inc_by(amount);
+                    SLASHING_BURN_TOTAL.inc_by(amount);
                     COMPUTE_SLA_VIOLATIONS_TOTAL
                         .ensure_handle_for_label_values(&[provider])
                         .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
@@ -652,20 +728,21 @@ impl Settlement {
 
     pub fn accrue(provider: &str, event: &str, amount: u64) {
         with_state_mut(|state| {
-            state.ct.deposit(provider, amount);
-            state.record_event(provider, event, amount as i64, None);
+            state.ledger.deposit(provider, amount);
+            state.record_event(provider, event, amount as i64);
             #[cfg(feature = "telemetry")]
             SETTLE_APPLIED_TOTAL.inc();
             state.persist_all();
         });
     }
 
-    pub fn accrue_split(provider: &str, ct: u64, it: u64) {
+    /// Accrue split amounts from consumer and industrial lanes.
+    /// Both amounts are combined into a single BLOCK balance.
+    pub fn accrue_split(provider: &str, consumer: u64, industrial: u64) {
         with_state_mut(|state| {
-            let total = ct.saturating_add(it);
-            state.ct.deposit(provider, total);
-            let legacy = if it > 0 { Some(it as i64) } else { None };
-            state.record_event(provider, "accrue_split", total as i64, legacy);
+            let total = consumer.saturating_add(industrial);
+            state.ledger.deposit(provider, total);
+            state.record_event(provider, "accrue_split", total as i64);
             #[cfg(feature = "telemetry")]
             SETTLE_APPLIED_TOTAL.inc();
             state.persist_all();
@@ -697,7 +774,14 @@ impl Settlement {
     }
 
     pub fn balances() -> Vec<BalanceSnapshot> {
-        with_state(|state| state.balances())
+        if let Ok(guard) = STATE.try_lock() {
+            if let Some(state) = guard.as_ref() {
+                let balances = state.balances();
+                *BALANCE_SNAPSHOT.guard() = balances.clone();
+                return balances;
+            }
+        }
+        BALANCE_SNAPSHOT.guard().clone()
     }
 
     pub fn engine_info() -> SettlementEngineInfo {
@@ -709,9 +793,9 @@ impl Settlement {
     }
 
     pub fn spend(provider: &str, event: &str, amount: u64) -> Result<(), ()> {
-        with_state_mut(|state| match state.ct.debit(provider, amount) {
+        with_state_mut(|state| match state.ledger.debit(provider, amount) {
             Ok(_) => {
-                state.record_event(provider, event, -(amount as i64), None);
+                state.record_event(provider, event, -(amount as i64));
                 #[cfg(feature = "telemetry")]
                 SETTLE_APPLIED_TOTAL.inc();
                 state.persist_all();
@@ -728,12 +812,13 @@ impl Settlement {
         })
     }
 
-    pub fn refund_split(buyer: &str, ct: u64, it: u64) {
+    /// Refund split amounts from consumer and industrial lanes.
+    /// Both amounts are combined into a single BLOCK balance.
+    pub fn refund_split(buyer: &str, consumer: u64, industrial: u64) {
         with_state_mut(|state| {
-            let total = ct.saturating_add(it);
-            state.ct.deposit(buyer, total);
-            let legacy = if it > 0 { Some(it as i64) } else { None };
-            state.record_event(buyer, "refund_split", total as i64, legacy);
+            let total = consumer.saturating_add(industrial);
+            state.ledger.deposit(buyer, total);
+            state.record_event(buyer, "refund_split", total as i64);
             #[cfg(feature = "telemetry")]
             SETTLE_APPLIED_TOTAL.inc();
             state.persist_all();

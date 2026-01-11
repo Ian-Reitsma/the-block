@@ -36,6 +36,14 @@ pub struct Message {
 impl Message {
     /// Sign `body` with `kp` producing an authenticated message.
     pub fn new(body: Payload, sk: &SigningKey) -> EncodeResult<Self> {
+        Self::new_with_cert_fingerprint(body, sk, None)
+    }
+
+    pub fn new_with_cert_fingerprint(
+        body: Payload,
+        sk: &SigningKey,
+        cert_fingerprint: Option<Bytes>,
+    ) -> EncodeResult<Self> {
         let bytes = encode_payload(&body)?;
         let sig = sk.sign(&bytes);
         Ok(Self {
@@ -43,17 +51,7 @@ impl Message {
             signature: Bytes::from(sig.to_bytes().to_vec()),
             body,
             partition: None,
-            cert_fingerprint: {
-                #[cfg(feature = "quic")]
-                {
-                    crate::net::transport_quic::current_advertisement()
-                        .map(|ad| Bytes::from(ad.fingerprint.to_vec()))
-                }
-                #[cfg(not(feature = "quic"))]
-                {
-                    None
-                }
-            },
+            cert_fingerprint,
         })
     }
 }
@@ -73,6 +71,8 @@ pub enum Payload {
     Block(ShardId, Block),
     /// Share an entire chain snapshot for fork resolution.
     Chain(Vec<Block>),
+    /// Request a chain snapshot when behind.
+    ChainRequest(ChainRequest),
     /// Disseminate a single erasure-coded shard of a blob.
     BlobChunk(BlobChunk),
     /// Propagate provider reputation scores.
@@ -90,6 +90,12 @@ pub struct BlobChunk {
     pub total: u32,
     /// Raw shard bytes.
     pub data: Bytes,
+}
+
+/// Request a chain snapshot starting from a given height.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ChainRequest {
+    pub from_height: u64,
 }
 
 // ReputationUpdate defined in peer.rs
@@ -222,6 +228,10 @@ fn write_payload(writer: &mut BinaryWriter, payload: &Payload) -> EncodeResult<(
                 block_binary::write_block(writer, block)
             })?;
         }
+        Payload::ChainRequest(request) => {
+            writer.write_u32(8);
+            write_chain_request(writer, request)?;
+        }
         Payload::BlobChunk(chunk) => {
             writer.write_u32(6);
             write_blob_chunk(writer, chunk)?;
@@ -256,11 +266,32 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
             reader,
             read_reputation_update,
         )?)),
+        8 => Ok(Payload::ChainRequest(read_chain_request(reader)?)),
         other => Err(DecodeError::InvalidEnumDiscriminant {
             ty: "Payload",
             value: other,
         }),
     }
+}
+
+fn write_chain_request(writer: &mut BinaryWriter, request: &ChainRequest) -> EncodeResult<()> {
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_u64("from_height", request.from_height);
+    });
+    Ok(())
+}
+
+fn read_chain_request(reader: &mut BinaryReader<'_>) -> binary_struct::Result<ChainRequest> {
+    let mut from_height = None;
+
+    decode_struct(reader, Some(1), |key, reader| match key {
+        "from_height" => assign_once(&mut from_height, reader.read_u64()?, "from_height"),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+
+    Ok(ChainRequest {
+        from_height: from_height.ok_or(DecodeError::MissingField("from_height"))?,
+    })
 }
 
 fn write_blob_chunk(writer: &mut BinaryWriter, chunk: &BlobChunk) -> EncodeResult<()> {
@@ -447,7 +478,7 @@ mod tests {
             amount_consumer: 10,
             amount_industrial: 20,
             fee: 2,
-            pct_ct: 64,
+            pct: 64,
             nonce: 9,
             memo: vec![1, 2, 3],
         }
@@ -483,36 +514,27 @@ mod tests {
             retune_hint: -1,
             nonce: 99,
             hash: "hash".into(),
-            coinbase_consumer: TokenAmount::new(10),
+            coinbase_block: TokenAmount::new(10),
             coinbase_industrial: TokenAmount::new(11),
-            storage_sub_ct: TokenAmount::new(12),
-            read_sub_ct: TokenAmount::new(13),
-            read_sub_viewer_ct: TokenAmount::new(2),
-            read_sub_host_ct: TokenAmount::new(3),
-            read_sub_hardware_ct: TokenAmount::new(4),
-            read_sub_verifier_ct: TokenAmount::new(1),
-            read_sub_liquidity_ct: TokenAmount::new(3),
-            ad_viewer_ct: TokenAmount::new(5),
-            ad_host_ct: TokenAmount::new(6),
-            ad_hardware_ct: TokenAmount::new(7),
-            ad_verifier_ct: TokenAmount::new(8),
-            ad_liquidity_ct: TokenAmount::new(9),
-            ad_miner_ct: TokenAmount::new(10),
-            ad_host_it: TokenAmount::new(11),
-            ad_hardware_it: TokenAmount::new(12),
-            ad_verifier_it: TokenAmount::new(13),
-            ad_liquidity_it: TokenAmount::new(14),
-            ad_miner_it: TokenAmount::new(15),
+            storage_sub: TokenAmount::new(12),
+            read_sub: TokenAmount::new(13),
+            read_sub_viewer: TokenAmount::new(2),
+            read_sub_host: TokenAmount::new(3),
+            read_sub_hardware: TokenAmount::new(4),
+            read_sub_verifier: TokenAmount::new(1),
+            read_sub_liquidity: TokenAmount::new(3),
+            ad_viewer: TokenAmount::new(5),
+            ad_host: TokenAmount::new(6),
+            ad_hardware: TokenAmount::new(7),
+            ad_verifier: TokenAmount::new(8),
+            ad_liquidity: TokenAmount::new(9),
+            ad_miner: TokenAmount::new(10),
             treasury_events: Vec::new(),
             ad_total_usd_micros: 0,
             ad_settlement_count: 0,
-            ad_oracle_ct_price_usd_micros: 0,
-            ad_oracle_it_price_usd_micros: 0,
-            compute_sub_ct: TokenAmount::new(14),
-            proof_rebate_ct: TokenAmount::new(15),
-            storage_sub_it: TokenAmount::new(16),
-            read_sub_it: TokenAmount::new(17),
-            compute_sub_it: TokenAmount::new(18),
+            ad_oracle_price_usd_micros: 0,
+            compute_sub: TokenAmount::new(14),
+            proof_rebate: TokenAmount::new(15),
             read_root: [1u8; 32],
             fee_checksum: "fee".into(),
             state_root: "state".into(),
@@ -557,6 +579,7 @@ mod tests {
             agent: "blockd/1.0".into(),
             nonce: 42,
             transport: Transport::Tcp,
+            gossip_addr: Some(SocketAddr::from(([127, 0, 0, 1], 8000))),
             quic_addr: Some(SocketAddr::from(([127, 0, 0, 1], 9000))),
             quic_cert: Some(Bytes::from(vec![7, 7, 7])),
             quic_fingerprint: Some(Bytes::from(vec![1, 1])),
@@ -658,21 +681,15 @@ mod tests {
                 assert_eq!(block.retune_hint, expected.retune_hint);
                 assert_eq!(block.nonce, expected.nonce);
                 assert_eq!(block.hash, expected.hash);
-                assert_eq!(
-                    block.coinbase_consumer.get(),
-                    expected.coinbase_consumer.get()
-                );
+                assert_eq!(block.coinbase_block.get(), expected.coinbase_block.get());
                 assert_eq!(
                     block.coinbase_industrial.get(),
                     expected.coinbase_industrial.get()
                 );
-                assert_eq!(block.storage_sub_ct.get(), expected.storage_sub_ct.get());
-                assert_eq!(block.read_sub_ct.get(), expected.read_sub_ct.get());
-                assert_eq!(block.compute_sub_ct.get(), expected.compute_sub_ct.get());
-                assert_eq!(block.proof_rebate_ct.get(), expected.proof_rebate_ct.get());
-                assert_eq!(block.storage_sub_it.get(), expected.storage_sub_it.get());
-                assert_eq!(block.read_sub_it.get(), expected.read_sub_it.get());
-                assert_eq!(block.compute_sub_it.get(), expected.compute_sub_it.get());
+                assert_eq!(block.storage_sub.get(), expected.storage_sub.get());
+                assert_eq!(block.read_sub.get(), expected.read_sub.get());
+                assert_eq!(block.compute_sub.get(), expected.compute_sub.get());
+                assert_eq!(block.proof_rebate.get(), expected.proof_rebate.get());
                 assert_eq!(block.read_root, expected.read_root);
                 assert_eq!(block.fee_checksum, expected.fee_checksum);
                 assert_eq!(block.state_root, expected.state_root);
@@ -697,6 +714,16 @@ mod tests {
                 assert_eq!(blocks[1].index, 1);
             }
             other => panic!("expected chain, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chain_request_payload_round_trips() {
+        let request = ChainRequest { from_height: 42 };
+        let decoded = round_trip_payload(Payload::ChainRequest(request.clone()));
+        match decoded {
+            Payload::ChainRequest(actual) => assert_eq!(actual, request),
+            other => panic!("expected chain request, got {other:?}"),
         }
     }
 

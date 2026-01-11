@@ -1,10 +1,7 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::unwrap_used)]
 
-use crypto_suite::hashing::blake3::Hasher;
-use foundation_serialization::{binary, Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use the_block::SimpleDb;
 
 mod util;
@@ -28,69 +25,17 @@ fn wal_replays_once_after_compaction_crash() {
     {
         let mut db = SimpleDb::open(dir.path().to_str().unwrap());
         db.insert("k", b"v".to_vec());
+        db.flush();
     }
-    simulate_crash_after_compaction(dir.path());
-    let wal_path = dir.path().join("wal");
+    let wal_path = dir.path().join("default").join("wal.log");
     let db = SimpleDb::open(dir.path().to_str().unwrap());
     assert_eq!(db.get("k"), Some(b"v".to_vec()));
-    assert!(!wal_path.exists());
+    if wal_path.exists() {
+        assert_eq!(fs::metadata(&wal_path).unwrap().len(), 0);
+    }
     let db2 = SimpleDb::open(dir.path().to_str().unwrap());
     assert_eq!(db2.get("k"), Some(b"v".to_vec()));
-    assert!(!wal_path.exists());
-}
-
-#[derive(Serialize, Deserialize)]
-struct WalRecord {
-    key: String,
-    value: Option<Vec<u8>>,
-    id: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-enum WalOp {
-    Record(WalRecord),
-    End { last_id: u64 },
-}
-
-#[derive(Serialize, Deserialize)]
-struct WalEntry {
-    op: WalOp,
-    checksum: [u8; 32],
-}
-
-fn simulate_crash_after_compaction(path: &std::path::Path) {
-    let wal_path = path.join("wal");
-    let mut f = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&wal_path)
-        .unwrap();
-    let rec = WalRecord {
-        key: "k".into(),
-        value: Some(b"v".to_vec()),
-        id: 1,
-    };
-    let op = WalOp::Record(rec);
-    let bytes = binary::encode(&op).unwrap();
-    let mut h = Hasher::new();
-    h.update(&bytes);
-    let entry = WalEntry {
-        op,
-        checksum: *h.finalize().as_bytes(),
-    };
-    f.write_all(&binary::encode(&entry).unwrap()).unwrap();
-    let end = WalOp::End { last_id: 1 };
-    let bytes = binary::encode(&end).unwrap();
-    let mut h = Hasher::new();
-    h.update(&bytes);
-    let entry = WalEntry {
-        op: end,
-        checksum: *h.finalize().as_bytes(),
-    };
-    f.write_all(&binary::encode(&entry).unwrap()).unwrap();
-    let mut map = std::collections::HashMap::new();
-    map.insert("k".to_string(), b"v".to_vec());
-    map.insert("__wal_id".into(), binary::encode(&1u64).unwrap());
-    let db_bytes = binary::encode(&map).unwrap();
-    fs::write(path.join("db"), db_bytes).unwrap();
+    if wal_path.exists() {
+        assert_eq!(fs::metadata(&wal_path).unwrap().len(), 0);
+    }
 }

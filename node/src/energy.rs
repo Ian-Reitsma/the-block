@@ -7,7 +7,7 @@ use crate::telemetry::{
     ENERGY_ACTIVE_DISPUTES, ENERGY_DISPUTE_OPEN_TOTAL, ENERGY_DISPUTE_RESOLVE_TOTAL,
     ENERGY_METER_READING_TOTAL, ENERGY_PENDING_CREDITS, ENERGY_PROVIDER_REGISTER_TOTAL,
     ENERGY_PROVIDER_TOTAL, ENERGY_SETTLEMENT_TOTAL, ENERGY_TOTAL_RECEIPTS,
-    ENERGY_TREASURY_FEE_CT_TOTAL,
+    ENERGY_TREASURY_FEE_TOTAL,
 };
 use concurrency::Lazy;
 use crypto_suite::hex;
@@ -418,7 +418,7 @@ fn record_treasury_fee(amount: u64) {
         return;
     }
     #[cfg(feature = "telemetry")]
-    ENERGY_TREASURY_FEE_CT_TOTAL.inc_by(amount);
+    ENERGY_TREASURY_FEE_TOTAL.inc_by(amount);
     if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(amount) {
         #[cfg(feature = "telemetry")]
         warn!(amount, ?err, "failed to accrue energy treasury fee");

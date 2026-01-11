@@ -9,6 +9,7 @@ pub use sha512::Sha512;
 
 use core::fmt;
 use core::hash::{Hash, Hasher};
+use std::sync::{Arc, OnceLock};
 
 use rand::{CryptoRng, RngCore};
 use thiserror::Error;
@@ -33,9 +34,20 @@ pub enum SignatureError {
     KeyMismatch,
 }
 
-#[derive(Clone)]
 pub struct SigningKey {
     seed: [u8; SECRET_KEY_LENGTH],
+    expanded: Arc<OnceLock<ExpandedSecretKey>>,
+    verifying: Arc<OnceLock<VerifyingKey>>,
+}
+
+impl Clone for SigningKey {
+    fn clone(&self) -> Self {
+        Self {
+            seed: self.seed,
+            expanded: Arc::clone(&self.expanded),
+            verifying: Arc::clone(&self.verifying),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -55,11 +67,19 @@ impl SigningKey {
     {
         let mut seed = [0u8; SECRET_KEY_LENGTH];
         rng.fill_bytes(&mut seed);
-        Self { seed }
+        Self {
+            seed,
+            expanded: Arc::new(OnceLock::new()),
+            verifying: Arc::new(OnceLock::new()),
+        }
     }
 
     pub fn from_bytes(bytes: &[u8; SECRET_KEY_LENGTH]) -> Self {
-        Self { seed: *bytes }
+        Self {
+            seed: *bytes,
+            expanded: Arc::new(OnceLock::new()),
+            verifying: Arc::new(OnceLock::new()),
+        }
     }
 
     pub fn from_keypair_bytes(bytes: &[u8; KEYPAIR_LENGTH]) -> Result<Self, SignatureError> {
@@ -68,7 +88,11 @@ impl SigningKey {
         let mut provided_public = [0u8; PUBLIC_KEY_LENGTH];
         provided_public.copy_from_slice(&bytes[SECRET_KEY_LENGTH..]);
 
-        let signing = Self { seed };
+        let signing = Self {
+            seed,
+            expanded: Arc::new(OnceLock::new()),
+            verifying: Arc::new(OnceLock::new()),
+        };
         if signing.verifying_key().to_bytes() != provided_public {
             return Err(SignatureError::KeyMismatch);
         }
@@ -87,16 +111,27 @@ impl SigningKey {
         out
     }
 
+    fn expanded(&self) -> &ExpandedSecretKey {
+        self.expanded
+            .get_or_init(|| ExpandedSecretKey::from_seed(&self.seed))
+    }
+
+    fn verifying_cached(&self) -> &VerifyingKey {
+        self.verifying.get_or_init(|| {
+            let expanded = self.expanded();
+            VerifyingKey {
+                point: EdwardsPoint::mul_base(&expanded.scalar),
+            }
+        })
+    }
+
     pub fn verifying_key(&self) -> VerifyingKey {
-        let expanded = ExpandedSecretKey::from_seed(&self.seed);
-        VerifyingKey {
-            point: EdwardsPoint::mul_base(&expanded.scalar),
-        }
+        self.verifying_cached().clone()
     }
 
     pub fn sign(&self, message: &[u8]) -> Signature {
-        let expanded = ExpandedSecretKey::from_seed(&self.seed);
-        let public = self.verifying_key();
+        let expanded = self.expanded();
+        let public = self.verifying_cached();
 
         let r_digest = Sha512::digest_chunks(&[&expanded.prefix, message]);
         let r_scalar = Scalar::from_bytes_mod_order_wide(&r_digest);
@@ -333,5 +368,74 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&seed);
         let vk = signing_key.verifying_key();
         assert_on_curve(&vk.point);
+    }
+
+    #[test]
+    fn basepoint_add_matches_scalar_addition() {
+        // Deterministic scalars to exercise group law: B*(a+b) == B*a + B*b
+        let a_bytes = hex_to_array::<32>("0100000000000000000000000000000000000000000000000000000000000000");
+        let b_bytes = hex_to_array::<32>("0200000000000000000000000000000000000000000000000000000000000000");
+        let ab_bytes =
+            hex_to_array::<32>("0300000000000000000000000000000000000000000000000000000000000000");
+        let a = Scalar::from_bytes_mod_order(&a_bytes);
+        let b = Scalar::from_bytes_mod_order(&b_bytes);
+        let ab = Scalar::from_bytes_mod_order(&ab_bytes);
+
+        let ba = EdwardsPoint::mul_base(&a);
+        let bb = EdwardsPoint::mul_base(&b);
+        let sum = ba.add(&bb);
+        let direct = EdwardsPoint::mul_base(&ab);
+
+        assert_eq!(sum.compress(), direct.compress());
+    }
+
+    #[test]
+    fn sign_verify_regression_acc7_message() {
+        // Regression reproducer from orphan_fuzz flake: sign + verify must succeed.
+        let sk =
+            hex_to_array::<32>("a0d388c95df8af6e83084a79219e17069346fc0364be38d1655bcba5a68a0fbf");
+        let msg = crate::hex::decode("5448455f424c4f434b76327c010000000800000000000000050000000000000066726f6d5f0400000000000000616363370200000000000000746f040000000000000073696e6b0f00000000000000616d6f756e745f636f6e73756d657201000000000000001100000000000000616d6f756e745f696e647573747269616c00000000000000000300000000000000666565e80300000000000003000000000000007063746405000000000000006e6f6e6365010000000000000004000000000000006d656d6f0000000000000000").expect("msg hex");
+        let expected_sig = "bda31c8496fafa510788d8f4a0042353cec9a32148493b3074b8f32aadb66e6a2ae40b8fe666e679f90f1b8ac8eb8259d5e4c99ca2a82fa3a7930d2acdee9603";
+
+        let signing_key = SigningKey::from_bytes(&sk);
+        let sig = signing_key.sign(&msg);
+        assert_eq!(
+            crate::hex::encode(sig.to_bytes()),
+            expected_sig,
+            "signature must be deterministic for regression payload"
+        );
+        let expanded = signing_key.expanded();
+        let a_scalar = expanded.scalar.clone();
+        let r_digest = Sha512::digest_chunks(&[&expanded.prefix, &msg]);
+        let r_scalar = Scalar::from_bytes_mod_order_wide(&r_digest);
+        let vk = signing_key.verifying_key();
+        let a_point = EdwardsPoint::mul_base(&a_scalar);
+        assert_eq!(a_point.compress(), vk.point.compress(), "public key mismatch");
+        let mut r_bytes = [0u8; 32];
+        let mut s_bytes = [0u8; 32];
+        let sig_bytes = sig.to_bytes();
+        r_bytes.copy_from_slice(&sig_bytes[..32]);
+        s_bytes.copy_from_slice(&sig_bytes[32..]);
+        let r_point = CompressedPoint(r_bytes).decompress().expect("r decompress");
+        let s_scalar =
+            Scalar::from_canonical_bytes(&s_bytes).expect("s canonical");
+        let public_bytes = vk.to_bytes();
+        let k_digest = Sha512::digest_chunks(&[&r_bytes, &public_bytes, &msg]);
+        let k_scalar = Scalar::from_bytes_mod_order_wide(&k_digest);
+        let sb = EdwardsPoint::mul_base(&s_scalar);
+        let ka = vk.point.scalar_mul(&k_scalar);
+        let r_plus = ka.add(&r_point);
+        let calc_s = Scalar::mul_add(&k_scalar, &a_scalar, &r_scalar);
+        let direct = EdwardsPoint::mul_base(&calc_s);
+        let recomposed = EdwardsPoint::mul_base(&r_scalar).add(&EdwardsPoint::mul_base(&a_scalar).scalar_mul(&k_scalar));
+        let zero = Scalar::from_bytes_mod_order(&[0u8; 32]);
+        let ka_scalar = Scalar::mul_add(&k_scalar, &a_scalar, &zero);
+        let base_ka = EdwardsPoint::mul_base(&ka_scalar);
+        let point_ka = vk.point.scalar_mul(&k_scalar);
+        assert_eq!(sb.compress(), r_plus.compress(), "group equation mismatch");
+        assert_eq!(direct.compress(), recomposed.compress(), "recomposition mismatch");
+        assert_eq!(base_ka.compress(), point_ka.compress(), "scalar multiplication mismatch");
+        vk.verify(&msg, &sig)
+            .expect("regression signature must verify");
     }
 }

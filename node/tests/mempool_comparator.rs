@@ -22,13 +22,14 @@ fn build_entry(sk: &[u8], fee: u64, nonce: u64, ts: u64) -> MempoolEntry {
         from_: "a".into(),
         to: "b".into(),
         amount_consumer: 1,
-        amount_industrial: 1,
+        amount_industrial: 0, // Single BLOCK token via consumer lane
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: Vec::new(),
     };
-    let tx = sign_tx(sk.to_vec(), payload).expect("valid key");
+    let mut tx = sign_tx(sk.to_vec(), payload).expect("valid key");
+    tx.tip = fee; // Set tip for fee-per-byte comparison
     let size = binary::encode(&tx).map(|b| b.len() as u64).unwrap_or(0);
     MempoolEntry {
         tx,
@@ -69,10 +70,15 @@ fn ordering_stable_after_heap_rebuild() {
     init();
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("heap_rebuild");
-    let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.tx_ttl = 100;
+    bc.base_fee = 0;
+    bc.min_fee_per_byte_consumer = 0;
+    // Use a monotonic fee floor so we can submit ascending fees without rejections.
+    bc.set_fee_floor_policy(1, 0);
+    bc.add_account("sink".into(), 0).unwrap();
     for acct in ["a", "b", "c", "d", "e"] {
-        bc.add_account(acct.into(), 10_000, 10_000).unwrap();
+        bc.add_account(acct.into(), 100_000).unwrap(); // Sufficient BLOCK for test transactions
     }
 
     let submit = |bc: &mut Blockchain, from: &str, fee: u64| {
@@ -80,9 +86,9 @@ fn ordering_stable_after_heap_rebuild() {
             from_: from.into(),
             to: "sink".into(),
             amount_consumer: 1,
-            amount_industrial: 1,
+            amount_industrial: 0, // Single BLOCK token via consumer lane
             fee,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         };
@@ -90,11 +96,11 @@ fn ordering_stable_after_heap_rebuild() {
         bc.submit_transaction(tx).unwrap();
     };
 
-    submit(&mut bc, "a", 4_000);
-    submit(&mut bc, "b", 3_000);
-    submit(&mut bc, "c", 3_000);
-    submit(&mut bc, "d", 2_000);
-    submit(&mut bc, "e", 2_500);
+    submit(&mut bc, "d", 20_000);
+    submit(&mut bc, "e", 25_000);
+    submit(&mut bc, "b", 30_000);
+    submit(&mut bc, "c", 30_000);
+    submit(&mut bc, "a", 40_000);
 
     let base = SystemTime::now()
         .duration_since(UNIX_EPOCH)

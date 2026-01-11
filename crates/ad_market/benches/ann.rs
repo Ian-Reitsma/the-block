@@ -1,7 +1,7 @@
 use ad_market::badge::ann::{self, SoftIntentReceipt, WalletAnnIndexSnapshot};
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3;
-use rand::{rngs::StdRng, RngCore, SeedableRng};
+use rand::{rngs::StdRng, RngCore};
 use testkit::tb_bench;
 
 struct AnnFixture {
@@ -11,7 +11,7 @@ struct AnnFixture {
 }
 
 static ANN_FIXTURES: Lazy<Vec<AnnFixture>> = Lazy::new(|| {
-    let mut rng = StdRng::seed_from_u64(0xANN5EED_u64);
+    let mut rng = StdRng::seed_from_u64(0xA115EED_u64);
     let mut fixtures = Vec::new();
     let bucket_targets = [128usize, 512, 2_048, 8_192, 32_768];
 

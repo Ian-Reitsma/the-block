@@ -48,8 +48,8 @@ def _parse_metrics(text: str) -> dict[str, int]:
 
 def test_spawn_purge_loop_concurrent(tmp_path):
     bc = the_block.Blockchain.with_difficulty(str(tmp_path), 1)
-    bc.add_account("alice", 10_000, 0)
-    bc.add_account("bob", 0, 0)
+    bc.add_account("alice", 10_000)
+    bc.add_account("bob", 0)
     bc.tx_ttl = 1
 
     priv, _ = the_block.generate_keypair()
@@ -59,7 +59,7 @@ def test_spawn_purge_loop_concurrent(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1_000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )
@@ -111,8 +111,8 @@ def test_spawn_purge_loop_concurrent(tmp_path):
 
 def test_spawn_purge_loop_overlap_reverse_trigger(tmp_path):
     bc = the_block.Blockchain.with_difficulty(str(tmp_path), 1)
-    bc.add_account("alice", 10_000, 0)
-    bc.add_account("bob", 0, 0)
+    bc.add_account("alice", 10_000)
+    bc.add_account("bob", 0)
     bc.tx_ttl = 1
 
     priv, _ = the_block.generate_keypair()
@@ -122,7 +122,7 @@ def test_spawn_purge_loop_overlap_reverse_trigger(tmp_path):
         amount_consumer=1,
         amount_industrial=0,
         fee=1_000,
-        pct_ct=100,
+        pct=100,
         nonce=1,
         memo=b"",
     )

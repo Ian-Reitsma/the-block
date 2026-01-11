@@ -295,13 +295,13 @@ mod serde_impls {
     }
 }
 
-const PKCS8_HEADER: [u8; 16] = [
+pub(crate) const PKCS8_HEADER: [u8; 16] = [
     0x30, 0x53, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2B, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ];
 
-const PKCS8_PUBLIC_PREFIX: [u8; 5] = [0xA1, 0x23, 0x03, 0x21, 0x00];
+pub(crate) const PKCS8_PUBLIC_PREFIX: [u8; 5] = [0xA1, 0x23, 0x03, 0x21, 0x00];
 
-fn encode_pkcs8(signing_key: &SigningKey) -> Result<SecretDocument, KeyEncodingError> {
+pub(crate) fn encode_pkcs8(signing_key: &SigningKey) -> Result<SecretDocument, KeyEncodingError> {
     let secret = signing_key.to_bytes();
     let public = signing_key.verifying_key().to_bytes();
     let capacity =
@@ -314,7 +314,7 @@ fn encode_pkcs8(signing_key: &SigningKey) -> Result<SecretDocument, KeyEncodingE
     Ok(SecretDocument { bytes: encoded })
 }
 
-fn decode_pkcs8(bytes: &[u8]) -> Result<backend::SigningKey, KeyEncodingError> {
+pub(crate) fn decode_pkcs8(bytes: &[u8]) -> Result<backend::SigningKey, KeyEncodingError> {
     let expected_len =
         PKCS8_HEADER.len() + SECRET_KEY_LENGTH + PKCS8_PUBLIC_PREFIX.len() + PUBLIC_KEY_LENGTH;
 

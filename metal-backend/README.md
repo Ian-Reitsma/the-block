@@ -1,6 +1,6 @@
 # Metal Orchard
 
-`metal-orchard` is the incubation ground for Tensor v0, a tensor runtime and kernel stack engineered for Apple Silicon and the Metal application programming interface. The repository hosts every source file, test, and document required to construct the project; no external submodules are referenced.
+`metal-orchard` (the `metal-backend/` tree in The Block) is the incubation ground for Tensor v0, a deterministic tensor runtime and kernel stack engineered for Apple Silicon and the Metal application programming interface. This stack is the core of the BlockTorch compute framework described in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](../docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy), and it underpins verified ML compute workloads in the marketplace. The repository hosts every source file, test, and document required to construct the project; no external submodules are referenced.
 
 ## Getting Started
 1. Install Xcode 15+, the Metal 4 SDK, and the command line tools so the build system can locate compilers and headers.
@@ -29,6 +29,7 @@
 - `Tensor::div` checks denominators for zero and can mask them when a safe flag
   is provided; see [docs/tensor.md](docs/tensor.md#elementwise-division) for
   details.
+- Deterministic operator behavior and profiling hooks (`ORCHARD_TENSOR_PROFILE`) are designed to feed the BlockTorch pricing and proof pipelines.
 
 ## Testing
 Run `ctest --output-on-failure` from the `build/` directory to execute the suite under `metal-tensor/tests`. The tests cover CPU and Metal paths, queue reuse, profiling hooks with matching alloc/free counts, and autograd gradients. CPU-only builds exercise transpose, matmul, mean, and sum backward paths to validate gradients without Metal. Always attempt to configure and run tests before submitting a pull request. Even on systems lacking the Metal SDK, failing output is still valuable and should be reported in the pull request.
@@ -69,6 +70,7 @@ Setting ORCHARD_TENSOR_PROFILE enables logging of allocation and deallocation ev
 2. Replace CPU fallbacks with tuned Metal kernels and document performance gains.
 3. Grow the test matrix for multi-device transfers, profiling scenarios, and stress tests.
 4. Iterate on FlashAttention kernels to close remaining gaps with the PyTorch baseline.
+5. Publish the BlockTorch kernel and gradient wire format specs and keep this README aligned with the Part XII roadmap.
 
 ## Contributor Protocol
 - Read `AGENTS.md` in this directory before touching any file; it is the definitive governance document.

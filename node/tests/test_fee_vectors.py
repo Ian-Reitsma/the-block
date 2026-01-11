@@ -9,6 +9,6 @@ def test_fee_vectors():
     for row in rows:
         selector = int(row["selector"])
         fee = int(row["fee"])
-        fee_ct = int(row["fee_ct"])
-        fee_it = int(row["fee_it"])
-        assert fee_decompose(selector, fee) == (fee_ct, fee_it)
+        fee_consumer = int(row["fee_consumer"])
+        fee_industrial = int(row["fee_industrial"])
+        assert fee_decompose(selector, fee) == (fee_consumer, fee_industrial)

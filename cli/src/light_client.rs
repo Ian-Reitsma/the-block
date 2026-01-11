@@ -585,7 +585,7 @@ fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<
         println!("No rebate receipts found.");
     } else {
         for receipt in &result.receipts {
-            println!("Block {} – {} CT", receipt.height, receipt.amount);
+            println!("Block {} – {} BLOCK", receipt.height, receipt.amount);
             for relayer in &receipt.relayers {
                 println!("  {}: {}", relayer.id, relayer.amount);
             }

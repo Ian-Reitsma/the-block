@@ -290,7 +290,7 @@ cargo test --release treasury_extreme --ignored \
    - Backlog by status
    - Execution errors by reason
    - Dependency failures by type
-   - Balance totals (TB tokens)
+   - Balance totals (BLOCK)
 
 2. **Treasury Rates** (interval: 1m)
    - Disbursement creation rates (1m, 1h windows)
@@ -515,28 +515,28 @@ PC (Primary)              Mac M1 #1 (Replica)      Mac M1 #2 (Observer)
 
 ### 6.1 Token Naming Consistency
 
-**Issue Identified**: Documentation uses mix of "CT" (Consumer Token), "IT" (Industrial Token), and "BLOCK" references.
+**Issue Identified**: Documentation still mixes the canonical BLOCK term with legacy labels such as "Consumer Token" (BLOCK) and "Industrial Token" (IT), which confuses new readers.
 
 **Current State** (from codebase search):
 - README.md: References "BLOCK" as canonical token
-- AGENTS.md: still mentions CT/IT telemetry labels in a few sections
+- AGENTS.md: still mentions BLOCK/IT telemetry labels in a few sections
 - Code: Treasury structs now expose a single `amount` field (aliases remain only in historical codec paths)
-- Metrics: Uses `_ct` suffixes in gauge names while telemetry migrations finish
+- Metrics: Uses `` suffixes in gauge names while telemetry migrations finish
 
 **Architectural Reality**:
-- **The Block uses a single token**: BLOCK
-- **CT/IT references are legacy**, retained only in metric names and historical codec aliases until the dashboards migrate
+- **The Block uses a single token**: BLOCK. Consumer and industrial lanes simply record how the shared BLOCK payout is split.
+- **BLOCK/IT references are legacy**, appearing only in historical telemetry labels or migration helpers while everything else uses the new names.
 
 **Documentation Status**:
 - ✅ README updated to use BLOCK terminology
 - ✅ ECONOMIC_SYSTEM_CHANGELOG documents the single-token model
-- ⚠️  Some docs (AGENTS, operations) still use CT/IT terms for telemetry names
-- ℹ️  Historical codecs accept `amount_ct`/`amount_it` during migration, but the canonical structs now expose `amount` only
+- ⚠️  Some docs (AGENTS, operations) still use BLOCK/IT terms for telemetry names
+- ℹ️  Historical codecs accept `amount`/`amount_it` during migration, but the canonical structs now expose `amount` only
 
 **Recommendation**:
 - User-facing docs should say "BLOCK tokens"
-- Technical docs can reference "CT ledger slot" with note that it's BLOCK-denominated
-- Code should prefer the new single-field names; remove `_ct/_it` telemetry once dashboards and RPC clients are updated
+- Technical docs can reference "BLOCK ledger slot" with note that it's BLOCK-denominated
+- Code should prefer the new single-field names; remove `/_it` telemetry once dashboards and RPC clients are updated
 
 ---
 
@@ -685,7 +685,7 @@ PC (Primary)              Mac M1 #1 (Replica)      Mac M1 #2 (Observer)
 | High | Professional security audit | Requires external vendor | Pre-mainnet |
 | High | Load testing at scale (1M+ TPS) | Requires production infrastructure | Pre-launch |
 | Medium | Disaster recovery drill execution | Needs live environment | Post-testnet |
-| Low | CT/IT terminology cleanup in docs | Non-critical, compatibility concern | Ongoing |
+| Low | BLOCK/IT terminology cleanup in docs | Non-critical, compatibility concern | Ongoing |
 
 ---
 

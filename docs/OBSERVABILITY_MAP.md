@@ -119,7 +119,7 @@ tb-cli receipts search --filter 'source_id=42' --limit 5
 - [ ] Status shows `finalized`
 - [ ] `executed_at` timestamp is reasonable
 - [ ] `tx_hash` matches ledger entry
-- [ ] Destination account received CT
+- [ ] Destination account received BLOCK
 - [ ] Settlement audit passes (see Stride 3)
 
 ---
@@ -163,7 +163,7 @@ energy_provider_status{status="active"}
 
 # Settlement activity
 energy_settlements_total{provider=~".*"}
-energy_settlement_ct_total
+energy_settlement_total
 
 # Oracle health
 oracle_latency_seconds
@@ -236,8 +236,7 @@ tb-cli energy credits list --status pending | jq '.[] | .expires_at' | sort | un
 ```promql
 energy_active_disputes_total
 energy_dispute_outcomes_total{outcome=~"resolved|slashed|dismissed"}
-energy_slashing_total{provider=~".*"}
-energy_slashed_ct_total
+energy_disputes_resolved_total{outcome="slashed"}
 ```
 
 **Grafana Dashboard**: `monitoring/grafana_energy_dashboard.json`
@@ -446,7 +445,7 @@ tb-cli gov treasury balance | jq .balance
 
 ### Settlement Audit ✅
 
-- [ ] Ledger conservation: CT supply stable
+- [ ] Ledger conservation: BLOCK supply stable
 - [ ] No rounding errors in fee distribution
 - [ ] Disbursement entries match treasury state
 - [ ] Receipt deduplication working (no double-settlement)

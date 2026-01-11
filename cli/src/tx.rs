@@ -83,7 +83,7 @@ pub struct RawTxPayload {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub fee: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub pct_ct: u8,
+    pub pct: u8,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub nonce: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -227,7 +227,7 @@ fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
         amount_consumer: payload.amount_consumer,
         amount_industrial: payload.amount_industrial,
         fee: payload.fee,
-        pct_ct: payload.pct_ct,
+        pct: payload.pct,
         nonce: payload.nonce,
         memo: payload.memo.clone(),
     };

@@ -157,13 +157,9 @@ pub struct AdReadinessSnapshot {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub settlement_count: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub ct_price_usd_micros: u64,
+    pub price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
-    pub it_price_usd_micros: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub market_ct_price_usd_micros: u64,
-    #[serde(default = "foundation_serialization::defaults::default")]
-    pub market_it_price_usd_micros: u64,
+    pub market_price_usd_micros: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub cohort_utilization: Vec<AdReadinessCohortUtilization>,
     #[serde(default)]
@@ -190,10 +186,8 @@ impl Default for AdReadinessSnapshot {
             zk_proof: None,
             total_usd_micros: 0,
             settlement_count: 0,
-            ct_price_usd_micros: 0,
-            it_price_usd_micros: 0,
-            market_ct_price_usd_micros: 0,
-            market_it_price_usd_micros: 0,
+            price_usd_micros: 0,
+            market_price_usd_micros: 0,
             cohort_utilization: Vec::new(),
             utilization_summary: None,
             ready_streak_windows: 0,
@@ -375,28 +369,18 @@ impl AdReadinessHandle {
         self.inner.record_ack(ts, viewer, host, provider);
     }
 
-    pub fn record_settlement(
-        &self,
-        ts: u64,
-        usd_micros: u64,
-        ct_price_usd_micros: u64,
-        it_price_usd_micros: u64,
-    ) {
+    pub fn record_settlement(&self, ts: u64, usd_micros: u64, price_usd_micros: u64) {
         self.inner
-            .record_settlement(ts, usd_micros, ct_price_usd_micros, it_price_usd_micros);
+            .record_settlement(ts, usd_micros, price_usd_micros);
     }
 
     pub fn record_utilization(
         &self,
         cohorts: &[CohortPriceSnapshot],
-        market_ct_price_usd_micros: u64,
-        market_it_price_usd_micros: u64,
+        market_price_usd_micros: u64,
     ) {
-        self.inner.record_utilization(
-            cohorts,
-            market_ct_price_usd_micros,
-            market_it_price_usd_micros,
-        );
+        self.inner
+            .record_utilization(cohorts, market_price_usd_micros);
     }
 
     pub fn decision(&self) -> ReadinessDecision {
@@ -489,13 +473,7 @@ impl AdReadinessInner {
         self.persist_events(&snapshot);
     }
 
-    fn record_settlement(
-        &self,
-        ts: u64,
-        usd_micros: u64,
-        ct_price_usd_micros: u64,
-        it_price_usd_micros: u64,
-    ) {
+    fn record_settlement(&self, ts: u64, usd_micros: u64, price_usd_micros: u64) {
         let mut guard = self
             .state
             .lock()
@@ -505,30 +483,15 @@ impl AdReadinessInner {
             .read()
             .unwrap_or_else(|poison| poison.into_inner())
             .clone();
-        guard.record_settlement(
-            ts,
-            usd_micros,
-            ct_price_usd_micros,
-            it_price_usd_micros,
-            &config,
-        );
+        guard.record_settlement(ts, usd_micros, price_usd_micros, &config);
     }
 
-    fn record_utilization(
-        &self,
-        cohorts: &[CohortPriceSnapshot],
-        market_ct_price_usd_micros: u64,
-        market_it_price_usd_micros: u64,
-    ) {
+    fn record_utilization(&self, cohorts: &[CohortPriceSnapshot], market_price_usd_micros: u64) {
         let mut guard = self
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        guard.record_utilization(
-            cohorts,
-            market_ct_price_usd_micros,
-            market_it_price_usd_micros,
-        );
+        guard.record_utilization(cohorts, market_price_usd_micros);
     }
 
     fn snapshot(&self) -> AdReadinessSnapshot {
@@ -563,10 +526,8 @@ struct AdReadinessState {
     last_updated: u64,
     privacy_seed: [u8; 32],
     settlements: VecDeque<SettlementObservation>,
-    last_ct_price_usd_micros: u64,
-    last_it_price_usd_micros: u64,
-    market_ct_price_usd_micros: u64,
-    market_it_price_usd_micros: u64,
+    last_price_usd_micros: u64,
+    market_price_usd_micros: u64,
     cohort_utilization: Vec<AdReadinessCohortUtilization>,
     utilization_summary: Option<AdReadinessUtilizationSummary>,
     segment_readiness: Option<AdSegmentReadiness>,
@@ -590,10 +551,8 @@ impl Default for AdReadinessState {
             last_updated: 0,
             privacy_seed: new_privacy_seed(),
             settlements: VecDeque::new(),
-            last_ct_price_usd_micros: 0,
-            last_it_price_usd_micros: 0,
-            market_ct_price_usd_micros: 0,
-            market_it_price_usd_micros: 0,
+            last_price_usd_micros: 0,
+            market_price_usd_micros: 0,
             cohort_utilization: Vec::new(),
             utilization_summary: None,
             segment_readiness: None,
@@ -658,30 +617,25 @@ impl AdReadinessState {
         &mut self,
         ts: u64,
         usd_micros: u64,
-        ct_price_usd_micros: u64,
-        it_price_usd_micros: u64,
+        price_usd_micros: u64,
         config: &AdReadinessConfig,
     ) {
         self.prune(ts, config.window_secs);
-        self.last_ct_price_usd_micros = ct_price_usd_micros;
-        self.last_it_price_usd_micros = it_price_usd_micros;
+        self.last_price_usd_micros = price_usd_micros;
         self.settlements.push_back(SettlementObservation {
             ts,
             usd_micros,
-            ct_price_usd_micros,
-            it_price_usd_micros,
+            price_usd_micros,
         });
     }
 
     fn record_utilization(
         &mut self,
         cohorts: &[CohortPriceSnapshot],
-        market_ct_price_usd_micros: u64,
-        market_it_price_usd_micros: u64,
+        market_price_usd_micros: u64,
     ) {
         let now = current_timestamp();
-        self.market_ct_price_usd_micros = market_ct_price_usd_micros;
-        self.market_it_price_usd_micros = market_it_price_usd_micros;
+        self.market_price_usd_micros = market_price_usd_micros;
         self.last_utilization_update = now;
         if cohorts.is_empty() {
             self.cohort_utilization.clear();
@@ -816,10 +770,8 @@ impl AdReadinessState {
                 zk_proof: None,
                 total_usd_micros: 0,
                 settlement_count: 0,
-                ct_price_usd_micros: self.last_ct_price_usd_micros,
-                it_price_usd_micros: self.last_it_price_usd_micros,
-                market_ct_price_usd_micros: self.market_ct_price_usd_micros,
-                market_it_price_usd_micros: self.market_it_price_usd_micros,
+                price_usd_micros: self.last_price_usd_micros,
+                market_price_usd_micros: self.market_price_usd_micros,
                 cohort_utilization: self.cohort_utilization.clone(),
                 utilization_summary: self.utilization_summary.clone(),
                 ready_streak_windows: 0,
@@ -867,16 +819,11 @@ impl AdReadinessState {
         let ready = blockers.is_empty();
         let total_usd_micros: u64 = self.settlements.iter().map(|obs| obs.usd_micros).sum();
         let settlement_count = self.settlements.len() as u64;
-        let ct_price = self
+        let price = self
             .settlements
             .back()
-            .map(|obs| obs.ct_price_usd_micros)
-            .unwrap_or(self.last_ct_price_usd_micros);
-        let it_price = self
-            .settlements
-            .back()
-            .map(|obs| obs.it_price_usd_micros)
-            .unwrap_or(self.last_it_price_usd_micros);
+            .map(|obs| obs.price_usd_micros)
+            .unwrap_or(self.last_price_usd_micros);
 
         let mut snapshot = AdReadinessSnapshot {
             window_secs: config.window_secs,
@@ -892,10 +839,8 @@ impl AdReadinessState {
             zk_proof: None,
             total_usd_micros,
             settlement_count,
-            ct_price_usd_micros: ct_price,
-            it_price_usd_micros: it_price,
-            market_ct_price_usd_micros: self.market_ct_price_usd_micros,
-            market_it_price_usd_micros: self.market_it_price_usd_micros,
+            price_usd_micros: price,
+            market_price_usd_micros: self.market_price_usd_micros,
             cohort_utilization: self.cohort_utilization.clone(),
             utilization_summary: self.utilization_summary.clone(),
             ready_streak_windows: self.ready_streak_windows,
@@ -1199,8 +1144,7 @@ struct ReadinessEvent {
 struct SettlementObservation {
     ts: u64,
     usd_micros: u64,
-    ct_price_usd_micros: u64,
-    it_price_usd_micros: u64,
+    price_usd_micros: u64,
 }
 
 fn current_timestamp() -> u64 {
@@ -1278,15 +1222,10 @@ pub fn global_snapshot() -> Option<AdReadinessSnapshot> {
         .and_then(|guard| guard.as_ref().map(|handle| handle.snapshot()))
 }
 
-pub fn record_settlement(
-    ts: u64,
-    usd_micros: u64,
-    ct_price_usd_micros: u64,
-    it_price_usd_micros: u64,
-) {
+pub fn record_settlement(ts: u64, usd_micros: u64, price_usd_micros: u64) {
     if let Ok(guard) = GLOBAL_HANDLE.read() {
         if let Some(handle) = guard.as_ref() {
-            handle.record_settlement(ts, usd_micros, ct_price_usd_micros, it_price_usd_micros);
+            handle.record_settlement(ts, usd_micros, price_usd_micros);
         }
     }
 }

@@ -4,7 +4,7 @@ use foundation_serialization::{Deserialize, Serialize};
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryState {
-    /// Total CT collected in the treasury.
+    /// Total BLOCK collected in the treasury.
     pub balance: u64,
 }
 

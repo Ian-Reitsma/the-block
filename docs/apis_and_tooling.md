@@ -193,7 +193,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 
 ## HTTP client and TLS diagnostics
 - Outbound clients live in `crates/httpd::{client.rs,blocking.rs}`. `httpd::Client` wraps the runtime `TcpStream`, supports HTTPS via the in-house TLS connector, and exposes:
-  - `ClientConfig { connect_timeout, request_timeout, max_response_bytes, tls }`.
+  - `ClientConfig { connect_timeout, request_timeout, read_timeout?, tls_handshake_timeout, max_response_bytes, tls }`.
   - `Client::with_tls_from_env(&["TB_NODE_TLS","TB_HTTP_TLS"])` to reuse the same certs as RPC/gateway surfaces.
   - `RequestBuilder::json(value)` for canonical JSON encoding and `send()` for async execution. Blocking variants offer the same API for CLI tools.
 - TLS rotation:
@@ -233,7 +233,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `ad_market.inventory`, `ad_market.list_campaigns`, `ad_market.distribution`, `ad_market.budget`, `ad_market.broker_state`, `ad_market.readiness` return selector-aware snapshots. Every `CohortPriceSnapshot`/`ReadinessSnapshot` carries `selectors_version`, `domain_tier`, `interest_tags`, optional `presence_bucket`, and privacy-budget gauges so downstream tooling can render per-segment pricing/utilization/freshness.
   - `ad_market.register_campaign` accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: `contract-cli ad-market register --file campaign.json` enforces the same schema and exposes `--selector` helpers for quick edits.
   - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts. CLI: `contract-cli ad-market presence list|reserve`.
-  - Conversion/value APIs: `ad_market.record_conversion` now supports `value_ct`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `contract-cli ad-market record-conversion --file conversion.json`.
+  - Conversion/value APIs: `ad_market.record_conversion` now supports `value`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `contract-cli ad-market record-conversion --file conversion.json`.
 
 ### Presence Cohort JSON Schemas
 

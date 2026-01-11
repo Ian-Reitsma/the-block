@@ -24,10 +24,6 @@ pub struct AdPolicyDistributionView {
     pub hardware_percent: u64,
     pub verifier_percent: u64,
     pub liquidity_percent: u64,
-    pub liquidity_split_ct_ppm: u64,
-    pub dual_token_settlement_enabled: bool,
-    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
-    pub normalized_liquidity_ppm: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,10 +113,8 @@ pub struct AdReadinessSnapshotView {
     pub last_updated: u64,
     pub total_usd_micros: u64,
     pub settlement_count: u64,
-    pub ct_price_usd_micros: u64,
-    pub it_price_usd_micros: u64,
-    pub market_ct_price_usd_micros: u64,
-    pub market_it_price_usd_micros: u64,
+    pub price_usd_micros: u64,
+    pub market_price_usd_micros: u64,
     #[serde(default)]
     pub cohort_utilization: Vec<AdReadinessCohortUtilization>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -156,22 +150,13 @@ fn parse_i64(map: &JsonMap, key: &str) -> Option<i64> {
     map.get(key).and_then(JsonValue::as_i64)
 }
 
-fn parse_bool(map: &JsonMap, key: &str) -> Option<bool> {
-    map.get(key).and_then(JsonValue::as_bool)
-}
-
 fn parse_distribution(map: &JsonMap) -> AdPolicyDistributionView {
-    let normalized_liquidity = parse_u64(map, "normalized_liquidity_ppm");
     AdPolicyDistributionView {
         viewer_percent: parse_u64(map, "viewer_percent").unwrap_or_default(),
         host_percent: parse_u64(map, "host_percent").unwrap_or_default(),
         hardware_percent: parse_u64(map, "hardware_percent").unwrap_or_default(),
         verifier_percent: parse_u64(map, "verifier_percent").unwrap_or_default(),
         liquidity_percent: parse_u64(map, "liquidity_percent").unwrap_or_default(),
-        liquidity_split_ct_ppm: parse_u64(map, "liquidity_split_ct_ppm").unwrap_or_default(),
-        dual_token_settlement_enabled: parse_bool(map, "dual_token_settlement_enabled")
-            .unwrap_or(false),
-        normalized_liquidity_ppm: normalized_liquidity,
     }
 }
 
@@ -230,9 +215,6 @@ pub fn parse_policy_snapshot(value: &JsonValue) -> Option<AdPolicySnapshotDetail
             hardware_percent: 0,
             verifier_percent: 0,
             liquidity_percent: 0,
-            liquidity_split_ct_ppm: 0,
-            dual_token_settlement_enabled: false,
-            normalized_liquidity_ppm: None,
         });
     let medians = obj
         .get("medians")
@@ -379,10 +361,8 @@ pub fn readiness_status_view(
             last_updated: snapshot.last_updated,
             total_usd_micros: snapshot.total_usd_micros,
             settlement_count: snapshot.settlement_count,
-            ct_price_usd_micros: snapshot.ct_price_usd_micros,
-            it_price_usd_micros: snapshot.it_price_usd_micros,
-            market_ct_price_usd_micros: snapshot.market_ct_price_usd_micros,
-            market_it_price_usd_micros: snapshot.market_it_price_usd_micros,
+            price_usd_micros: snapshot.price_usd_micros,
+            market_price_usd_micros: snapshot.market_price_usd_micros,
             cohort_utilization: snapshot.cohort_utilization.clone(),
             utilization_summary: snapshot.utilization_summary.clone(),
             ready_streak_windows: snapshot.ready_streak_windows,
@@ -421,20 +401,6 @@ pub fn summary_to_json(summary: &AdPolicySnapshotSummary) -> JsonValue {
         "liquidity_percent".into(),
         JsonValue::Number(summary.distribution.liquidity_percent.into()),
     );
-    dist.insert(
-        "liquidity_split_ct_ppm".into(),
-        JsonValue::Number(summary.distribution.liquidity_split_ct_ppm.into()),
-    );
-    dist.insert(
-        "dual_token_settlement_enabled".into(),
-        JsonValue::Bool(summary.distribution.dual_token_settlement_enabled),
-    );
-    if let Some(norm) = summary.distribution.normalized_liquidity_ppm {
-        dist.insert(
-            "normalized_liquidity_ppm".into(),
-            JsonValue::Number(norm.into()),
-        );
-    }
     root.insert("distribution".into(), JsonValue::Object(dist));
     // medians
     let mut med = JsonMap::new();
@@ -617,20 +583,12 @@ pub fn readiness_to_json(view: &AdReadinessStatusView) -> JsonValue {
         JsonValue::Number(view.snapshot.settlement_count.into()),
     );
     snap.insert(
-        "ct_price_usd_micros".into(),
-        JsonValue::Number(view.snapshot.ct_price_usd_micros.into()),
+        "price_usd_micros".into(),
+        JsonValue::Number(view.snapshot.price_usd_micros.into()),
     );
     snap.insert(
-        "it_price_usd_micros".into(),
-        JsonValue::Number(view.snapshot.it_price_usd_micros.into()),
-    );
-    snap.insert(
-        "market_ct_price_usd_micros".into(),
-        JsonValue::Number(view.snapshot.market_ct_price_usd_micros.into()),
-    );
-    snap.insert(
-        "market_it_price_usd_micros".into(),
-        JsonValue::Number(view.snapshot.market_it_price_usd_micros.into()),
+        "market_price_usd_micros".into(),
+        JsonValue::Number(view.snapshot.market_price_usd_micros.into()),
     );
     // blockers array
     let blockers = view

@@ -54,17 +54,13 @@ declare -a METRICS=(
   
   # Energy Metrics
   "energy_provider_total"
-  "energy_provider_status"
   "energy_pending_credits_total"
-  "energy_settlements_total"
-  "energy_settlement_ct_total"
+  "energy_settlement_total"
   "energy_active_disputes_total"
-  "oracle_latency_seconds"
+  "oracle_inclusion_lag_seconds"
   "energy_signature_verification_failures_total"
-  "energy_slashing_total"
-  "energy_slashed_ct_total"
-  "energy_reputation_score"
-  "energy_reputation_confidence"
+  "energy_disputes_resolved_total"
+  "energy_treasury_fee_total"
   
   # Receipt Metrics
   "receipt_emitted_total"

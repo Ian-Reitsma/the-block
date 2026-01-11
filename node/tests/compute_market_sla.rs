@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
+mod settlement_util;
 mod util;
-use util::settlement::SettlementCtx;
+use settlement_util::SettlementCtx;
 use the_block::compute_market::scheduler::Capability;
 use the_block::compute_market::{scheduler, ExecutionReceipt, Job, Market, Offer, Workload};
 
@@ -16,7 +17,7 @@ fn job_timeout_and_resubmit_penalizes() {
         consumer_bond: 5,
         units: 1,
         price_per_unit: 1,
-        fee_pct_ct: 0,
+        fee_pct: 0,
         capability: Capability {
             cpu_cores: 1,
             ..Default::default()
@@ -48,8 +49,7 @@ fn job_timeout_and_resubmit_penalizes() {
     let proof = ExecutionReceipt {
         reference: [0u8; 32],
         output: [0u8; 32],
-        payout_ct: 0,
-        payout_it: 1,
+        payout: 1,
         proof: None,
     };
     assert!(market.submit_slice("job1", proof).is_err());
@@ -63,7 +63,7 @@ fn job_timeout_and_resubmit_penalizes() {
         consumer_bond: 5,
         units: 1,
         price_per_unit: 1,
-        fee_pct_ct: 0,
+        fee_pct: 0,
         capability: Capability {
             cpu_cores: 1,
             ..Default::default()

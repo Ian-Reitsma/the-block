@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use sys::paths;
 use sys::signals::{Signals, SIGHUP};
 
@@ -48,6 +48,8 @@ pub struct NodeConfig {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub energy: EnergyConfig,
     pub telemetry_summary_interval: u64,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub runtime: RuntimeTuningConfig,
     #[serde(default = "default_max_peer_metrics")]
     pub max_peer_metrics: usize,
     #[serde(default = "default_true")]
@@ -84,6 +86,10 @@ pub struct NodeConfig {
     pub p2p_max_per_sec: u32,
     #[serde(default = "default_p2p_max_bytes_per_sec")]
     pub p2p_max_bytes_per_sec: u64,
+    #[serde(default = "default_p2p_rate_window_secs")]
+    pub p2p_rate_window_secs: u64,
+    #[serde(default = "default_p2p_chain_sync_interval_ms")]
+    pub p2p_chain_sync_interval_ms: u64,
     #[serde(default = "default_provider_reputation_decay")]
     pub provider_reputation_decay: f64,
     #[serde(default = "default_provider_reputation_retention")]
@@ -127,6 +133,7 @@ impl Default for NodeConfig {
             compute_market: ComputeMarketConfig::default(),
             energy: EnergyConfig::default(),
             telemetry_summary_interval: 0,
+            runtime: RuntimeTuningConfig::default(),
             max_peer_metrics: default_max_peer_metrics(),
             peer_metrics_export: default_true(),
             peer_metrics_path: default_peer_metrics_path(),
@@ -145,6 +152,8 @@ impl Default for NodeConfig {
             peer_reputation_decay: default_peer_reputation_decay(),
             p2p_max_per_sec: default_p2p_max_per_sec(),
             p2p_max_bytes_per_sec: default_p2p_max_bytes_per_sec(),
+            p2p_rate_window_secs: default_p2p_rate_window_secs(),
+            p2p_chain_sync_interval_ms: default_p2p_chain_sync_interval_ms(),
             provider_reputation_decay: default_provider_reputation_decay(),
             provider_reputation_retention: default_provider_reputation_retention(),
             reputation_gossip: default_true(),
@@ -174,6 +183,63 @@ fn default_read_ack_privacy() -> ReadAckPrivacyMode {
 
 fn default_receipt_providers() -> Vec<ReceiptProviderConfig> {
     Vec::new()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RuntimeTuningConfig {
+    #[serde(default = "default_runtime_reactor_idle_poll_ms")]
+    pub reactor_idle_poll_ms: u64,
+    #[serde(default = "default_runtime_io_read_backoff_ms")]
+    pub io_read_backoff_ms: u64,
+    #[serde(default = "default_runtime_io_write_backoff_ms")]
+    pub io_write_backoff_ms: u64,
+}
+
+impl RuntimeTuningConfig {
+    fn normalized(&self) -> Self {
+        let reactor_idle_poll_ms = if self.reactor_idle_poll_ms == 0 {
+            default_runtime_reactor_idle_poll_ms()
+        } else {
+            self.reactor_idle_poll_ms
+        };
+        let io_read_backoff_ms = if self.io_read_backoff_ms == 0 {
+            default_runtime_io_read_backoff_ms()
+        } else {
+            self.io_read_backoff_ms
+        };
+        let io_write_backoff_ms = if self.io_write_backoff_ms == 0 {
+            default_runtime_io_write_backoff_ms()
+        } else {
+            self.io_write_backoff_ms
+        };
+        Self {
+            reactor_idle_poll_ms,
+            io_read_backoff_ms,
+            io_write_backoff_ms,
+        }
+    }
+}
+
+impl Default for RuntimeTuningConfig {
+    fn default() -> Self {
+        Self {
+            reactor_idle_poll_ms: default_runtime_reactor_idle_poll_ms(),
+            io_read_backoff_ms: default_runtime_io_read_backoff_ms(),
+            io_write_backoff_ms: default_runtime_io_write_backoff_ms(),
+        }
+    }
+}
+
+fn default_runtime_reactor_idle_poll_ms() -> u64 {
+    100
+}
+
+fn default_runtime_io_read_backoff_ms() -> u64 {
+    10
+}
+
+fn default_runtime_io_write_backoff_ms() -> u64 {
+    10
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -470,6 +536,7 @@ fn enforce_runtime_policy(allowed: &[String]) {
 pub struct RateLimitConfig {
     pub p2p_max_per_sec: u32,
     pub p2p_max_bytes_per_sec: u64,
+    pub p2p_rate_window_secs: u64,
 }
 #[derive(Clone)]
 pub struct ReputationConfig {
@@ -482,6 +549,7 @@ static RATE_LIMIT_CFG: Lazy<Arc<RwLock<RateLimitConfig>>> = Lazy::new(|| {
     Arc::new(RwLock::new(RateLimitConfig {
         p2p_max_per_sec: cfg.p2p_max_per_sec,
         p2p_max_bytes_per_sec: cfg.p2p_max_bytes_per_sec,
+        p2p_rate_window_secs: cfg.p2p_rate_window_secs,
     }))
 });
 static REPUTATION_CFG: Lazy<Arc<RwLock<ReputationConfig>>> = Lazy::new(|| {
@@ -527,6 +595,14 @@ fn default_p2p_max_per_sec() -> u32 {
 
 fn default_p2p_max_bytes_per_sec() -> u64 {
     65536
+}
+
+fn default_p2p_rate_window_secs() -> u64 {
+    1
+}
+
+fn default_p2p_chain_sync_interval_ms() -> u64 {
+    500
 }
 
 fn default_provider_reputation_decay() -> f64 {
@@ -879,6 +955,7 @@ fn apply(cfg: &NodeConfig) {
         let mut rl = RATE_LIMIT_CFG.write().unwrap();
         rl.p2p_max_per_sec = cfg.p2p_max_per_sec;
         rl.p2p_max_bytes_per_sec = cfg.p2p_max_bytes_per_sec;
+        rl.p2p_rate_window_secs = cfg.p2p_rate_window_secs;
     }
     {
         let mut rep = REPUTATION_CFG.write().unwrap();
@@ -886,9 +963,15 @@ fn apply(cfg: &NodeConfig) {
         rep.provider_reputation_decay = cfg.provider_reputation_decay;
         rep.provider_reputation_retention = cfg.provider_reputation_retention;
     }
+    let runtime_cfg = cfg.runtime.normalized();
+    runtime::configure_reactor_idle_poll(Duration::from_millis(runtime_cfg.reactor_idle_poll_ms));
+    runtime::configure_io_read_backoff(Duration::from_millis(runtime_cfg.io_read_backoff_ms));
+    runtime::configure_io_write_backoff(Duration::from_millis(runtime_cfg.io_write_backoff_ms));
     crate::net::set_peer_reputation_decay(cfg.peer_reputation_decay);
     crate::net::set_p2p_max_per_sec(cfg.p2p_max_per_sec);
     crate::net::set_p2p_max_bytes_per_sec(cfg.p2p_max_bytes_per_sec);
+    crate::net::set_p2p_rate_window_secs(cfg.p2p_rate_window_secs);
+    crate::net::set_p2p_chain_sync_interval_ms(cfg.p2p_chain_sync_interval_ms);
     crate::compute_market::scheduler::set_provider_reputation_decay(cfg.provider_reputation_decay);
     crate::compute_market::scheduler::set_provider_reputation_retention(
         cfg.provider_reputation_retention,
@@ -1000,64 +1083,82 @@ pub fn watch(dir: &str) {
         *CONFIG_DIR.write().unwrap() = dir.to_string();
     }
     crate::gossip::config::watch(dir);
+    if cfg!(test) && std::env::var_os("TB_ENABLE_CONFIG_WATCH_TESTS").is_none() {
+        // Tests exercise configuration reload paths explicitly; avoid spawning
+        // long-lived filesystem watchers that never shut down across property
+        // test iterations.
+        return;
+    }
     let cfg_dir = dir.to_string();
-    runtime::spawn(async move {
-        let path = Path::new(&cfg_dir);
-        match FsWatcher::new(path, WatchRecursiveMode::NonRecursive) {
-            Ok(mut watcher) => loop {
-                match watcher.next().await {
-                    Ok(event)
-                        if matches!(
-                            event.kind,
-                            WatchEventKind::Created
-                                | WatchEventKind::Modified
-                                | WatchEventKind::Removed
-                        ) =>
-                    {
-                        eprintln!("[config] Received event: {:?} with {} paths", event.kind, event.paths.len());
-                        let mut reload_node = false;
-                        let mut reload_gossip = false;
-                        let mut reload_storage = false;
-                        for changed in &event.paths {
-                            eprintln!("[config]   Path: {:?}", changed);
-                            if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
-                                eprintln!("[config]   File name: {:?}", name);
-                                match name {
-                                    "default.toml" => {
-                                        eprintln!("[config]   Matched default.toml, will reload");
-                                        reload_node = true;
-                                    }
-                                    "gossip.toml" => reload_gossip = true,
-                                    "storage.toml" => reload_storage = true,
-                                    _ => {
-                                        eprintln!("[config]   No match for {:?}", name);
-                                    }
-                                }
-                            } else {
-                                eprintln!("[config]   Could not extract file name from {:?}", changed);
-                            }
+    runtime::spawn({
+        let cfg_dir = cfg_dir.clone();
+        async move {
+            let mut last_mtimes = (
+                file_mtime(Path::new(&cfg_dir).join("default.toml")),
+                file_mtime(Path::new(&cfg_dir).join("gossip.toml")),
+                file_mtime(Path::new(&cfg_dir).join("storage.toml")),
+            );
+            let handle_paths = |paths: &[PathBuf]| {
+                let mut reload_node = false;
+                let mut reload_gossip = false;
+                let mut reload_storage = false;
+                for changed in paths {
+                    if let Some(name) = changed.file_name().and_then(|s| s.to_str()) {
+                        match name {
+                            "default.toml" => reload_node = true,
+                            "gossip.toml" => reload_gossip = true,
+                            "storage.toml" => reload_storage = true,
+                            _ => {}
                         }
-                        if reload_node {
-                            eprintln!("[config] Calling reload()...");
-                            let _ = reload();
-                            eprintln!("[config] reload() completed");
-                        }
-                        if reload_gossip {
-                            crate::gossip::config::reload();
-                        }
-                        if reload_storage {
-                            crate::storage::settings::configure_from_dir(&cfg_dir);
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(err) => {
-                        diagnostics::log::warn!("config_watch_error: {err}");
-                        runtime::sleep(Duration::from_secs(1)).await;
                     }
                 }
-            },
-            Err(err) => {
-                diagnostics::log::warn!("config_watch_init_failed: {err}");
+                if reload_node {
+                    let _ = reload();
+                }
+                if reload_gossip {
+                    crate::gossip::config::reload();
+                }
+                if reload_storage {
+                    crate::storage::settings::configure_from_dir(&cfg_dir);
+                }
+            };
+            let path = Path::new(&cfg_dir);
+            match FsWatcher::new(path, WatchRecursiveMode::NonRecursive) {
+                Ok(mut watcher) => loop {
+                    match watcher.next().await {
+                        Ok(event)
+                            if matches!(
+                                event.kind,
+                                WatchEventKind::Created
+                                    | WatchEventKind::Modified
+                                    | WatchEventKind::Removed
+                            ) =>
+                        {
+                            handle_paths(&event.paths);
+                        }
+                        Ok(_) => {}
+                        Err(err) => {
+                            diagnostics::log::warn!("config_watch_error: {err}");
+                            runtime::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                    if let Some(polled) = poll_config_changes(&cfg_dir, &mut last_mtimes) {
+                        handle_paths(&polled);
+                    }
+                    // Yield to prevent starving other async tasks when processing bursts of file events
+                    runtime::yield_now().await;
+                },
+                Err(err) => {
+                    diagnostics::log::warn!(
+                        "config_watch_init_failed: {err}; falling back to polling"
+                    );
+                    loop {
+                        if let Some(polled) = poll_config_changes(&cfg_dir, &mut last_mtimes) {
+                            handle_paths(&polled);
+                        }
+                        runtime::sleep(Duration::from_millis(250)).await;
+                    }
+                }
             }
         }
     });
@@ -1069,6 +1170,40 @@ pub fn watch(dir: &str) {
             crate::gossip::config::reload();
         }
     });
+}
+
+fn file_mtime(path: impl AsRef<Path>) -> Option<SystemTime> {
+    fs::metadata(path.as_ref()).and_then(|m| m.modified()).ok()
+}
+
+fn poll_config_changes(
+    cfg_dir: &str,
+    last: &mut (Option<SystemTime>, Option<SystemTime>, Option<SystemTime>),
+) -> Option<Vec<PathBuf>> {
+    let default_path = Path::new(cfg_dir).join("default.toml");
+    let gossip_path = Path::new(cfg_dir).join("gossip.toml");
+    let storage_path = Path::new(cfg_dir).join("storage.toml");
+    let current = (
+        file_mtime(&default_path),
+        file_mtime(&gossip_path),
+        file_mtime(&storage_path),
+    );
+    let mut changes = Vec::new();
+    if current.0 != last.0 {
+        changes.push(default_path);
+    }
+    if current.1 != last.1 {
+        changes.push(gossip_path);
+    }
+    if current.2 != last.2 {
+        changes.push(storage_path);
+    }
+    *last = current;
+    if changes.is_empty() {
+        None
+    } else {
+        Some(changes)
+    }
 }
 
 static BLOCKCHAIN_HANDLE: Lazy<RwLock<Option<Weak<Mutex<Blockchain>>>>> =
@@ -1124,10 +1259,10 @@ pub fn config_dir() -> Option<String> {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InflationConfig {
-    pub beta_storage_sub_ct: f64,
-    pub gamma_read_sub_ct: f64,
-    pub kappa_cpu_sub_ct: f64,
-    pub lambda_bytes_out_sub_ct: f64,
+    pub beta_storage_sub: f64,
+    pub gamma_read_sub: f64,
+    pub kappa_cpu_sub: f64,
+    pub lambda_bytes_out_sub: f64,
     pub risk_lambda: f64,
     pub entropy_phi: f64,
     pub vdf_kappa: u64,
@@ -1140,10 +1275,10 @@ pub struct InflationConfig {
 impl Default for InflationConfig {
     fn default() -> Self {
         Self {
-            beta_storage_sub_ct: 0.05,
-            gamma_read_sub_ct: 0.02,
-            kappa_cpu_sub_ct: 0.01,
-            lambda_bytes_out_sub_ct: 0.005,
+            beta_storage_sub: 0.05,
+            gamma_read_sub: 0.02,
+            kappa_cpu_sub: 0.01,
+            lambda_bytes_out_sub: 0.005,
             risk_lambda: 4.0 * std::f64::consts::LN_2,
             entropy_phi: 2.0,
             vdf_kappa: 1u64 << 28,

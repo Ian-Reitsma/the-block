@@ -103,8 +103,8 @@ fn storage_contract_to_value(contract: &StorageContract) -> JsonValue {
         JsonValue::Number(JsonNumber::from(contract.accrued)),
     );
     map.insert(
-        "total_deposit_ct".into(),
-        JsonValue::Number(JsonNumber::from(contract.total_deposit_ct)),
+        "total_deposit".into(),
+        JsonValue::Number(JsonNumber::from(contract.total_deposit)),
     );
     map.insert(
         "last_payment_block".into(),
@@ -142,8 +142,8 @@ fn replica_to_value(replica: &ReplicaIncentive) -> JsonValue {
         JsonValue::Number(JsonNumber::from(replica.price_per_block)),
     );
     map.insert(
-        "deposit_ct".into(),
-        JsonValue::Number(JsonNumber::from(replica.deposit_ct)),
+        "deposit".into(),
+        JsonValue::Number(JsonNumber::from(replica.deposit)),
     );
     map.insert(
         "proof_successes".into(),
@@ -189,7 +189,7 @@ fn sample_contract(object_id: &str, provider: &str) -> ContractRecord {
         retention_blocks: 8,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 0,
+        total_deposit: 0,
         last_payment_block: None,
         storage_root: tree.root,
     };

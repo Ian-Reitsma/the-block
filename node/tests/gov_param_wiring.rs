@@ -35,11 +35,15 @@ fn build_signed_tx(
         amount_consumer: consumer,
         amount_industrial: industrial,
         fee,
-        pct_ct: 0,
+        pct: 0,
         nonce,
         memo: Vec::new(),
     };
-    sign_tx(sk.to_vec(), payload).expect("signing")
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
 }
 
 #[testkit::tb_serial]
@@ -47,8 +51,11 @@ fn consumer_fee_comfort_updates_at_epoch_boundary() {
     let dir = tempdir().unwrap();
     let store = GovStore::open(dir.path());
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("a".into(), 0, 2_000).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    // Remove fee floors so comfort guard behaviour is isolated from base fee gating.
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
+    bc.add_account("a".into(), 2_000).unwrap();
+    bc.add_account("b".into(), 0).unwrap();
     let mut rt = Runtime::new(&mut bc);
     let mut params = Params::default();
     rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);

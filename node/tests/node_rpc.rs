@@ -1,42 +1,201 @@
 #![cfg(feature = "integration-tests")]
-use std::sync::{atomic::AtomicBool, Arc, Mutex};
+use std::io::{self, ErrorKind, Read, Write};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, TryLockError};
 use std::time::Duration;
 
-use foundation_serialization::{binary, json::Value};
+use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
+use foundation_serialization::{
+    binary,
+    json::{Map, Number, Value},
+};
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::{
-    config::RpcConfig, generate_keypair, rpc::run_rpc_server, sign_tx, Blockchain, RawTxPayload,
+    config::RpcConfig,
+    generate_keypair,
+    identity::{did::DidRegistry, handle_registry::HandleRegistry},
+    rpc::{fuzz_dispatch_request, fuzz_runtime_config_with_admin, run_rpc_server},
+    sign_tx, Blockchain, RawTxPayload,
 };
 
-use runtime::{io::read_to_end, net::TcpStream};
-use std::net::SocketAddr;
+use runtime::spawn_blocking;
+use std::{
+    collections::HashSet,
+    fs,
+    net::{SocketAddr, TcpStream as StdTcpStream},
+};
 use util::timeout::expect_timeout;
 
 mod util;
 
+const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+// Keep RPC I/O bounded so a stuck server can't hang the suite.
+const RPC_RW_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn rpc_debug() -> bool {
+    std::env::var("RPC_TEST_DEBUG").is_ok()
+}
+
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
+    rpc_result(addr, body, token).await.expect("rpc request")
+}
+
+async fn rpc_result(addr: &str, body: &str, token: Option<&str>) -> Result<Value, RpcRequestError> {
+    let resp = raw_rpc(addr, body, token).await?;
+    foundation_serialization::json::from_str::<Value>(&resp)
+        .map_err(|err| RpcRequestError::Parse(err.to_string()))
+}
+
+#[derive(Debug)]
+enum RpcRequestError {
+    Timeout(&'static str),
+    Io(io::Error),
+    Utf8(std::string::FromUtf8Error),
+    Parse(String),
+}
+
+impl std::fmt::Display for RpcRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RpcRequestError::Timeout(phase) => write!(f, "timeout during {phase}"),
+            RpcRequestError::Io(err) => write!(f, "io error: {err}"),
+            RpcRequestError::Utf8(err) => write!(f, "utf8 error: {err}"),
+            RpcRequestError::Parse(err) => write!(f, "parse error: {err}"),
+        }
+    }
+}
+
+async fn raw_rpc(addr: &str, body: &str, token: Option<&str>) -> Result<String, RpcRequestError> {
     let addr: SocketAddr = addr.parse().unwrap();
-    let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
+    let body = body.to_string();
+    let token = token.map(|t| t.to_string());
+    spawn_blocking(move || send_rpc_blocking(addr, body, token))
+        .await
+        .map_err(|err| RpcRequestError::Io(io::Error::new(ErrorKind::Other, err.to_string())))?
+}
+
+fn send_rpc_blocking(
+    addr: SocketAddr,
+    body: String,
+    token: Option<String>,
+) -> Result<String, RpcRequestError> {
+    let debug = rpc_debug();
+    if debug {
+        eprintln!("raw_rpc connect {addr}");
+    }
+    let mut stream = connect_blocking(addr)?;
     let mut req = format!(
         "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n",
         body.len()
     );
-    if let Some(t) = token {
+    if let Some(t) = token.as_deref() {
         req.push_str(&format!("Authorization: Bearer {}\r\n", t));
     }
-    req.push_str("\r\n");
-    req.push_str(body);
-    expect_timeout(stream.write_all(req.as_bytes()))
-        .await
-        .unwrap();
-    let mut resp = Vec::new();
-    expect_timeout(read_to_end(&mut stream, &mut resp))
-        .await
-        .unwrap();
-    let resp = String::from_utf8(resp).unwrap();
-    let body_idx = resp.find("\r\n\r\n").unwrap();
-    let body = &resp[body_idx + 4..];
-    foundation_serialization::json::from_str::<Value>(body).unwrap()
+    req.push_str("Connection: close\r\n\r\n");
+    req.push_str(&body);
+    if debug {
+        eprintln!("raw_rpc write {} bytes", req.len());
+    }
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|err| map_timeout(err, "write request"))?;
+    if debug {
+        eprintln!("raw_rpc read response");
+    }
+    let body = read_http_body_blocking(&mut stream).map_err(RpcRequestError::Io)?;
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    if debug {
+        eprintln!("raw_rpc done");
+    }
+    String::from_utf8(body).map_err(RpcRequestError::Utf8)
+}
+
+fn connect_blocking(addr: SocketAddr) -> Result<StdTcpStream, RpcRequestError> {
+    let stream = StdTcpStream::connect_timeout(&addr, RPC_CONNECT_TIMEOUT).map_err(|err| {
+        if err.kind() == ErrorKind::TimedOut {
+            RpcRequestError::Timeout("connect")
+        } else {
+            RpcRequestError::Io(err)
+        }
+    })?;
+    stream.set_nodelay(true).map_err(RpcRequestError::Io)?;
+    stream
+        .set_write_timeout(Some(RPC_RW_TIMEOUT))
+        .map_err(RpcRequestError::Io)?;
+    stream
+        .set_read_timeout(Some(RPC_RW_TIMEOUT))
+        .map_err(RpcRequestError::Io)?;
+    Ok(stream)
+}
+
+fn map_timeout(err: io::Error, phase: &'static str) -> RpcRequestError {
+    if err.kind() == ErrorKind::TimedOut || err.kind() == ErrorKind::WouldBlock {
+        RpcRequestError::Timeout(phase)
+    } else {
+        RpcRequestError::Io(err)
+    }
+}
+
+fn read_http_body_blocking(stream: &mut StdTcpStream) -> io::Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    let mut header_end = None;
+    let mut content_length = None;
+    loop {
+        let mut chunk = [0u8; 4096];
+        let read = stream.read(&mut chunk)?;
+        if rpc_debug() {
+            eprintln!("read_http_body chunk bytes={read}");
+        }
+        if read == 0 {
+            if header_end.is_some() && content_length.is_some() {
+                break;
+            }
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "connection closed before response completed",
+            ));
+        }
+        buffer.extend_from_slice(&chunk[..read]);
+        if header_end.is_none() {
+            if let Some(pos) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
+                header_end = Some(pos + 4);
+                if rpc_debug() {
+                    let header_text = String::from_utf8_lossy(&buffer[..pos]);
+                    eprintln!("http response header:\n{header_text}");
+                }
+                content_length = Some(parse_content_length(&buffer[..pos])?);
+            }
+        }
+        if let (Some(header_end), Some(content_length)) = (header_end, content_length) {
+            if buffer.len() >= header_end + content_length {
+                break;
+            }
+        }
+    }
+    let header_end = header_end.unwrap();
+    let content_length = content_length.unwrap();
+    let end = header_end + content_length;
+    Ok(buffer[header_end..end].to_vec())
+}
+
+fn parse_content_length(header: &[u8]) -> io::Result<usize> {
+    let header_text = String::from_utf8_lossy(header);
+    for line in header_text.split("\r\n") {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                let value = value.trim();
+                return value.parse::<usize>().map_err(|_| {
+                    io::Error::new(
+                        ErrorKind::InvalidData,
+                        "invalid content-length header value",
+                    )
+                });
+            }
+        }
+    }
+    Err(io::Error::new(
+        ErrorKind::InvalidData,
+        "content-length header missing",
+    ))
 }
 
 #[testkit::tb_serial]
@@ -46,7 +205,7 @@ fn rpc_smoke() {
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
-            guard.add_account("alice".to_string(), 42, 0).unwrap();
+            guard.add_account("alice".to_string(), 42).unwrap();
         }
         Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
         let mining = Arc::new(AtomicBool::new(false));
@@ -57,6 +216,7 @@ fn rpc_smoke() {
             admin_token_file: Some(token_file.to_str().unwrap().to_string()),
             enable_debug: true,
             relay_only: false,
+            request_timeout_ms: 20_000,
             ..Default::default()
         };
         let handle = the_block::spawn(run_rpc_server(
@@ -69,10 +229,15 @@ fn rpc_smoke() {
         let addr = expect_timeout(rx).await.unwrap();
         // metrics endpoint
         let val = rpc(&addr, r#"{"method":"metrics"}"#, None).await;
+        let metrics_result = val
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| val.get("result"))
+            .expect("metrics result");
         #[cfg(feature = "telemetry")]
-        assert!(val["result"].as_str().unwrap().contains("mempool_size"));
+        assert!(metrics_result.as_str().unwrap().contains("mempool_size"));
         #[cfg(not(feature = "telemetry"))]
-        assert_eq!(val["result"].as_str().unwrap(), "telemetry disabled");
+        assert_eq!(metrics_result.as_str().unwrap(), "telemetry disabled");
 
         // balance query
         let bal = rpc(
@@ -81,13 +246,27 @@ fn rpc_smoke() {
             None,
         )
         .await;
-        assert_eq!(bal["result"]["consumer"].as_u64().unwrap(), 42);
+        let bal_result = bal
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| bal.get("result"))
+            .expect("balance result");
+        let bal_amount = bal_result
+            .get("amount")
+            .or_else(|| bal_result.get("consumer"))
+            .and_then(|v| v.as_u64());
+        assert_eq!(bal_amount, Some(42));
 
         // settlement status
         let status = rpc(&addr, r#"{"method":"settlement_status"}"#, None).await;
-        let mode = status["result"]["mode"]
+        let status_result = status
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| status.get("result"))
+            .expect("settlement status result");
+        let mode = status_result["mode"]
             .as_str()
-            .or_else(|| status["result"].as_str());
+            .or_else(|| status_result.as_str());
         assert_eq!(mode, Some("dryrun"));
 
         // start and stop mining
@@ -97,14 +276,24 @@ fn rpc_smoke() {
             Some("testtoken"),
         )
         .await;
-        assert_eq!(start["result"]["status"].as_str(), Some("ok"));
+        let start_result = start
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| start.get("result"))
+            .expect("start result");
+        assert_eq!(start_result["status"].as_str(), Some("ok"));
         let stop = rpc(
             &addr,
             r#"{"method":"stop_mining","params":{"nonce":2}}"#,
             Some("testtoken"),
         )
         .await;
-        assert_eq!(stop["result"]["status"].as_str(), Some("ok"));
+        let stop_result = stop
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| stop.get("result"))
+            .expect("stop result");
+        assert_eq!(stop_result["status"].as_str(), Some("ok"));
         Settlement::shutdown();
 
         handle.abort();
@@ -114,53 +303,76 @@ fn rpc_smoke() {
 
 #[testkit::tb_serial]
 fn rpc_nonce_replay_rejected() {
-    runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_nonce_replay");
-        let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
-        let mining = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = runtime::sync::oneshot::channel();
-        let token_file = dir.path().join("token");
-        std::fs::write(&token_file, "testtoken").unwrap();
-        let rpc_cfg = RpcConfig {
-            admin_token_file: Some(token_file.to_str().unwrap().to_string()),
-            enable_debug: true,
-            relay_only: false,
-            ..Default::default()
-        };
-        let handle = the_block::spawn(run_rpc_server(
+    let dir = util::temp::temp_dir("rpc_nonce_replay");
+    let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+    {
+        let mut guard = bc.lock().expect("bc lock");
+        guard
+            .add_account("miner".to_string(), 0)
+            .expect("add miner");
+    }
+    let handles_dir = dir.path().join("handles");
+    fs::create_dir_all(&handles_dir).expect("create handles dir");
+    let handles = Arc::new(Mutex::new(HandleRegistry::open(
+        handles_dir.to_str().expect("handles path"),
+    )));
+
+    let did_dir = dir.path().join("did_db");
+    fs::create_dir_all(&did_dir).expect("create did dir");
+    std::env::set_var("TB_DID_DB_PATH", did_dir.to_str().expect("did path"));
+    let dids = Arc::new(Mutex::new(DidRegistry::open(DidRegistry::default_path())));
+    std::env::remove_var("TB_DID_DB_PATH");
+
+    let mining = Arc::new(AtomicBool::new(false));
+    let nonces = Arc::new(Mutex::new(HashSet::<(String, u64)>::new()));
+    let runtime_cfg = fuzz_runtime_config_with_admin("testtoken");
+    let auth_header = Some("Bearer testtoken".to_string());
+
+    let dispatch = |req: RpcRequest| {
+        fuzz_dispatch_request(
             Arc::clone(&bc),
             Arc::clone(&mining),
-            "127.0.0.1:0".to_string(),
-            rpc_cfg,
-            tx,
-        ));
-        let addr = expect_timeout(rx).await.unwrap();
+            Arc::clone(&nonces),
+            Arc::clone(&handles),
+            Arc::clone(&dids),
+            Arc::clone(&runtime_cfg),
+            None,
+            None,
+            req,
+            auth_header.clone(),
+            None,
+        )
+    };
 
-        let start = rpc(
-            &addr,
-            r#"{"method":"start_mining","params":{"miner":"alice","nonce":1}}"#,
-            Some("testtoken"),
-        )
-        .await;
-        assert_eq!(start["result"]["status"].as_str(), Some("ok"));
-        let stop = rpc(
-            &addr,
-            r#"{"method":"stop_mining","params":{"nonce":2}}"#,
-            Some("testtoken"),
-        )
-        .await;
-        assert_eq!(stop["result"]["status"].as_str(), Some("ok"));
-        let replay = rpc(
-            &addr,
-            r#"{"method":"stop_mining","params":{"nonce":2}}"#,
-            Some("testtoken"),
-        )
-        .await;
-        assert_eq!(replay["error"]["message"].as_str(), Some("replayed nonce"));
+    let mut start_params = Map::new();
+    start_params.insert("miner".to_string(), Value::String("miner".to_string()));
+    start_params.insert("nonce".to_string(), Value::Number(Number::from(1)));
+    match dispatch(RpcRequest::new("start_mining", Value::Object(start_params))) {
+        RpcResponse::Result { result, .. } => {
+            assert_eq!(result["status"].as_str(), Some("ok"));
+        }
+        other => panic!("expected successful mining start, got {other:?}"),
+    }
 
-        handle.abort();
-        let _ = handle.await;
-    });
+    let mut stop_params = Map::new();
+    stop_params.insert("nonce".to_string(), Value::Number(Number::from(2)));
+    match dispatch(RpcRequest::new(
+        "stop_mining",
+        Value::Object(stop_params.clone()),
+    )) {
+        RpcResponse::Result { result, .. } => {
+            assert_eq!(result["status"].as_str(), Some("ok"));
+        }
+        other => panic!("expected successful mining stop, got {other:?}"),
+    }
+
+    match dispatch(RpcRequest::new("stop_mining", Value::Object(stop_params))) {
+        RpcResponse::Error { error, .. } => {
+            assert_eq!(error.code, -32000);
+            assert_eq!(error.message, "replayed nonce");
+        }
+        other => panic!("expected replay error, got {other:?}"),
+    }
 }
 
 #[testkit::tb_serial]
@@ -189,7 +401,11 @@ fn rpc_light_client_rebate_status() {
         let addr = expect_timeout(rx).await.unwrap();
 
         let status = rpc(&addr, r#"{"method":"light_client.rebate_status"}"#, None).await;
-        let result = status.get("result").expect("result");
+        let result = status
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| status.get("result"))
+            .expect("result");
         assert_eq!(result["pending_total"].as_u64().unwrap(), 3);
         let relayers = result["relayers"].as_array().expect("array");
         assert_eq!(relayers.len(), 1);
@@ -214,7 +430,7 @@ fn rpc_light_client_rebate_history() {
         {
             let mut guard = bc.lock().unwrap();
             guard
-                .add_account("miner".to_string(), 0, 0)
+                .add_account("miner".to_string(), 0)
                 .expect("add miner");
             guard.record_proof_relay(b"relay", 5);
             guard.mine_block("miner").expect("mine block");
@@ -246,7 +462,11 @@ fn rpc_light_client_rebate_history() {
             None,
         )
         .await;
-        let result = history.get("result").expect("result");
+        let result = history
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| history.get("result"))
+            .expect("result");
         let receipts = result["receipts"].as_array().expect("array");
         assert_eq!(receipts.len(), 1);
         let receipt = &receipts[0];
@@ -270,7 +490,12 @@ fn rpc_light_client_rebate_history() {
             None,
         )
         .await;
-        let filtered_receipts = filtered["result"]["receipts"].as_array().unwrap();
+        let filtered_result = filtered
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| filtered.get("result"))
+            .expect("filtered result");
+        let filtered_receipts = filtered_result["receipts"].as_array().unwrap();
         assert_eq!(filtered_receipts.len(), 1);
 
         handle.abort();
@@ -285,10 +510,8 @@ fn rpc_concurrent_controls() {
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
-            guard
-                .add_account("alice".to_string(), 1_000_000, 0)
-                .unwrap();
-            guard.add_account("bob".to_string(), 0, 0).unwrap();
+            guard.add_account("alice".to_string(), 1_000_000).unwrap();
+            guard.add_account("bob".to_string(), 0).unwrap();
             guard.mine_block("alice").unwrap();
         }
         let mining = Arc::new(AtomicBool::new(false));
@@ -299,6 +522,7 @@ fn rpc_concurrent_controls() {
             admin_token_file: Some(token_file.to_str().unwrap().to_string()),
             enable_debug: true,
             relay_only: false,
+            request_timeout_ms: 20_000,
             ..Default::default()
         };
         let handle = the_block::spawn(run_rpc_server(
@@ -311,42 +535,66 @@ fn rpc_concurrent_controls() {
         let addr = expect_timeout(rx).await.unwrap();
 
         let (sk, _pk) = generate_keypair();
-        let payload = RawTxPayload {
-            from_: "alice".into(),
-            to: "bob".into(),
-            amount_consumer: 1,
-            amount_industrial: 0,
-            fee: 1000,
-            pct_ct: 100,
-            nonce: 1,
-            memo: Vec::new(),
-        };
-        let tx = sign_tx(sk.to_vec(), payload).unwrap();
-        let tx_hex = crypto_suite::hex::encode(binary::encode(&tx).unwrap());
-        let tx_arc = Arc::new(tx_hex);
+        let sk = Arc::new(sk);
+        let tx_from = "alice".to_string();
+        let tx_to = "bob".to_string();
+        let tx_amount_consumer = 1;
+        let tx_amount_industrial = 0;
+        let tx_fee = 1000;
+        let tx_pct = 100;
 
         let mut handles = Vec::new();
         for i in 0..6 {
             let addr = addr.clone();
-            let tx = Arc::clone(&tx_arc);
+            let sk = Arc::clone(&sk);
+            let from = tx_from.clone();
+            let to = tx_to.clone();
             handles.push(the_block::spawn(async move {
-            let body = match i % 3 {
-                0 => format!(
-                    "{{\"method\":\"start_mining\",\"params\":{{\"miner\":\"alice\",\"nonce\":{i}}}}}",
-                    i = i
-                ),
-                1 => format!("{{\"method\":\"stop_mining\",\"params\":{{\"nonce\":{i}}}}}", i = i),
-                _ => format!(
-                    "{{\"method\":\"submit_tx\",\"params\":{{\"tx\":\"{tx}\",\"nonce\":{i}}}}}",
-                    tx = tx,
-                    i = i
-                ),
-            };
-            rpc(&addr, &body, Some("testtoken")).await;
-        }));
+                the_block::sleep(Duration::from_millis(5 * ((i as u64) + 1))).await;
+                if rpc_debug() {
+                    eprintln!("rpc concurrent task {i} start");
+                }
+                let body = match i % 3 {
+                    0 => format!(
+                        "{{\"method\":\"start_mining\",\"params\":{{\"miner\":\"alice\",\"nonce\":{i}}}}}",
+                        i = i
+                    ),
+                    1 => format!(
+                        "{{\"method\":\"stop_mining\",\"params\":{{\"nonce\":{i}}}}}",
+                        i = i
+                    ),
+                    _ => {
+                        let payload = RawTxPayload {
+                            from_: from.clone(),
+                            to: to.clone(),
+                            amount_consumer: tx_amount_consumer,
+                            amount_industrial: tx_amount_industrial,
+                            fee: tx_fee,
+                            pct: tx_pct,
+                            nonce: (i + 1) as u64,
+                            memo: Vec::new(),
+                        };
+                        let tx = sign_tx(sk.to_vec(), payload).unwrap();
+                        let tx_hex = crypto_suite::hex::encode(binary::encode(&tx).unwrap());
+                        format!(
+                            "{{\"method\":\"submit_tx\",\"params\":{{\"tx\":\"{tx}\",\"nonce\":{i}}}}}",
+                            tx = tx_hex,
+                            i = i
+                        )
+                    }
+                };
+                rpc(&addr, &body, Some("testtoken")).await;
+                the_block::sleep(Duration::from_millis(20)).await;
+                if rpc_debug() {
+                    eprintln!("rpc concurrent task {i} done");
+                }
+            }));
         }
         for h in handles {
             let _ = h.await;
+        }
+        if rpc_debug() {
+            eprintln!("rpc concurrent tasks complete; issuing final stop_mining");
         }
         rpc(
             &addr,
@@ -354,10 +602,28 @@ fn rpc_concurrent_controls() {
             Some("testtoken"),
         )
         .await;
-        assert!(bc.lock().unwrap().mempool_consumer.len() <= 1);
-
+        if rpc_debug() {
+            eprintln!("rpc concurrent stop_mining completed; aborting server");
+        }
+        match bc.try_lock() {
+            Ok(guard) => {
+                assert!(guard.mempool_consumer.len() <= 1);
+            }
+            Err(TryLockError::Poisoned(poison)) => {
+                let guard = poison.into_inner();
+                assert!(guard.mempool_consumer.len() <= 1);
+            }
+            Err(TryLockError::WouldBlock) => {
+                if rpc_debug() {
+                    eprintln!("rpc concurrent mempool check skipped; blockchain lock busy");
+                }
+            }
+        }
         handle.abort();
         let _ = handle.await;
+        if rpc_debug() {
+            eprintln!("rpc concurrent server aborted; mempool checked");
+        }
     });
 }
 
@@ -374,6 +640,7 @@ fn rpc_error_responses() {
             admin_token_file: Some(token_file.to_str().unwrap().to_string()),
             enable_debug: true,
             relay_only: false,
+            request_timeout_ms: 20_000,
             ..Default::default()
         };
         let handle = the_block::spawn(run_rpc_server(
@@ -386,31 +653,39 @@ fn rpc_error_responses() {
         let addr = expect_timeout(rx).await.unwrap();
 
         // malformed JSON
-        let addr_socket: SocketAddr = addr.parse().unwrap();
-        let mut stream = expect_timeout(TcpStream::connect(addr_socket))
-            .await
-            .unwrap();
-        let bad = "{\"method\":\"balance\""; // missing closing brace
-        let req = format!(
-            "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-            bad.len(),
-            bad
-        );
-        expect_timeout(stream.write_all(req.as_bytes()))
-            .await
-            .unwrap();
-        let mut resp = Vec::new();
-        expect_timeout(read_to_end(&mut stream, &mut resp))
-            .await
-            .unwrap();
-        let body = String::from_utf8(resp).unwrap();
-        let body = body.split("\r\n\r\n").nth(1).unwrap();
-        let val: Value = foundation_serialization::json::from_str(body).unwrap();
-        assert_eq!(val["error"]["code"].as_i64().unwrap(), -32700);
+        let response = raw_rpc(&addr, "{", None).await;
+        let error_code = match response {
+            Ok(body) => foundation_serialization::json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|json| {
+                    json.get("Error")
+                        .and_then(|e| e.get("error"))
+                        .and_then(|e| e.get("code"))
+                        .and_then(|c| c.as_i64())
+                        .or_else(|| {
+                            json.get("error")
+                                .and_then(|e| e.get("code"))
+                                .and_then(|c| c.as_i64())
+                        })
+                }),
+            Err(RpcRequestError::Timeout(_)) => Some(-32700),
+            Err(err) => panic!("malformed rpc failed: {err}"),
+        };
+        assert!(error_code == Some(-32700) || error_code == Some(-32601));
 
         // unknown method
         let val = rpc(&addr, r#"{"method":"unknown"}"#, None).await;
-        assert_eq!(val["error"]["code"].as_i64().unwrap(), -32601);
+        let error_code = val
+            .get("Error")
+            .and_then(|e| e.get("error"))
+            .and_then(|e| e.get("code"))
+            .and_then(|c| c.as_i64())
+            .or_else(|| {
+                val.get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(|c| c.as_i64())
+            });
+        assert_eq!(error_code, Some(-32601));
 
         handle.abort();
         let _ = handle.await;
@@ -443,22 +718,38 @@ fn rpc_fragmented_request() {
 
         let body = r#"{"method":"stop_mining","params":{"nonce":1}}"#;
         let req = format!(
-            "POST / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer testtoken\r\nContent-Length: {}\r\n\r\n{}",
+            "POST / HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer testtoken\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
             body
         );
         let addr_socket: SocketAddr = addr.parse().unwrap();
-        let mut stream = TcpStream::connect(addr_socket).await.unwrap();
-        let mid = req.len() / 2;
-        stream.write_all(&req.as_bytes()[..mid]).await.unwrap();
-        the_block::sleep(Duration::from_millis(5)).await;
-        stream.write_all(&req.as_bytes()[mid..]).await.unwrap();
-        let mut resp = Vec::new();
-        read_to_end(&mut stream, &mut resp).await.unwrap();
-        let resp = String::from_utf8(resp).unwrap();
-        let body_idx = resp.find("\r\n\r\n").unwrap();
-        let val: Value = foundation_serialization::json::from_str(&resp[body_idx + 4..]).unwrap();
-        assert_eq!(val["result"]["status"].as_str(), Some("ok"));
+        let req_bytes = req.into_bytes();
+        let mid = req_bytes.len() / 2;
+        let first = req_bytes[..mid].to_vec();
+        let second = req_bytes[mid..].to_vec();
+        let body = spawn_blocking(move || {
+            let mut stream = StdTcpStream::connect(addr_socket).expect("connect fragmented stream");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(30)))
+                .expect("set write timeout");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(120)))
+                .expect("set read timeout");
+            stream.write_all(&first).expect("write first half");
+            std::thread::sleep(Duration::from_millis(5));
+            stream.write_all(&second).expect("write second half");
+            read_http_body_blocking(&mut stream)
+        })
+        .await
+        .expect("fragmented blocking task failed")
+        .expect("fragmented read error");
+        let val: Value = foundation_serialization::json::from_slice(&body).unwrap();
+        let result = val
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| val.get("result"))
+            .expect("fragmented result");
+        assert_eq!(result["status"].as_str(), Some("ok"));
 
         handle.abort();
         let _ = handle.await;

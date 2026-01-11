@@ -19,7 +19,7 @@ pub async fn run_stream(mut ws: ServerStream, bc: Arc<Mutex<Blockchain>>) {
         };
         let mut trie = MerkleTrie::new();
         for (address, account) in accounts.iter() {
-            let value = account_state_value(account.balance.consumer, account.nonce);
+            let value = account_state_value(account.balance.amount, account.nonce);
             trie.insert(address.as_bytes(), &value);
         }
         let root = trie.root_hash();
@@ -27,7 +27,7 @@ pub async fn run_stream(mut ws: ServerStream, bc: Arc<Mutex<Blockchain>>) {
             .iter()
             .map(|(address, account)| AccountChunk {
                 address: address.clone(),
-                balance: account.balance.consumer,
+                balance: account.balance.amount,
                 account_seq: account.nonce,
                 proof: trie
                     .prove(address.as_bytes())

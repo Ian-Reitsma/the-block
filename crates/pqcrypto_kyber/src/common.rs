@@ -110,9 +110,9 @@ pub fn keypair<const PK: usize, const SK: usize>() -> (PublicKey<PK>, SecretKey<
     (PublicKey { bytes: public }, SecretKey { secret, public })
 }
 
-pub fn encapsulate<const CT: usize, const SS: usize, const PK: usize>(
+pub fn encapsulate<const CIPHERTEXT_LEN: usize, const SS: usize, const PK: usize>(
     public: &PublicKey<PK>,
-) -> (Ciphertext<CT>, SharedSecret<SS>) {
+) -> (Ciphertext<CIPHERTEXT_LEN>, SharedSecret<SS>) {
     let mut entropy = [0u8; 32];
     if random::fill_bytes(&mut entropy).is_err() {
         let mut hasher = blake3::Hasher::new();
@@ -121,7 +121,7 @@ pub fn encapsulate<const CT: usize, const SS: usize, const PK: usize>(
         hasher.finalize_xof(&mut entropy);
     }
 
-    let ciphertext = derive_ciphertext::<CT, PK>(&public.bytes, &entropy);
+    let ciphertext = derive_ciphertext::<CIPHERTEXT_LEN, PK>(&public.bytes, &entropy);
     let shared = derive_shared::<SS, PK>(&public.bytes, &entropy);
     (
         Ciphertext { bytes: ciphertext },
@@ -150,16 +150,16 @@ fn derive_public<const N: usize>(secret: &[u8]) -> [u8; N] {
     out
 }
 
-fn derive_ciphertext<const CT: usize, const PK: usize>(
+fn derive_ciphertext<const CIPHERTEXT_LEN: usize, const PK: usize>(
     public: &[u8; PK],
     entropy: &[u8; 32],
-) -> [u8; CT] {
+) -> [u8; CIPHERTEXT_LEN] {
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"the-block.kyber.ciphertext");
-    hasher.update(&(CT as u32).to_le_bytes());
+    hasher.update(&(CIPHERTEXT_LEN as u32).to_le_bytes());
     hasher.update(entropy);
     hasher.update(&public[..32]);
-    let mut out = [0u8; CT];
+    let mut out = [0u8; CIPHERTEXT_LEN];
     hasher.finalize_xof(&mut out);
     out
 }

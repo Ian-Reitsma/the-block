@@ -31,7 +31,7 @@ async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
     let addr: SocketAddr = addr.parse().unwrap();
     let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
     let req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+        "POST / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
     );
@@ -65,6 +65,7 @@ fn peer_key_rotate() {
             agent: "test".into(),
             nonce: 0,
             transport: Transport::Tcp,
+            gossip_addr: None,
             quic_addr: None,
             quic_cert: None,
             quic_fingerprint: None,
@@ -92,30 +93,45 @@ fn peer_key_rotate() {
         let (_new_sk_bytes, new_pk_vec) = generate_keypair();
         let new_pk: [u8; 32] = new_pk_vec.as_slice().try_into().unwrap();
         let sig = sk.sign(&new_pk);
+        let pk_hex = crypto_suite::hex::encode(pk);
+        let new_pk_hex = crypto_suite::hex::encode(new_pk);
         let body = format!(
-        "{{\"method\":\"net.key_rotate\",\"params\":{{\"peer_id\":\"{}\",\"new_key\":\"{}\",\"signature\":\"{}\"}}}}",
-        crypto_suite::hex::encode(pk),
-        crypto_suite::hex::encode(new_pk),
-        crypto_suite::hex::encode(sig.to_bytes()),
-    );
+            "{{\"method\":\"net.key_rotate\",\"params\":{{\"peer_id\":\"{}\",\"new_key\":\"{}\",\"signature\":\"{}\"}}}}",
+            pk_hex,
+            new_pk_hex,
+            crypto_suite::hex::encode(sig.to_bytes()),
+        );
         let res = rpc(&addr, &body).await;
-        assert_eq!(res["result"]["status"].as_str(), Some("ok"));
+        let result = res
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| res.get("result"));
+        let status = result
+            .and_then(|v| v.get("status"))
+            .and_then(|v| v.as_str());
+        assert_eq!(status, Some("ok"));
 
         // old key rejected
         let body_old = format!(
             "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
-            crypto_suite::hex::encode(pk)
+            pk_hex
         );
         let val = rpc(&addr, &body_old).await;
-        assert!(val.get("error").is_some());
+        let has_error = val.get("error").is_some() || val.get("Error").is_some();
+        assert!(has_error);
 
         // new key retains metrics
         let body_new = format!(
             "{{\"method\":\"net.peer_stats\",\"params\":{{\"peer_id\":\"{}\"}}}}",
-            crypto_suite::hex::encode(new_pk)
+            new_pk_hex
         );
         let val = rpc(&addr, &body_new).await;
-        assert_eq!(val["result"]["requests"].as_u64().unwrap(), 1);
+        let result = val
+            .get("Result")
+            .and_then(|r| r.get("result"))
+            .or_else(|| val.get("result"))
+            .expect("peer_stats result");
+        assert_eq!(result["requests"].as_u64().unwrap(), 1);
 
         handle.abort();
         Settlement::shutdown();

@@ -133,7 +133,7 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | `node/src/compute_market/` | Offers, matcher, courier, settlement, SNARK proving, SLA slashing plumbing. Lane health telemetry and slash receipts live here. |
 | `node/src/storage/`, `storage_market/`, `state/` | Blob storage pipeline, erasure coding, proofs-of-retrievability, rent accounting, sled snapshots. |
 | `node/src/simple_db/` | SimpleDb snapshot layer used across subsystems (energy market, storage, governance). Implements fsync + atomic rename semantics and cross-platform safeguards. |
-| `node/src/treasury_executor.rs` | CT ledger hooks that convert compute/storage receipts and treasury disbursements into coinbase outputs. |
+| `node/src/treasury_executor.rs` | BLOCK ledger hooks that convert compute/storage receipts and treasury disbursements into coinbase outputs. |
 | `node/src/blob_chain.rs`, `node/src/storage/` | Glue between on-chain blob commitments and the actual storage backends. |
 
 ### Energy Market
@@ -161,7 +161,7 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | --- | --- |
 | `crates/ad_market/` | Cohort schema (`CohortKeyV2`), privacy budget manager, budget broker, uplift estimator, badge guards, and presence attestation verifier. Hosts migrations, selector validation, and governance-configured registries (interest tags, domain tiers, presence knobs). |
 | `node/src/rpc/ad_market.rs`, `cli/src/ad_market.rs` | RPC + CLI entry points for selector-aware inventory, campaign registration, readiness, conversion reporting, presence cohort discovery/reservation, and privacy guardrail errors. |
-| `cli/src/gov.rs`, `cli/src/explorer.rs` | Governance CLI controls for ad-market knobs (presence TTL, selector caps, privacy budgets) and explorer summaries that break out CT/IT revenue per selector/domain tier/presence bucket. The explorer commands dump per-selector payouts so dashboards/CSV exports never miss new signals. |
+| `cli/src/gov.rs`, `cli/src/explorer.rs` | Governance CLI controls for ad-market knobs (presence TTL, selector caps, privacy budgets) and explorer summaries that break out BLOCK revenue per selector/domain tier/presence bucket. The explorer commands dump per-selector payouts so dashboards/CSV exports never miss new signals. |
 | `metrics-aggregator/src/lib.rs` (`ad_*` block), `monitoring/ad_market_dashboard.json` | Aggregates segment readiness counters, auction competitiveness histograms, privacy budget gauges, conversion totals, and publishes them over `/wrappers`. Keep Grafana JSON + screenshots in sync whenever selectors change (see `docs/operations.md#ad-market-operations`). |
 | `node/tests/ad_market_rpc.rs` | Integration coverage for badge committees, selectors, presence attestations, conversion auth, and telemetry exports. Extend when adding selectors or RPCs. |
 | `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs` | Ad marketplace policy + readiness snapshots with reversible migrations between `cohort_v1` tuple keys and `CohortKeyV2` (domain tier + interest + presence). Signed policies live here and feed RPC/explorer verifiers. |

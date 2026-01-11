@@ -17,6 +17,7 @@ fn order_matching() {
     let mut book = OrderBook::default();
     let mut ledger = TrustLedger::default();
     ledger.establish("alice".into(), "bob".into(), 1_000);
+    ledger.establish("bob".into(), "alice".into(), 1_000);
     ledger.authorize("alice", "bob");
     ledger.authorize("bob", "alice");
     let buy = Order {
@@ -53,13 +54,18 @@ fn order_matching() {
 fn path_finding() {
     let mut ledger = TrustLedger::default();
     ledger.establish("alice".into(), "bob".into(), 100);
+    ledger.establish("bob".into(), "alice".into(), 100);
     ledger.establish("bob".into(), "carol".into(), 100);
+    ledger.establish("carol".into(), "bob".into(), 100);
     ledger.authorize("alice", "bob");
+    ledger.authorize("bob", "alice");
     ledger.authorize("bob", "carol");
+    ledger.authorize("carol", "bob");
     let path = ledger.find_path("alice", "carol", 50).unwrap();
     assert_eq!(path, vec!["alice", "bob", "carol"]);
     // Fails when not authorized
     ledger.establish("carol".into(), "dave".into(), 100);
+    ledger.establish("dave".into(), "carol".into(), 100);
     assert!(ledger.find_path("alice", "dave", 10).is_none());
 }
 

@@ -17,8 +17,8 @@ pub const MAX_RECEIPT_BYTES_PER_BLOCK: usize = 10_000_000;
 /// Maximum length for string fields (contract_id, provider, etc.)
 pub const MAX_STRING_FIELD_LENGTH: usize = 256;
 
-/// Minimum payment amount to emit a receipt (spam protection)
-pub const MIN_PAYMENT_FOR_RECEIPT_CT: u64 = 1;
+/// Minimum payment amount to emit a receipt (spam protection) in BLOCK
+pub const MIN_PAYMENT_FOR_RECEIPT: u64 = 1;
 ```
 
 ---
@@ -42,7 +42,7 @@ let receipt = Receipt::Storage(StorageReceipt {
     contract_id: "sc_123".into(),
     provider: "provider_1".into(),
     bytes: 1000,
-    price_ct: 500,
+    price: 500,
     block_height: 100,
     provider_escrow: 10000,
 });
@@ -276,7 +276,7 @@ fn valid_receipt_passes() {
         contract_id: "sc_123".into(),
         provider: "provider_1".into(),
         bytes: 1000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
     });
@@ -290,7 +290,7 @@ fn empty_contract_id_fails() {
         contract_id: "".into(), // Empty!
         provider: "provider_1".into(),
         bytes: 1000,
-        price_ct: 500,
+        price: 500,
         block_height: 100,
         provider_escrow: 10000,
     });

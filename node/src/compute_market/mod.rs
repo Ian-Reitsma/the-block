@@ -76,9 +76,9 @@ pub struct Offer {
     pub units: u64,
     /// Price quoted per compute unit.
     pub price_per_unit: u64,
-    /// Percentage of `price` paid in consumer tokens. `0` routes the entire
-    /// amount to industrial tokens, `100` routes it all to consumer tokens.
-    pub fee_pct_ct: u8,
+    /// Percentage of `price` routed to the consumer lane. `0` routes the entire
+    /// amount to the industrial lane, `100` routes it all to the consumer lane.
+    pub fee_pct: u8,
     /// Hardware capability advertised by the provider.
     #[serde(default = "foundation_serialization::defaults::default")]
     pub capability: scheduler::Capability,
@@ -102,8 +102,8 @@ impl Offer {
         if self.units == 0 {
             return Err("no units offered");
         }
-        if self.fee_pct_ct > 100 {
-            return Err("invalid fee_pct_ct");
+        if self.fee_pct > 100 {
+            return Err("invalid fee_pct");
         }
         if !scheduler::validate_multiplier(self.reputation_multiplier) {
             return Err("invalid reputation multiplier");
@@ -134,10 +134,8 @@ fn default_multiplier() -> f64 {
 pub struct ExecutionReceipt {
     pub reference: [u8; 32],
     pub output: [u8; 32],
-    #[serde(default, alias = "payout")]
-    pub payout_ct: u64,
     #[serde(default)]
-    pub payout_it: u64,
+    pub payout: u64,
     #[serde(
         default = "foundation_serialization::defaults::default",
         skip_serializing_if = "foundation_serialization::skip::option_is_none"
@@ -162,7 +160,7 @@ impl ExecutionReceipt {
     }
 
     pub fn total(&self) -> u64 {
-        self.payout_ct.saturating_add(self.payout_it)
+        self.payout
     }
 }
 
@@ -288,7 +286,7 @@ struct JobState {
     provider_capability: scheduler::Capability,
     provider_bond: u64,
     price_per_unit: u64,
-    fee_pct_ct: u8,
+    fee_pct: u8,
     paid_slices: usize,
     completed: bool,
 }
@@ -355,7 +353,7 @@ impl Market {
                             job_id: resolution.job_id.clone(),
                             provider: state.provider.clone(),
                             compute_units: total_units,
-                            payment_ct: total_payment,
+                            payment: total_payment,
                             block_height: self.current_block,
                             verified,
                             provider_signature: vec![],
@@ -492,7 +490,7 @@ impl Market {
             provider_capability: offer.capability.clone(),
             provider_bond: offer.provider_bond,
             price_per_unit: offer.price_per_unit,
-            fee_pct_ct: offer.fee_pct_ct,
+            fee_pct: offer.fee_pct,
             paid_slices: 0,
             completed: false,
         };
@@ -564,13 +562,13 @@ impl Market {
         let resolution = settlement::Settlement::resolve_sla(job_id, outcome);
         let mut provider_refund = state.provider_bond;
         let mut consumer_refund = state.job.consumer_bond;
-        let refunded_by_resolution = resolution.as_ref().map_or(0, |res| res.refunded_ct);
+        let refunded_by_resolution = resolution.as_ref().map_or(0, |res| res.refunded);
         if let Some(res) = &resolution {
             if let SlaResolutionKind::Violated { .. } = res.outcome {
-                provider_refund = provider_refund.saturating_sub(res.burned_ct);
+                provider_refund = provider_refund.saturating_sub(res.burned);
             }
-            if res.refunded_ct > 0 {
-                consumer_refund = res.refunded_ct;
+            if res.refunded > 0 {
+                consumer_refund = res.refunded;
             }
         }
         if provider_refund > 0 {
@@ -586,7 +584,7 @@ impl Market {
     pub fn submit_slice(
         &mut self,
         job_id: &str,
-        mut proof: ExecutionReceipt,
+        proof: ExecutionReceipt,
     ) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
         self.sweep_overdue_jobs();
@@ -655,18 +653,7 @@ impl Market {
         let total_expected = slice_units
             .checked_mul(state.price_per_unit)
             .ok_or("payout overflow")?;
-        let (expected_ct, expected_it) =
-            crate::fee::decompose(state.fee_pct_ct, total_expected).map_err(|_| "payout split")?;
-        if proof.payout_ct == 0 && proof.payout_it == 0 {
-            // Legacy receipts send total payout through alias field
-            proof.payout_ct = proof.total();
-        }
-        if proof.payout_it == 0 && proof.payout_ct == total_expected && expected_it > 0 {
-            // Upgrade legacy receipts to the expected split automatically.
-            proof.payout_ct = expected_ct;
-            proof.payout_it = expected_it;
-        }
-        if proof.payout_ct != expected_ct || proof.payout_it != expected_it {
+        if proof.payout != total_expected {
             scheduler::record_failure(&state.provider);
             if state.job.capability.accelerator.is_some() {
                 scheduler::record_accelerator_failure(&state.provider);
@@ -676,7 +663,7 @@ impl Market {
             return Err("payout mismatch");
         }
         record_units_processed(slice_units);
-        settlement::Settlement::accrue_split(&state.provider, proof.payout_ct, proof.payout_it);
+        settlement::Settlement::accrue(&state.provider, "payout", proof.payout);
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
@@ -727,10 +714,10 @@ impl Market {
         };
         if let Some(res) = &resolution {
             if let SlaResolutionKind::Violated { .. } = res.outcome {
-                provider_refund = provider_refund.saturating_sub(res.burned_ct);
+                provider_refund = provider_refund.saturating_sub(res.burned);
             }
-            if res.refunded_ct > 0 {
-                consumer_refund = res.refunded_ct;
+            if res.refunded > 0 {
+                consumer_refund = res.refunded;
             }
         }
         scheduler::record_success(&state.provider);
@@ -742,7 +729,7 @@ impl Market {
         if provider_refund > 0 {
             settlement::Settlement::accrue(&provider_id, "bond_refund", provider_refund);
         }
-        if resolution.as_ref().map_or(true, |res| res.refunded_ct == 0) && consumer_refund > 0 {
+        if resolution.as_ref().map_or(true, |res| res.refunded == 0) && consumer_refund > 0 {
             settlement::Settlement::refund_split(&buyer_id, consumer_refund, 0);
         }
         Some((provider_refund, consumer_refund))
@@ -783,8 +770,7 @@ impl Market {
             let receipt = ExecutionReceipt {
                 reference: expected,
                 output,
-                payout_ct: units * price_per_unit,
-                payout_it: 0,
+                payout: units * price_per_unit,
                 proof: proof_bundle,
             };
             total += self.submit_slice(job_id, receipt)?;
@@ -989,7 +975,7 @@ mod tests {
             consumer_bond: 1,
             units: 10,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1006,8 +992,7 @@ mod tests {
         let receipt = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout_ct: 1,
-            payout_it: 0,
+            payout: 1,
             proof: None,
         };
         assert!(receipt.verify(&Workload::Transcode(data.to_vec())));
@@ -1056,7 +1041,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1084,8 +1069,7 @@ mod tests {
         let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout_ct: 5,
-            payout_it: 0,
+            payout: 5,
             proof: None,
         };
         assert_eq!(
@@ -1118,7 +1102,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1166,7 +1150,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1220,7 +1204,7 @@ mod tests {
             consumer_bond: 1,
             units: 2,
             price_per_unit: 5,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1251,8 +1235,7 @@ mod tests {
         let proof = ExecutionReceipt {
             reference: hash,
             output: hash,
-            payout_ct: 5,
-            payout_it: 0,
+            payout: 5,
             proof: None,
         };
         market
@@ -1292,7 +1275,7 @@ mod tests {
             consumer_bond: 5,
             units: 1,
             price_per_unit: 1,
-            fee_pct_ct: 0,
+            fee_pct: 0,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1327,7 +1310,7 @@ mod tests {
             consumer_bond: 5,
             units: 1,
             price_per_unit: 1,
-            fee_pct_ct: 0,
+            fee_pct: 0,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,
@@ -1378,7 +1361,7 @@ mod tests {
             resolution.outcome,
             SlaResolutionKind::Violated { .. }
         ));
-        assert!(resolution.burned_ct >= 200);
+        assert!(resolution.burned >= 200);
         assert!(settlement::Settlement::balance("prov") <= 800);
 
         // second sweep should be idempotent once the queue is empty
@@ -1401,7 +1384,7 @@ mod tests {
             consumer_bond: 1,
             units: 1,
             price_per_unit: 2,
-            fee_pct_ct: 100,
+            fee_pct: 100,
             capability: scheduler::Capability::default(),
             reputation: 0,
             reputation_multiplier: 1.0,

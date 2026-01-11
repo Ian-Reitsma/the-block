@@ -1,9 +1,16 @@
 #![cfg(feature = "integration-tests")]
-use the_block::compute_market::{scheduler, snark, ExecutionReceipt, Job, Market, Offer, Workload};
+use sys::tempfile::tempdir;
+use the_block::compute_market::{
+    scheduler,
+    settlement::{SettleMode, Settlement},
+    snark, ExecutionReceipt, Job, Market, Offer, Workload,
+};
 
 #[test]
 fn invalid_proof_rejected() {
     scheduler::reset_for_test();
+    let dir = tempdir().unwrap();
+    Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
     let mut market = Market::new();
     let offer = Offer {
         job_id: "job1".into(),
@@ -12,7 +19,7 @@ fn invalid_proof_rejected() {
         consumer_bond: 1,
         units: 1,
         price_per_unit: 5,
-        fee_pct_ct: 100,
+        fee_pct: 100,
         capability: scheduler::Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,
@@ -38,9 +45,9 @@ fn invalid_proof_rejected() {
     let receipt = ExecutionReceipt {
         reference: expected,
         output: expected,
-        payout_ct: 5,
-        payout_it: 0,
+        payout: 5,
         proof: Some(bundle),
     };
     assert!(market.submit_slice("job1", receipt).is_err());
+    Settlement::shutdown();
 }

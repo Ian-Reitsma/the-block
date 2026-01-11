@@ -1,8 +1,8 @@
 # Service Credits — Storage, Compute, Bandwidth
 
 ## 1. Shared Concepts
-- **Unified CT ledger** — Subsidies map to the CT `TokenRegistry` (see `docs/economics_and_governance.md#ct-supply-and-sub-ledgers`). Snapshot data lives under `state/` using the same sled Merkle trie as consumer balances.
-- **Buckets** — `STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT` maintained via `node/src/treasury_executor.rs` and surfaced in RPC `treasury.status`.
+- **Unified BLOCK ledger** — Subsidies map to the BLOCK `TokenRegistry` (see `docs/economics_and_governance.md#block-supply-and-sub-ledgers`). Snapshot data lives under `state/` using the same sled Merkle trie as consumer balances.
+- **Buckets** — `STORAGE_SUB`, `READ_SUB`, `COMPUTE_SUB` maintained via `node/src/treasury_executor.rs` and surfaced in RPC `treasury.status`.
 - **Read receipts** — `node/src/read_receipt.rs` batches gateway reads with auditing metadata; CLI/regressions covered in `docs/architecture.md#gateway-and-client-access`.
 
 ## 2. Storage Credits
@@ -24,7 +24,7 @@
 2. `storage_market::StorageMarket::register_contract` calculates deposits and writes `ContractRecord`.
 3. Retrieval challenges hit `storage.challenge`, which verifies proofs via `StorageContract::verify_proof`. Success increments EWMA counters; failure slashes deposits and decreases scheduler reputation via `compute_market::scheduler::merge_reputation`.
    The RPC and `contract-cli storage challenge` now supply `chunk_data` (hex-encoded chunk bytes) and `proof` (hex-encoded `MerkleProof.path`) so the node can verify the leaf against `storage_root`.
-4. Payments accrue as CT in contract state, later withdrawn when contract expires. Ledger entries reference `object_id` for audit.
+4. Payments accrue as BLOCK in contract state, later withdrawn when contract expires. Ledger entries reference `object_id` for audit.
 5. Telemetry increments `STORAGE_CONTRACT_CREATED_TOTAL`, `RETRIEVAL_SUCCESS_TOTAL`, `RETRIEVAL_FAILURE_TOTAL` in `node/src/telemetry.rs`.
 
 ## 3. Compute Credits
@@ -38,14 +38,14 @@
 | --- | --- |
 | `scheduler::PendingJob` | Job envelope with `job_id`, `priority`, `lane`, `effective_priority`. Stored in `scheduler::Queues` keyed by lane.
 | `matcher::Receipt` | Records buyer, provider, price, issued block, and lane label. Persisted in receipt store + surfaced over RPC `recent_roots`.
-| `settlement::Settlement` | Contains job/receipt IDs, payout CT, proofs, and audit metadata. Stored in sled tree `compute:settlements`. |
+| `settlement::Settlement` | Contains job/receipt IDs, payout BLOCK, proofs, and audit metadata. Stored in sled tree `compute:settlements`. |
 | `price_board::Quote` | Maintains EWMA pricing windows per lane, inform `compute.stats` output. |
 
 ### Settlement Flow
 1. Buyers post jobs through RPC `compute.submit_job` (handler in `node/src/rpc/compute_market.rs`). Jobs enter lane-specific queues.
 2. Matcher rotates lanes (fairness window) and pairs jobs to providers; `Receipt` is emitted and sent to `ReceiptStore`.
 3. Providers submit SNARK proofs; `settlement::engine` validates and issues `Settlement` records.
-4. Treasury executor credits CT to provider accounts; `metrics-aggregator` collects `compute_market.sla_history` for dashboards.
+4. Treasury executor credits BLOCK to provider accounts; `metrics-aggregator` collects `compute_market.sla_history` for dashboards.
 5. CLI/Explorer surfaces receipts + payouts for audit.
 
 ## 4. Bandwidth / Gateway Credits
@@ -63,7 +63,7 @@
 
 ### Settlement Flow
 1. Reads accrue in batches via `read_receipt::Batcher`. Each batch includes jurisdiction + policy metadata for billing.
-2. Billing pipeline converts bytes → CT debits from `READ_SUB_CT`. `gateway` RPC exposes stats so explorers and the CLI can reconcile.
+2. Billing pipeline converts bytes → BLOCK debits from `READ_SUB`. `gateway` RPC exposes stats so explorers and the CLI can reconcile.
 3. Governance policy toggles (jurisdiction packs, fee multipliers) determine whether reads stay free or pull from rebates. Handled in `node/src/gateway/policy.rs`.
 
 ## 5. Interfaces & Testing

@@ -13,13 +13,13 @@ use rand::rngs::OsRng;
 use std::env;
 use std::fmt;
 use std::fs;
-use std::io::{self, ErrorKind, Read, Write};
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
-use std::thread;
 use std::time::Duration;
 
 const MAX_RECORD_CHUNK: usize = 16 * 1024;
+const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug)]
 pub enum TlsConnectorError {
@@ -91,6 +91,7 @@ pub struct TlsConnector {
     identity: Option<ClientIdentity>,
     anchors: Vec<VerifyingKey>,
     allow_invalid: bool,
+    handshake_timeout: Duration,
 }
 
 impl fmt::Debug for TlsConnector {
@@ -99,6 +100,7 @@ impl fmt::Debug for TlsConnector {
             .field("identity", &self.identity.is_some())
             .field("anchors", &self.anchors.len())
             .field("allow_invalid", &self.allow_invalid)
+            .field("handshake_timeout", &self.handshake_timeout)
             .finish()
     }
 }
@@ -108,17 +110,39 @@ impl TlsConnector {
         TlsConnectorBuilder::default()
     }
 
+    pub fn with_handshake_timeout(mut self, timeout: Duration) -> Self {
+        self.handshake_timeout = timeout;
+        self
+    }
+
     pub fn connect(
         &self,
         _host: &str,
         mut stream: TcpStream,
     ) -> Result<ClientTlsStream, TlsConnectorError> {
+        let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
+        if debug {
+            eprintln!("[tls-client] starting TLS handshake");
+        }
+        stream
+            .set_nonblocking(false)
+            .map_err(TlsConnectorError::Io)?;
         stream.set_nodelay(true).ok();
+        if self.handshake_timeout != Duration::from_secs(0) {
+            let _ = stream.set_read_timeout(Some(self.handshake_timeout));
+            let _ = stream.set_write_timeout(Some(self.handshake_timeout));
+        }
+        if debug {
+            eprintln!("[tls-client] generating keys...");
+        }
         let mut rng = OsRng::default();
         let secret = X25519Secret::generate(&mut rng);
         let client_ephemeral = secret.public_key().to_bytes();
         let mut client_nonce = [0u8; 32];
         rng.fill_bytes(&mut client_nonce);
+        if debug {
+            eprintln!("[tls-client] keys generated");
+        }
 
         let (certificate, signature) = if let Some(identity) = &self.identity {
             let mut message = Vec::with_capacity(client_ephemeral.len() + client_nonce.len());
@@ -140,13 +164,23 @@ impl TlsConnector {
             signature.as_deref(),
         );
         let len = (hello.len() as u32).to_be_bytes();
+        let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
+        if debug {
+            eprintln!("[tls-client] sending client hello ({} bytes)", hello.len());
+        }
         blocking_write_all(&mut stream, &len)?;
         blocking_write_all(&mut stream, &hello)?;
         stream.flush()?;
+        if debug {
+            eprintln!("[tls-client] sent client hello, waiting for server response");
+        }
 
         let mut len_buf = [0u8; 4];
         blocking_read_exact(&mut stream, &mut len_buf)?;
         let frame_len = u32::from_be_bytes(len_buf) as usize;
+        if debug {
+            eprintln!("[tls-client] received server hello length ({frame_len} bytes)");
+        }
         if frame_len > HANDSHAKE_MAX_LEN {
             return Err(TlsConnectorError::InvalidCertificate(
                 "server handshake too large",
@@ -154,6 +188,12 @@ impl TlsConnector {
         }
         let mut frame = vec![0u8; frame_len];
         blocking_read_exact(&mut stream, &mut frame)?;
+        if debug {
+            eprintln!(
+                "[tls-client] received server hello frame ({} bytes)",
+                frame.len()
+            );
+        }
         let server = ServerHelloFrame::decode(&frame)?;
         if server.magic != *HANDSHAKE_MAGIC {
             return Err(TlsConnectorError::InvalidCertificate(
@@ -171,7 +211,13 @@ impl TlsConnector {
             ));
         }
 
+        if debug {
+            eprintln!("[tls-client] parsing server certificate");
+        }
         let server_cert = parse_server_certificate(&server.certificate)?;
+        if debug {
+            eprintln!("[tls-client] validating server certificate");
+        }
         validate_server_certificate(&server_cert, &self.anchors, self.allow_invalid)?;
 
         let server_public = X25519Public::from_bytes(&server.server_ephemeral)
@@ -193,20 +239,33 @@ impl TlsConnector {
             &server.server_ephemeral,
             &server.server_nonce,
         );
+        if debug {
+            eprintln!("[tls-client] verifying handshake signature");
+        }
         server_cert
             .verifying
             .verify(&transcript, &signature)
             .map_err(|_| TlsConnectorError::VerificationFailed("server handshake signature"))?;
+        if debug {
+            eprintln!("[tls-client] handshake signature verified");
+        }
 
+        if debug {
+            eprintln!("[tls-client] tls handshake completed");
+        }
+        if self.handshake_timeout != Duration::from_secs(0) {
+            let _ = stream.set_read_timeout(None);
+            let _ = stream.set_write_timeout(None);
+        }
         Ok(ClientTlsStream::new(stream, session))
     }
 }
 
-#[derive(Default)]
 pub struct TlsConnectorBuilder {
     identity: Option<ClientIdentity>,
     anchors: Vec<VerifyingKey>,
     allow_invalid: bool,
+    handshake_timeout: Duration,
 }
 
 impl TlsConnectorBuilder {
@@ -237,12 +296,29 @@ impl TlsConnectorBuilder {
         self
     }
 
+    pub fn handshake_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.handshake_timeout = timeout;
+        self
+    }
+
     pub fn build(self) -> Result<TlsConnector, TlsConnectorError> {
         Ok(TlsConnector {
             identity: self.identity,
             anchors: dedupe_verifying_keys(self.anchors),
             allow_invalid: self.allow_invalid,
+            handshake_timeout: self.handshake_timeout,
         })
+    }
+}
+
+impl Default for TlsConnectorBuilder {
+    fn default() -> Self {
+        Self {
+            identity: None,
+            anchors: Vec::new(),
+            allow_invalid: false,
+            handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
+        }
     }
 }
 
@@ -715,6 +791,14 @@ impl ClientTlsStream {
         }
     }
 
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.stream.set_read_timeout(timeout)
+    }
+
+    pub fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.stream.set_write_timeout(timeout)
+    }
+
     fn read_record(&mut self) -> io::Result<Option<Vec<u8>>> {
         let mut header = [0u8; 12];
         match blocking_read_exact(&mut self.stream, &mut header) {
@@ -746,6 +830,14 @@ impl ClientTlsStream {
     }
 
     fn write_record(&mut self, chunk: &[u8]) -> io::Result<()> {
+        let debug = std::env::var("TB_TLS_TEST_DEBUG").is_ok();
+        if debug {
+            eprintln!(
+                "[tls-client] writing record seq={} len={}",
+                self.write_seq,
+                chunk.len()
+            );
+        }
         let frame = encrypt_record(
             &self.session.client_write,
             &self.session.client_mac,
@@ -903,54 +995,10 @@ pub fn tls_connector_from_env_any(
     Ok(None)
 }
 
-fn is_would_block(err: &io::Error) -> bool {
-    err.kind() == ErrorKind::WouldBlock
-}
-
-fn blocking_read(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<usize> {
-    loop {
-        match stream.read(buf) {
-            Ok(0) => return Ok(0),
-            Ok(n) => return Ok(n),
-            Err(err) if is_would_block(&err) => {
-                thread::sleep(Duration::from_millis(1));
-                continue;
-            }
-            Err(err) => return Err(err),
-        }
-    }
-}
-
 fn blocking_read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<()> {
-    let mut offset = 0;
-    while offset < buf.len() {
-        let n = blocking_read(stream, &mut buf[offset..])?;
-        if n == 0 {
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "tcp stream closed while reading",
-            ));
-        }
-        offset += n;
-    }
-    Ok(())
+    stream.read_exact(buf)
 }
 
-fn blocking_write_all(stream: &mut TcpStream, mut buf: &[u8]) -> io::Result<()> {
-    while !buf.is_empty() {
-        match stream.write(buf) {
-            Ok(0) => {
-                return Err(io::Error::new(
-                    ErrorKind::WriteZero,
-                    "tcp stream closed while writing",
-                ));
-            }
-            Ok(n) => buf = &buf[n..],
-            Err(err) if is_would_block(&err) => {
-                thread::sleep(Duration::from_millis(1));
-            }
-            Err(err) => return Err(err),
-        }
-    }
-    Ok(())
+fn blocking_write_all(stream: &mut TcpStream, buf: &[u8]) -> io::Result<()> {
+    stream.write_all(buf)
 }

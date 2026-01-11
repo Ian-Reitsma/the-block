@@ -307,6 +307,7 @@ node/state_db/
 node/snapshots/
 node/diff_history/
 node/governance/history/
+node/state/dump/
 
 # LLM model weights and artifacts
 qwen/
@@ -332,3 +333,5 @@ node/diff_history/**/*.json
 node/governance/history/**/*.json
 git-starcoder/
 Vemdor/
+# Test logs
+test-logs/

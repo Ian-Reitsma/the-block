@@ -696,6 +696,22 @@ impl InhouseAdapter {
         ))
     }
 
+    pub async fn listen_with_certificate(
+        &self,
+        addr: SocketAddr,
+        certificate: inhouse_impl::Certificate,
+    ) -> DiagResult<(ListenerHandle, CertificateHandle)> {
+        let (endpoint, cert) = self
+            .0
+            .backend
+            .listen_with_certificate(addr, certificate)
+            .await?;
+        Ok((
+            ListenerHandle::Inhouse(endpoint),
+            CertificateHandle::Inhouse(cert),
+        ))
+    }
+
     pub async fn connect(
         &self,
         addr: SocketAddr,

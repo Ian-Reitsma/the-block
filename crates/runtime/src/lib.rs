@@ -336,6 +336,36 @@ pub fn interval(duration: Duration) -> Interval {
     handle().interval(duration)
 }
 
+/// Configure the reactor idle poll duration for the in-house backend.
+pub fn configure_reactor_idle_poll(duration: Duration) {
+    #[cfg(feature = "inhouse-backend")]
+    inhouse::set_reactor_idle_poll(duration);
+    #[cfg(feature = "stub-backend")]
+    {
+        let _ = duration;
+    }
+}
+
+/// Configure the read backoff used when IO readiness notifications are missed.
+pub fn configure_io_read_backoff(duration: Duration) {
+    #[cfg(feature = "inhouse-backend")]
+    inhouse::set_io_read_backoff(duration);
+    #[cfg(feature = "stub-backend")]
+    {
+        let _ = duration;
+    }
+}
+
+/// Configure the write backoff used when IO readiness notifications are missed.
+pub fn configure_io_write_backoff(duration: Duration) {
+    #[cfg(feature = "inhouse-backend")]
+    inhouse::set_io_write_backoff(duration);
+    #[cfg(feature = "stub-backend")]
+    {
+        let _ = duration;
+    }
+}
+
 /// Yields execution to allow other tasks to make progress on the active backend.
 pub async fn yield_now() {
     handle().yield_now().await

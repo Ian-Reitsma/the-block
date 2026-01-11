@@ -21,8 +21,11 @@ fn fee_vectors_match() {
             v => v,
         };
         let fee: u64 = parts[1].parse().unwrap();
-        let fee_ct: u64 = parts[2].parse().unwrap();
-        let fee_it: u64 = parts[3].parse().unwrap();
-        assert_eq!(decompose(selector, fee).unwrap(), (fee_ct, fee_it));
+        let fee_consumer: u64 = parts[2].parse().unwrap();
+        let fee_industrial: u64 = parts[3].parse().unwrap();
+        assert_eq!(
+            decompose(selector, fee).unwrap(),
+            (fee_consumer, fee_industrial)
+        );
     }
 }

@@ -322,33 +322,33 @@
       },
       {
         "id": 9,
-        "title": "Settlement Volume by Market (CT)",
+        "title": "Settlement Volume by Market (BLOCK)",
         "type": "graph",
         "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
         "targets": [
           {
-            "expr": "receipt_settlement_storage_ct",
+            "expr": "receipt_settlement_storage",
             "legendFormat": "Storage",
             "refId": "A"
           },
           {
-            "expr": "receipt_settlement_compute_ct",
+            "expr": "receipt_settlement_compute",
             "legendFormat": "Compute",
             "refId": "B"
           },
           {
-            "expr": "receipt_settlement_energy_ct",
+            "expr": "receipt_settlement_energy",
             "legendFormat": "Energy",
             "refId": "C"
           },
           {
-            "expr": "receipt_settlement_ad_ct",
+            "expr": "receipt_settlement_ad",
             "legendFormat": "Ad",
             "refId": "D"
           }
         ],
         "yaxes": [
-          {"format": "short", "label": "Settlement (CT)"},
+          {"format": "short", "label": "Settlement (BLOCK)"},
           {"format": "short"}
         ]
       },

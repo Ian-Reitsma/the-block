@@ -345,7 +345,7 @@ pub fn verify_authorization(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::rngs::StdRng;
 
     fn create_test_operator() -> (SigningKey, VerifyingKey, String) {
         let mut rng = StdRng::seed_from_u64(42);

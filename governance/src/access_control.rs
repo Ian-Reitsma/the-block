@@ -295,7 +295,7 @@ impl AuthContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{rngs::StdRng, SeedableRng};
+    use rand::rngs::StdRng;
 
     fn create_test_keypair() -> (SigningKey, VerifyingKey) {
         let mut rng = StdRng::seed_from_u64(42);
@@ -359,10 +359,11 @@ mod tests {
 
         // Requires Operator role, but only has Executor
         let result = ctx.authorize(&auth, Role::Operator);
-        assert!(matches!(
-            result,
-            Err(AuthError::InsufficientPrivilege { .. })
-        ));
+        assert!(
+            matches!(result, Err(AuthError::InsufficientPrivilege { .. })),
+            "Expected InsufficientPrivilege error but got: {:?}",
+            result
+        );
     }
 
     #[test]

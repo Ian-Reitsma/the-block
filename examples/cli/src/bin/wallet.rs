@@ -179,7 +179,7 @@ fn build_command() -> Command {
             CommandBuilder::new(
                 CommandId("wallet.stake-role"),
                 "stake-role",
-                "Stake CT for a service role",
+                "Stake BLOCK for a service role",
             )
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "role",
@@ -187,7 +187,7 @@ fn build_command() -> Command {
             )))
             .arg(ArgSpec::Positional(PositionalSpec::new(
                 "amount",
-                "Amount of CT to stake",
+                "Amount of BLOCK to stake",
             )))
             .arg(ArgSpec::Option(
                 OptionSpec::new("seed", "seed", "32-byte seed in hex").required(true),
@@ -274,4 +274,3 @@ impl Role {
         }
     }
 }
-

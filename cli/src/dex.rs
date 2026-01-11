@@ -25,8 +25,8 @@ pub enum LiquidityCmd {
     /// Add liquidity to a pool
     Add {
         pool: String,
-        ct: u64,
-        it: u64,
+        consumer: u64,
+        industrial: u64,
         state: String,
     },
     /// Remove liquidity from a pool
@@ -136,12 +136,12 @@ impl LiquidityCmd {
                     "Pool identifier",
                 )))
                 .arg(ArgSpec::Positional(PositionalSpec::new(
-                    "ct",
-                    "CT contribution",
+                    "consumer",
+                    "Consumer lane contribution",
                 )))
                 .arg(ArgSpec::Positional(PositionalSpec::new(
-                    "it",
-                    "Industrial contribution",
+                    "industrial",
+                    "Industrial lane contribution",
                 )))
                 .arg(ArgSpec::Option(
                     OptionSpec::new("state", "state", "Dex state file").default("dex.bin"),
@@ -178,14 +178,14 @@ impl LiquidityCmd {
         match name {
             "add" => {
                 let pool = require_positional(sub_matches, "pool")?;
-                let ct = parse_positional_u64(sub_matches, "ct")?;
-                let it = parse_positional_u64(sub_matches, "it")?;
+                let consumer = parse_positional_u64(sub_matches, "consumer")?;
+                let industrial = parse_positional_u64(sub_matches, "industrial")?;
                 let state =
                     take_string(sub_matches, "state").unwrap_or_else(|| "dex.bin".to_string());
                 Ok(LiquidityCmd::Add {
                     pool,
-                    ct,
-                    it,
+                    consumer,
+                    industrial,
                     state,
                 })
             }
@@ -254,13 +254,13 @@ pub fn handle(cmd: DexCmd) {
         DexCmd::Liquidity { action } => match action {
             LiquidityCmd::Add {
                 pool,
-                ct,
-                it,
+                consumer,
+                industrial,
                 state,
             } => {
                 let mut store = DexStore::open(&state);
                 let mut p: Pool = store.load_pool(&pool);
-                let minted = p.add_liquidity(ct as u128, it as u128);
+                let minted = p.add_liquidity(consumer as u128, industrial as u128);
                 store.save_pool(&pool, &p);
                 println!("minted shares: {}", minted);
             }
@@ -271,9 +271,9 @@ pub fn handle(cmd: DexCmd) {
             } => {
                 let mut store = DexStore::open(&state);
                 let mut p: Pool = store.load_pool(&pool);
-                let (ct, it) = p.remove_liquidity(shares as u128);
+                let (consumer, industrial) = p.remove_liquidity(shares as u128);
                 store.save_pool(&pool, &p);
-                println!("withdrawn ct:{} it:{}", ct, it);
+                println!("withdrawn consumer:{} industrial:{}", consumer, industrial);
             }
         },
     }

@@ -21,7 +21,7 @@ fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
         let addr: SocketAddr = addr.parse().unwrap();
         let mut stream = expect_timeout(TcpStream::connect(addr)).await.unwrap();
         let req = format!(
-            "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
+            "POST / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
             body
         );
@@ -47,8 +47,11 @@ fn mempool_stats_rpc() {
         let expected_floor;
         {
             let mut guard = bc.lock().unwrap();
-            guard.add_account("alice".into(), 1000, 0).unwrap();
-            guard.add_account("bob".into(), 0, 0).unwrap();
+            guard.min_fee_per_byte_consumer = 0;
+            guard.min_fee_per_byte_industrial = 0;
+            guard.base_fee = 0;
+            guard.add_account("alice".into(), 1000).unwrap();
+            guard.add_account("bob".into(), 0).unwrap();
             let (sk, _) = generate_keypair();
             for i in 0..2 {
                 let payload = RawTxPayload {
@@ -57,7 +60,7 @@ fn mempool_stats_rpc() {
                     amount_consumer: 1,
                     amount_industrial: 0,
                     fee: (i + 1) * 10,
-                    pct_ct: 100,
+                    pct: 100,
                     nonce: i + 1,
                     memo: Vec::new(),
                 };
@@ -96,6 +99,11 @@ fn mempool_qos_event_public_rpc() {
 
         let dir = tempdir().unwrap();
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
+        {
+            let mut guard = bc.lock().unwrap();
+            guard.min_fee_per_byte_consumer = 0;
+            guard.min_fee_per_byte_industrial = 0;
+        }
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();
         let handle = the_block::spawn(run_rpc_server(

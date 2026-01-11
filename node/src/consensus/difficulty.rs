@@ -58,6 +58,12 @@ pub fn retarget(prev: u64, timestamps: &[u64], target_spacing_ms: u64) -> u64 {
     if timestamps.len() < 2 {
         return prev.max(1);
     }
+    // Validate monotonicity before processing
+    for window in timestamps.windows(2) {
+        if window[1] <= window[0] {
+            return prev.max(1);
+        }
+    }
     let params = Params::default();
     let spacing = if target_spacing_ms == 0 {
         TARGET_SPACING_MS
@@ -152,36 +158,27 @@ mod tests {
                 retune_hint: 0,
                 nonce: 0,
                 hash: String::new(),
-                coinbase_consumer: TokenAmount::new(0),
+                coinbase_block: TokenAmount::new(0),
                 coinbase_industrial: TokenAmount::new(0),
-                storage_sub_ct: TokenAmount::new(0),
-                read_sub_ct: TokenAmount::new(0),
-                read_sub_viewer_ct: TokenAmount::new(0),
-                read_sub_host_ct: TokenAmount::new(0),
-                read_sub_hardware_ct: TokenAmount::new(0),
-                read_sub_verifier_ct: TokenAmount::new(0),
-                read_sub_liquidity_ct: TokenAmount::new(0),
-                ad_viewer_ct: TokenAmount::new(0),
-                ad_host_ct: TokenAmount::new(0),
-                ad_hardware_ct: TokenAmount::new(0),
-                ad_verifier_ct: TokenAmount::new(0),
-                ad_liquidity_ct: TokenAmount::new(0),
-                ad_miner_ct: TokenAmount::new(0),
-                ad_host_it: TokenAmount::new(0),
-                ad_hardware_it: TokenAmount::new(0),
-                ad_verifier_it: TokenAmount::new(0),
-                ad_liquidity_it: TokenAmount::new(0),
-                ad_miner_it: TokenAmount::new(0),
+                storage_sub: TokenAmount::new(0),
+                read_sub: TokenAmount::new(0),
+                read_sub_viewer: TokenAmount::new(0),
+                read_sub_host: TokenAmount::new(0),
+                read_sub_hardware: TokenAmount::new(0),
+                read_sub_verifier: TokenAmount::new(0),
+                read_sub_liquidity: TokenAmount::new(0),
+                ad_viewer: TokenAmount::new(0),
+                ad_host: TokenAmount::new(0),
+                ad_hardware: TokenAmount::new(0),
+                ad_verifier: TokenAmount::new(0),
+                ad_liquidity: TokenAmount::new(0),
+                ad_miner: TokenAmount::new(0),
                 treasury_events: Vec::new(),
                 ad_total_usd_micros: 0,
                 ad_settlement_count: 0,
-                ad_oracle_ct_price_usd_micros: 0,
-                ad_oracle_it_price_usd_micros: 0,
-                compute_sub_ct: TokenAmount::new(0),
-                proof_rebate_ct: TokenAmount::new(0),
-                storage_sub_it: TokenAmount::new(0),
-                read_sub_it: TokenAmount::new(0),
-                compute_sub_it: TokenAmount::new(0),
+                ad_oracle_price_usd_micros: 0,
+                compute_sub: TokenAmount::new(0),
+                proof_rebate: TokenAmount::new(0),
                 read_root: [0u8; 32],
                 fee_checksum: String::new(),
                 state_root: String::new(),

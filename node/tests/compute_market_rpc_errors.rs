@@ -12,10 +12,11 @@ use the_block::{
     rpc::{fuzz_dispatch_request, fuzz_runtime_config},
     Blockchain,
 };
-use util::settlement::SettlementCtx;
 use util::temp::temp_dir;
 
+mod settlement_util;
 mod util;
+use settlement_util::SettlementCtx;
 
 #[testkit::tb_serial]
 fn price_board_no_data_errors() {
@@ -33,9 +34,7 @@ fn price_board_no_data_errors() {
     let did_dir = dir.path().join("did_db");
     fs::create_dir_all(&did_dir).expect("create did dir");
     env::set_var("TB_DID_DB_PATH", did_dir.to_str().expect("did path"));
-    let dids = Arc::new(Mutex::new(DidRegistry::open(
-        &DidRegistry::default_path(),
-    )));
+    let dids = Arc::new(Mutex::new(DidRegistry::open(DidRegistry::default_path())));
     env::remove_var("TB_DID_DB_PATH");
 
     let mining = Arc::new(AtomicBool::new(false));

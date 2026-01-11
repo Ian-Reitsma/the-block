@@ -31,11 +31,15 @@ fn build_signed_tx(
         amount_consumer: consumer,
         amount_industrial: industrial,
         fee,
-        pct_ct: selector,
+        pct: selector,
         nonce,
         memo: Vec::new(),
     };
-    sign_tx(sk.to_vec(), payload).expect("valid key")
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
 }
 
 #[testkit::tb_serial]
@@ -43,8 +47,8 @@ fn invalid_selector_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_invalid_selector");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1, 255);
     #[cfg(feature = "telemetry")]
@@ -74,12 +78,14 @@ fn balance_overflow_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_balance_overflow");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("alice".into(), u64::MAX, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
+    bc.add_account("alice".into(), u64::MAX).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     // create pending reservation near limit to force overflow
     {
         let acc = bc.accounts.get_mut("alice").unwrap();
-        acc.pending_consumer = u64::MAX - 1;
+        acc.pending_amount = u64::MAX - 1;
     }
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1, 1, 100);
@@ -110,7 +116,7 @@ fn drop_not_found_rejects_and_counts() {
     init();
     let dir = temp_dir("temp_drop_not_found");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
     #[cfg(feature = "telemetry")]
     {
         telemetry::TX_REJECTED_TOTAL.reset();

@@ -28,11 +28,15 @@ fn build_signed_tx(
         amount_consumer: consumer,
         amount_industrial: industrial,
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: Vec::new(),
     };
-    sign_tx(sk.to_vec(), payload).expect("valid key")
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
 }
 
 #[test]
@@ -41,22 +45,37 @@ fn concurrent_duplicate_submission() {
     init();
     let dir = temp_dir("temp_concurrency");
     let bc = Arc::new(RwLock::new(Blockchain::new(dir.path().to_str().unwrap())));
-    bc.write()
-        .unwrap()
-        .add_account("alice".into(), 10_000, 0)
-        .unwrap();
-    bc.write().unwrap().add_account("bob".into(), 0, 0).unwrap();
-    bc.write().unwrap().mine_block("alice").unwrap();
+    {
+        let mut guard = bc.write().unwrap();
+        guard.add_account("alice".into(), 10_000).unwrap();
+        guard.add_account("bob".into(), 0).unwrap();
+        // Set minimum fees to 0 for testing to avoid fee-based rejections
+        guard.min_fee_per_byte_consumer = 0;
+        guard.mine_block("alice").unwrap();
+    }
     let (sk, _pk) = generate_keypair();
     let tx = build_signed_tx(&sk, "alice", "bob", 1, 0, 1000, 1);
     let tx_clone = tx.clone();
     let bc1 = Arc::clone(&bc);
     let bc2 = Arc::clone(&bc);
-    let t1 = std::thread::spawn(move || bc1.write().unwrap().submit_transaction(tx).is_ok());
-    let t2 = std::thread::spawn(move || bc2.write().unwrap().submit_transaction(tx_clone).is_ok());
+
+    // Capture actual results to diagnose failures
+    let t1 = std::thread::spawn(move || bc1.write().unwrap().submit_transaction(tx));
+    let t2 = std::thread::spawn(move || bc2.write().unwrap().submit_transaction(tx_clone));
     let r1 = t1.join().unwrap();
     let r2 = t2.join().unwrap();
-    assert!(r1 ^ r2, "exactly one submission should succeed");
+
+    let r1_ok = r1.is_ok();
+    let r2_ok = r2.is_ok();
+
+    // Enhanced assertion with diagnostic output
+    assert!(
+        r1_ok ^ r2_ok,
+        "exactly one submission should succeed: r1={:?}, r2={:?}",
+        r1,
+        r2
+    );
+
     let pending_nonce = {
         let guard = bc.read().unwrap();
         guard.accounts.get("alice").unwrap().pending_nonce
@@ -77,7 +96,7 @@ fn cross_thread_fuzz() {
         let name = format!("acc{i}");
         bc.write()
             .unwrap()
-            .add_account(name.clone(), 10_000, 10_000)
+            .add_account(name.clone(), 20_000)
             .unwrap();
         let (sk, _pk) = generate_keypair();
         keys.push((name, sk));
@@ -91,7 +110,10 @@ fn cross_thread_fuzz() {
     // Warm-up: run 2 transactions per thread to measure baseline performance
     let warmup_start = Instant::now();
     let warmup_iters = 2;
-    eprintln!("[cross_thread_fuzz] Measuring system performance with {} warmup iterations per thread...", warmup_iters);
+    eprintln!(
+        "[cross_thread_fuzz] Measuring system performance with {} warmup iterations per thread...",
+        warmup_iters
+    );
     let warmup_handles: Vec<_> = (0..2)
         .map(|i| {
             let bc_cl = Arc::clone(&bc);
@@ -131,14 +153,20 @@ fn cross_thread_fuzz() {
                 let to = format!("acc{}", (i + 1) % 32);
                 for iter in 0..iters {
                     if iter > 0 && iter % 10 == 0 {
-                        eprintln!("[cross_thread_fuzz] Thread {} processed {} transactions", i, iter);
+                        eprintln!(
+                            "[cross_thread_fuzz] Thread {} processed {} transactions",
+                            i, iter
+                        );
                     }
                     let fee = rng.gen_range(1000..5000);
                     let nonce = rng.gen::<u64>() + 1;
                     let tx = build_signed_tx(&sk, &name, &to, 1, 1, fee, nonce);
                     let _ = bc_cl.write().unwrap().submit_transaction(tx);
                 }
-                eprintln!("[cross_thread_fuzz] Thread {} completed all {} transactions", i, iters);
+                eprintln!(
+                    "[cross_thread_fuzz] Thread {} completed all {} transactions",
+                    i, iters
+                );
             })
         })
         .collect();
@@ -162,8 +190,8 @@ fn cap_race_respects_limit() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 32;
     bc.max_pending_per_account = 64;
-    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 1_000_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
@@ -195,8 +223,8 @@ fn flood_mempool_never_over_cap() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 16;
     bc.max_pending_per_account = 64;
-    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 1_000_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
@@ -233,8 +261,8 @@ fn admit_and_mine_never_over_cap() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 16;
     bc.max_pending_per_account = 64;
-    bc.add_account("alice".into(), 1_000_000, 0).unwrap();
-    bc.add_account("bob".into(), 0, 0).unwrap();
+    bc.add_account("alice".into(), 1_000_000).unwrap();
+    bc.add_account("bob".into(), 0).unwrap();
     bc.mine_block("alice").unwrap();
     let (sk, _pk) = generate_keypair();
     let bc = Arc::new(RwLock::new(bc));
@@ -254,7 +282,11 @@ fn admit_and_mine_never_over_cap() {
             let len = guard.mempool_consumer.len();
             drop(guard);
             peak_miner.fetch_max(len, Ordering::SeqCst);
-            eprintln!("[admit_and_mine_never_over_cap] Mined block {}, mempool len: {}", block_num + 1, len);
+            eprintln!(
+                "[admit_and_mine_never_over_cap] Mined block {}, mempool len: {}",
+                block_num + 1,
+                len
+            );
         }
         eprintln!("[admit_and_mine_never_over_cap] Mining thread completed");
     });

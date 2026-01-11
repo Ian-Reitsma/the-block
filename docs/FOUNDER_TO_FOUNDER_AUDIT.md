@@ -329,7 +329,7 @@ pub struct TreasuryDisbursement {
 
 You have a **civic-grade L1 blockchain** with:
 
-1. **Dual-token economics** (Consumer CT + Industrial IT)
+1. **Lane-based economics** (Single BLOCK token with consumer/industrial lanes)
 2. **Governance treasury** with proposal-based disbursements
 3. **Energy market** with oracle-verified credits
 4. **DEX** for token swaps
@@ -1018,7 +1018,7 @@ curl -XPOST http://localhost:9093/api/v1/alerts -d '[
 Based on code analysis, this isn't just a blockchain. It's:
 
 **A Civic Operating System**
-- Dual tokens for consumer vs industrial use
+- Single BLOCK token with consumer/industrial lanes for traffic routing
 - Inflation-funded public goods
 - Governance treasury for community funding
 - Energy market for green compute
@@ -1029,7 +1029,7 @@ Based on code analysis, this isn't just a blockchain. It's:
 
 ### The Moat (Technical Advantages)
 
-1. **Dual-token design**: No other L1 has this
+1. **Lane-based economics**: Single token with consumer/industrial lane segregation
 2. **Integrated markets**: Most chains are general-purpose
 3. **Civic governance**: Treasury for public goods
 4. **Python bindings**: Accessibility

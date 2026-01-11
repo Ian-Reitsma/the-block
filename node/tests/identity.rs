@@ -1,22 +1,14 @@
 #![cfg(feature = "integration-tests")]
-use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::SigningKey;
-use foundation_unicode::{NormalizationAccuracy, Normalizer};
+use foundation_unicode::NormalizationAccuracy;
 use sys::tempfile::tempdir;
 use the_block::generate_keypair;
 use the_block::identity::handle_registry::{HandleError, HandleRegistry, RegistrationOutcome};
 
 fn sign_msg(handle: &str, sk: &SigningKey, nonce: u64) -> (Vec<u8>, Vec<u8>) {
-    let normalizer = Normalizer;
-    let handle_norm = normalizer.nfkc(handle).as_str().to_lowercase();
     let pk = sk.verifying_key();
-    let mut h = blake3::Hasher::new();
-    h.update(b"register:");
-    h.update(handle_norm.as_bytes());
-    h.update(&pk.to_bytes());
-    h.update(&nonce.to_le_bytes());
-    let msg = h.finalize();
-    let sig = sk.sign(msg.as_bytes());
+    let msg = HandleRegistry::registration_message(handle, &pk.to_bytes(), nonce).unwrap();
+    let sig = sk.sign(&msg);
     (pk.to_bytes().to_vec(), sig.to_bytes().to_vec())
 }
 

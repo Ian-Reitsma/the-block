@@ -1,9 +1,10 @@
 use super::RpcError;
 use crate::governance::{
-    decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
-    GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
+    decode_binary, decode_runtime_backend_policy, decode_storage_engine_policy,
+    decode_transport_provider_policy, encode_binary, GovStore, ParamKey, Params, Proposal,
+    ProposalStatus, Runtime, Vote, VoteChoice,
 };
-use foundation_serialization::{binary, Serialize};
+use foundation_serialization::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -27,11 +28,11 @@ pub struct ReleaseSignersResponse {
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct InflationParamsResponse {
-    pub beta_storage_sub_ct: i64,
-    pub gamma_read_sub_ct: i64,
-    pub kappa_cpu_sub_ct: i64,
-    pub lambda_bytes_out_sub_ct: i64,
-    pub rent_rate_ct_per_byte: i64,
+    pub beta_storage_sub: i64,
+    pub gamma_read_sub: i64,
+    pub kappa_cpu_sub: i64,
+    pub lambda_bytes_out_sub: i64,
+    pub rent_rate_per_byte: i64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -55,12 +56,12 @@ fn parse_key(k: &str) -> Option<ParamKey> {
         "IndustrialAdmissionMinCapacity" => Some(ParamKey::IndustrialAdmissionMinCapacity),
         "FeeFloorWindow" => Some(ParamKey::FeeFloorWindow),
         "FeeFloorPercentile" => Some(ParamKey::FeeFloorPercentile),
-        "BetaStorageSubCt" => Some(ParamKey::BetaStorageSubCt),
-        "GammaReadSubCt" => Some(ParamKey::GammaReadSubCt),
-        "KappaCpuSubCt" => Some(ParamKey::KappaCpuSubCt),
-        "LambdaBytesOutSubCt" => Some(ParamKey::LambdaBytesOutSubCt),
-        "TreasuryPercentCt" => Some(ParamKey::TreasuryPercentCt),
-        "RentRateCtPerByte" => Some(ParamKey::RentRateCtPerByte),
+        "BetaStorageSub" => Some(ParamKey::BetaStorageSub),
+        "GammaReadSub" => Some(ParamKey::GammaReadSub),
+        "KappaCpuSub" => Some(ParamKey::KappaCpuSub),
+        "LambdaBytesOutSub" => Some(ParamKey::LambdaBytesOutSub),
+        "TreasuryPercent" => Some(ParamKey::TreasuryPercent),
+        "RentRatePerByte" => Some(ParamKey::RentRatePerByte),
         "MinerRewardLogisticTarget" => Some(ParamKey::MinerRewardLogisticTarget),
         "BadgeExpirySecs" => Some(ParamKey::BadgeExpirySecs),
         "JurisdictionRegion" => Some(ParamKey::JurisdictionRegion),
@@ -117,17 +118,17 @@ pub fn vote_proposal(
     // ensure dependencies activated
     let tree = store.proposals();
     if let Some(raw) = tree
-        .get(binary::encode(&proposal_id).unwrap())
+        .get(encode_binary(&proposal_id).unwrap())
         .map_err(|_| RpcError::new(-32068, "storage"))?
     {
-        let prop: Proposal = binary::decode(&raw).map_err(|_| RpcError::new(-32069, "decode"))?;
+        let prop: Proposal = decode_binary(&raw).map_err(|_| RpcError::new(-32069, "decode"))?;
         for dep in &prop.deps {
             if let Some(dr) = tree
-                .get(binary::encode(dep).unwrap())
+                .get(encode_binary(dep).unwrap())
                 .map_err(|_| RpcError::new(-32068, "storage"))?
             {
                 let dp: Proposal =
-                    binary::decode(&dr).map_err(|_| RpcError::new(-32069, "decode"))?;
+                    decode_binary(&dr).map_err(|_| RpcError::new(-32069, "decode"))?;
                 if dp.status != ProposalStatus::Activated {
                     return Err(RpcError::new(-32070, "dependency not active"));
                 }
@@ -186,7 +187,7 @@ pub fn gov_list(store: &GovStore) -> Result<Vec<Proposal>, RpcError> {
     for item in store.proposals().iter() {
         // need access; make proposals() pub
         let (_, raw) = item.map_err(|_| RpcError::new(-32063, "iter"))?;
-        let p: Proposal = binary::decode(&raw).map_err(|_| RpcError::new(-32065, "decode"))?;
+        let p: Proposal = decode_binary(&raw).map_err(|_| RpcError::new(-32065, "decode"))?;
         arr.push(p);
     }
     Ok(arr)
@@ -227,11 +228,11 @@ pub fn release_signers(store: &GovStore) -> Result<ReleaseSignersResponse, RpcEr
 
 pub fn inflation_params(params: &Params) -> InflationParamsResponse {
     InflationParamsResponse {
-        beta_storage_sub_ct: params.beta_storage_sub_ct,
-        gamma_read_sub_ct: params.gamma_read_sub_ct,
-        kappa_cpu_sub_ct: params.kappa_cpu_sub_ct,
-        lambda_bytes_out_sub_ct: params.lambda_bytes_out_sub_ct,
-        rent_rate_ct_per_byte: params.rent_rate_ct_per_byte,
+        beta_storage_sub: params.beta_storage_sub,
+        gamma_read_sub: params.gamma_read_sub,
+        kappa_cpu_sub: params.kappa_cpu_sub,
+        lambda_bytes_out_sub: params.lambda_bytes_out_sub,
+        rent_rate_per_byte: params.rent_rate_per_byte,
     }
 }
 

@@ -6,7 +6,7 @@ use std::future::Future;
 use std::panic::{self, AssertUnwindSafe};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Condvar, LockResult, Mutex, Weak};
+use std::sync::{Arc, Condvar, LockResult, Mutex, OnceLock, Weak};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,7 +28,52 @@ pub(crate) mod net;
 
 const SPAWN_LATENCY_METRIC: &str = "runtime_spawn_latency_seconds";
 const PENDING_TASKS_METRIC: &str = "runtime_pending_tasks";
-const REACTOR_WAKER_TOKEN: Token = Token(usize::MAX - 1);
+// Use a 32-bit sentinel for compatibility with pollers that truncate user data
+// fields (observed in some epoll configurations). Keeping this value within
+// the u32 range ensures token comparisons remain stable across platforms.
+const REACTOR_WAKER_TOKEN: Token = Token(u32::MAX as usize - 1);
+const DEFAULT_REACTOR_IDLE_POLL_MS: u64 = 100;
+const DEFAULT_IO_READ_BACKOFF_MS: u64 = 10;
+const DEFAULT_IO_WRITE_BACKOFF_MS: u64 = 10;
+
+static REACTOR_IDLE_POLL_MS: AtomicU64 = AtomicU64::new(DEFAULT_REACTOR_IDLE_POLL_MS);
+static IO_READ_BACKOFF_MS: AtomicU64 = AtomicU64::new(DEFAULT_IO_READ_BACKOFF_MS);
+static IO_WRITE_BACKOFF_MS: AtomicU64 = AtomicU64::new(DEFAULT_IO_WRITE_BACKOFF_MS);
+
+pub(crate) fn set_reactor_idle_poll(duration: Duration) {
+    let millis = duration.as_millis().min(u64::MAX as u128) as u64;
+    let value = millis.max(1);
+    REACTOR_IDLE_POLL_MS.store(value, AtomicOrdering::SeqCst);
+}
+
+pub(crate) fn set_io_read_backoff(duration: Duration) {
+    let millis = duration.as_millis().min(u64::MAX as u128) as u64;
+    let value = millis.max(1);
+    IO_READ_BACKOFF_MS.store(value, AtomicOrdering::SeqCst);
+}
+
+pub(crate) fn set_io_write_backoff(duration: Duration) {
+    let millis = duration.as_millis().min(u64::MAX as u128) as u64;
+    let value = millis.max(1);
+    IO_WRITE_BACKOFF_MS.store(value, AtomicOrdering::SeqCst);
+}
+
+fn reactor_idle_poll() -> Duration {
+    Duration::from_millis(REACTOR_IDLE_POLL_MS.load(AtomicOrdering::SeqCst).max(1))
+}
+
+pub(crate) fn io_read_backoff() -> Duration {
+    Duration::from_millis(IO_READ_BACKOFF_MS.load(AtomicOrdering::SeqCst).max(1))
+}
+
+pub(crate) fn io_write_backoff() -> Duration {
+    Duration::from_millis(IO_WRITE_BACKOFF_MS.load(AtomicOrdering::SeqCst).max(1))
+}
+
+fn reactor_debug_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("RUNTIME_REACTOR_DEBUG").is_ok())
+}
 
 pub(crate) struct InHouseRuntime {
     inner: Arc<Inner>,
@@ -548,9 +593,14 @@ impl ReactorInner {
     fn compute_timeout(&self) -> Option<Duration> {
         let mut state = self.timers.lock().recover();
         state.prune();
-        state
+        let next = state
             .peek_deadline()
-            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        let idle = reactor_idle_poll();
+        Some(match next {
+            Some(timeout) => timeout.min(idle),
+            None => idle,
+        })
     }
 
     fn fire_due_timers(&self) {
@@ -568,12 +618,57 @@ impl ReactorInner {
 
     fn dispatch_io_event(&self, event: &ReactorEvent) {
         let token_index = event.token().0;
+        let event_ident = event.ident().map(|ident| ident as ReactorRaw);
+        let debug = reactor_debug_enabled();
+        if debug {
+            eprintln!(
+                "[REACTOR] token={} ident={:?} read={} write={} err={} read_closed={} write_closed={} priority={}",
+                token_index,
+                event_ident,
+                event.is_readable(),
+                event.is_writable(),
+                event.is_error(),
+                event.is_read_closed(),
+                event.is_write_closed(),
+                event.is_priority()
+            );
+        }
         let mut wake_read = None;
         let mut wake_write = None;
+        let mut wake_read_token = token_index;
 
         {
             let mut state = self.io.lock().recover();
-            if let Some(entry) = state.entries.get_mut(&token_index) {
+            let mut resolved_token = token_index;
+            let mut remap_reason: Option<&'static str> = None;
+            if let (Some(fd), false) = (event_ident, event.is_priority()) {
+                match state.entries.get(&resolved_token).map(|entry| entry.fd) {
+                    Some(entry_fd) if entry_fd == fd => {}
+                    Some(_) => {
+                        remap_reason = Some("mismatched fd");
+                    }
+                    None => {
+                        remap_reason = Some("missing token");
+                    }
+                }
+                if remap_reason.is_some() {
+                    if let Some(token) = state.token_by_fd.get(&fd).copied() {
+                        resolved_token = token.0;
+                        if debug {
+                            eprintln!(
+                                "[REACTOR] token={} {} remapped to {} via fd {:?}",
+                                token_index,
+                                remap_reason.unwrap_or(""),
+                                resolved_token,
+                                fd
+                            );
+                        }
+                    }
+                }
+            }
+
+            if let Some(entry) = state.entries.get_mut(&resolved_token) {
+                wake_read_token = resolved_token;
                 if event.is_readable()
                     || event.is_read_closed()
                     || event.is_error()
@@ -581,6 +676,13 @@ impl ReactorInner {
                 {
                     entry.read_ready = true;
                     wake_read = entry.read_waker.take();
+                    if debug {
+                        eprintln!(
+                            "[REACTOR] token={} read_ready=true, has_waker={}",
+                            wake_read_token,
+                            wake_read.is_some()
+                        );
+                    }
                 }
                 if event.is_writable()
                     || event.is_write_closed()
@@ -590,10 +692,18 @@ impl ReactorInner {
                     entry.write_ready = true;
                     wake_write = entry.write_waker.take();
                 }
+            } else if debug {
+                eprintln!(
+                    "[REACTOR] token={} dropped event (ident={:?})",
+                    token_index, event_ident
+                );
             }
         }
 
         if let Some(waker) = wake_read {
+            if debug {
+                eprintln!("[REACTOR] token={} waking read task", wake_read_token);
+            }
             waker.wake();
         }
         if let Some(waker) = wake_write {
@@ -604,12 +714,25 @@ impl ReactorInner {
     fn register_fd(&self, fd: ReactorRaw, interest: ReactorInterest) -> io::Result<Token> {
         let token_value = self.next_token.fetch_add(1, AtomicOrdering::SeqCst) as usize;
         let token = Token(token_value);
-        let _ = self.waker.wake();
-        self.poll.register(fd, token, interest)?;
         {
             let mut state = self.io.lock().recover();
-            state.insert(token, fd);
+            state.insert(token, fd, interest);
         }
+        if let Err(err) = self.poll.register(fd, token, interest) {
+            let mut state = self.io.lock().recover();
+            state.remove(token);
+            return Err(err);
+        }
+        if reactor_debug_enabled() {
+            eprintln!(
+                "[REACTOR] register fd={} token={} read={} write={}",
+                fd,
+                token_value,
+                interest.contains(ReactorInterest::READABLE),
+                interest.contains(ReactorInterest::WRITABLE)
+            );
+        }
+        let _ = self.waker.wake();
         Ok(token)
     }
 
@@ -618,6 +741,9 @@ impl ReactorInner {
         self.poll.deregister(fd, token)?;
         let mut state = self.io.lock().recover();
         state.remove(token);
+        if reactor_debug_enabled() {
+            eprintln!("[REACTOR] deregister fd={} token={}", fd, token.0);
+        }
         Ok(())
     }
 
@@ -657,6 +783,7 @@ impl ReactorInner {
             }
         }
 
+        let _ = self.waker.wake();
         Poll::Pending
     }
 
@@ -666,6 +793,86 @@ impl ReactorInner {
 
     fn poll_write_ready(&self, token: Token, cx: &Context<'_>) -> Poll<io::Result<()>> {
         self.poll_io_ready(token, IoDirection::Write, cx)
+    }
+
+    fn enable_write_interest(&self, token: Token) -> io::Result<()> {
+        let (fd, prev_interest, new_interest, should_update) = {
+            let mut state = self.io.lock().recover();
+            let entry = state.entries.get_mut(&token.0).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "io registration missing")
+            })?;
+            entry.write_waiters = entry.write_waiters.saturating_add(1);
+            let prev_interest = entry.interest;
+            let mut new_interest = entry.interest;
+            let mut should_update = false;
+            if !entry.interest.contains(ReactorInterest::WRITABLE) {
+                new_interest = entry.interest.union(ReactorInterest::WRITABLE);
+                entry.interest = new_interest;
+                should_update = true;
+            }
+            (entry.fd, prev_interest, new_interest, should_update)
+        };
+
+        if should_update {
+            if let Err(err) = self
+                .poll
+                .update_interest(fd, token, prev_interest, new_interest)
+            {
+                let mut state = self.io.lock().recover();
+                if let Some(entry) = state.entries.get_mut(&token.0) {
+                    entry.interest = prev_interest;
+                    entry.write_waiters = entry.write_waiters.saturating_sub(1);
+                }
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
+    fn disable_write_interest(&self, token: Token) -> io::Result<()> {
+        let (fd, prev_interest, new_interest, should_update, decremented) = {
+            let mut state = self.io.lock().recover();
+            let entry = state.entries.get_mut(&token.0).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, "io registration missing")
+            })?;
+            let mut decremented = false;
+            if entry.write_waiters > 0 {
+                entry.write_waiters -= 1;
+                decremented = true;
+            }
+            let prev_interest = entry.interest;
+            let mut new_interest = entry.interest;
+            let mut should_update = false;
+            if entry.write_waiters == 0 && entry.interest.contains(ReactorInterest::WRITABLE) {
+                new_interest = entry.interest.without(ReactorInterest::WRITABLE);
+                entry.interest = new_interest;
+                should_update = true;
+            }
+            (
+                entry.fd,
+                prev_interest,
+                new_interest,
+                should_update,
+                decremented,
+            )
+        };
+
+        if should_update {
+            if let Err(err) = self
+                .poll
+                .update_interest(fd, token, prev_interest, new_interest)
+            {
+                let mut state = self.io.lock().recover();
+                if let Some(entry) = state.entries.get_mut(&token.0) {
+                    entry.interest = prev_interest;
+                    if decremented {
+                        entry.write_waiters = entry.write_waiters.saturating_add(1);
+                    }
+                }
+                return Err(err);
+            }
+        }
+        Ok(())
     }
 
     fn register_timer(
@@ -714,38 +921,53 @@ struct TimerState {
 
 struct IoState {
     entries: HashMap<usize, IoEntry>,
+    token_by_fd: HashMap<ReactorRaw, Token>,
 }
 
 impl IoState {
     fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            token_by_fd: HashMap::new(),
         }
     }
 
-    fn insert(&mut self, token: Token, _fd: ReactorRaw) {
-        self.entries.insert(token.0, IoEntry::new());
+    fn insert(&mut self, token: Token, fd: ReactorRaw, interest: ReactorInterest) {
+        self.entries.insert(token.0, IoEntry::new(fd, interest));
+        self.token_by_fd.insert(fd, token);
     }
 
     fn remove(&mut self, token: Token) {
-        self.entries.remove(&token.0);
+        if let Some(entry) = self.entries.remove(&token.0) {
+            self.token_by_fd.remove(&entry.fd);
+        }
     }
 }
 
 struct IoEntry {
+    fd: ReactorRaw,
+    interest: ReactorInterest,
     read_ready: bool,
     write_ready: bool,
     read_waker: Option<Waker>,
     write_waker: Option<Waker>,
+    write_waiters: usize,
 }
 
 impl IoEntry {
-    fn new() -> Self {
+    fn new(fd: ReactorRaw, interest: ReactorInterest) -> Self {
         Self {
+            fd,
+            interest,
             read_ready: false,
             write_ready: false,
             read_waker: None,
             write_waker: None,
+            write_waiters: if interest.contains(ReactorInterest::WRITABLE) {
+                1
+            } else {
+                0
+            },
         }
     }
 }
@@ -778,6 +1000,14 @@ impl IoRegistration {
 
     pub(crate) fn poll_write_ready(&self, cx: &Context<'_>) -> Poll<io::Result<()>> {
         self.reactor.poll_write_ready(self.token, cx)
+    }
+
+    pub(crate) fn enable_write_interest(&self) -> io::Result<()> {
+        self.reactor.enable_write_interest(self.token)
+    }
+
+    pub(crate) fn disable_write_interest(&self) -> io::Result<()> {
+        self.reactor.disable_write_interest(self.token)
     }
 
     pub(crate) fn deregister(&self) -> io::Result<()> {

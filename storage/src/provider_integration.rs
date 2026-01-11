@@ -178,7 +178,7 @@ mod tests {
             retention_blocks: 10000,
             next_payment_block: 2000,
             accrued: 0,
-            total_deposit_ct: 0,
+            total_deposit: 0,
             last_payment_block: None,
             storage_root: merkle_root,
         }

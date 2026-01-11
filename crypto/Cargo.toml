@@ -10,5 +10,8 @@ base64_fp = { path = "../crates/base64_fp" }
 crypto_suite = { path = "../crates/crypto_suite" }
 sys = { path = "../crates/sys" }
 
+[dev-dependencies]
+testkit = { path = "../crates/testkit" }
+
 [features]
 quantum = ["pqcrypto-dilithium"]

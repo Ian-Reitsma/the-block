@@ -88,10 +88,8 @@ fn build_summary(seq: u64) -> TelemetrySummary {
                 last_updated: snapshot.last_updated,
                 total_usd_micros: snapshot.total_usd_micros,
                 settlement_count: snapshot.settlement_count,
-                ct_price_usd_micros: snapshot.ct_price_usd_micros,
-                it_price_usd_micros: snapshot.it_price_usd_micros,
-                market_ct_price_usd_micros: snapshot.market_ct_price_usd_micros,
-                market_it_price_usd_micros: snapshot.market_it_price_usd_micros,
+                price_usd_micros: snapshot.price_usd_micros,
+                market_price_usd_micros: snapshot.market_price_usd_micros,
                 cohort_utilization: snapshot
                     .cohort_utilization
                     .iter()

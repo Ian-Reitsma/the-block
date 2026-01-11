@@ -72,8 +72,12 @@ fn settlement_engine_parity() {
         let base_str = base.to_str().expect("settlement path str");
         Settlement::init(base_str, SettleMode::Real);
         Settlement::accrue("provider-a", "test_accrue", 42);
+        let actual_path = Settlement::storage_path();
         Settlement::shutdown();
-        Settlement::init(base_str, SettleMode::Real);
+        Settlement::init(
+            actual_path.to_str().expect("settlement storage path"),
+            SettleMode::Real,
+        );
         let balances = Settlement::balances();
         assert!(balances
             .iter()

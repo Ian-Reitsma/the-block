@@ -11,7 +11,8 @@ use the_block::Block;
 fn increases_when_blocks_fast() {
     let prev = 1000;
     let params = the_block::governance::Params::default();
-    let (next, _) = retune(prev, &[0, 60_000], 0, &params);
+    // Blocks coming at 500ms intervals (2x faster than 1s target)
+    let (next, _) = retune(prev, &[0, 500], 0, &params);
     assert!(next > prev);
 }
 
@@ -19,7 +20,8 @@ fn increases_when_blocks_fast() {
 fn decreases_when_blocks_slow() {
     let prev = 1000;
     let params = the_block::governance::Params::default();
-    let (next, _) = retune(prev, &[0, 240_000], 0, &params);
+    // Blocks coming at 2s intervals (2x slower than 1s target)
+    let (next, _) = retune(prev, &[0, 2_000], 0, &params);
     assert!(next < prev);
 }
 

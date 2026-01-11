@@ -236,8 +236,8 @@
 <h3 id="15-schema-migrations-v7v10"><a class="header" href="#15-schema-migrations-v7v10">1.5 Schema migrations (v7–v10)</a></h3>
 <div class="table-wrapper"><table><thead><tr><th>Version</th><th>Scope</th><th>Pre‑migration state</th><th>Post‑migration state</th><th>Operator expectations</th></tr></thead><tbody>
 <tr><td>v7</td><td>Recent timestamp journaling (<code>docs/schema_migrations/v7_recent_timestamps.md</code> ➜ <code>Blockchain::recent_timestamps</code>)</td><td>Mempool entries only tracked <code>timestamp_millis</code>; restarts lost ordering guarantees.</td><td><code>timestamp_ticks</code> persisted alongside millis so QoS lanes continue after restarts (<code>node/tests/reopen.rs</code>).</td><td>Allow the node to reopen once so it can rewrite mempool entries; no manual action beyond monitoring <code>telemetry::STARTUP_TTL_DROP_TOTAL</code>.</td></tr>
-<tr><td>v8</td><td>Bridge header persistence (<code>docs/schema_migrations/v8_bridge_headers.md</code>)</td><td>Bridge proofs not materialised in sled; challenge windows could not replay after crash.</td><td><code>simple_db::names::BRIDGE</code> stores verified headers and pending withdrawals; CLI exposes `tb-cli bridge pending</td><td>disputes`.</td></tr>
-<tr><td>v9</td><td>DEX escrow snapshots</td><td>Escrow state stored only in memory; C/R flows risked desync.</td><td><code>simple_db::names::DEX_STORAGE</code> now stores <code>EscrowState</code> (orders, locks, HTLC proofs).</td><td>Before upgrading, pause matching, run <code>tb-cli dex escrow export</code>; after upgrade confirm <code>dex.order_book</code> RPC matches expectations.</td></tr>
+<tr><td>v8</td><td>Bridge header persistence (<code>docs/schema_migrations/v8_bridge_headers.md</code>)</td><td>Bridge proofs not materialised in sled; challenge windows could not replay after crash.</td><td><code>simple_db::names::BRIDGE</code> stores verified headers and pending withdrawals; CLI exposes `contract-cli bridge pending</td><td>disputes`.</td></tr>
+<tr><td>v9</td><td>DEX escrow snapshots</td><td>Escrow state stored only in memory; C/R flows risked desync.</td><td><code>simple_db::names::DEX_STORAGE</code> now stores <code>EscrowState</code> (orders, locks, HTLC proofs).</td><td>Before upgrading, pause matching, run <code>contract-cli dex escrow export</code>; after upgrade confirm <code>dex.order_book</code> RPC matches expectations.</td></tr>
 <tr><td>v10</td><td>Industrial subsidy buckets</td><td>Subsidy accounting was aggregated; per‑lane reporting missing.</td><td><code>Block::industrial_subsidies()</code> writes <code>storage_sub_it</code>, <code>read_sub_it</code>, <code>compute_sub_it</code>; governance surfaces via explorer and CLI.</td><td>Update dashboards to use the new metrics (<code>INDUSTRIAL_SUBSIDY_*</code>); re-run treasury audits to ensure ledgers reconcile.</td></tr>
 </tbody></table>
 </div>
@@ -246,7 +246,7 @@
 <h3 id="21-account-abstraction-specifics"><a class="header" href="#21-account-abstraction-specifics">2.1 Account abstraction specifics</a></h3>
 <ul>
 <li>Handle registry (<code>node/src/identity/handle_registry.rs</code>) replaces the former <code>account_abstraction.md</code>: handles normalize via NFKC, reject <code>sys/</code> &amp; <code>admin/</code> prefixes, and require strictly increasing nonces. Records are stored under <code>simple_db::names::IDENTITY_HANDLES</code>.</li>
-<li>Fee hooks (<code>node/src/fees.rs</code>, <code>node/src/fee/policy.rs</code>) enforce percentile‑based fee floors per lane. Wallets and RPC clients read <code>FeeLane</code> metadata to decide whether to dip into rebates before CT.</li>
+<li>Fee hooks (<code>node/src/fees.rs</code>, <code>node/src/fee/policy.rs</code>) enforce percentile‑based fee floors per lane. Wallets and RPC clients read <code>FeeLane</code> metadata to decide whether to dip into rebates before BLOCK.</li>
 <li>When submitting transactions:
 <ul>
 <li>Signature threshold vs signer set is checked before admission; failing multisig payloads are staged in <code>pending_multisig</code>.</li>
@@ -261,16 +261,16 @@ next = max(prev + Δ, 1)
 </code></pre>
 <ul>
 <li><code>TARGET_GAS_PER_BLOCK = 1_000_000</code>.</li>
-<li><code>Δ</code> is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑CT per byte).</li>
+<li><code>Δ</code> is clamped by dividing by 8 (12.5 % per block). The base fee never drops below 1 (micro‑BLOCK per byte).</li>
 <li>Telemetry: <code>base_fee</code> gauge plus <code>mempool_fee_floor_*</code> histograms show nudges per block. <code>node/tests/base_fee.rs</code> exercises the path.</li>
 </ul>
 <h3 id="23-qos-accounting-ttl-math-and-rpc-surfaces"><a class="header" href="#23-qos-accounting-ttl-math-and-rpc-surfaces">2.3 QoS accounting, TTL math, and RPC surfaces</a></h3>
 <ul>
 <li>Admission + per‑sender limits (<code>node/src/mempool/admission.rs</code>): <code>AdmissionState::reserve_sender</code> tracks outstanding slots keyed by <code>(sender, lane)</code>. Defaults:
 <ul>
-<li><code>max_pending_per_account = 16</code> (overrideable via <code>tb-cli node mempool set-cap</code> or <code>TB_MEMPOOL_ACCOUNT_CAP</code>).</li>
+<li><code>max_pending_per_account = 16</code> (overrideable via <code>contract-cli node mempool set-cap</code> or <code>TB_MEMPOOL_ACCOUNT_CAP</code>).</li>
 <li><code>max_mempool_size_{consumer,industrial} = 1_024</code> entries each.</li>
-<li><code>min_fee_per_byte_{consumer,industrial}</code> defaults to 1 µCT/byte but is immediately clamped to the rolling floor.</li>
+<li><code>min_fee_per_byte_{consumer,industrial}</code> defaults to 1 µBLOCK/byte but is immediately clamped to the rolling floor.</li>
 </ul>
 </li>
 <li>Rolling floor: every admitted transaction records its <code>fee_per_byte</code>. The percentile window is configured by governance (<code>fee_floor_window</code>, <code>fee_floor_percentile</code>) so QoS can insist on e.g. “p75 of the last 512 admits.” When callers post <code>mempool.qos_event</code> we log overrides (<code>FEE_FLOOR_WARNING_TOTAL</code> / <code>FEE_FLOOR_OVERRIDE_TOTAL</code>).</li>
@@ -299,11 +299,11 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>QoS telemetry: <code>submit_tx</code> increments <code>TX_SUBMITTED_TOTAL</code>; successful admissions increment <code>TX_ADMITTED_TOTAL</code> and log the caller’s jurisdiction for compliance. Rejections emit <code>tx_rejected_total{reason}</code> samples so dashboards can correlate floods.</li>
 </ul>
 <h4 id="mempoolstats-payload"><a class="header" href="#mempoolstats-payload"><code>mempool.stats</code> payload</a></h4>
-<p>RPC <code>mempool.stats</code> (<code>node/src/rpc/mod.rs:1445</code>) reads the current lane snapshot without mutating the pool. Each field is in milliseconds or micro‑CT as noted below.</p>
+<p>RPC <code>mempool.stats</code> (<code>node/src/rpc/mod.rs:1445</code>) reads the current lane snapshot without mutating the pool. Each field is in milliseconds or micro‑BLOCK as noted below.</p>
 <div class="table-wrapper"><table><thead><tr><th>Field</th><th>Meaning</th></tr></thead><tbody>
 <tr><td><code>size</code></td><td>Number of entries in the requested lane.</td></tr>
 <tr><td><code>age_p50</code> / <code>age_p95</code></td><td>Milliseconds since admission (median / 95th percentile).</td></tr>
-<tr><td><code>fee_p50</code> / <code>fee_p90</code></td><td>Raw <code>tip</code> percentiles (µCT). Divide by serialized size for fee per byte.</td></tr>
+<tr><td><code>fee_p50</code> / <code>fee_p90</code></td><td>Raw <code>tip</code> percentiles (µBLOCK). Divide by serialized size for fee per byte.</td></tr>
 <tr><td><code>fee_floor</code></td><td>Current percentile floor after min‑fee clamps.</td></tr>
 </tbody></table>
 </div>
@@ -324,7 +324,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>Pick logic: in re‑entrant builds we maintain <code>(current_class, budget, last_idx)</code>. Each dequeue consumes one unit of the class budget; once the budget hits zero or the queue empties we rotate to the next non‑empty class. In non‑re‑entrant builds we rotate a ring buffer of <code>(class, queue_len)</code> pairs so large bursts cannot starve lower-weight lanes.</li>
 <li>Batch size: callers (e.g., the gossip reactor or execution pipeline) pass <code>limit</code> into <code>drain(limit)</code> or <code>execute_ready(limit)</code>. A typical block assembly requests <code>limit = dynamic_block_limit()</code>; gossip workers usually ask for 64 messages. Because the scheduler enforces per-class weights the effective fairness window equals <code>weight</code> dequeues before the class yields to its peers.</li>
 <li>Starvation guards: <code>ServiceSchedulerStats</code> exposes <code>queue_depths</code> + <code>weights</code> via diagnostics so operators can confirm configuration. If a class enters <code>reentrant_enabled</code> mode with weight zero its queues will still be scanned periodically to avoid livelock. For transaction execution, <code>TxScheduler</code> builds read/write sets (<code>TxRwSet</code>) and refuses to schedule transactions whose inputs or outputs overlap an active run (“RW conflict”). Conflicts are surfaced as <code>ScheduleError::Conflict(txid)</code> so block builders can defer the losing transaction without discarding it.</li>
-<li>Governance knobs: to bias toward consumer traffic during incidents set <code>scheduler_weight_gossip=4</code>, <code>scheduler_weight_compute=1</code>, <code>scheduler_weight_storage=1</code>, then monitor <code>scheduler.stats</code> RPC to ensure queue depths drop as expected. <code>tb-cli diagnostics scheduler</code> prints the same struct locally.</li>
+<li>Governance knobs: to bias toward consumer traffic during incidents set <code>scheduler_weight_gossip=4</code>, <code>scheduler_weight_compute=1</code>, <code>scheduler_weight_storage=1</code>, then monitor <code>scheduler.stats</code> RPC to ensure queue depths drop as expected. <code>contract-cli diagnostics scheduler</code> prints the same struct locally.</li>
 </ul>
 <hr />
 <h2 id="3-networking-overlay-and-p2p"><a class="header" href="#3-networking-overlay-and-p2p">3. Networking, Overlay, and P2P</a></h2>
@@ -377,7 +377,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li><code>PartitionWatch</code> (<code>node/src/net/partition_watch.rs</code>) tracks unreachable peers; default threshold = 8.</li>
 <li>When <code>mark_unreachable</code> pushes the count past the threshold, <code>PARTITION_EVENTS_TOTAL</code> increments and <code>active=true</code>. Operators should:
 <ol>
-<li>Query <code>tb-cli net partition</code> (via diagnostics) to list isolated peer IDs.</li>
+<li>Query <code>contract-cli net partition</code> (via diagnostics) to list isolated peer IDs.</li>
 <li>Inspect <code>partition_watch.current_marker()</code> to correlate with dashboards/incident logs.</li>
 <li>Run the recovery recipe: flush peer bans, reseed overlay via CLI, confirm <code>is_partitioned()</code> flips back to false.</li>
 </ol>
@@ -386,7 +386,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <h3 id="35-overlay-store-and-peer-persistence"><a class="header" href="#35-overlay-store-and-peer-persistence">3.5 Overlay store and peer persistence</a></h3>
 <ul>
 <li>Backends: <code>node/src/config.rs</code> exposes <code>overlay.backend = inhouse | stub</code>. The in-house backend (<code>crates/p2p_overlay::InhouseOverlay</code>) persists peers under <code>TB_OVERLAY_DB_PATH</code> (defaults to <code>~/.the_block/overlay</code>). Records are pretty‑printed JSON containing the base58 peer ID, socket address, and <code>last_seen</code> epoch seconds. The stub backend (memory only) is useful for deterministic tests.</li>
-<li>Discovery + RPC selection: <code>node/src/net/discovery.rs</code> re‑exports the trait so CLI/RPC consumers can issue <code>net.overlay_status</code> and <code>tb-cli net overlay-status --format json</code>. Switching backend at runtime is safe; <code>net::overlay_service()</code> holds the chosen implementation in a read/write lock, and <code>governance::registry</code> wires up policy changes.</li>
+<li>Discovery + RPC selection: <code>node/src/net/discovery.rs</code> re‑exports the trait so CLI/RPC consumers can issue <code>net.overlay_status</code> and <code>contract-cli net overlay-status --format json</code>. Switching backend at runtime is safe; <code>net::overlay_service()</code> holds the chosen implementation in a read/write lock, and <code>governance::registry</code> wires up policy changes.</li>
 <li>Migration: <code>scripts/migrate_overlay_store.rs</code> converts legacy bincode sled trees into the new JSON format. Invoke it before flipping <code>overlay.backend</code> on existing nodes so peer histories are retained.</li>
 <li>Peer metrics store: <code>node/src/net/peer_metrics_store.rs</code> writes compressed records into <code>sled</code> (<code>peer_metrics</code> tree). Values are encoded via <code>peer_metrics_binary::{encode, decode}</code> (compact bincode) and keyed by <code>&lt;peer-pk&gt;&lt;timestamp&gt;</code> which enables retention pruning. <code>peer.metrics_export</code> CLI/RPC commands also read from this tree.</li>
 <li>Ban store: <code>node/src/net/ban_store.rs</code> keeps bans in <code>SimpleDb::open_named(names::NET_BANS, TB_BAN_DB)</code>. Entries are hex peer IDs with an 8‑byte timestamp payload; <code>ban_store::purge_expired()</code> enforces TTL and updates <code>BANNED_PEERS_TOTAL</code>.</li>
@@ -419,7 +419,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <ul>
 <li>CLI (<code>cli/src/ai.rs</code>):
 <ul>
-<li><code>tb-cli ai diagnose --snapshot metrics.json</code> loads a JSON blob, evaluates heuristics (currently latency thresholds), and prints remediation tips.</li>
+<li><code>contract-cli ai diagnose --snapshot metrics.json</code> loads a JSON blob, evaluates heuristics (currently latency thresholds), and prints remediation tips.</li>
 <li><code>Metrics</code> struct contains <code>avg_latency_ms</code>; extend it as headless tooling matures.</li>
 </ul>
 </li>
@@ -448,16 +448,16 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <h3 id="53-storage-market-incentives"><a class="header" href="#53-storage-market-incentives">5.3 Storage-market incentives</a></h3>
 <ul>
 <li><code>storage_market/src/lib.rs</code> models each contract as <code>ContractRecord { contract: StorageContract, replicas: Vec&lt;ReplicaIncentive&gt; }</code>.</li>
-<li><code>ReplicaIncentive</code> fields: <code>allocated_shares</code>, <code>price_per_block</code>, <code>deposit_ct</code>, success/failure counters, last proof block, last outcome.</li>
+<li><code>ReplicaIncentive</code> fields: <code>allocated_shares</code>, <code>price_per_block</code>, <code>deposit</code>, success/failure counters, last proof block, last outcome.</li>
 <li>SLAs recorded via <code>record_proof_outcome</code>:
 <ul>
 <li>Success ➜ increment <code>proof_successes</code>, no slashing.</li>
-<li>Failure ➜ deduct <code>min(price_per_block, deposit_ct)</code> and increment <code>proof_failures</code>.</li>
+<li>Failure ➜ deduct <code>min(price_per_block, deposit)</code> and increment <code>proof_failures</code>.</li>
 </ul>
 </li>
 <li>CLI/RPC:
 <ul>
-<li><code>storage_market.provider_balances</code>, <code>storage_market.audit_log</code>, and explorer views show deposits, accrued CT, and slashes.</li>
+<li><code>storage_market.provider_balances</code>, <code>storage_market.audit_log</code>, and explorer views show deposits, accrued BLOCK, and slashes.</li>
 </ul>
 </li>
 </ul>
@@ -488,10 +488,10 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </ul>
 <h3 id="57-rent-escrow-releases-and-proofs"><a class="header" href="#57-rent-escrow-releases-and-proofs">5.7 Rent escrow, releases, and proofs</a></h3>
 <ul>
-<li><code>RentEscrow</code> (<code>node/src/storage/fs.rs</code>) persists deposits in <code>SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)</code>. API summary:
+<li><code>RentEscrow</code> (<code>node/src/storage/fs.rs</code>) persists deposits in <code>SimpleDb::open_named(names::STORAGE_FS, TB_STORAGE_PIPELINE_DIR)</code>. API summary:</li>
+<li><code>lock(id, depositor, amount, expiry)</code> writes a record and increments <code>RENT_ESCROW_LOCKED_TOTAL</code>.</li>
+<li><code>release(id)</code> removes the record, refunds 90 % to the depositor, burns 10 % (tracked via <code>RENT_ESCROW_REFUNDED_TOTAL</code>/<code>RENT_ESCROW_BURNED_TOTAL</code>), and returns <code>(account, refund, burn)</code>.
 <ul>
-<li><code>lock(id, depositor, amount, expiry)</code> writes a record and increments <code>RENT_ESCROW_LOCKED_CT_TOTAL</code>.</li>
-<li><code>release(id)</code> removes the record, refunds 90 % to the depositor, burns 10 % (tracked via <code>RENT_ESCROW_REFUNDED_CT_TOTAL</code>/<code>RENT_ESCROW_BURNED_CT_TOTAL</code>), and returns <code>(account, refund, burn)</code>.</li>
 <li><code>purge_expired(now)</code> sweeps stale locks and emits identical telemetry. Expiry checks happen before every rent escrow lookup so operators only need to call it when clocks skew.</li>
 </ul>
 </li>
@@ -507,9 +507,9 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <ul>
 <li>Legacy manifests still exist under <code>storage_market/legacy/</code>. <code>storage_market/src/importer.rs</code> provides an ergonomic wrapper around that filesystem for audits and replay:
 <ul>
-<li><code>tb-cli storage importer audit --dir &lt;market&gt;</code> scans the pending/migrated manifest directories, samples up to 32 entries (<code>AUDIT_SAMPLE_LIMIT</code>), and reports duplicates/missing keys.</li>
-<li><code>tb-cli storage importer rerun --overwrite</code> replays a manifest into the sled <code>market/contracts</code> tree. Modes: <code>InsertMissing</code> (default) or <code>OverwriteExisting</code>. Use <code>--dry-run</code> to see the counts first.</li>
-<li><code>tb-cli storage importer verify --scope {contracts,all}</code> compares manifest checksums (deterministic hash over <code>(&lt;cf&gt;, key, value)</code> pairs) with the live database.</li>
+<li><code>contract-cli storage importer audit --dir &lt;market&gt;</code> scans the pending/migrated manifest directories, samples up to 32 entries (<code>AUDIT_SAMPLE_LIMIT</code>), and reports duplicates/missing keys.</li>
+<li><code>contract-cli storage importer rerun --overwrite</code> replays a manifest into the sled <code>market/contracts</code> tree. Modes: <code>InsertMissing</code> (default) or <code>OverwriteExisting</code>. Use <code>--dry-run</code> to see the counts first.</li>
+<li><code>contract-cli storage importer verify --scope {contracts,all}</code> compares manifest checksums (deterministic hash over <code>(&lt;cf&gt;, key, value)</code> pairs) with the live database.</li>
 </ul>
 </li>
 <li>All importer commands honor <code>--allow-absent</code> so CI can skip legacy steps when the manifests were already migrated. Reports can be written to disk (<code>--out report.json</code>) and are encoded with <code>foundation_serialization::json</code> for reproducibility.</li>
@@ -528,8 +528,8 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li><code>idempotency_key</code> is BLAKE3(<code>job_id | buyer | provider | price | units | version | lane</code>), guaranteeing deduplicated settlement entries even if retries occur.</li>
 <li>SNARK receipts now embed a <code>ProofBundle</code> produced by <code>node/src/compute_market/snark.rs</code>. The helper wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled circuits per digest, selects CPU or GPU provers automatically, records telemetry (<code>snark_prover_latency_seconds{backend}</code>, <code>snark_prover_failure_total{backend}</code>), and emits bundles containing the circuit/output/witness commitments plus serialized proof bytes.</li>
 <li>Each proof bundle includes a <code>CircuitArtifact { circuit_hash, wasm_hash, generated_at }</code>, allowing offline re-verification and matching against CLI/explorer exports without re-running compilation.</li>
-<li>CLI support lives under <code>cli/src/snark.rs</code>. <code>snark compile</code> now writes attested circuit artifacts (digest + wasm hash + timestamp) so operators can cache proving parameters offline, and <code>tb-cli compute proofs --limit N</code> streams the latest <code>compute_market.sla_history</code> proofs (fingerprint, backend, commitments, artifact metadata) for audits.</li>
-<li>Settlement persists every accepted proof via <code>Settlement::record_proof</code>, retaining the full vector of bundles per SLA and exposing them through <code>compute_market.sla_history</code>. <code>tb-cli explorer sync-proofs</code> writes the same <code>Vec&lt;ProofBundle&gt;</code> blobs into the explorer tables (<code>compute_sla_history</code>, <code>compute_sla_proofs</code>), and the explorer HTTP route <code>/compute/sla/history?limit=N</code> re-exports the decoded fingerprints/artifacts for dashboards and auditors.</li>
+<li>CLI support lives under <code>cli/src/snark.rs</code>. <code>snark compile</code> now writes attested circuit artifacts (digest + wasm hash + timestamp) so operators can cache proving parameters offline, and <code>contract-cli compute proofs --limit N</code> streams the latest <code>compute_market.sla_history</code> proofs (fingerprint, backend, commitments, artifact metadata) for audits.</li>
+<li>Settlement persists every accepted proof via <code>Settlement::record_proof</code>, retaining the full vector of bundles per SLA and exposing them through <code>compute_market.sla_history</code>. <code>contract-cli explorer sync-proofs</code> writes the same <code>Vec&lt;ProofBundle&gt;</code> blobs into the explorer tables (<code>compute_sla_history</code>, <code>compute_sla_proofs</code>), and the explorer HTTP route <code>/compute/sla/history?limit=N</code> re-exports the decoded fingerprints/artifacts for dashboards and auditors.</li>
 </ul>
 <h3 id="63-sla-slashing-and-dashboards"><a class="header" href="#63-sla-slashing-and-dashboards">6.3 SLA slashing and dashboards</a></h3>
 <ul>
@@ -537,19 +537,19 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <ul>
 <li><code>SettleMode</code> (<code>DryRun</code>, <code>Armed</code>, <code>Real</code>) toggled via governance or CLI.</li>
 <li><code>SlaRecord { job_id, provider, buyer, provider_bond, consumer_bond, deadline, scheduled_at, proofs: Vec&lt;ProofBundle&gt; }</code>.</li>
-<li><code>SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned_ct, refunded_ct, proofs }</code>.</li>
+<li><code>SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned, refunded, proofs }</code>.</li>
 </ul>
 </li>
-<li>Automation:
+<li>Automation:</li>
+<li>Violations call <code>SlaOutcome::Violated { reason, automated }</code>, burn the lesser of the bond and configured slash amount (<code>COMPUTE_SLA_AUTOMATED_SLASH_TOTAL</code>, <code>SLASHING_BURN_TOTAL</code>).
 <ul>
-<li>Violations call <code>SlaOutcome::Violated { reason, automated }</code>, burn the lesser of the bond and configured slash amount (<code>COMPUTE_SLA_AUTOMATED_SLASH_TOTAL</code>, <code>SLASHING_BURN_CT_TOTAL</code>).</li>
 <li>Dashboards plot <code>COMPUTE_SLA_PENDING_TOTAL</code>, <code>COMPUTE_SLA_VIOLATIONS_TOTAL</code>, and <code>COMPUTE_SLA_NEXT_DEADLINE_TS</code>.</li>
 </ul>
 </li>
 <li>Operator workflow:
 <ol>
 <li>Arm settlement via <code>compute_arm_real</code> RPC, wait for the <code>activate_at</code> block height, then advance to <code>SettleMode::Real</code>.</li>
-<li>Watch aggregator dashboards for SLA thresholds; use <code>tb-cli compute settlement</code> to inspect queued records.</li>
+<li>Watch aggregator dashboards for SLA thresholds; use <code>contract-cli compute settlement</code> to inspect queued records.</li>
 <li>Use the courier appendix (below) when diagnosing stuck carry-to-earn flows and pull <code>compute_market.sla_history</code> when auditing proof material alongside SLA outcomes.</li>
 </ol>
 </li>
@@ -576,7 +576,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </ul>
 <h3 id="66-scheduler-metrics-rpc"><a class="header" href="#66-scheduler-metrics-rpc">6.6 Scheduler metrics RPC</a></h3>
 <ul>
-<li><code>scheduler.metrics</code> (<code>node/src/rpc/compute_market.rs</code>) simply forwards the JSON from <code>scheduler::metrics()</code> which contains <code>reputation</code> (provider score map) and <code>utilization</code> (capability → units consumed). Use <code>tb-cli compute scheduler metrics --json</code> for scripting.</li>
+<li><code>scheduler.metrics</code> (<code>node/src/rpc/compute_market.rs</code>) simply forwards the JSON from <code>scheduler::metrics()</code> which contains <code>reputation</code> (provider score map) and <code>utilization</code> (capability → units consumed). Use <code>contract-cli compute scheduler metrics --json</code> for scripting.</li>
 <li><code>scheduler.stats</code> returns a richer struct (<code>SchedulerStats</code>): outcome counters (<code>success</code>, <code>capability_mismatch</code>, <code>reputation_failure</code>), queue depths per priority (<code>queued_high/normal/low</code>), pending jobs with effective priority, and preemption counters.</li>
 <li>Together with <code>compute_market.stats</code> these RPCs explain why a job failed to match (e.g., reputation failure vs lack of capability) without scraping node logs.</li>
 </ul>
@@ -599,19 +599,19 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </li>
 <li><strong>Provider trust roots</strong>:
 <ul>
-<li><code>config/default.toml</code> exposes <code>energy.provider_keys = [{ provider_id = "...", public_key_hex = "..." }, …]</code>. Reloads invoke <code>node::energy::configure_provider_keys</code>, clearing and repopulating the sled-backed verifier registry so ops can rotate or revoke keys without restarts.</li>
+<li><code>config/default.toml</code> exposes <code>energy.provider_keys = [{ provider_id = "...", public_key_hex = "..." }, …]</code>. Reloads invoke <code>node::energy::configure_provider_keys</code>, clearing and repopulating the sled-backed verifier registry so ops can rotate or revoke keys without restarts. Entries are authoritative—omitting a provider removes it from the registry and puts it back into shadow mode.</li>
 </ul>
 </li>
 <li><strong>RPC + CLI</strong> (<code>node/src/rpc/energy.rs</code>, <code>cli/src/energy.rs</code>):
 <ul>
 <li>RPC methods: <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.submit_reading</code>, <code>energy.settle</code>. Helpers enforce payload shape (<code>require_string</code>, <code>require_u64</code>, <code>decode_hash</code>, <code>decode_signature</code>) and emit canonical JSON for providers/credits/receipts.</li>
-<li>CLI mirrors the RPC schema: <code>tb-cli energy register &lt;capacity&gt; &lt;price&gt; --meter-address … --jurisdiction … --stake … --owner …</code>, <code>tb-cli energy market [--provider-id … --verbose]</code>, <code>tb-cli energy submit-reading --reading-json '…'</code>, <code>tb-cli energy settle &lt;provider&gt; &lt;kwh&gt; --meter-hash … --buyer …</code>.</li>
+<li>CLI mirrors the RPC schema: <code>contract-cli energy register &lt;capacity&gt; &lt;price&gt; --meter-address … --jurisdiction … --stake … --owner …</code>, <code>contract-cli energy market [--provider-id … --verbose]</code>, <code>contract-cli energy submit-reading --reading-json '…'</code>, <code>contract-cli energy settle &lt;provider&gt; &lt;kwh&gt; --meter-hash … --buyer …</code>.</li>
 <li>All tooling (oracle adapters, explorer, dashboards) reuse the schema documented in <code>docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts</code> so meter hashes/receipts stay byte-identical everywhere.</li>
 </ul>
 </li>
-<li><strong>Oracle adapter + mock service</strong> (<code>crates/oracle-adapter</code>, <code>services/mock-energy-oracle</code>):
+<li><strong>Oracle adapter + mock service</strong> (<code>crates/oracle-adapter</code>, <code>services/mock-energy-oracle</code>):</li>
+<li>Adapter defines <code>SignatureVerifier</code>; the default (<code>Ed25519SignatureVerifier</code>) enforces signatures for every provider with a registered key. <code>MeterReadingPayload</code> implements <code>MeterReading</code> and exposes the canonical <code>signing_bytes()</code> digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.
 <ul>
-<li>Adapter defines <code>SignatureVerifier</code>; the default <code>Ed25519SignatureVerifier</code> enforces signatures for every provider with a registered key. <code>MeterReadingPayload</code> implements <code>MeterReading</code> and exposes the canonical <code>signing_bytes()</code> digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.</li>
 <li>Mock service (in-house <code>httpd</code> router) listens on <code>MOCK_ENERGY_ORACLE_ADDR</code> (default <code>127.0.0.1:8080</code>), exposes <code>/meter/:id/reading</code> (increments totals by 250 kWh, updates timestamp, returns payload) and <code>/meter/:id/submit</code> (accepts posted readings). Used by <code>scripts/deploy-worldos-testnet.sh</code>.</li>
 </ul>
 </li>
@@ -641,10 +641,10 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>Share minting:
 <ul>
 <li>First LP: <code>share = sqrt(ct * it)</code>.</li>
-<li>Subsequent LPs: <code>share = min(total_shares * ct / reserve_ct, total_shares * it / reserve_it)</code>.</li>
+<li>Subsequent LPs: <code>share = min(total_shares * ct / reserve, total_shares * it / reserve_it)</code>.</li>
 </ul>
 </li>
-<li>Swaps preserve <code>k = reserve_ct * reserve_it</code>; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.</li>
+<li>Swaps preserve <code>k = reserve * reserve_it</code>; slippage is purely the constant-product curve (no extra fee yet). Governance can wrap this module to add fees later without redesigning the math.</li>
 </ul>
 <h3 id="72-trust-line-routing"><a class="header" href="#72-trust-line-routing">7.2 Trust-line routing</a></h3>
 <ul>
@@ -681,7 +681,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>Persistence and RPC:
 <ul>
 <li>Escrow tables live in sled (<code>dex::storage::DexStore</code>) and are exported via <code>node/src/dex/storage_binary.rs</code> (bincode helpers for order books, escrow snapshots, proofs).</li>
-<li>RPC <code>dex_escrow_status</code>/<code>dex_escrow_release</code>/<code>dex_escrow_proof</code> expose the state machine; CLI mirrors them via <code>tb-cli dex escrow status|release|proof</code>.</li>
+<li>RPC <code>dex_escrow_status</code>/<code>dex_escrow_release</code>/<code>dex_escrow_proof</code> expose the state machine; CLI mirrors them via <code>contract-cli dex escrow status|release|proof</code>.</li>
 </ul>
 </li>
 <li>Explorer + metrics:
@@ -748,7 +748,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>Audit tooling:
 <ul>
 <li>Aggregator <code>/audit</code> endpoint stores incident logs.</li>
-<li><code>scripts/settlement_audit.rs</code>, <code>tools/settlement_audit</code>, and <code>tb-cli gov treasury audit</code> compare ledger projections vs settlement state.</li>
+<li><code>scripts/settlement_audit.rs</code>, <code>tools/settlement_audit</code>, and <code>contract-cli gov treasury audit</code> compare ledger projections vs settlement state.</li>
 <li>Risk reviews must cite relevant sections here before patching code.</li>
 </ul>
 </li>
@@ -763,9 +763,9 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>
 <p>Auction lifecycle:</p>
 <ol>
-<li>Seller lists via <code>tb-cli gateway domain list &lt;domain&gt; &lt;min_bid&gt; --seller &lt;acct&gt; ...</code>.</li>
-<li>Bidders lock stake references (<code>register_stake</code>) and submit bids (<code>tb-cli gateway domain bid ... --stake-ref ref1</code>). Bids must exceed both <code>min_bid_ct</code> and previous <code>highest_bid</code>.</li>
-<li>Seller (or governance) completes the sale (<code>tb-cli gateway domain complete</code>) once <code>end_ts</code> passes; ledger events (<code>LedgerEventRecord</code>) debit bidders, credit seller/royalty/treasury, and refund unused stake.</li>
+<li>Seller lists via <code>contract-cli gateway domain list &lt;domain&gt; &lt;min_bid&gt; --seller &lt;acct&gt; ...</code>.</li>
+<li>Bidders lock stake references (<code>register_stake</code>) and submit bids (<code>contract-cli gateway domain bid ... --stake-ref ref1</code>). Bids must exceed both <code>min_bid</code> and previous <code>highest_bid</code>.</li>
+<li>Seller (or governance) completes the sale (<code>contract-cli gateway domain complete</code>) once <code>end_ts</code> passes; ledger events (<code>LedgerEventRecord</code>) debit bidders, credit seller/royalty/treasury, and refund unused stake.</li>
 <li>If no bids, <code>cancel</code> reopens the domain.</li>
 </ol>
 </li>
@@ -783,7 +783,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <ul>
 <li>RPC <code>gateway.policy</code> returns the active TXT policy parsed via <code>gateway::dns::gateway_policy</code>.</li>
 <li><code>gateway.dns_lookup</code> exposes the cached verdict (<code>verified</code>, <code>pending</code>, <code>failed</code>) so explorers can show trust badges.</li>
-<li>CLI <code>tb-cli net dns verify &lt;domain&gt;</code> exercises the same path and prints cache hits/misses.</li>
+<li>CLI <code>contract-cli net dns verify &lt;domain&gt;</code> exercises the same path and prints cache hits/misses.</li>
 </ul>
 </li>
 </ul>
@@ -799,9 +799,9 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </li>
 <li>CLI runbook:
 <ol>
-<li><code>tb-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600</code> (custom script) polls the RPC <code>gateway.reads_since</code>.</li>
-<li><code>tb-cli gateway mobile-cache flush</code> before maintenance to force anchors.</li>
-<li>Inspect anchors via <code>compute_market.recent_roots</code> to ensure READ_SUB_CT credits landed.</li>
+<li><code>contract-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600</code> (custom script) polls the RPC <code>gateway.reads_since</code>.</li>
+<li><code>contract-cli gateway mobile-cache flush</code> before maintenance to force anchors.</li>
+<li>Inspect anchors via <code>compute_market.recent_roots</code> to ensure READ_SUB credits landed.</li>
 </ol>
 </li>
 </ul>
@@ -819,8 +819,8 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>The cache uses ChaCha20‑Poly1305; entries persist <code>stored_at</code>, <code>expires_at</code>, and ciphertext bytes. TTL enforcement sweeps expired records, increments <code>MOBILE_CACHE_STALE_TOTAL</code>, and updates <code>MOBILE_CACHE_QUEUE_BYTES</code>.</li>
 <li>CLI:
 <ul>
-<li><code>tb-cli gateway mobile-cache status --url http://node:26658 --pretty</code>.</li>
-<li><code>tb-cli gateway mobile-cache flush</code> to drop encrypted responses and offline queue state.</li>
+<li><code>contract-cli gateway mobile-cache status --url http://node:26658 --pretty</code>.</li>
+<li><code>contract-cli gateway mobile-cache flush</code> to drop encrypted responses and offline queue state.</li>
 </ul>
 </li>
 </ul>
@@ -837,7 +837,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li>
 <p>Light-client crate (<code>crates/light-client</code>):</p>
 <ul>
-<li><code>SyncOptions</code> gate by Wi-Fi/charging/battery and compute <code>GatingReason</code>. Device probes feed <code>DeviceStatusSnapshot</code> which feeds CLI via <code>tb-cli light-client device status --json</code>.</li>
+<li><code>SyncOptions</code> gate by Wi-Fi/charging/battery and compute <code>GatingReason</code>. Device probes feed <code>DeviceStatusSnapshot</code> which feeds CLI via <code>contract-cli light-client device status --json</code>.</li>
 <li>Headers (<code>light_client::Header</code>) mirror the canonical layout (height, prev hash, Merkle roots, VDF data, optional validator key/sig). <code>verify_and_append</code> enforces PoW and checkpoint rules.</li>
 <li><code>state_stream</code> consumers persist deltas under <code>~/.the_block/light_client.toml</code> and reuse <code>fetch_signed</code> to load jurisdiction-specific overrides.</li>
 </ul>
@@ -863,9 +863,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <li>
 <p>CLI quick start:</p>
 <ol>
-<li><code>tb-cli light-client rebate-status --url http://node:26658</code> prints local balances.</li>
-<li><code>tb-cli light-client rebate-history --limit 5 --json</code> paginates receipts (set <code>--relayer &lt;hex&gt;</code> to filter).</li>
-<li><code>tb-cli light-client device status --json</code> confirms gating vs overrides before enabling background sync.</li>
+<li><code>contract-cli light-client rebate-status --url http://node:26658</code> prints local balances.</li>
+<li><code>contract-cli light-client rebate-history --limit 5 --json</code> paginates receipts (set <code>--relayer &lt;hex&gt;</code> to filter).</li>
+<li><code>contract-cli light-client device status --json</code> confirms gating vs overrides before enabling background sync.</li>
 </ol>
 </li>
 <li>
@@ -886,9 +886,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 </ul>
 <h3 id="102-fee-rebates"><a class="header" href="#102-fee-rebates">10.2 Fee rebates</a></h3>
 <ul>
-<li>Rebates are ledger entries keyed to sender accounts. <code>node/src/fees/mod.rs</code> charges consumer traffic by applying rebates first; <code>FeeLane::Industrial</code> bypasses rebates and bills direct CT.</li>
-<li>RPC: <code>peer.rebate_status</code>, <code>peer.rebate_claim</code>. CLI: <code>tb-cli fees status</code>, <code>tb-cli fees claim</code>.</li>
-<li>Ordering: when submitting a transaction <code>submit_tx</code> calculates <code>total_consumer = amount_consumer + fee</code>, subtracts available rebate credits, and only then debits CT.</li>
+<li>Rebates are ledger entries keyed to sender accounts. <code>node/src/fees/mod.rs</code> charges consumer traffic by applying rebates first; <code>FeeLane::Industrial</code> bypasses rebates and bills direct BLOCK.</li>
+<li>RPC: <code>peer.rebate_status</code>, <code>peer.rebate_claim</code>. CLI: <code>contract-cli fees status</code>, <code>contract-cli fees claim</code>.</li>
+<li>Ordering: when submitting a transaction <code>submit_tx</code> calculates <code>total_consumer = amount_consumer + fee</code>, subtracts available rebate credits, and only then debits BLOCK.</li>
 </ul>
 <h3 id="103-governance-parameters"><a class="header" href="#103-governance-parameters">10.3 Governance parameters</a></h3>
 <ul>
@@ -899,16 +899,16 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <ul>
 <li>CLI:
 <ul>
-<li><code>tb-cli gov release propose --hash &lt;build_hash&gt; --artifact &lt;url&gt;</code> registers new releases; provenance signatures must match <code>config/release_signers.txt</code> or env overrides.</li>
-<li><code>tb-cli gov release approve --proposal &lt;id&gt;</code> collects signatures/quorum.</li>
-<li><code>tb-cli gov release rollback --proposal &lt;id&gt;</code> triggers rollback windows; explorer <code>GET /releases</code> surfaces history.</li>
+<li><code>contract-cli gov release propose --hash &lt;build_hash&gt; --artifact &lt;url&gt;</code> registers new releases; provenance signatures must match <code>config/release_signers.txt</code> or env overrides.</li>
+<li><code>contract-cli gov release approve --proposal &lt;id&gt;</code> collects signatures/quorum.</li>
+<li><code>contract-cli gov release rollback --proposal &lt;id&gt;</code> triggers rollback windows; explorer <code>GET /releases</code> surfaces history.</li>
 </ul>
 </li>
 <li>UI flows mirror CLI commands via explorer endpoints; log indexer ensures wallet + explorer display identical release states.</li>
 <li>Provenance controls (<code>node/src/provenance.rs</code>):
 <ul>
 <li>
-<p>Signer list: load from <code>TB_RELEASE_SIGNERS</code>, <code>TB_RELEASE_SIGNERS_FILE</code>, or <code>config/release_signers.txt</code>. <code>tb-cli gov release signers</code> prints the active keys.</p>
+<p>Signer list: load from <code>TB_RELEASE_SIGNERS</code>, <code>TB_RELEASE_SIGNERS_FILE</code>, or <code>config/release_signers.txt</code>. <code>contract-cli gov release signers</code> prints the active keys.</p>
 </li>
 <li>
 <p>Attestation payloads look like:</p>
@@ -934,11 +934,11 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <li><code>governance/src/treasury.rs</code> enforces:
 <ul>
 <li>Non‑negative balances (<code>ct</code>, <code>industrial</code>) tracked in sled.</li>
-<li>Streaming caps and kill switches (<code>kill_switch_subsidy_reduction</code>, <code>treasury_percent_ct</code>).</li>
+<li>Streaming caps and kill switches (<code>kill_switch_subsidy_reduction</code>, <code>treasury_percent</code>).</li>
 <li>Audit log size ≤ 256 entries; older entries roll off but anchor hashes persist.</li>
 </ul>
 </li>
-<li>Executor snapshots (CLI <code>tb-cli gov treasury executor</code>) must show monotonic <code>last_tick_at</code>. Settlement anchors are hashed and appended to the audit log for replayability.</li>
+<li>Executor snapshots (CLI <code>contract-cli gov treasury executor</code>) must show monotonic <code>last_tick_at</code>. Settlement anchors are hashed and appended to the audit log for replayability.</li>
 </ul>
 <h3 id="106-service-badge-lifecycle"><a class="header" href="#106-service-badge-lifecycle">10.6 Service badge lifecycle</a></h3>
 <ul>
@@ -950,9 +950,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 </li>
 <li>CLI (<code>cli/src/service_badge.rs</code>):
 <ul>
-<li><code>tb-cli service-badge issue|revoke</code> wrap the RPC methods for automation.</li>
-<li><code>tb-cli service-badge verify &lt;token&gt;</code> confirms authenticity (good for explorer tooltips).</li>
-<li><code>tb-cli service-badge venue register|rotate|status &lt;name&gt;</code> manages venue presence tokens tracked in <code>VENUE_TOKENS</code>.</li>
+<li><code>contract-cli service-badge issue|revoke</code> wrap the RPC methods for automation.</li>
+<li><code>contract-cli service-badge verify &lt;token&gt;</code> confirms authenticity (good for explorer tooltips).</li>
+<li><code>contract-cli service-badge venue register|rotate|status &lt;name&gt;</code> manages venue presence tokens tracked in <code>VENUE_TOKENS</code>.</li>
 </ul>
 </li>
 <li>Explorer + telemetry:
@@ -970,7 +970,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <li>Migration playbook:
 <ol>
 <li>Build both PQ and classic binaries; verify <code>crypto_suite</code> self‑tests.</li>
-<li>Rotate commit‑reveal keys using CLI (<code>tb-cli gov commit-reveal rotate</code> when available) while telemetry <code>CRYPTO_MIGRATION_*</code> metrics stay zero.</li>
+<li>Rotate commit‑reveal keys using CLI (<code>contract-cli gov commit-reveal rotate</code> when available) while telemetry <code>CRYPTO_MIGRATION_*</code> metrics stay zero.</li>
 <li>Roll out PQ wallets by updating <code>TB_WALLET_SCHEME=dalek|dilithium</code>; the wallet crate auto‑detects remote signer capability.</li>
 </ol>
 </li>
@@ -1060,8 +1060,8 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <h3 id="131-metric-inventory-and-alerting"><a class="header" href="#131-metric-inventory-and-alerting">13.1 Metric inventory and alerting</a></h3>
 <p>See Appendix B for detailed metric descriptions. Key highlights:</p>
 <div class="table-wrapper"><table><thead><tr><th>Metric</th><th>Meaning</th><th>Labels</th><th>Units</th><th>Suggested alert</th></tr></thead><tbody>
-<tr><td><code>base_fee</code></td><td>Current per-byte base fee</td><td>n/a</td><td>micro‑CT</td><td>Alert if <code>&gt;10x</code> baseline for &gt;5 min (congestion).</td></tr>
-<tr><td><code>mempool_fee_floor_{consumer,industrial}</code></td><td>Rolling fee floors</td><td>lane</td><td>micro‑CT</td><td>Alert if consumer floor moves &gt;50 % in &lt;60 s (possible spam).</td></tr>
+<tr><td><code>base_fee</code></td><td>Current per-byte base fee</td><td>n/a</td><td>micro‑BLOCK</td><td>Alert if <code>&gt;10x</code> baseline for &gt;5 min (congestion).</td></tr>
+<tr><td><code>mempool_fee_floor_{consumer,industrial}</code></td><td>Rolling fee floors</td><td>lane</td><td>micro‑BLOCK</td><td>Alert if consumer floor moves &gt;50 % in &lt;60 s (possible spam).</td></tr>
 <tr><td><code>MEMPOOL_EVICTIONS_TOTAL</code></td><td>Evicted tx count</td><td>lane</td><td>count</td><td>Alert if derivative spikes unexpectedly.</td></tr>
 <tr><td><code>PARTITION_EVENTS_TOTAL</code></td><td>Partition incidents</td><td>n/a</td><td>count</td><td>Alert on increments; cross‑link to runbook.</td></tr>
 <tr><td><code>QUIC_HANDSHAKE_FAIL_TOTAL</code></td><td>Failed QUIC handshakes</td><td>peer,reason</td><td>count</td><td>Alert on surge for specific provider.</td></tr>
@@ -1069,7 +1069,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>MOBILE_CACHE_*</code></td><td>Cache hits/misses/sweeps</td><td>action</td><td>count</td><td>Alert on sustained misses and queue overflows.</td></tr>
 <tr><td><code>COMPUTE_SLA_VIOLATIONS_TOTAL</code></td><td>SLA breaches</td><td>reason</td><td>count</td><td>Alert &gt;0 while in <code>SettleMode::Real</code>.</td></tr>
 <tr><td><code>BRIDGE_CHALLENGE_TOTAL</code></td><td>Bridge challenges</td><td>asset</td><td>count</td><td>Alert if &gt;0 without operator action.</td></tr>
-<tr><td><code>TREASURY_BALANCE_CT</code></td><td>Treasury CT balance</td><td>n/a</td><td>CT</td><td>Alert if drops &gt;X% per day outside scheduled disbursements.</td></tr>
+<tr><td><code>TREASURY_BALANCE</code></td><td>Treasury BLOCK balance</td><td>n/a</td><td>BLOCK</td><td>Alert if drops &gt;X% per day outside scheduled disbursements.</td></tr>
 <tr><td><code>WRAPPER_DEPENDENCY_POLICY_VIOLATION</code></td><td>Dependency drift</td><td>wrapper</td><td>count</td><td>Alert immediately; governance override required.</td></tr>
 </tbody></table>
 </div>
@@ -1086,39 +1086,47 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <h2 id="14-developer-handbook-highlights"><a class="header" href="#14-developer-handbook-highlights">14. Developer Handbook Highlights</a></h2>
 <ul>
 <li><strong>Concurrency &amp; Logging</strong>: Use <code>concurrency::{MutexExt, DashMap}</code> to avoid poisoned locks; log via <code>diagnostics::tracing</code> with structured fields (<code>component</code>, <code>peer</code>, <code>lane</code>, etc.). Never log PII; privacy filters exist for the LE portal only.</li>
-<li><strong>Debugging</strong>: <code>tb-cli diagnostics {mempool,gossip,mesh,tls}</code> surfaces cached stats. Enable <code>RUST_LOG=trace</code> plus diagnostics subscriber when reproducing issues. Probe CLI (above) complements runtime diagnostics.</li>
+<li><strong>Debugging</strong>: <code>contract-cli diagnostics {mempool,gossip,mesh,tls}</code> surfaces cached stats. Enable <code>RUST_LOG=trace</code> plus diagnostics subscriber when reproducing issues. Probe CLI (above) complements runtime diagnostics.</li>
 <li><strong>Performance &amp; Benchmarks</strong>: Bench harnesses under <code>benches/</code> and Grafana dashboards compare results against thresholds in <code>config/benchmarks/*.thresholds</code>. Export histograms via <code>TB_BENCH_PROM_PATH</code>.</li>
 <li><strong>Formal Methods &amp; Simulation</strong>: <code>formal/</code> crate plus <code>docs/formal.md</code> house model checks. <code>sim/</code> contains scenario harnesses (dependency faults, DKG latency, bridge threats); run them before altering consensus or governance logic.</li>
-<li><strong>WASM/VM Debug</strong>: <code>cli/src/wasm.rs</code>, <code>node/src/vm</code>, <code>node/src/vm/debugger.rs</code> provide contract deployment, tracing, and debugging. Workflow: <code>tb-cli wasm build</code> → <code>tb-cli contract deploy</code> → <code>tb-cli contract call</code> → <code>tb-cli vm trace --tx &lt;hash&gt;</code>.</li>
+<li><strong>WASM/VM Debug</strong>: <code>cli/src/wasm.rs</code>, <code>node/src/vm</code>, <code>node/src/vm/debugger.rs</code> provide contract deployment, tracing, and debugging. Workflow: <code>contract-cli wasm build</code> → <code>contract-cli contract deploy</code> → <code>contract-cli contract call</code> → <code>contract-cli vm trace --tx &lt;hash&gt;</code>.</li>
 </ul>
 <hr />
 <h2 id="appendices"><a class="header" href="#appendices">Appendices</a></h2>
 <h3 id="appendix-a--rpc-method-index"><a class="header" href="#appendix-a--rpc-method-index">Appendix A · RPC Method Index</a></h3>
-<p><em>All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house <code>httpd</code> router. Every request must carry <code>{"jsonrpc":"2.0","id":&lt;id&gt;,"method":...,"params":...}</code>; responses mirror the standard result/error envelope. Objects below list field names, types, and whether they are optional (<code>?</code>). Unless noted otherwise, numeric fee values are expressed in micro-CT and heights/epochs use unsigned 64-bit integers.</em></p>
+<p><em>All methods speak JSON-RPC 2.0 over HTTP(S) via the in-house <code>httpd</code> router. Every request must carry <code>{"jsonrpc":"2.0","id":&lt;id&gt;,"method":...,"params":...}</code>; responses mirror the standard result/error envelope. Objects below list field names, types, and whether they are optional (<code>?</code>). Unless noted otherwise, numeric fee values are expressed in micro-BLOCK and heights/epochs use unsigned 64-bit integers.</em></p>
 <h4 id="ad_market-nodesrcrpcad_marketrs"><a class="header" href="#ad_market-nodesrcrpcad_marketrs">ad_market.* (<code>node/src/rpc/ad_market.rs</code>)</a></h4>
 <p><strong>Objects</strong></p>
 <ul>
-<li><code>CampaignSummary</code>: <code>{id, advertiser_account, remaining_budget_usd_micros, reserved_budget_usd_micros, creatives[]}</code>.</li>
-<li><code>DistributionPolicy</code>: <code>{viewer_percent, host_percent, hardware_percent, verifier_percent}</code>.</li>
-<li><code>CohortPriceSnapshot</code>: <code>{domain, provider?, badges[], price_per_mib_usd_micros, target_utilization_ppm, observed_utilization_ppm}</code>.</li>
-<li><code>BudgetSnapshot</code>: top-level fields <code>generated_at_micros</code>, <code>config</code> (see <code>BudgetBrokerConfig</code>), <code>campaigns[]</code> (each with <code>id</code>, <code>kappa</code>, <code>epoch_spend_total_usd_micros</code>, <code>remaining_usd_micros</code>, <code>cohorts[]</code>).</li>
-<li><code>ReadinessSnapshot</code>: <code>{ready, window_secs, unique_viewers, host_count, provider_count, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, utilization{cohort-&gt;{domain,viewer_ppm,host_ppm}}, distribution?}</code>.</li>
-<li><code>PolicySnapshot</code>: stored in <code>node/ad_policy_snapshot.rs</code>; serialized as <code>{epoch, weights[], governance_hash}</code>.</li>
-<li><code>CampaignRegistration</code>: canonical ad campaign object (ID, advertiser account, creatives, metadata map, budgets) as accepted by <code>ad_market::campaign_from_value</code>.</li>
-<li><code>ConversionRecord</code>: <code>{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, occurred_at_micros?}</code>. Requires <code>Authorization: Advertiser &lt;account&gt;:&lt;token&gt;</code> header; token hash stored under <code>metadata["conversion_token_hash"]</code>.</li>
+<li><code>DomainTier</code>: enum string <code>"premium" | "reserved" | "community" | "unverified"</code> derived from <code>.block</code> auctions (<code>node/src/gateway/dns.rs</code>). Premium/reserved entries require proof of stake ownership before targeting.</li>
+<li><code>PresenceBucket</code>: <code>{bucket_id,String, kind:"localnet"|"range_boost", beacon_id,String, radius_meters,u16, minted_at_micros,u64, expires_at_micros,u64, confidence_bps,u16, venue_id?, crowd_size_hint?, presence_badge?}</code>. Proofs originate from LocalNet/Range Boost receipts and expire per <code>TB_PRESENCE_TTL_SECS</code>.</li>
+<li><code>CohortKeyV2</code>: <code>{domain,String, domain_tier:DomainTier, domain_owner?:AccountId, provider?:String, badges:Vec&lt;BadgeId&gt;, interest_tags:Vec&lt;InterestTagId&gt;, presence_bucket?:PresenceBucket, selectors_version,u16}</code>. Keys serialize under <code>cohort_v2:&lt;hash&gt;</code>; v1 tuple keys remain readable for downgrade migrations.</li>
+<li><code>SelectorBidSpec</code>: <code>{selector_id,String, clearing_price_usd_micros,u64, shading_factor_bps,u16, slot_cap,u32, max_pacing_ppm,u32}</code>. Used anywhere <code>selector_budget</code> appears.</li>
+<li><code>CampaignSummary</code>: <code>{id, advertiser_account, remaining_budget_usd_micros, reserved_budget_usd_micros, selector_budget:Vec&lt;SelectorBidSpec&gt;, creatives[], badges[], interest_tags[], presence_filters[], domain_filters?{include?:DomainTier[],exclude?:DomainTier[]}}</code>.</li>
+<li><code>DistributionPolicy</code>: <code>{viewer_percent, host_percent, hardware_percent, verifier_percent}</code> (unchanged) but now annotated in responses with <code>selector_overrides?</code> whenever governance sets selector-specific payouts.</li>
+<li><code>CohortPriceSnapshot</code>: <code>{key:CohortKeyV2, price_per_mib_usd_micros, selector_budget:Vec&lt;SelectorBidSpec&gt;, target_utilization_ppm, observed_utilization_ppm, privacy_budget_remaining_ppm}</code>.</li>
+<li><code>BudgetSnapshot</code>: <code>{generated_at_micros,u64, config:BudgetBrokerConfig, privacy_budget:{total_ppm,u32, remaining_ppm,u32}, campaigns:[{id, kappa,f64, epoch_spend_total_usd_micros, remaining_usd_micros, selector_budget:Vec&lt;SelectorBidSpec&gt;, cohorts[CohortKeyV2]}], uplift?:{selector:String, holdout_fraction_bps,u16, estimated_roas,f64}[]}</code>.</li>
+<li><code>ReadinessSnapshot</code>: <code>{ready,bool, window_secs,u32, unique_viewers,u64, host_count,u64, provider_count,u64, thresholds:{min_unique_viewers,min_host_count,min_provider_count}, segments:{domain_tier-&gt;{supply_ppm, readiness_score}, interest_tag-&gt;{supply_ppm, readiness_score}, presence_bucket-&gt;{freshness_histogram, ready_slots}}, privacy_budget:{remaining_ppm,u32, denied:int}, uplift_summary:{selector:String, holdout_fraction_bps,u16, deltar_ppm,i64}, distribution?}</code>.</li>
+<li><code>PolicySnapshot</code>: stored in <code>node/ad_policy_snapshot.rs</code>; serialized as <code>{epoch,u64, cohort_schema_version,u16, selector_weights[], governance_hash}</code>.</li>
+<li><code>CampaignRegistration</code>: payload accepted by <code>ad_market::campaign_from_value</code>. Schema: <code>{id,String, advertiser_account,String, creatives[], metadata, selector_budget:Vec&lt;SelectorBidSpec&gt;, interest_tags:Vec&lt;InterestTagId&gt;, badges:Vec&lt;BadgeId&gt;, presence_filters?:{allow?:PresenceBucketSpec[], deny?:PresenceBucketSpec[]}, domain_filters?:{include?:DomainTier[], exclude?:DomainTier[]}, conversion_value_rules?:{currency_code?,"USD" default, default_value_usd_micros?, value?, attribution_window_secs?, selector_weights?:[{selector_id, weight_ppm,u32}]}}</code>.</li>
+<li><code>ConversionRecord</code>: <code>{campaign_id, creative_id, advertiser_account, assignment:{fold,u8,in_holdout,bool,propensity,f64}, value_usd_micros?, value?, currency_code?, attribution_window_secs?, selector_weights?:[{selector_id,String, value_weight_ppm,u32}], occurred_at_micros?}</code>. Requires <code>Authorization: Advertiser &lt;account&gt;:&lt;token&gt;</code>; token hash stored under <code>metadata["conversion_token_hash"]</code>.</li>
+<li><code>PresenceCohortSummary</code>: <code>{bucket:PresenceBucket, ready_slots,u64, privacy_guardrail:String, selector_prices:Vec&lt;SelectorBidSpec&gt;}</code> returned by <code>ad_market.list_presence_cohorts</code>.</li>
 </ul>
-<p><strong>Common errors</strong>: <code>-32602</code> invalid params, <code>-32603</code> internal/disabled, <code>-32000</code> duplicate campaign, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030..-32033</code> advertiser auth failures.</p>
+<p><strong>Common errors</strong>: <code>-32602</code> invalid params, <code>-32603</code> internal/disabled, <code>-32000</code> duplicate campaign, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030..-32033</code> advertiser auth failures.
+Additional selector-specific errors: <code>-32034</code> invalid presence bucket (expired/unsupported), <code>-32035</code> forbidden selector combination per privacy policy, <code>-32036</code> unknown interest tag/domain tier, <code>-32037</code> insufficient privacy budget, <code>-32038</code> holdout overlap, <code>-32039</code> mismatched selector weights.</p>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
-<tr><td><code>ad_market.inventory</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy,oracle:{ct_price_usd_micros,it_price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot]}</code></td><td><code>-32603</code> when the market handle is not configured</td></tr>
-<tr><td><code>ad_market.list_campaigns</code></td><td>none</td><td><code>{status:"ok",campaigns:[CampaignSummary]}</code></td><td><code>-32603</code> when disabled</td></tr>
-<tr><td><code>ad_market.distribution</code></td><td>none</td><td><code>{status:"ok",distribution:DistributionPolicy}</code></td><td><code>-32603</code></td></tr>
-<tr><td><code>ad_market.budget</code></td><td>none</td><td><code>{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...}}</code> mirroring <code>budget_snapshot_to_value</code></td><td><code>-32603</code></td></tr>
-<tr><td><code>ad_market.broker_state</code></td><td>none</td><td>Same payload as <code>ad_market.budget</code> (includes pacing deltas and analytics)</td><td><code>-32603</code></td></tr>
-<tr><td><code>ad_market.readiness</code></td><td>none</td><td><code>ReadinessSnapshot</code> plus optional <code>distribution</code> (only when coupled with live market data)</td><td><code>-32603</code> when readiness handle unset</td></tr>
+<tr><td><code>ad_market.inventory</code></td><td><code>{selector_filter?:{domain_tier?,interest_tag?,presence_bucket_id?,badge?}}</code></td><td><code>{status:"ok",distribution:DistributionPolicy,oracle:{price_usd_micros},campaigns:[CampaignSummary],cohort_prices:[CohortPriceSnapshot],selector_prices:Vec&lt;SelectorBidSpec&gt;}</code></td><td><code>-32603</code> when the market handle is not configured, <code>-32035</code> selector violates privacy</td></tr>
+<tr><td><code>ad_market.list_campaigns</code></td><td><code>{selector_filter?}</code></td><td><code>{status:"ok",campaigns:[CampaignSummary]}</code></td><td><code>-32603</code> when disabled</td></tr>
+<tr><td><code>ad_market.distribution</code></td><td><code>{selector_id?}</code></td><td><code>{status:"ok",distribution:DistributionPolicy,selector_overrides?:Vec&lt;SelectorBidSpec&gt;}</code></td><td><code>-32603</code></td></tr>
+<tr><td><code>ad_market.budget</code></td><td><code>{campaign_id?}</code></td><td><code>{status:"ok",config:BudgetBrokerConfig,campaigns:[...],delta:{...},privacy_budget:{...}}</code> mirroring <code>budget_snapshot_to_value</code></td><td><code>-32603</code></td></tr>
+<tr><td><code>ad_market.broker_state</code></td><td>none</td><td>Same payload as <code>ad_market.budget</code> plus pacing deltas and competitiveness analytics per selector</td><td><code>-32603</code></td></tr>
+<tr><td><code>ad_market.readiness</code></td><td><code>{selector_filter?}</code></td><td><code>ReadinessSnapshot</code> including per-selector inventory depth, presence-proof freshness histograms, and privacy budget gauges; optional <code>distribution</code> only when live market data is attached</td><td><code>-32603</code> when readiness handle unset, <code>-32037</code> privacy guardrail triggered</td></tr>
 <tr><td><code>ad_market.policy_snapshot</code></td><td><code>{epoch}</code></td><td>Snapshot JSON from <code>ad_policy_snapshot::load_snapshot</code> or <code>{status:"not_found"}</code></td><td><code>-32602</code> missing epoch</td></tr>
 <tr><td><code>ad_market.policy_snapshots</code></td><td><code>{start_epoch?,end_epoch?}</code> (<code>end_epoch</code> defaults to <code>chain_height/120</code>)</td><td><code>{snapshots:[PolicySnapshot]}</code></td><td>none (empty list when no snapshots)</td></tr>
 <tr><td><code>ad_market.register_campaign</code></td><td><code>CampaignRegistration</code></td><td><code>{status:"ok"}</code> on success</td><td><code>-32603</code> when market disabled/persistence error, <code>-32602</code> invalid payload, <code>-32000</code> duplicate campaign</td></tr>
-<tr><td><code>ad_market.record_conversion</code></td><td><code>ConversionRecord</code> body + advertiser auth header</td><td><code>{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?}}</code></td><td><code>-32603</code> disabled/internal, <code>-32602</code> invalid payload, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030</code> auth missing, <code>-32031</code> advertiser mismatch, <code>-32032</code> token missing, <code>-32033</code> invalid token</td></tr>
+<tr><td><code>ad_market.record_conversion</code></td><td><code>ConversionRecord</code> body + advertiser auth header</td><td><code>{status:"ok",conversion_summary:{authenticated_total,rejected_total,error_counts,last_error?,last_authenticated_at?,value_totals:{usd_micros?,ct?}}}</code></td><td><code>-32603</code> disabled/internal, <code>-32602</code> invalid payload, <code>-32001</code> unknown campaign, <code>-32002</code> unknown creative, <code>-32030</code> auth missing, <code>-32031</code> advertiser mismatch, <code>-32032</code> token missing, <code>-32033</code> invalid token, <code>-32039</code> selector weight mismatch</td></tr>
+<tr><td><code>ad_market.list_presence_cohorts</code></td><td><code>{region?,domain_tier?,min_confidence_bps?,interest_tag?}</code></td><td><code>{status:"ok",cohorts:[PresenceCohortSummary],privacy_budget:{remaining_ppm}}</code></td><td><code>-32602</code> invalid filter, <code>-32034</code> stale bucket, <code>-32037</code> privacy guardrail</td></tr>
+<tr><td><code>ad_market.reserve_presence</code></td><td><code>{campaign_id,String, presence_bucket_id,String, slot_count,u32, expires_at_micros?, selector_budget?:Vec&lt;SelectorBidSpec&gt;}</code></td><td><code>{status:"ok",reservation_id,String,expires_at_micros,u64}</code></td><td><code>-32001</code> unknown campaign, <code>-32034</code> invalid bucket, <code>-32035</code> forbidden selector combo, <code>-32037</code> insufficient privacy budget</td></tr>
 </tbody></table>
 </div>
 <h4 id="analytics-anomaly-labeling-and-settlement-probes"><a class="header" href="#analytics-anomaly-labeling-and-settlement-probes">Analytics, anomaly labeling, and settlement probes</a></h4>
@@ -1160,9 +1168,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 </ul>
 <p><strong>Common errors</strong> map bridge errors to RPC codes (<code>-32002</code> invalid proof, <code>-32007</code> duplicate withdrawal, <code>-32010</code> challenge window open, etc.) plus <code>-32602</code> invalid params and <code>-32000</code> busy DB lock.</p>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
-<tr><td><code>bridge.relayer_status</code></td><td><code>RelayerStatusRequest</code></td><td><code>RelayerInfo {relayer,bond_ct,pending_rewards_ct,duty_state}</code></td><td>bridge error codes</td></tr>
+<tr><td><code>bridge.relayer_status</code></td><td><code>RelayerStatusRequest</code></td><td><code>RelayerInfo {relayer,bond,pending_rewards,duty_state}</code></td><td>bridge error codes</td></tr>
 <tr><td><code>bridge.bond_relayer</code></td><td><code>BondRelayerRequest</code></td><td><code>{status:"ok"}</code></td><td><code>-32014</code> insufficient bond, storage errors</td></tr>
-<tr><td><code>bridge.claim_rewards</code></td><td><code>ClaimRewardsRequest</code></td><td><code>{claimed_ct, pending_ct}</code></td><td><code>-32015/-32017</code> reward validation errors</td></tr>
+<tr><td><code>bridge.claim_rewards</code></td><td><code>ClaimRewardsRequest</code></td><td><code>{claimed, pending}</code></td><td><code>-32015/-32017</code> reward validation errors</td></tr>
 <tr><td><code>bridge.verify_deposit</code></td><td><code>VerifyDepositRequest</code></td><td><code>DepositReceipt</code> (+ emission details) when proof checks succeed</td><td>proof errors <code>-32002</code>, replay <code>-32006</code>, storage <code>-32013</code></td></tr>
 <tr><td><code>bridge.request_withdrawal</code></td><td><code>RequestWithdrawalRequest</code></td><td><code>PendingWithdrawalInfo</code> plus commitment hash</td><td>duplicates <code>-32007</code>, insufficient bond <code>-32014</code></td></tr>
 <tr><td><code>bridge.challenge_withdrawal</code></td><td><code>ChallengeWithdrawalRequest</code></td><td><code>{status:"ok", challenge:ChallengeRecord}</code></td><td><code>-32008</code> missing withdrawal, <code>-32009</code> already challenged</td></tr>
@@ -1175,7 +1183,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>bridge.reward_accruals</code></td><td><code>RewardAccrualsRequest</code></td><td><code>{items:[RewardAccrualRecord], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.settlement_log</code></td><td><code>SettlementLogRequest</code></td><td><code>{items:[SettlementRecord], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.dispute_audit</code></td><td><code>DisputeAuditRequest</code></td><td><code>{items:[DisputeAuditRecord], next_cursor?}</code></td><td>none</td></tr>
-<tr><td><code>bridge.relayer_accounting</code></td><td><code>RelayerAccountingRequest</code></td><td><code>{relayer, stake_ct, duty_totals, slash_totals}</code></td><td>none</td></tr>
+<tr><td><code>bridge.relayer_accounting</code></td><td><code>RelayerAccountingRequest</code></td><td><code>{relayer, stake, duty_totals, slash_totals}</code></td><td>none</td></tr>
 <tr><td><code>bridge.duty_log</code></td><td><code>DutyLogRequest</code></td><td><code>{items:[DutyRecord], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.deposit_history</code></td><td><code>DepositHistoryRequest</code></td><td><code>{items:[DepositReceipt], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.slash_log</code></td><td><code>SlashLogRequest</code></td><td><code>{items:[SlashRecord], next_cursor?}</code></td><td>none</td></tr>
@@ -1184,17 +1192,17 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 </tbody></table>
 </div>
 <h4 id="domain-registry-and-gateway-surfaces-nodesrcgatewaydnsrs-nodesrcservice_badgers-nodesrcgatewaymobile_cachers"><a class="header" href="#domain-registry-and-gateway-surfaces-nodesrcgatewaydnsrs-nodesrcservice_badgers-nodesrcgatewaymobile_cachers">Domain registry and gateway surfaces (<code>node/src/gateway/dns.rs</code>, <code>node/src/service_badge.rs</code>, <code>node/src/gateway/mobile_cache.rs</code>)</a></h4>
-<p>DNS methods share the JSON schema under <code>docs/spec/dns_record.schema.json</code>. Auctions/stakes use sled-backed objects <code>{domain, owner, reserve_ct, bidders[], expires_at}</code>.</p>
+<p>DNS methods share the JSON schema under <code>docs/spec/dns_record.schema.json</code>. Auctions/stakes use sled-backed objects <code>{domain, owner, reserve, bidders[], expires_at}</code>.</p>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
 <tr><td><code>dns.publish_record</code></td><td><code>DnsRecord</code> JSON (TXT + proof metadata)</td><td><code>{status:"ok", record_hash}</code></td><td>schema validation errors surfaced via <code>gateway::dns::Error</code> codes (forwarded via <code>rpc_error</code>)</td></tr>
-<tr><td><code>dns.list_for_sale</code></td><td><code>{domain,reserve_ct, ttl_blocks}</code></td><td><code>{status:"ok"}</code> once sale is staged</td><td>same as above</td></tr>
-<tr><td><code>dns.place_bid</code></td><td><code>{domain,bid_ct,bidder}</code></td><td><code>{status:"ok", leading_bid}</code></td><td>bidding window/price errors via dns error codes</td></tr>
+<tr><td><code>dns.list_for_sale</code></td><td><code>{domain,reserve, ttl_blocks}</code></td><td><code>{status:"ok"}</code> once sale is staged</td><td>same as above</td></tr>
+<tr><td><code>dns.place_bid</code></td><td><code>{domain,bid,bidder}</code></td><td><code>{status:"ok", leading_bid}</code></td><td>bidding window/price errors via dns error codes</td></tr>
 <tr><td><code>dns.complete_sale</code></td><td><code>{domain}</code></td><td><code>{status:"ok", new_owner}</code></td><td><code>not_found</code>, <code>auction_open</code> style dns errors</td></tr>
 <tr><td><code>dns.cancel_sale</code></td><td><code>{domain}</code></td><td><code>{status:"ok"}</code></td><td>dns errors</td></tr>
-<tr><td><code>dns.register_stake</code></td><td><code>{domain,stake_ct}</code></td><td><code>{status:"ok", stake_id}</code></td><td>dns errors</td></tr>
+<tr><td><code>dns.register_stake</code></td><td><code>{domain,stake}</code></td><td><code>{status:"ok", stake_id}</code></td><td>dns errors</td></tr>
 <tr><td><code>dns.withdraw_stake</code></td><td><code>{stake_id}</code></td><td><code>{status:"ok"}</code></td><td>dns errors</td></tr>
-<tr><td><code>dns.stake_status</code></td><td><code>{stake_id?}</code></td><td><code>{stakes:[{domain, owner, stake_ct, expires_at}]}</code> or single entry when ID supplied</td><td>dns errors</td></tr>
-<tr><td><code>dns.auctions</code></td><td><code>{domain?}</code> filter</td><td><code>{auctions:[{domain,status,reserve_ct,bids,closes_at}]}</code></td><td>dns errors</td></tr>
+<tr><td><code>dns.stake_status</code></td><td><code>{stake_id?}</code></td><td><code>{stakes:[{domain, owner, stake, expires_at}]}</code> or single entry when ID supplied</td><td>dns errors</td></tr>
+<tr><td><code>dns.auctions</code></td><td><code>{domain?}</code> filter</td><td><code>{auctions:[{domain,status,reserve,bids,closes_at}]}</code></td><td>dns errors</td></tr>
 <tr><td><code>gateway.policy</code></td><td><code>{}</code> or filters (<code>region?</code>)</td><td>Current gateway policy JSON (rate limits, read-ack requirements, privacy toggles)</td><td>none</td></tr>
 <tr><td><code>gateway.reads_since</code></td><td><code>{since_ms}</code></td><td><code>{count, buckets:[{ts_ms,count}]}</code> built from read-ack batches</td><td>none</td></tr>
 <tr><td><code>gateway.venue_status</code></td><td><code>{venue_id}</code></td><td><code>{status:"ok", crowd_size, last_seen}</code> from <code>service_badge::venue_status_detail</code></td><td><code>-32602</code> missing venue_id</td></tr>
@@ -1221,7 +1229,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>compute_market.scheduler_stats</code></td><td>none</td><td>Raw scheduler view (per-lane queues, fairness windows)</td><td>none</td></tr>
 <tr><td><code>compute_market.scheduler_metrics</code></td><td>none</td><td><code>scheduler::Metrics</code> structure (latency, starvation counters, lane deadlines)</td><td>none</td></tr>
 <tr><td><code>compute_market.recent_roots</code></td><td><code>{n?}</code></td><td>Latest <code>n</code> micro-shard roots used for receipts</td><td>none</td></tr>
-<tr><td><code>compute_market.provider_balances</code></td><td>none</td><td><code>{providers:[{id, pending_ct, settled_ct, sla_bond_ct}]}</code></td><td>none</td></tr>
+<tr><td><code>compute_market.provider_balances</code></td><td>none</td><td><code>{providers:[{id, pending, settled, sla_bond}]}</code></td><td>none</td></tr>
 <tr><td><code>compute_market.audit</code></td><td>none</td><td>Extended audit log incl. fairness window snapshots, outstanding SLA records</td><td><code>MarketError</code> codes</td></tr>
 </tbody></table>
 </div>
@@ -1229,7 +1237,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
 <tr><td><code>config.reload</code></td><td><code>{compaction_secs?, sample_rate_ppm?}</code></td><td><code>{status:"ok", sample_rate_ppm, compaction_secs}</code> and updates telemetry config</td><td>none (values sanitized)</td></tr>
 <tr><td><code>consensus.difficulty</code></td><td><code>{window?}</code></td><td>Returns difficulty window stats (EMA short/med/long, next target)</td><td>none</td></tr>
-<tr><td><code>consensus.pos.register</code></td><td><code>{validator, stake_ct, proof}</code></td><td><code>{status:"ok"}</code> once validator registered</td><td>PoS errors (<code>-32060</code> range)</td></tr>
+<tr><td><code>consensus.pos.register</code></td><td><code>{validator, stake, proof}</code></td><td><code>{status:"ok"}</code> once validator registered</td><td>PoS errors (<code>-32060</code> range)</td></tr>
 <tr><td><code>consensus.pos.bond</code></td><td><code>{validator, stake_delta}</code></td><td><code>{status:"ok"}</code></td><td>same</td></tr>
 <tr><td><code>consensus.pos.unbond</code></td><td><code>{validator, amount}</code></td><td><code>{status:"ok"}</code> after queueing unbond</td><td>same</td></tr>
 <tr><td><code>consensus.pos.slash</code></td><td><code>{validator, reason, proof}</code></td><td><code>{status:"ok"}</code> after slash recorded</td><td>same</td></tr>
@@ -1258,7 +1266,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
 <tr><td><code>light.headers</code></td><td><code>{from_height, count}</code></td><td><code>{headers:[{height,header_fields...}]}</code> chunked for device syncing</td><td>none</td></tr>
 <tr><td><code>light.latest_header</code></td><td>none</td><td><code>{height, header}</code> for best tip</td><td>none</td></tr>
-<tr><td><code>light_client.rebate_status</code></td><td><code>{device_id}</code></td><td><code>{pending_ct, claimed_ct, last_claim_ts, proofs[]}</code></td><td><code>-32030</code> unauthorized when device not registered</td></tr>
+<tr><td><code>light_client.rebate_status</code></td><td><code>{device_id}</code></td><td><code>{pending, claimed, last_claim_ts, proofs[]}</code></td><td><code>-32030</code> unauthorized when device not registered</td></tr>
 <tr><td><code>light_client.rebate_history</code></td><td><code>{device_id, limit?, cursor?}</code></td><td><code>{items:[{epoch,ct,receipt_hash}], next_cursor?}</code></td><td>same as above</td></tr>
 <tr><td><code>state_stream.subscribe</code></td><td>WebSocket upgrade, no body</td><td>Streams <code>{height, root, accounts_changed, proofs}</code> batches</td><td>HTTP 429 when subscriber cap reached</td></tr>
 </tbody></table>
@@ -1310,8 +1318,8 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 </div>
 <h4 id="peer-rebate-rent-escrow-scheduler-and-storage-helpers"><a class="header" href="#peer-rebate-rent-escrow-scheduler-and-storage-helpers">Peer rebate, rent escrow, scheduler and storage helpers</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
-<tr><td><code>peer.rebate_status</code></td><td><code>{peer_id}</code></td><td><code>{pending_ct, claimed_ct, receipts[]}</code></td><td>invalid ID</td></tr>
-<tr><td><code>peer.rebate_claim</code></td><td><code>{peer_id}</code></td><td><code>{status:"ok", claimed_ct}</code> once receipts consumed</td><td>invalid ID</td></tr>
+<tr><td><code>peer.rebate_status</code></td><td><code>{peer_id}</code></td><td><code>{pending, claimed, receipts[]}</code></td><td>invalid ID</td></tr>
+<tr><td><code>peer.rebate_claim</code></td><td><code>{peer_id}</code></td><td><code>{status:"ok", claimed}</code> once receipts consumed</td><td>invalid ID</td></tr>
 <tr><td><code>rent.escrow.balance</code></td><td><code>{provider}</code></td><td><code>{balance, locked_until}</code> from <code>RentEscrow</code> sled</td><td>none</td></tr>
 <tr><td><code>scheduler.stats</code></td><td>none</td><td>Scheduler debug payload <code>{lanes:[{lane, queued, fairness_deadline_ms, slice_quota}], starvation_counters}</code></td><td>none</td></tr>
 </tbody></table>
@@ -1324,7 +1332,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>gov_params</code></td><td><code>{epoch?}</code></td><td><code>{params}</code> snapshot from <code>GOV_PARAMS</code></td><td>none</td></tr>
 <tr><td><code>gov_rollback_last</code> / <code>gov_rollback</code></td><td><code>{epoch}</code> / <code>{proposal_id, epoch}</code></td><td><code>{status:"ok"}</code> after reverting governance store</td><td><code>-32043</code> rollback guardrails</td></tr>
 <tr><td><code>gov.release_signers</code></td><td>none</td><td><code>{signers:[{name,pubkey}]} </code></td><td>none</td></tr>
-<tr><td><code>gov.treasury.balance</code></td><td>none</td><td><code>{ct, industrial_ct, usd_estimate}</code> from treasury sled</td><td>none</td></tr>
+<tr><td><code>gov.treasury.balance</code></td><td>none</td><td><code>{ct, industrial, usd_estimate}</code> from treasury sled</td><td>none</td></tr>
 <tr><td><code>gov.treasury.balance_history</code></td><td><code>{start?, end?}</code></td><td><code>{entries:[{epoch,ct}], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>gov.treasury.disbursements</code></td><td><code>{limit?, cursor?}</code></td><td><code>{items:[{proposal_id, amount, recipient, executed_at}], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>service_badge_issue</code></td><td><code>{subject, badge}</code> (requires signer badge header)</td><td><code>{status:"ok"}</code> and records issuance</td><td><code>-32602</code> invalid payload, <code>-32050</code> when badge invalid</td></tr>
@@ -1369,8 +1377,8 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <h4 id="transactions-and-fee-markets"><a class="header" href="#transactions-and-fee-markets">Transactions and fee markets</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
 <tr><td><code>submit_tx</code></td><td><code>{tx}</code> hex-encoded <code>SignedTransaction</code> plus optional <code>{max_fee, tip}</code> overrides</td><td><code>{status:"ok"}</code> when enqueued; <code>{status:"error", error}</code> when mempool rejects</td><td><code>-32602</code> malformed hex/transaction, propagation errors as strings</td></tr>
-<tr><td><code>price_board_get</code></td><td><code>{lane}</code></td><td><code>{lane, base_fee, tip_histogram:[{percentile, tip_micro_ct}]}</code> mirroring <code>node/src/fees.rs</code> board</td><td>none</td></tr>
-<tr><td><code>industrial</code></td><td>none</td><td><code>{backlog_bytes, utilization_ppm, multiplier}</code> from subsidy governor gauges (see § CT subsidy)</td><td>none</td></tr>
+<tr><td><code>price_board_get</code></td><td><code>{lane}</code></td><td><code>{lane, base_fee, tip_histogram:[{percentile, tip_micro}]}</code> mirroring <code>node/src/fees.rs</code> board</td><td>none</td></tr>
+<tr><td><code>industrial</code></td><td>none</td><td><code>{backlog_bytes, utilization_ppm, multiplier}</code> from subsidy governor gauges (see § BLOCK subsidy)</td><td>none</td></tr>
 <tr><td><code>inflation.params</code></td><td>none</td><td><code>{emission_curve:{start_height,end_height,rate}, decay_factor, treasury_split}</code> read from <code>docs/economics_and_governance.md</code> constants</td><td>none</td></tr>
 </tbody></table>
 </div>
@@ -1382,13 +1390,14 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <h4 id="storage-pipeline-convenience-rpcs"><a class="header" href="#storage-pipeline-convenience-rpcs">Storage pipeline convenience RPCs</a></h4>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
 <tr><td><code>storage_upload</code></td><td><code>{object_id, provider_id, original_bytes, shares, price_per_block, start_block, retention_blocks}</code></td><td>Delegates to <code>storage::upload</code>, returning manifest receipt (<code>{status:"ok", contract_id}</code>)</td><td>storage errors bubble up via <code>rpc_error(-32603,...)</code></td></tr>
-<tr><td><code>storage_challenge</code></td><td><code>{object_id, provider_id?, chunk_idx, proof, current_block}</code></td><td><code>{status:"ok", challenge_id}</code> if proof accepted</td><td><code>-32602</code> invalid inputs; storage errors</td></tr>
+<tr><td><code>storage_challenge</code></td><td><code>{object_id, provider_id?, chunk_idx, chunk_data, proof, current_block}</code></td><td><code>{status:"ok", challenge_id}</code> if proof accepted</td><td><code>-32602</code> invalid inputs; storage errors</td></tr>
 <tr><td><code>storage.manifests</code></td><td><code>{limit?}</code></td><td><code>{manifests:[{object_id, provider_id, shares, retention_blocks, status}]}</code> limited to latest <code>limit</code> entries</td><td>none</td></tr>
 <tr><td><code>storage_provider_profiles</code></td><td>none</td><td><code>{providers:[{id, capacity_bytes, maintenance, uptime_ppm}]}</code></td><td>none</td></tr>
 <tr><td><code>storage_provider_set_maintenance</code></td><td><code>{provider, maintenance:bool}</code></td><td><code>{status:"ok"}</code> after toggling provider availability</td><td><code>-32030</code> unknown provider</td></tr>
-<tr><td><code>storage_incentives</code></td><td>none</td><td><code>{rent_escrow:{credits_ct, debits_ct}, rebate_rates:{lane, ppm}}</code></td><td>none</td></tr>
+<tr><td><code>storage_incentives</code></td><td>none</td><td><code>{rent_escrow:{credits, debits}, rebate_rates:{lane, ppm}}</code></td><td>none</td></tr>
 </tbody></table>
 </div>
+<p>Storage challenges now expect <code>chunk_data</code> (hex-encoded bytes for the challenged chunk) and <code>proof</code> (hex-encoded <code>MerkleProof.path</code>) so providers must present the actual content that links back to <code>storage_root</code>.</p>
 <h3 id="appendix-b--metric-index"><a class="header" href="#appendix-b--metric-index">Appendix B · Metric Index</a></h3>
 <p>The table below is generated directly from <code>node/src/telemetry.rs</code>. Run <code>python tools/extract_metrics.py --format markdown</code> whenever the telemetry file changes to keep the appendix in sync. For deployment guidance see <code>docs/operations.md#metrics-aggregator-ops</code> and <code>monitoring/README.md</code>.</p>
 <div class="table-wrapper"><table><thead><tr><th>Name</th><th>Type</th><th>Labels</th><th>Units</th><th>Description</th></tr></thead><tbody>
@@ -1405,7 +1414,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>balance_overflow_reject_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Transactions rejected due to balance overflow</td></tr>
 <tr><td><code>banned_peers_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Total peers currently banned</td></tr>
 <tr><td><code>base_fee</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>current base fee</td></tr>
-<tr><td><code>base_reward_ct</code></td><td>IntGauge</td><td>–</td><td>CT</td><td>base reward after logistic factor</td></tr>
+<tr><td><code>base_reward</code></td><td>IntGauge</td><td>–</td><td>BLOCK</td><td>base reward after logistic factor</td></tr>
 <tr><td><code>block_apply_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Blocks that failed atomic application</td></tr>
 <tr><td><code>block_mined_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total mined blocks</td></tr>
 <tr><td><code>build_provenance_invalid_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Build provenance checks that failed</td></tr>
@@ -1502,9 +1511,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>price_weight_applied_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total price entries adjusted by reputation weight</td></tr>
 <tr><td><code>priority_boost_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Jobs whose priority was boosted due to aging</td></tr>
 <tr><td><code>privacy_sanitization_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total sanitized payloads</td></tr>
-<tr><td><code>proof_rebates_amount_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT awarded via proof rebates</td></tr>
+<tr><td><code>proof_rebates_amount_total</code></td><td>IntCounter</td><td>–</td><td>BLOCK</td><td>Total BLOCK awarded via proof rebates</td></tr>
 <tr><td><code>proof_rebates_claimed_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total proof rebate claims</td></tr>
-<tr><td><code>proof_rebates_pending_total</code></td><td>IntGauge</td><td>–</td><td>CT</td><td>Pending CT rebates awaiting claim</td></tr>
+<tr><td><code>proof_rebates_pending_total</code></td><td>IntGauge</td><td>–</td><td>BLOCK</td><td>Pending BLOCK rebates awaiting claim</td></tr>
 <tr><td><code>quic_bytes_recv_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Total bytes received over QUIC</td></tr>
 <tr><td><code>quic_bytes_sent_total</code></td><td>IntCounter</td><td>–</td><td>bytes</td><td>Total bytes sent over QUIC</td></tr>
 <tr><td><code>quic_conn_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>QUIC connection handshake latency</td></tr>
@@ -1527,9 +1536,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>remote_signer_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Remote signer latency</td></tr>
 <tr><td><code>remote_signer_request_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total remote signer requests</td></tr>
 <tr><td><code>remote_signer_success_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Successful remote signer responses</td></tr>
-<tr><td><code>rent_escrow_burned_ct_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT burned from rent escrow</td></tr>
-<tr><td><code>rent_escrow_locked_ct_total</code></td><td>IntGauge</td><td>–</td><td>CT</td><td>Total CT locked in rent escrow</td></tr>
-<tr><td><code>rent_escrow_refunded_ct_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT refunded from rent escrow</td></tr>
+<tr><td><code>rent_escrow_burned_total</code></td><td>IntCounter</td><td>–</td><td>BLOCK</td><td>Total BLOCK burned from rent escrow</td></tr>
+<tr><td><code>rent_escrow_locked_total</code></td><td>IntGauge</td><td>–</td><td>BLOCK</td><td>Total BLOCK locked in rent escrow</td></tr>
+<tr><td><code>rent_escrow_refunded_total</code></td><td>IntCounter</td><td>–</td><td>BLOCK</td><td>Total BLOCK refunded from rent escrow</td></tr>
 <tr><td><code>reputation_gossip_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Reputation updates that failed verification or were stale</td></tr>
 <tr><td><code>reputation_gossip_latency_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Propagation latency for reputation updates</td></tr>
 <tr><td><code>retrieval_failure_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total failed proof-of-retrievability challenges</td></tr>
@@ -1557,7 +1566,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>shielded_pool_size</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Number of pending shielded nullifiers</td></tr>
 <tr><td><code>shielded_tx_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total shielded transactions accepted</td></tr>
 <tr><td><code>sigverify_ops_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of signature verifications measured via perf counters</td></tr>
-<tr><td><code>slashing_burn_ct_total</code></td><td>IntCounter</td><td>–</td><td>CT</td><td>Total CT burned from slashing penalties</td></tr>
+<tr><td><code>slashing_burn_total</code></td><td>IntCounter</td><td>–</td><td>BLOCK</td><td>Total BLOCK burned from slashing penalties</td></tr>
 <tr><td><code>snapshot_created_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total snapshots created</td></tr>
 <tr><td><code>snapshot_duration_seconds</code></td><td>Histogram</td><td>–</td><td>seconds</td><td>Snapshot operation duration</td></tr>
 <tr><td><code>snapshot_fail_total</code></td><td>IntCounter</td><td>–</td><td>ratio</td><td>Total snapshot operation failures</td></tr>
@@ -1615,7 +1624,7 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <div class="table-wrapper"><table><thead><tr><th>Name</th><th>Purpose</th><th>Common prefixes/keys</th></tr></thead><tbody>
 <tr><td><code>default</code></td><td>Legacy chain state (fallback).</td><td><code>chain</code>, <code>accounts</code>.</td></tr>
 <tr><td><code>bridge</code></td><td>Bridge headers, pending withdrawals.</td><td><code>header:&lt;height&gt;</code>, <code>withdrawal:&lt;commitment&gt;</code>.</td></tr>
-<tr><td><code>compute_settlement</code></td><td>Settlement engine state (balances, audit log).</td><td><code>ledger_ct</code>, <code>ledger_it</code>, <code>sla_queue</code>, <code>sla_history</code>.</td></tr>
+<tr><td><code>compute_settlement</code></td><td>Settlement engine state (balances, audit log).</td><td><code>ledger</code>, <code>ledger_it</code>, <code>sla_queue</code>, <code>sla_history</code>.</td></tr>
 <tr><td><code>dex_storage</code></td><td>Order book, trades, escrow locks, AMM pools.</td><td><code>book</code>, <code>trade:*</code>, <code>escrow</code>, <code>amm/&lt;pool_id&gt;</code>.</td></tr>
 <tr><td><code>gateway_dns</code></td><td>Domain auctions, stakes, ownership.</td><td><code>auction:&lt;domain&gt;</code>, <code>stake:&lt;ref&gt;</code>, <code>ownership:&lt;domain&gt;</code>.</td></tr>
 <tr><td><code>gateway_ad_readiness</code></td><td>Readiness snapshots for ad flows.</td><td><code>snapshot:&lt;epoch&gt;</code>.</td></tr>
@@ -1653,8 +1662,8 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <tr><td><code>industrial_admission_min_capacity</code></td><td>10</td><td>Minimum queue capacity before opening industrial lane.</td></tr>
 <tr><td><code>fairshare_global_max_ppm</code></td><td>250 000</td><td>QoS cap per account in parts‑per‑million.</td></tr>
 <tr><td><code>burst_refill_rate_per_s_ppm</code></td><td>500 000 (≈30 tx/min)</td><td>Token bucket refill rate.</td></tr>
-<tr><td><code>beta_storage_sub_ct</code>, <code>gamma_read_sub_ct</code>, <code>kappa_cpu_sub_ct</code>, <code>lambda_bytes_out_sub_ct</code></td><td>50/20/10/5</td><td>Subsidy multipliers (basis points).</td></tr>
-<tr><td><code>read_subsidy_*_percent</code></td><td>Derived defaults</td><td>Split READ_SUB_CT across viewer/host/hardware/verifier/liquidity.</td></tr>
+<tr><td><code>beta_storage_sub</code>, <code>gamma_read_sub</code>, <code>kappa_cpu_sub</code>, <code>lambda_bytes_out_sub</code></td><td>50/20/10/5</td><td>Subsidy multipliers (basis points).</td></tr>
+<tr><td><code>read_subsidy_*_percent</code></td><td>Derived defaults</td><td>Split <code>READ_SUB</code> across viewer/host/hardware/verifier/liquidity.</td></tr>
 <tr><td><code>kill_switch_subsidy_reduction</code></td><td>0</td><td>Emergency knob to damp multipliers.</td></tr>
 <tr><td><code>miner_reward_logistic_target</code>, <code>logistic_slope_milli</code>, <code>miner_hysteresis</code></td><td>100 / ~230 / 10</td><td>Shape of logistic emission curve.</td></tr>
 <tr><td><code>badge_expiry_secs</code>, <code>badge_issue/revoke_uptime_percent</code></td><td>30 days / 99 % / 95 %</td><td>Service badge policy.</td></tr>
@@ -1669,9 +1678,9 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <p>(Refer to <code>governance/src/params.rs</code> for the exhaustive list and serialization order.)</p>
 <h3 id="appendix-f--dns--read-receipt-flowchart"><a class="header" href="#appendix-f--dns--read-receipt-flowchart">Appendix F · DNS &amp; Read-Receipt Flowchart</a></h3>
 <ol>
-<li><code>tb-cli gateway domain list</code> → RPC <code>dns.list_for_sale</code> → SimpleDb <code>auction:&lt;domain&gt;</code> record.</li>
-<li><code>tb-cli gateway domain bid</code> (optionally register stake first) → RPC <code>dns.place_bid</code>.</li>
-<li><code>tb-cli gateway domain complete</code> → RPC <code>dns.complete_sale</code> → ledger events (seller, royalties, treasury) + CLI confirmation.</li>
+<li><code>contract-cli gateway domain list</code> → RPC <code>dns.list_for_sale</code> → SimpleDb <code>auction:&lt;domain&gt;</code> record.</li>
+<li><code>contract-cli gateway domain bid</code> (optionally register stake first) → RPC <code>dns.place_bid</code>.</li>
+<li><code>contract-cli gateway domain complete</code> → RPC <code>dns.complete_sale</code> → ledger events (seller, royalties, treasury) + CLI confirmation.</li>
 <li>Gateway serves content; clients issue reads with <code>ReadAck</code> headers (<code>X-TB-Read-Ack</code>).</li>
 <li>Gateway writes receipts (<code>read/&lt;epoch&gt;/&lt;seq&gt;.bin</code>), batches hourly via RPC <code>gateway.reads_since</code> &amp; <code>gateway.batch_read_receipts</code>, anchors root through settlement.</li>
 </ol>
@@ -1679,14 +1688,14 @@ GET /light_client/rebate_history?limit=2 -&gt; {
 <div class="table-wrapper"><table><thead><tr><th>Component</th><th>Behaviour</th></tr></thead><tbody>
 <tr><td>Courier queue</td><td>sled <code>courier</code> tree storing <code>CourierReceipt</code>. Automatic retries (5 attempts, 100 ms exponential backoff).</td></tr>
 <tr><td>SLA scheduler</td><td><code>Settlement::sla</code> vector holds active deadlines; <code>SLA_HISTORY_LIMIT = 256</code>.</td></tr>
-<tr><td>CLI hooks</td><td><code>tb-cli compute courier status</code>, <code>tb-cli compute settlement audit</code> (future extension) read <code>compute_market.*</code> RPC responses.</td></tr>
+<tr><td>CLI hooks</td><td><code>contract-cli compute courier status</code>, <code>contract-cli compute settlement audit</code> (future extension) read <code>compute_market.*</code> RPC responses.</td></tr>
 </tbody></table>
 </div>
 <h3 id="appendix-h--amm--htlc-math-reference"><a class="header" href="#appendix-h--amm--htlc-math-reference">Appendix H · AMM &amp; HTLC Math Reference</a></h3>
 <ul>
 <li>AMM invariants:
 <ul>
-<li><code>k = reserve_ct * reserve_it</code>.</li>
+<li><code>k = reserve * reserve_it</code>.</li>
 <li>Share minting uses geometric mean for first LP; later LPs mint shares proportional to contributions.</li>
 <li>No fee term yet; add <code>fee_bps</code> multiplier before recomputing <code>k</code> if needed.</li>
 </ul>

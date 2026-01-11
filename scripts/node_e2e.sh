@@ -109,7 +109,7 @@ print(json.dumps({
   "amount_consumer": 100,
   "amount_industrial": 0,
   "fee": 200000,
-  "pct_ct": 0,
+  "pct": 0,
   "nonce": 1,
   "memo": []
 }))

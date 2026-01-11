@@ -1229,16 +1229,16 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::IndustrialAdmissionMinCapacity => "industrial_admission_min_capacity",
         ParamKey::FairshareGlobalMax => "fairshare_global_max_ppm",
         ParamKey::BurstRefillRatePerS => "burst_refill_rate_per_s_ppm",
-        ParamKey::BetaStorageSubCt => "beta_storage_sub_ct",
-        ParamKey::GammaReadSubCt => "gamma_read_sub_ct",
-        ParamKey::KappaCpuSubCt => "kappa_cpu_sub_ct",
-        ParamKey::LambdaBytesOutSubCt => "lambda_bytes_out_sub_ct",
+        ParamKey::BetaStorageSub => "beta_storage_sub",
+        ParamKey::GammaReadSub => "gamma_read_sub",
+        ParamKey::KappaCpuSub => "kappa_cpu_sub",
+        ParamKey::LambdaBytesOutSub => "lambda_bytes_out_sub",
         ParamKey::ReadSubsidyViewerPercent => "read_subsidy_viewer_percent",
         ParamKey::ReadSubsidyHostPercent => "read_subsidy_host_percent",
         ParamKey::ReadSubsidyHardwarePercent => "read_subsidy_hardware_percent",
         ParamKey::ReadSubsidyVerifierPercent => "read_subsidy_verifier_percent",
         ParamKey::ReadSubsidyLiquidityPercent => "read_subsidy_liquidity_percent",
-        ParamKey::DualTokenSettlementEnabled => "dual_token_settlement_enabled",
+        ParamKey::LaneBasedSettlementEnabled => "lane_based_settlement_enabled",
         ParamKey::AdReadinessWindowSecs => "ad_readiness_window_secs",
         ParamKey::AdReadinessMinUniqueViewers => "ad_readiness_min_unique_viewers",
         ParamKey::AdReadinessMinHostCount => "ad_readiness_min_host_count",
@@ -1246,9 +1246,9 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::EnergyMinStake => "energy_min_stake",
         ParamKey::EnergyOracleTimeoutBlocks => "energy_oracle_timeout_blocks",
         ParamKey::EnergySlashingRateBps => "energy_slashing_rate_bps",
-        ParamKey::TreasuryPercentCt => "treasury_percent_ct",
-        ParamKey::ProofRebateLimitCt => "proof_rebate_limit_ct",
-        ParamKey::RentRateCtPerByte => "rent_rate_ct_per_byte",
+        ParamKey::TreasuryPercent => "treasury_percent",
+        ParamKey::ProofRebateLimit => "proof_rebate_limit",
+        ParamKey::RentRatePerByte => "rent_rate_per_byte",
         ParamKey::KillSwitchSubsidyReduction => "kill_switch_subsidy_reduction",
         ParamKey::MinerRewardLogisticTarget => "miner_reward_logistic_target",
         ParamKey::LogisticSlope => "logistic_slope_milli",
@@ -1289,6 +1289,19 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::AdPercentileBuckets => "ad_percentile_buckets",
         ParamKey::AdRehearsalEnabled => "ad_rehearsal_enabled",
         ParamKey::AdRehearsalStabilityWindows => "ad_rehearsal_stability_windows",
+        ParamKey::LaneConsumerCapacity => "lane_consumer_capacity",
+        ParamKey::LaneIndustrialCapacity => "lane_industrial_capacity",
+        ParamKey::LaneConsumerCongestionSensitivity => "lane_consumer_congestion_sensitivity",
+        ParamKey::LaneIndustrialCongestionSensitivity => "lane_industrial_congestion_sensitivity",
+        ParamKey::LaneIndustrialMinPremiumPercent => "lane_industrial_min_premium_percent",
+        ParamKey::LaneTargetUtilizationPercent => "lane_target_utilization_percent",
+        ParamKey::LaneMarketSignalHalfLife => "lane_market_signal_half_life",
+        ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+            "lane_market_demand_max_multiplier_percent"
+        }
+        ParamKey::LaneMarketDemandSensitivityPercent => "lane_market_demand_sensitivity_percent",
+        ParamKey::LanePIProportionalGainPercent => "lane_pi_proportional_gain_percent",
+        ParamKey::LanePIIntegralGainPercent => "lane_pi_integral_gain_percent",
     }
 }
 
@@ -2878,10 +2891,10 @@ impl GovStore {
                                 }
                                 ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
                                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
-                                ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
-                                ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
-                                ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
-                                ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                                ParamKey::BetaStorageSub => params.beta_storage_sub,
+                                ParamKey::GammaReadSub => params.gamma_read_sub,
+                                ParamKey::KappaCpuSub => params.kappa_cpu_sub,
+                                ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
                                 ParamKey::ReadSubsidyViewerPercent => {
                                     params.read_subsidy_viewer_percent
                                 }
@@ -2897,8 +2910,8 @@ impl GovStore {
                                 ParamKey::ReadSubsidyLiquidityPercent => {
                                     params.read_subsidy_liquidity_percent
                                 }
-                                ParamKey::DualTokenSettlementEnabled => {
-                                    params.dual_token_settlement_enabled
+                                ParamKey::LaneBasedSettlementEnabled => {
+                                    params.lane_based_settlement_enabled
                                 }
                                 ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
                                 ParamKey::AdReadinessMinUniqueViewers => {
@@ -2910,8 +2923,8 @@ impl GovStore {
                                 ParamKey::AdReadinessMinProviderCount => {
                                     params.ad_readiness_min_provider_count
                                 }
-                                ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
-                                ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
+                                ParamKey::ProofRebateLimit => params.proof_rebate_limit,
+                                ParamKey::RentRatePerByte => params.rent_rate_per_byte,
                                 ParamKey::KillSwitchSubsidyReduction => {
                                     params.kill_switch_subsidy_reduction
                                 }
@@ -2936,7 +2949,7 @@ impl GovStore {
                                 ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
                                 ParamKey::RuntimeBackend => params.runtime_backend_policy,
                                 ParamKey::TransportProvider => params.transport_provider_policy,
-                                ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
+                                ParamKey::TreasuryPercent => params.treasury_percent,
                                 ParamKey::StorageEnginePolicy => params.storage_engine_policy,
                                 ParamKey::BridgeMinBond => params.bridge_min_bond,
                                 ParamKey::BridgeDutyReward => params.bridge_duty_reward,
@@ -2966,6 +2979,35 @@ impl GovStore {
                                     params.energy_oracle_timeout_blocks
                                 }
                                 ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
+                                ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
+                                ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
+                                ParamKey::LaneConsumerCongestionSensitivity => {
+                                    params.lane_consumer_congestion_sensitivity
+                                }
+                                ParamKey::LaneIndustrialCongestionSensitivity => {
+                                    params.lane_industrial_congestion_sensitivity
+                                }
+                                ParamKey::LaneIndustrialMinPremiumPercent => {
+                                    params.lane_industrial_min_premium_percent
+                                }
+                                ParamKey::LaneTargetUtilizationPercent => {
+                                    params.lane_target_utilization_percent
+                                }
+                                ParamKey::LaneMarketSignalHalfLife => {
+                                    params.lane_market_signal_half_life
+                                }
+                                ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+                                    params.lane_market_demand_max_multiplier_percent
+                                }
+                                ParamKey::LaneMarketDemandSensitivityPercent => {
+                                    params.lane_market_demand_sensitivity_percent
+                                }
+                                ParamKey::LanePIProportionalGainPercent => {
+                                    params.lane_pi_proportional_gain_percent
+                                }
+                                ParamKey::LanePIIntegralGainPercent => {
+                                    params.lane_pi_integral_gain_percent
+                                }
                             };
                             if let Some(spec) = registry().iter().find(|s| s.key == prop.key) {
                                 (spec.apply)(prop.new_value, params)
@@ -3141,16 +3183,16 @@ impl GovStore {
                 }
                 ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
                 ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
-                ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
-                ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
-                ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
-                ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+                ParamKey::BetaStorageSub => params.beta_storage_sub,
+                ParamKey::GammaReadSub => params.gamma_read_sub,
+                ParamKey::KappaCpuSub => params.kappa_cpu_sub,
+                ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
                 ParamKey::ReadSubsidyViewerPercent => params.read_subsidy_viewer_percent,
                 ParamKey::ReadSubsidyHostPercent => params.read_subsidy_host_percent,
                 ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
                 ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
                 ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
-                ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
+                ParamKey::LaneBasedSettlementEnabled => params.lane_based_settlement_enabled,
                 ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
                 ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
                 ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
@@ -3158,8 +3200,8 @@ impl GovStore {
                 ParamKey::EnergyMinStake => params.energy_min_stake,
                 ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
                 ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
-                ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
-                ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
+                ParamKey::ProofRebateLimit => params.proof_rebate_limit,
+                ParamKey::RentRatePerByte => params.rent_rate_per_byte,
                 ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
                 ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
                 ParamKey::LogisticSlope => params.logistic_slope_milli,
@@ -3180,7 +3222,7 @@ impl GovStore {
                 ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
                 ParamKey::RuntimeBackend => params.runtime_backend_policy,
                 ParamKey::TransportProvider => params.transport_provider_policy,
-                ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
+                ParamKey::TreasuryPercent => params.treasury_percent,
                 ParamKey::StorageEnginePolicy => params.storage_engine_policy,
                 ParamKey::BridgeMinBond => params.bridge_min_bond,
                 ParamKey::BridgeDutyReward => params.bridge_duty_reward,
@@ -3202,6 +3244,27 @@ impl GovStore {
                 ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
                 ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
                 ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
+                ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
+                ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
+                ParamKey::LaneConsumerCongestionSensitivity => {
+                    params.lane_consumer_congestion_sensitivity
+                }
+                ParamKey::LaneIndustrialCongestionSensitivity => {
+                    params.lane_industrial_congestion_sensitivity
+                }
+                ParamKey::LaneIndustrialMinPremiumPercent => {
+                    params.lane_industrial_min_premium_percent
+                }
+                ParamKey::LaneTargetUtilizationPercent => params.lane_target_utilization_percent,
+                ParamKey::LaneMarketSignalHalfLife => params.lane_market_signal_half_life,
+                ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+                    params.lane_market_demand_max_multiplier_percent
+                }
+                ParamKey::LaneMarketDemandSensitivityPercent => {
+                    params.lane_market_demand_sensitivity_percent
+                }
+                ParamKey::LanePIProportionalGainPercent => params.lane_pi_proportional_gain_percent,
+                ParamKey::LanePIIntegralGainPercent => params.lane_pi_integral_gain_percent,
             };
             (spec.apply_runtime)(val, rt)
                 .map_err(|_| sled::Error::Unsupported("apply_runtime".into()))?;
@@ -3213,16 +3276,16 @@ impl GovStore {
             ParamKey::IndustrialAdmissionMinCapacity => params.industrial_admission_min_capacity,
             ParamKey::FairshareGlobalMax => params.fairshare_global_max_ppm,
             ParamKey::BurstRefillRatePerS => params.burst_refill_rate_per_s_ppm,
-            ParamKey::BetaStorageSubCt => params.beta_storage_sub_ct,
-            ParamKey::GammaReadSubCt => params.gamma_read_sub_ct,
-            ParamKey::KappaCpuSubCt => params.kappa_cpu_sub_ct,
-            ParamKey::LambdaBytesOutSubCt => params.lambda_bytes_out_sub_ct,
+            ParamKey::BetaStorageSub => params.beta_storage_sub,
+            ParamKey::GammaReadSub => params.gamma_read_sub,
+            ParamKey::KappaCpuSub => params.kappa_cpu_sub,
+            ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
             ParamKey::ReadSubsidyViewerPercent => params.read_subsidy_viewer_percent,
             ParamKey::ReadSubsidyHostPercent => params.read_subsidy_host_percent,
             ParamKey::ReadSubsidyHardwarePercent => params.read_subsidy_hardware_percent,
             ParamKey::ReadSubsidyVerifierPercent => params.read_subsidy_verifier_percent,
             ParamKey::ReadSubsidyLiquidityPercent => params.read_subsidy_liquidity_percent,
-            ParamKey::DualTokenSettlementEnabled => params.dual_token_settlement_enabled,
+            ParamKey::LaneBasedSettlementEnabled => params.lane_based_settlement_enabled,
             ParamKey::AdReadinessWindowSecs => params.ad_readiness_window_secs,
             ParamKey::AdReadinessMinUniqueViewers => params.ad_readiness_min_unique_viewers,
             ParamKey::AdReadinessMinHostCount => params.ad_readiness_min_host_count,
@@ -3230,8 +3293,8 @@ impl GovStore {
             ParamKey::EnergyMinStake => params.energy_min_stake,
             ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
             ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
-            ParamKey::ProofRebateLimitCt => params.proof_rebate_limit_ct,
-            ParamKey::RentRateCtPerByte => params.rent_rate_ct_per_byte,
+            ParamKey::ProofRebateLimit => params.proof_rebate_limit,
+            ParamKey::RentRatePerByte => params.rent_rate_per_byte,
             ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
             ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
             ParamKey::LogisticSlope => params.logistic_slope_milli,
@@ -3252,7 +3315,7 @@ impl GovStore {
             ParamKey::SchedulerWeightStorage => params.scheduler_weight_storage,
             ParamKey::RuntimeBackend => params.runtime_backend_policy,
             ParamKey::TransportProvider => params.transport_provider_policy,
-            ParamKey::TreasuryPercentCt => params.treasury_percent_ct,
+            ParamKey::TreasuryPercent => params.treasury_percent,
             ParamKey::StorageEnginePolicy => params.storage_engine_policy,
             ParamKey::BridgeMinBond => params.bridge_min_bond,
             ParamKey::BridgeDutyReward => params.bridge_duty_reward,
@@ -3273,6 +3336,25 @@ impl GovStore {
             ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
             ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
             ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
+            ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
+            ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
+            ParamKey::LaneConsumerCongestionSensitivity => {
+                params.lane_consumer_congestion_sensitivity
+            }
+            ParamKey::LaneIndustrialCongestionSensitivity => {
+                params.lane_industrial_congestion_sensitivity
+            }
+            ParamKey::LaneIndustrialMinPremiumPercent => params.lane_industrial_min_premium_percent,
+            ParamKey::LaneTargetUtilizationPercent => params.lane_target_utilization_percent,
+            ParamKey::LaneMarketSignalHalfLife => params.lane_market_signal_half_life,
+            ParamKey::LaneMarketDemandMaxMultiplierPercent => {
+                params.lane_market_demand_max_multiplier_percent
+            }
+            ParamKey::LaneMarketDemandSensitivityPercent => {
+                params.lane_market_demand_sensitivity_percent
+            }
+            ParamKey::LanePIProportionalGainPercent => params.lane_pi_proportional_gain_percent,
+            ParamKey::LanePIIntegralGainPercent => params.lane_pi_integral_gain_percent,
         };
         self.persist_param_change(
             &hist_dir,

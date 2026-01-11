@@ -17,7 +17,7 @@ fn cross_shard_reorg_updates_roots() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 0,
+        pct: 0,
         nonce: 1,
         memo: vec![],
     };
@@ -32,7 +32,7 @@ fn cross_shard_reorg_updates_roots() {
         amount_consumer: 1,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 0,
+        pct: 0,
         nonce: 1,
         memo: vec![],
     };

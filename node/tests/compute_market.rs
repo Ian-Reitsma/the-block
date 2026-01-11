@@ -1,32 +1,14 @@
 #![cfg(feature = "integration-tests")]
+mod settlement_util;
+
 use crypto_suite::hashing::blake3;
 use runtime::sync::CancellationToken;
+use settlement_util::SettlementCtx;
+use sys::tempfile::tempdir;
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LaneSeed};
 use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};
 use the_block::transaction::FeeLane;
-use the_block::compute_market::settlement::{Settlement, SettleMode};
-use sys::tempfile::{tempdir, TempDir};
-
-struct SettlementCtx {
-    _dir: TempDir,
-}
-
-impl SettlementCtx {
-    fn new() -> Self {
-        let dir = tempdir().expect("settlement tempdir");
-        let path = dir.path().join("settlement");
-        let path_str = path.to_str().expect("settlement path");
-        Settlement::init(path_str, SettleMode::DryRun);
-        Self { _dir: dir }
-    }
-}
-
-impl Drop for SettlementCtx {
-    fn drop(&mut self) {
-        Settlement::shutdown();
-    }
-}
 
 #[test]
 fn offer_validation() {
@@ -37,7 +19,7 @@ fn offer_validation() {
         consumer_bond: 1,
         units: 5,
         price_per_unit: 2,
-        fee_pct_ct: 100,
+        fee_pct: 100,
         capability: scheduler::Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,
@@ -54,8 +36,7 @@ fn slice_proof_verification() {
     let proof = ExecutionReceipt {
         reference: hash,
         output: hash,
-        payout_ct: 1,
-        payout_it: 0,
+        payout: 1,
         proof: None,
     };
     assert!(proof.verify(&Workload::Transcode(data.to_vec())));
@@ -79,7 +60,7 @@ fn market_job_flow_and_finalize() {
         consumer_bond: 1,
         units: 1,
         price_per_unit: 5,
-        fee_pct_ct: 100,
+        fee_pct: 100,
         capability: scheduler::Capability::default(),
         reputation: 0,
         reputation_multiplier: 1.0,
@@ -104,8 +85,7 @@ fn market_job_flow_and_finalize() {
     let proof = ExecutionReceipt {
         reference: ref_hash,
         output: ref_hash,
-        payout_ct: 5,
-        payout_it: 0,
+        payout: 5,
         proof: None,
     };
     let payout = market.submit_slice("job1", proof).unwrap();

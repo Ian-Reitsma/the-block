@@ -16,13 +16,9 @@ fn rejects_nonce_gap() {
         "alice".into(),
         Account {
             address: "alice".into(),
-            balance: TokenBalance {
-                consumer: 100,
-                industrial: 0,
-            },
+            balance: TokenBalance { amount: 100 },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
@@ -38,7 +34,7 @@ fn rejects_nonce_gap() {
             amount_consumer: 10,
             amount_industrial: 0,
             fee: 0,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         },
@@ -52,7 +48,7 @@ fn rejects_nonce_gap() {
             amount_consumer: 5,
             amount_industrial: 0,
             fee: 0,
-            pct_ct: 100,
+            pct: 100,
             nonce: 3, // gap (missing nonce 2)
             memo: Vec::new(),
         },
@@ -67,7 +63,7 @@ fn rejects_nonce_gap() {
 
     let res = validate_and_apply(&bc, &block);
     assert!(matches!(res, Err(TxAdmissionError::NonceGap)));
-    assert_eq!(bc.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc.accounts["alice"].balance.amount, 100);
 }
 
 #[test]
@@ -78,13 +74,9 @@ fn rollback_on_mid_block_panic() {
         "alice".into(),
         Account {
             address: "alice".into(),
-            balance: TokenBalance {
-                consumer: 100,
-                industrial: 0,
-            },
+            balance: TokenBalance { amount: 100 },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
@@ -100,7 +92,7 @@ fn rollback_on_mid_block_panic() {
             amount_consumer: 10,
             amount_industrial: 0,
             fee: 0,
-            pct_ct: 100,
+            pct: 100,
             nonce: 1,
             memo: Vec::new(),
         },
@@ -119,6 +111,6 @@ fn rollback_on_mid_block_panic() {
     }));
     assert!(res.is_err());
     // state unchanged
-    assert_eq!(bc.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc.accounts["alice"].balance.amount, 100);
     assert!(!bc.accounts.contains_key("bob"));
 }

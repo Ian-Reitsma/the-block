@@ -20,16 +20,16 @@ If token price crashes, adoption explodes, energy costs spike, or ad volume chan
 
 **⚠️ Common Confusion Alert:**
 
-- **Total Supply Hard Cap:** 20 trillion CT (20,000,000,000,000)
-  - This is the MAXIMUM CT that can ever exist
+- **Total Supply Hard Cap:** 20 trillion BLOCK (20,000,000,000,000)
+  - This is the MAXIMUM BLOCK that can ever exist
   - Location: `node/src/lib.rs:373`
   - Fixed constant, never changes
 
-- **Annual Issuance:** 40 million CT/year (bootstrap value)
-  - This is how much CT is MINTED per year
+- **Annual Issuance:** 40 million BLOCK/year (bootstrap value)
+  - This is how much BLOCK is MINTED per year
   - Location: `node/src/economics/inflation_controller.rs:39`
   - Formula-based, adjusts every epoch to maintain ~5% inflation
-  - Range: 50M - 300M CT/year (governance-controlled bounds)
+  - Range: 50M - 300M BLOCK/year (governance-controlled bounds)
 
 **Analogy:** Total supply is like the "size of the ocean," while annual issuance is like "how fast the faucet drips." The faucet (issuance) adjusts speed dynamically, but the ocean (total supply) has a fixed maximum capacity.
 
@@ -37,11 +37,11 @@ If token price crashes, adoption explodes, energy costs spike, or ad volume chan
 
 ## The Four Layers
 
-### Layer 1: Adaptive Global CT Issuance
+### Layer 1: Adaptive Global BLOCK Issuance
 
 **Problem**: Fixed issuance rate breaks if circulating supply or token price changes dramatically.
 
-**Solution**: Proportional controller maintains target inflation rate (starts at 40M CT/year, adjusts dynamically).
+**Solution**: Proportional controller maintains target inflation rate (starts at 40M BLOCK/year, adjusts dynamically).
 
 ```
 Formula:
@@ -52,8 +52,8 @@ Formula:
 Parameters:
   π* = 500 bps (5% target inflation)
   k_π = 0.10 (proportional gain)
-  I_min = 50M CT/year
-  I_max = 300M CT/year
+  I_min = 50M BLOCK/year
+  I_max = 300M BLOCK/year
 ```
 
 **Result**: If inflation drifts to 3%, issuance automatically increases. If it hits 10%, issuance decreases. Converges to 5% ±1% within ~10 epochs.
@@ -135,7 +135,7 @@ Parameters (per market):
   M_max = 3.0
 
   Where:
-    c_j = average unit cost (CT per kWh for energy)
+    c_j = average unit cost (BLOCK per kWh for energy)
     p_j = effective unit payout
     m_j^target = target provider margin
 ```
@@ -201,7 +201,7 @@ Every epoch (120 blocks):
 ```
 1. MEASURE
    ├─ Gather utilization, costs, margins from markets
-   ├─ Read circulating CT, ad volume, non-KYC volume, treasury inflow
+   ├─ Read circulating BLOCK, ad volume, non-KYC volume, treasury inflow
    └─ Load governance parameters
 
 2. LAYER 1: Inflation Controller
@@ -235,7 +235,7 @@ Every epoch (120 blocks):
 All metrics exposed at `/metrics`:
 
 **Layer 1: Inflation**
-- `economics_annual_issuance_ct` - Current annual CT issuance
+- `economics_annual_issuance_block` - Current annual BLOCK issuance
 - `economics_realized_inflation_bps` - Actual inflation rate
 
 **Layer 2: Subsidies**
@@ -357,7 +357,7 @@ The economic control laws execute at every epoch boundary (block height % 120 ==
 // 1. Convert governance parameters to economics format
 let econ_params = economics::GovernanceEconomicParams::from_governance_params(
     &self.params,
-    self.economics_prev_annual_issuance_ct,
+    self.economics_prev_annual_issuance,
     self.economics_prev_subsidy.clone(),
     self.economics_prev_tariff.clone(),
 );
@@ -387,15 +387,15 @@ let total_ad_spend = self.pending_ad_settlements.iter()
 let econ_snapshot = economics::execute_epoch_economics(
     epoch,
     &metrics,
-    self.emission_consumer,          // Circulating CT
-    self.economics_epoch_tx_volume_ct,  // Non-KYC volume
+    self.emission_consumer,          // Circulating BLOCK
+    self.economics_epoch_tx_volume,  // Non-KYC volume
     total_ad_spend,
     0,                              // Treasury inflow (TODO: wire up)
     &econ_params,
 );
 
 // 5. Update blockchain state with results
-self.economics_prev_annual_issuance_ct = econ_snapshot.inflation.annual_issuance_ct;
+self.economics_prev_annual_issuance = econ_snapshot.inflation.annual_issuance;
 self.economics_prev_subsidy = econ_snapshot.subsidies.clone();
 self.economics_prev_tariff = econ_snapshot.tariff.clone();
 
@@ -407,7 +407,7 @@ self.economics_prev_tariff = econ_snapshot.tariff.clone();
 }
 
 // 7. Reset epoch counter
-self.economics_epoch_tx_volume_ct = 0;
+self.economics_epoch_tx_volume = 0;
 ```
 
 ### State Tracking in Blockchain
@@ -421,10 +421,10 @@ pub struct Blockchain {
     // ... other fields ...
 
     // Economic Control Law State
-    pub economics_prev_annual_issuance_ct: u64,
+    pub economics_prev_annual_issuance: u64,
     pub economics_prev_subsidy: economics::SubsidySnapshot,
     pub economics_prev_tariff: economics::TariffSnapshot,
-    pub economics_epoch_tx_volume_ct: u64,
+    pub economics_epoch_tx_volume: u64,
 }
 
 impl Default for Blockchain {
@@ -433,7 +433,7 @@ impl Default for Blockchain {
             // ... other fields ...
 
             // Bootstrap economic state
-            economics_prev_annual_issuance_ct: 200_000_000,
+            economics_prev_annual_issuance: 200_000_000,
             economics_prev_subsidy: economics::SubsidySnapshot {
                 storage_share_bps: 1500, // 15%
                 compute_share_bps: 3000, // 30%
@@ -442,10 +442,10 @@ impl Default for Blockchain {
             },
             economics_prev_tariff: economics::TariffSnapshot {
                 tariff_bps: 0,
-                non_kyc_volume_ct: 0,
+                non_kyc_volume: 0,
                 treasury_contribution_bps: 0,
             },
-            economics_epoch_tx_volume_ct: 0,
+            economics_epoch_tx_volume: 0,
         }
     }
 }
@@ -461,7 +461,7 @@ Governance parameters (stored as `i64` millis) are converted to controller param
 impl GovernanceEconomicParams {
     pub fn from_governance_params(
         gov: &crate::governance::Params,
-        previous_annual_issuance_ct: u64,
+        previous_annual_issuance: u64,
         subsidy_prev: SubsidySnapshot,
         tariff_prev: TariffSnapshot,
     ) -> Self {
@@ -469,9 +469,9 @@ impl GovernanceEconomicParams {
             inflation: inflation_controller::InflationParams {
                 target_inflation_bps: gov.inflation_target_bps as u16,
                 controller_gain: (gov.inflation_controller_gain as f64) / 1000.0,
-                min_annual_issuance_ct: gov.min_annual_issuance_ct as u64,
-                max_annual_issuance_ct: gov.max_annual_issuance_ct as u64,
-                previous_annual_issuance_ct,
+                min_annual_issuance_block: gov.min_annual_issuance_block as u64,
+                max_annual_issuance_block: gov.max_annual_issuance_block as u64,
+                previous_annual_issuance,
             },
             subsidy: subsidy_allocator::SubsidyParams {
                 // ... all 12 subsidy parameters ...
@@ -721,7 +721,7 @@ The economic control laws represent **world-class economic engineering**:
 - Operator runbook with emergency procedures
 - Grafana dashboard with 8 panels and 3 alerts
 
-The "sweet spot" (200M CT/year, 100 nodes, $1 price) is now a **stable basin**, not a fragile fixed point. Even if reality drifts 50% away, the system auto-corrects.
+The "sweet spot" (200M BLOCK/year, 100 nodes, $1 price) is now a **stable basin**, not a fragile fixed point. Even if reality drifts 50% away, the system auto-corrects.
 
 **For operators:** Start with [docs/economics_operator_runbook.md](../docs/economics_operator_runbook.md)
 **For developers:** See integration code at [node/src/lib.rs:4725-4778](../node/src/lib.rs#L4725-L4778)

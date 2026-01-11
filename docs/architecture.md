@@ -6,7 +6,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 
 ## Ledger and Consensus
 
-> **Plain English:** The ledger is the shared spreadsheet everyone agrees on. It tracks who owns what CT and what services are owed. Blocks are like pages — every ~1 second, a new page is added containing recent transactions. "Consensus" is how all the computers (nodes) agree on which page comes next, preventing anyone from cheating.
+> **Plain English:** The ledger is the shared spreadsheet everyone agrees on. It tracks who owns what BLOCK and what services are owed. Blocks are like pages — every ~1 second, a new page is added containing recent transactions. "Consensus" is how all the computers (nodes) agree on which page comes next, preventing anyone from cheating.
 >
 > **Key concepts:**
 > - **Regular blocks**: Added every ~1 second
@@ -43,7 +43,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 
 ## Transaction and Execution Pipeline
 
-> **Plain English:** When you want to send CT or use a service, you create a "transaction" — a signed message saying what you want to do. Here's the journey:
+> **Plain English:** When you want to send BLOCK or use a service, you create a "transaction" — a signed message saying what you want to do. Here's the journey:
 >
 > 1. **You sign it** — Your wallet creates and signs the transaction
 > 2. **It enters the mempool** — The "waiting room" where transactions sit before being included in a block
@@ -59,7 +59,7 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 
 ### Fee Lanes and Rebates
 - Fee lanes are typed via `node/src/transaction::FeeLane` and `node/src/fee`, with rebate hooks under `node/src/fees` and `node/src/fee/readiness`. Governance controls floors through `governance/src/params.rs` and telemetry tracks enforcement (`gateway_fee_floor_*` metrics).
-- Rebates post ledger entries that auto-apply to the submitter before consuming liquid CT. Reference detail lives in `docs/economics_and_governance.md#fee-lanes-and-rebates`.
+- Rebates post ledger entries that auto-apply to the submitter before consuming liquid BLOCK. Reference detail lives in `docs/economics_and_governance.md#fee-lanes-and-rebates`.
 
 ### Mempool Admission and Eviction
 - Admission and QoS live under `node/src/mempool/admission.rs`; scoring and eviction policies are in `node/src/mempool/scoring.rs`. Tests live in `node/src/mempool/tests`.
@@ -97,7 +97,7 @@ pub struct StorageReceipt {
     pub file_id: String,           // Unique file identifier
     pub provider: String,          // Storage provider address
     pub bytes_stored: u64,         // Total bytes in this settlement
-    pub cost_ct: u64,              // BLOCK paid to provider
+    pub cost: u64,              // BLOCK paid to provider
     pub block_height: u64,         // When this settled
     pub duration_epochs: u32,      // How many epochs of storage
 }
@@ -110,7 +110,7 @@ pub struct ComputeReceipt {
     pub job_id: String,            // Unique job identifier
     pub worker: String,            // Compute provider address
     pub compute_units: u64,        // Units consumed
-    pub cost_ct: u64,              // BLOCK paid to worker
+    pub cost: u64,              // BLOCK paid to worker
     pub block_height: u64,         // When job completed
     pub proof_type: String,        // "snark", "trusted", etc.
 }
@@ -123,7 +123,7 @@ pub struct EnergyReceipt {
     pub meter_id: String,          // Smart meter identifier
     pub provider: String,          // Energy provider address
     pub kwh_delivered: u64,        // Energy delivered (in milliwatt-hours)
-    pub cost_ct: u64,              // BLOCK paid to provider
+    pub cost: u64,              // BLOCK paid to provider
     pub block_height: u64,         // Settlement block
     pub oracle_signature: Vec<u8>, // Oracle attestation
 }
@@ -136,7 +136,7 @@ pub struct AdReceipt {
     pub campaign_id: String,       // Campaign identifier
     pub publisher: String,         // Publisher address
     pub impressions: u64,          // Impressions delivered
-    pub spend_ct: u64,             // BLOCK spent by advertiser
+    pub spend: u64,             // BLOCK spent by advertiser
     pub block_height: u64,         // Settlement block
     pub conversions: u32,          // Attributed conversions
 }
@@ -310,10 +310,10 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
 | `receipts_energy_per_block` | Gauge | Energy receipts in current block |
 | `receipts_ad_per_block` | Gauge | Ad receipts in current block |
 | `receipt_bytes_per_block` | Gauge | Serialized receipt size (bytes) |
-| `receipt_settlement_storage_ct` | Gauge | Storage settlement amount (BLOCK) |
-| `receipt_settlement_compute_ct` | Gauge | Compute settlement amount (BLOCK) |
-| `receipt_settlement_energy_ct` | Gauge | Energy settlement amount (BLOCK) |
-| `receipt_settlement_ad_ct` | Gauge | Ad settlement amount (BLOCK) |
+| `receipt_settlement_storage` | Gauge | Storage settlement amount (BLOCK) |
+| `receipt_settlement_compute` | Gauge | Compute settlement amount (BLOCK) |
+| `receipt_settlement_energy` | Gauge | Energy settlement amount (BLOCK) |
+| `receipt_settlement_ad` | Gauge | Ad settlement amount (BLOCK) |
 | `metrics_derivation_duration_ms` | Histogram | Time to derive metrics from receipts |
 
 **Usage:**
@@ -340,19 +340,19 @@ pub fn derive_market_metrics_from_chain(
             match receipt {
                 Receipt::Storage(r) => {
                     metrics.storage_volume += r.bytes_stored;
-                    metrics.storage_revenue += r.cost_ct;
+                    metrics.storage_revenue += r.cost;
                 },
                 Receipt::Compute(r) => {
                     metrics.compute_units += r.compute_units;
-                    metrics.compute_revenue += r.cost_ct;
+                    metrics.compute_revenue += r.cost;
                 },
                 Receipt::Energy(r) => {
                     metrics.energy_kwh += r.kwh_delivered;
-                    metrics.energy_revenue += r.cost_ct;
+                    metrics.energy_revenue += r.cost;
                 },
                 Receipt::Ad(r) => {
                     metrics.ad_impressions += r.impressions;
-                    metrics.ad_revenue += r.spend_ct;
+                    metrics.ad_revenue += r.spend;
                 },
             }
         }
@@ -420,6 +420,11 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 ### P2P Handshake
 - `node/src/p2p/handshake.rs` negotiates capabilities, runtime/transport providers, and telemetry hooks. Peer identity lives in the `p2p_overlay` crate with in-house and stub adapters.
 - Capability negotiation exposes compression, service roles, and QUIC certificate fingerprints so gossip and RPC choose the right transport.
+- Handshake hellos now carry the sender's gossip listener address; peers reply and push their chain snapshot to that address so restarts/joiners converge immediately without waiting for new blocks.
+- Adding a peer triggers an immediate handshake + hello exchange so rejoined peers resync and refresh their peer lists without waiting on a new block.
+- Inbound gossip is accepted on a non-blocking listener and processed on the blocking worker pool so chain validation cannot stall new connections. Chain sync uses explicit `ChainRequest` pulls (requesting from the local height) plus immediate snapshot pushes with exponential-backoff retries, and a periodic pull tick (default 500ms, `TB_P2P_CHAIN_SYNC_INTERVAL_MS`) to recover from missed broadcasts.
+- QUIC certificates are required for QUIC transport; if a TCP-only peer advertises an invalid QUIC cert, the handshake proceeds but QUIC metadata is ignored and the peer stays on TCP.
+- Certificate fingerprints are enforced for QUIC traffic (and for any message that includes a fingerprint); TCP fallbacks accept missing fingerprints even when a cached QUIC cert exists so mixed-transport peers can still converge.
 
 ### P2P Wire Protocol
 - Message framing and compatibility shims live under `node/src/p2p/wire_binary.rs`. Versioned encodings ensure older/minor peers interoperate; tests assert round-trip and legacy compatibility.
@@ -436,6 +441,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 ### Gossip Relay
 - `node/src/gossip/relay.rs` implements TTL-bound dedup, shard-aware peer sets, and latency + reputation scoring. Fanout metrics live in `node/src/telemetry.rs` (`GOSSIP_*` series) and the relay persists shard membership so partitions recover quickly.
 - Range-boost deliveries and ANN payloads register as gossip hops, keeping mesh telemetry side-by-side with QUIC counts.
+- P2P rate limiting clamps request volume with a configurable window: `TB_P2P_RATE_WINDOW_SECS` (default 1s) controls how long counts accumulate before reset, pairing with `TB_P2P_MAX_PER_SEC`/`TB_P2P_MAX_BYTES_PER_SEC` to keep abusive peers from starving the network. Operators can widen the window for incident drills or lock it down during attacks.
 
 ### QUIC Transport
 - The in-house transport crate (`crates/transport`) abstracts Quinn and s2n providers. `node/src/net/quic.rs` publishes diag snapshots through RPC/CLI (`contract-cli net quic-stats`).
@@ -455,7 +461,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 > 1. **Chunked** — Split into pieces
 > 2. **Encrypted** — So only you can read them
 > 3. **Erasure coded** — Spread across multiple providers so the file survives even if some go offline
-> 4. **Tracked on-chain** — The ledger knows who stores what and pays them CT
+> 4. **Tracked on-chain** — The ledger knows who stores what and pays them BLOCK
 >
 > **SimpleDb** is our internal key-value store that handles crash-safe writes using atomic file operations.
 
@@ -490,11 +496,11 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 > **Plain English:** Think of this as a built-in AWS marketplace where people sell compute time, and the blockchain can audit that the work actually got done.
 >
 > **How it works:**
-> 1. **Provider offers compute** — "I have a GPU, I'll run your jobs for X CT per hour"
+> 1. **Provider offers compute** — "I have a GPU, I'll run your jobs for X BLOCK per hour"
 > 2. **Consumer submits a job** — "Run this ML model on my data"
 > 3. **Work gets done** — Provider executes the job
 > 4. **SNARK receipt proves it** — A small cryptographic proof shows the work was done correctly, without re-running it
-> 5. **CT changes hands** — Provider gets paid, consumer gets results
+> 5. **BLOCK changes hands** — Provider gets paid, consumer gets results
 >
 > **Key terms:**
 > - **Offer**: A provider's listing (price, capacity, bond deposited)
@@ -502,13 +508,15 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 > - **SLA (Service Level Agreement)**: Rules about quality/uptime; violations can lead to slashing
 > - **Lane**: Priority tier for different job types
 
+**BlockTorch integration**: The `metal-backend/` stack (metal-tensor + autograd) provides the deterministic tensor layer for ML workloads executed through the compute marketplace. BlockTorch defines the kernel set, gradient serialization, and proof-ready metadata needed for SNARK attestation and pricing via `ORCHARD_TENSOR_PROFILE`. The strategic roadmap and coordinator workflow live in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy), with execution priority captured in `AGENTS.md §15.B.1`.
+
 ### Offers and Matching
 - Computation lives under `node/src/compute_market`. Offers, bids, and receipts serialize through `foundation_serialization` and are exposed over RPC (`node/src/rpc/compute_market.rs`).
 - Providers stake bonds (`compute_market::Offer`), schedule workloads, and settle receipts via `compute_market::settlement`.
 
 ### Lane Scheduler
 - The matcher rotates fairness windows per lane and is backed by sled state stored under `state/market`. Lane telemetrics feed `match_loop_latency_seconds{lane}`.
-- SLA slashing is being layered atop the same scheduler per `AGENTS.md §15.B`: failed workloads will emit slash receipts anchored in CT subsidy sub-ledgers, remediation dashboards (Grafana panels sourced from `monitoring/`) will highlight degraded lanes, and deterministic replay tests will cover fairness windows, starvation protection, and persisted receipts.
+- SLA slashing is being layered atop the same scheduler per `AGENTS.md §15.B`: failed workloads will emit slash receipts anchored in BLOCK subsidy sub-ledgers, remediation dashboards (Grafana panels sourced from `monitoring/`) will highlight degraded lanes, and deterministic replay tests will cover fairness windows, starvation protection, and persisted receipts.
 
 ### Workloads and SNARK Receipts
 - Supported workloads: transcode, inference, GPU hash, SNARK. SNARK proofs now run through `node/src/compute_market/snark.rs`, which wraps the Groth16 backend, hashes wasm bytes into circuit digests, caches compiled shapes per digest, and chooses CPU/GPU provers (with telemetry exported via `snark_prover_latency_seconds{backend}` / `snark_prover_failure_total{backend}`).
@@ -526,16 +534,16 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 
 ## Energy Market
 
-> **Plain English:** The energy market lets you buy and sell real-world electricity with built-in verification. Smart meters send cryptographically signed readings to the network, which turns them into "credits" that can be settled for CT.
+> **Plain English:** The energy market lets you buy and sell real-world electricity with built-in verification. Smart meters send cryptographically signed readings to the network, which turns them into "credits" that can be settled for BLOCK.
 >
 > **Example flow:**
 > | Step | What Happens |
 > |------|--------------|
-> | 1. Register | Provider signs up with capacity (e.g., 10,000 kWh) and price (e.g., 50 CT/kWh) |
+> | 1. Register | Provider signs up with capacity (e.g., 10,000 kWh) and price (e.g., 50 BLOCK/kWh) |
 > | 2. Meter reading | Smart meter sends signed reading: "1,000 kWh delivered" |
 > | 3. Credit created | Network verifies signature, creates an `EnergyCredit` |
 > | 4. Settlement | Customer settles 500 kWh → `EnergyReceipt` created, treasury fee deducted |
-> | 5. Payout | Provider receives CT in their account |
+> | 5. Payout | Provider receives BLOCK in their account |
 >
 > **If someone disputes a reading:** A special "dispute" record is created, triggering review.
 
@@ -543,7 +551,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - Oracle trust roots are defined in `config/default.toml` under `energy.provider_keys`. Each entry maps a provider ID to a 32-byte Ed25519 public key; reloads hot-swap the verifier registry via `node::energy::configure_provider_keys` so operators can rotate or revoke keys without restarts.
 - RPC wiring (`node/src/rpc/energy.rs`) exposes `energy.register_provider`, `energy.market_state`, `energy.submit_reading`, `energy.settle`, `energy.receipts`, `energy.credits`, `energy.disputes`, `energy.flag_dispute`, and `energy.resolve_dispute`. The CLI (`cli/src/energy.rs`) emits the same JSON schema and prints providers, receipts, credits, and disputes so oracle adapters (`crates/oracle-adapter`) and explorers stay aligned. `docs/testnet/ENERGY_QUICKSTART.md` covers bootstrap, signature validation, dispute rehearsal, and how to script `contract-cli energy` calls.
 - Governance owns `energy_min_stake`, `energy_oracle_timeout_blocks`, and `energy_slashing_rate_bps`. Proposals feed those values through the shared governance crate, latch them in `node/src/governance/params.rs`, then invoke `node::energy::set_governance_params`, so runtime hooks refresh the market config plus treasury/slashing math with no recompiles.
-- Observability: `energy_market` emits gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_avg_price`), counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_ct_total`, `energy_dispute_{open,resolve}_total`, `energy_kwh_traded_total`, `energy_signature_failure_total{provider,reason}`), histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`), and simple health probes (`node::energy::check_energy_market_health`). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope or signature failures spike.
+- Observability: `energy_market` emits gauges (`energy_provider_total`, `energy_pending_credits_total`, `energy_receipt_total`, `energy_active_disputes_total`, `energy_avg_price`), counters (`energy_provider_register_total`, `energy_meter_reading_total{provider}`, `energy_settlement_total{provider}`, `energy_treasury_fee_total`, `energy_dispute_{open,resolve}_total`, `energy_kwh_traded_total`, `energy_signature_failure_total{provider,reason}`), histograms (`energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`), and simple health probes (`node::energy::check_energy_market_health`). Feed them into the metrics-aggregator dashboards and alert whenever pending meter credits exceed the safe envelope or signature failures spike.
 
 ### Energy, Governance, and RPC Next Tasks
 - **Governance + Params**
@@ -611,7 +619,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 > - **Mobile cache** — Encrypted offline storage so phones work without network
 > - **Light clients** — Lightweight sync for devices that can't store the full chain
 >
-> **User story:** Your wallet app connects to a gateway node. When you check your balance, the app calls an RPC method. When you send CT, it submits a signed transaction. When you go offline, the mobile cache keeps recent data locally.
+> **User story:** Your wallet app connects to a gateway node. When you check your balance, the app calls an RPC method. When you send BLOCK, it submits a signed transaction. When you go offline, the mobile cache keeps recent data locally.
 
 ### HTTP Gateway
 - `node/src/gateway/http.rs` uses `crates/httpd` for the router, TLS, and WebSocket upgrades. Gateways serve static content, APIs, and compute relays from the embedded storage pipeline.
@@ -621,7 +629,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - DNS + `.block` records are handled by `node/src/gateway/dns.rs` with schemas archived under `docs/spec/dns_record.schema.json`.
 
 ### DNS Auctions and Staking
-- Gateway domain auctions use stake-backed bids and escrowed CT recorded under `node/src/gateway/dns.rs` (see `StakeEscrowRecord`). RPC/CLI support deposit, withdraw, and refund flows with error codes under the same module.
+- Gateway domain auctions use stake-backed bids and escrowed BLOCK recorded under `node/src/gateway/dns.rs` (see `StakeEscrowRecord`). RPC/CLI support deposit, withdraw, and refund flows with error codes under the same module.
 
 ### Mobile Gateway Cache
 - Mobile caches persist ChaCha20-Poly1305 encrypted blobs in sled (`node/src/gateway/mobile_cache.rs`). TTL sweeps and CLI flush commands ensure offline support without stale data.
@@ -631,7 +639,7 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
 - Mobile updates plus power/bandwidth heuristics from the old `docs/mobile_light_client.md` live here and in `docs/apis_and_tooling.md#light-client-streaming`.
 
 ### Read Receipts
-- `node/src/gateway/read_receipt.rs` records signed acknowledgements, batches them for ledger inclusion, and exposes CLI/metrics counters. Economics for `READ_SUB_CT` live in `docs/economics_and_governance.md`.
+- `node/src/gateway/read_receipt.rs` records signed acknowledgements, batches them for ledger inclusion, and exposes CLI/metrics counters. Economics for `READ_SUB` live in `docs/economics_and_governance.md`.
 
 ## Launch Governor
 
@@ -758,9 +766,9 @@ The RPC output now also contains an `economics_prev_market_metrics` array derive
 - **Self-tuning PI controller** — Budget pacing now hinges on a PI controller that runs inside each `CampaignBudgetState`. The controller tracks the relative error between `epoch_spend` and `epoch_target`, integrates it, and applies a `dual_price` adjustment once per reservation; the error zero-crossings feed a Ziegler-Nichols inspired tuner that recalculates `Kp/Ki` so the spend stays within the configured robustness window. The tuning knobs live in `BudgetBrokerConfig.pi_tuner` (fields: `enabled`, `kp_min`, `kp_max`, `ki_min`, `ki_max`, `ki_ratio`, `tuning_sensitivity`, `zero_cross_min_interval_micros`, and `max_integral`) and are normalized alongside the existing step/dual steps. `CampaignBudgetSnapshot.pi_controller` persists the controller state so deterministic replays keep the same gain history, and the resulting `dual_price`/`kappa` traces continue to surface through the existing telemetry guards.
 - **Proof-of-presence targeting** — `node/src/localnet`, `node/src/range_boost`, and `node/src/service_badge.rs` mint `PresenceReceipt {beacon_id,device_key,mesh_node,location_bucket,radius_meters,confidence_bps,minted_at_micros,expires_at_micros}` entries that `crates/ad_market/src/attestation.rs` verifies. Receipts are cached in a privacy-safe sled store, gated by governance knobs `TB_PRESENCE_TTL_SECS`, `TB_PRESENCE_RADIUS_METERS`, and `TB_PRESENCE_PROOF_CACHE_SIZE`, and exposed through new RPCs (`ad_market.list_presence_cohorts`, `ad_market.reserve_presence`). Node `bin` logic already cancels reservations when `presence_badge` checks fail; this feature extends those hooks to the new attestation types and read-readiness rehearsal gate.
 - **Domain marketplace + interest ingestion** — `node/src/gateway/dns.rs` emits ownership tiers and auction/intent metadata that feed the ad-policy snapshot. A governance-owned registry maps `.block` categories and premium tiers to `interest_tags`, so advertisers can reserve or exclude those audiences. Synchronization happens alongside the ad policy snapshot pruning pipeline, and readiness snapshots surface `domain_tier_supply_ppm` and `interest_tag_supply_ppm` buckets for operators. Docs (`docs/system_reference.md`, `docs/apis_and_tooling.md`) enumerate RPC validation errors for misaligned tiers/tags.
-- **Analytics, conversions, and uplift** — `crates/ad_market/src/uplift.rs` now manages holdout cohorts per selector, exposing readiness/ROAS deltas via `ad_market.readiness`. `ad_market.record_conversion` accepts `value_usd_micros`, `value_ct`, `currency_code`, `attribution_window_secs`, and `selector_weights[]` so advertisers can attribute conversions back to badges, interest tags, domains, and presence proofs. Readiness reports publish inventory depth, presence-proof freshness histograms, domain-tier utilization, and privacy budget status per selector, while CLI/explorer commands mirror the same aggregates.
+- **Analytics, conversions, and uplift** — `crates/ad_market/src/uplift.rs` now manages holdout cohorts per selector, exposing readiness/ROAS deltas via `ad_market.readiness`. `ad_market.record_conversion` accepts `value_usd_micros`, `value`, `currency_code`, `attribution_window_secs`, and `selector_weights[]` so advertisers can attribute conversions back to badges, interest tags, domains, and presence proofs. Readiness reports publish inventory depth, presence-proof freshness histograms, domain-tier utilization, and privacy budget status per selector, while CLI/explorer commands mirror the same aggregates.
 - **Privacy + governance guardrails** — `crates/ad_market/src/privacy.rs` clamps selector combinations (badge + premium domain + precise presence requires explicit opt-in) and guarantees k-anonymity before releasing supply or readiness data. Violations surface via RPC errors and telemetry (`ad_privacy_budget_utilization_ratio`, `ad_privacy_denial_total`). Governance proposals (via `cli/src/gov.rs`) own selector caps, privacy budgets, interest registries, and presence TTL/radius settings.
-- **Observability + gate cadence** — `metrics-aggregator/src/lib.rs` adds segment readiness counters (`ad_segment_ready_total{domain_tier,presence_bucket,interest_tag}`), competitiveness stats (`ad_auction_top_bid_usd_micros{selector}`, `ad_bid_shading_factor_bps{selector}`, `ad_auction_win_rate{selector}`), conversion values (`ad_conversion_value_ct_total{selector}`), and privacy usage histograms. The aggregator exports them through `/wrappers`, Grafana panels live under `monitoring/ad_market_dashboard.json`, and `docs/operations.md#telemetry-wiring` now requires screenshots from `npm ci --prefix monitoring && make monitor` whenever these metrics change. Every touch to `crates/ad_market`, `node/src/rpc/ad_market.rs`, `node/src/localnet`, `node/src/range_boost`, `node/src/gateway/dns.rs`, `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs`, `metrics-aggregator/`, `monitoring/`, or the associated CLI/explorer files must rerun the full gate list (`just lint`, `just fmt`, `just test-fast`, `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, `scripts/fuzz_coverage.sh`) with transcripts attached per `AGENTS.md §0.6`.
+- **Observability + gate cadence** — `metrics-aggregator/src/lib.rs` adds segment readiness counters (`ad_segment_ready_total{domain_tier,presence_bucket,interest_tag}`), competitiveness stats (`ad_auction_top_bid_usd_micros{selector}`, `ad_bid_shading_factor_bps{selector}`, `ad_auction_win_rate{selector}`), conversion values (`ad_conversion_value_total{selector}`), and privacy usage histograms. The aggregator exports them through `/wrappers`, Grafana panels live under `monitoring/ad_market_dashboard.json`, and `docs/operations.md#telemetry-wiring` now requires screenshots from `npm ci --prefix monitoring && make monitor` whenever these metrics change. Every touch to `crates/ad_market`, `node/src/rpc/ad_market.rs`, `node/src/localnet`, `node/src/range_boost`, `node/src/gateway/dns.rs`, `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs`, `metrics-aggregator/`, `monitoring/`, or the associated CLI/explorer files must rerun the full gate list (`just lint`, `just fmt`, `just test-fast`, `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, `scripts/fuzz_coverage.sh`) with transcripts attached per `AGENTS.md §0.6`.
 
 ### Law-enforcement Portal and Jurisdiction Packs
 - LE logging (`node/src/le_portal.rs`) records requests, actions, canaries, and evidence logs, with privacy redaction optional. Jurisdiction packs (`jurisdiction/`, `docs/security_and_privacy.md#jurisdiction-packs`) scope consent defaults and audit hooks.

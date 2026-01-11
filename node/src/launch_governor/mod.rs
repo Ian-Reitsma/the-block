@@ -253,7 +253,7 @@ pub struct DnsSample {
     pub completion: Option<RatioSample>,
     pub settle_durations_ms: Option<Vec<u64>>,
     pub stake_coverage_ratio: Option<f64>,
-    pub settlement_p90_ct: Option<u64>,
+    pub settlement_p90: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -374,7 +374,7 @@ impl SignalProvider for LiveSignalProvider {
                     .collect(),
             )
         };
-        let settlement_p90 = percentile_u64(&snapshot.settlement_amounts_ct, 0.9);
+        let settlement_p90 = percentile_u64(&snapshot.settlement_amounts, 0.9);
         let coverage_ratio = settlement_p90.and_then(|p90| {
             if p90 == 0 {
                 None
@@ -388,7 +388,7 @@ impl SignalProvider for LiveSignalProvider {
             completion: completion_ratio,
             settle_durations_ms: durations_ms,
             stake_coverage_ratio: coverage_ratio,
-            settlement_p90_ct: settlement_p90,
+            settlement_p90: settlement_p90,
         }
     }
 
@@ -1410,7 +1410,7 @@ impl NamingController {
         let dispute_ratio = sample.dispute_share.as_ref()?.ratio()?;
         let completion_ratio = sample.completion.as_ref()?.ratio()?;
         let coverage = sample.stake_coverage_ratio.unwrap_or(0.0);
-        let settle_p90 = sample.settlement_p90_ct.unwrap_or(0) as f64;
+        let settle_p90 = sample.settlement_p90.unwrap_or(0) as f64;
         let duration_median = sample
             .settle_durations_ms
             .as_ref()
@@ -1496,7 +1496,7 @@ impl NamingController {
                 JsonValue::Number(JsonNumber::from_f64(coverage).unwrap_or(JsonNumber::from(0u64))),
             ),
             (
-                "settlement_p90_ct",
+                "settlement_p90",
                 JsonValue::Number(JsonNumber::from(settle_p90 as u64)),
             ),
         ]);
@@ -2056,7 +2056,7 @@ mod tests {
             }),
             settle_durations_ms: Some(vec![2200, 2400]),
             stake_coverage_ratio: Some(80.0),
-            settlement_p90_ct: Some(100),
+            settlement_p90: Some(100),
         };
         assert!(ctrl.evaluate(1, &baseline).is_none());
         let rehearsal_sample = DnsSample {
@@ -2074,7 +2074,7 @@ mod tests {
             }),
             settle_durations_ms: Some(vec![1500, 1400]),
             stake_coverage_ratio: Some(150.0),
-            settlement_p90_ct: Some(100),
+            settlement_p90: Some(100),
         };
         let eval = ctrl.evaluate(2, &rehearsal_sample).expect("rehearsal");
         assert_eq!(eval.action, GateAction::Rehearsal);
@@ -2084,7 +2084,7 @@ mod tests {
             completion: rehearsal_sample.completion.clone(),
             settle_durations_ms: Some(vec![1200, 1100]),
             stake_coverage_ratio: Some(400.0),
-            settlement_p90_ct: Some(80),
+            settlement_p90: Some(80),
         };
         let trade_eval = ctrl.evaluate(3, &trade_sample).expect("trade");
         assert_eq!(trade_eval.action, GateAction::Trade);

@@ -52,7 +52,7 @@ tls_warning = { path = "../crates/tls_warning" }
 # linear-algebra routines for governor
 foundation_math = { path = "../crates/foundation_math" }
 # minimal HTTP parsing
-# account ledger for CT burns
+# account ledger for BLOCK burns
 ledger = { path = "../ledger" }
 dex = { path = "../dex" }
 bridges = { path = "../bridges" }

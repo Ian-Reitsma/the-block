@@ -23,11 +23,15 @@ fn build_signed_tx(
         amount_consumer: 0,
         amount_industrial: 1,
         fee,
-        pct_ct: 0,
+        pct: 0,
         nonce,
         memo: Vec::new(),
     };
-    let mut tx = sign_tx(sk.to_vec(), payload).expect("sign");
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    let mut tx = sign_tx(secret.to_vec(), payload).expect("valid key");
     tx.lane = FeeLane::Industrial;
     tx
 }
@@ -36,8 +40,11 @@ fn build_signed_tx(
 fn rejects_industrial_when_consumer_fees_high() {
     let dir = tempdir().unwrap();
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("a".into(), 0, 2_000).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    // Zero out fee floors so the comfort guard path (not the fee floor) drives the rejection.
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
+    bc.add_account("a".into(), 2_000).unwrap();
+    bc.add_account("b".into(), 0).unwrap();
     bc.comfort_threshold_p90 = 10;
     for _ in 0..50 {
         policy::record_consumer_fee(20);

@@ -19,7 +19,7 @@ In this project, **documentation describes reality**. If code does something dif
 | `just test-fast` | Quick tests — catches obvious bugs in a few minutes |
 | `just test-full` | Full tests — runs everything, takes longer, catches subtle issues |
 | Replay test | Re-runs all historical blocks to verify determinism (same input = same output) |
-| Settlement audit | Double-entry accounting check — makes sure CT doesn't appear or disappear |
+| Settlement audit | Double-entry accounting check — makes sure BLOCK doesn't appear or disappear |
 | Fuzzing | Throws random inputs at the code to find edge cases |
 
 ### Your First PR: 3 Steps
@@ -53,7 +53,7 @@ Quick Index
 - Progress Snapshot: see [`Document Map`](docs/overview.md#document-map) for subsystem status and gaps
 - Networking, per-peer telemetry, & DHT recovery: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
 - QUIC handshake & fallback rules: see [`Networking and Propagation`](docs/architecture.md#networking-and-propagation)
-- Economic formulas: see [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers)
+- Economic formulas: see [`BLOCK Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#block-supply-and-sub-ledgers)
 - Blob root scheduling: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
 - Macro-block checkpoints: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
 - Law-enforcement portal & canary runbook: see [`Auxiliary Services`](docs/architecture.md#auxiliary-services)
@@ -64,13 +64,14 @@ Quick Index
 - PoH tick generator: see [`Ledger and Consensus`](docs/architecture.md#ledger-and-consensus)
 - Commit–reveal scheme: see [`Proposal Lifecycle`, `Governance Parameters`, and `Risk Controls`](docs/economics_and_governance.md#proposal-lifecycle)
 - Service badge tracker: see [`Auxiliary Services`](docs/architecture.md#auxiliary-services)
-- Fee market reference: see [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers)
-- Network fee rebates: see [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers)
+- Fee market reference: see [`BLOCK Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#block-supply-and-sub-ledgers)
+- Network fee rebates: see [`BLOCK Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#block-supply-and-sub-ledgers)
 - Transaction lifecycle and fee lanes: see [`Transaction and Execution Pipeline`](docs/architecture.md#transaction-and-execution-pipeline)
 - Compute-market courier retry logic: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
 - Compute-market admission quotas: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
 - Compute-unit calibration: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
 - Compute-market SNARK receipts: see [`Compute Marketplace`](docs/architecture.md#compute-marketplace)
+- BlockTorch compute framework strategy: see [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy)
 - Multi-hop trust-line routing: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
 - DEX escrow and partial-payment proofs: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
 - AMM pools and liquidity mining: see [`DEX and Trust Lines`](docs/architecture.md#dex-and-trust-lines)
@@ -137,9 +138,9 @@ The last 10% of work is operational hardening—this list is derived from the li
    - **Deployment guidance**: `RECEIPT_INTEGRATION_COMPLETE.md` and `PHASES_2-4_COMPLETE.md` describe the coordinated rollout, governor checks, and release checklist.
    - **Consensus impact reminder**: Receipts now influence block hash; follow the governor coordination badges (`node/src/launch_governor`) and `docs/operations.md#telemetry-wiring` before switching on mainnet.
 
-#### Concrete Example: Changing CT Fee Floor Behavior
+#### Concrete Example: Changing BLOCK Fee Floor Behavior
 
-Say you want to change how CT fee floors work (e.g., increase the base fee target from 50% to 60% mempool fullness). Here's the actual order of operations:
+Say you want to change how BLOCK fee floors work (e.g., increase the base fee target from 50% to 60% mempool fullness). Here's the actual order of operations:
 
 1. **Read the existing spec first:**
    - [`docs/economics_and_governance.md`](docs/economics_and_governance.md) — fee lanes section
@@ -191,7 +192,7 @@ Say you want to change how CT fee floors work (e.g., increase the base fee targe
 
 ---
 
-Subsidy accounting is unified around the CT subsidy categories (`STORAGE_SUB_CT`, `READ_SUB_CT`, and `COMPUTE_SUB_CT`) with ledger snapshots shared across the node, governance crate, CLI, and explorer.
+Subsidy accounting is unified around the BLOCK-denominated subsidy buckets (`STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB`); each bucket now represents ledger snapshots shared across the node, governance crate, CLI, and explorer.
 The stack includes multi-signature release approvals with explorer and CLI support, attested binary fetch with automated rollback, QUIC mutual-TLS rotation plus diagnostics and chaos tooling, mempool QoS slot accounting, end-to-end metrics-to-log correlation surfaced through the aggregator and dashboards, and the fully in-house TCP/UDP reactor that underpins every HTTP, WebSocket, and gossip surface alongside the proof-rebate pipeline persisting receipts appended to coinbase outputs during block production. Governance tracks fee-floor policy history with rollback support, wallet flows surface localized floor warnings with telemetry hooks and JSON output, DID anchoring runs through on-chain registry storage with explorer timelines, and light-client commands handle sign-only payloads as well as remote provenance attestations. Macro-block checkpointing, per-shard state roots, SNARK-verified compute receipts, real-time light-client state streaming, Lagrange-coded storage allocation with proof-of-retrievability, adaptive gossip fanout with LRU deduplication, deterministic WASM execution with a stateful debugger, build provenance attestation, session-key abstraction, Kalman difficulty retune, and network partition recovery extend the cluster-wide `metrics-aggregator` and graceful `compute.job_cancel` RPC.
 
 Highlights: governance/ledger/metrics aggregator encode via the first-party serialization facade and explorer/CLI/log indexer route SQLite through the `foundation_sqlite` wrapper; remaining serde_json/bincode usage lives in tooling.
@@ -206,7 +207,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 - Wallet binaries ship on `ed25519-dalek 2.2.x`, propagate multisig signer sets, escrow hash algorithms, and remote signer telemetry, surfacing localized fee-floor coaching with JSON automation hooks for dashboards.
 - Wrapper telemetry exports runtime/transport/overlay/storage/coding/codec/crypto metadata, feeds the aggregator `/wrappers` endpoint, powers the `contract-cli system dependencies` command, and keeps Grafana dashboards aligned with dependency-policy violations.
 - SNARK receipts now run through the in-house Groth16 backend with Halo-style circuits, caching compiled wasm digests per workload, producing CPU/GPU prover telemetry (`snark_prover_latency_seconds`, `snark_prover_failure_total`), attaching proof bundles (with fingerprints + circuit artifacts) to SLA history, auto-selecting GPU provers whenever providers advertise CUDA/ROCm capability, and exposing data via `compute_market.sla_history` + `contract-cli compute proofs`.
-- Compute-market matching enforces lane-aware batching with fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards, and records payouts exclusively in CT with receipts anchored directly into the consolidated subsidy ledger.
+- Compute-market matching enforces lane-aware batching with fairness windows, starvation telemetry, configurable batch sizes, and persisted receipts wired through the `ReceiptStore` so restarts replay only outstanding orders. The matcher rotates lanes until either the batch quota or a fairness deadline trips, stages seeds before swap-in to prevent invalid wipes, exposes structured lane status/age warnings plus `match_loop_latency_seconds{lane}` histograms for dashboards, and records payouts exclusively in BLOCK with receipts anchored directly into the consolidated subsidy ledger.
 - Mobile gateway caches persist encrypted responses and offline transactions to sled-backed storage with TTL sweeping, max-size guardrails, eviction telemetry, and CLI/RPC status & flush endpoints so mobile users can recover across restarts without leaking stale data. Sweepers drain a min-heap of expirations, boot-time replays rebuild the queue, and ChaCha20-Poly1305 keys derive from `TB_MOBILE_CACHE_KEY_HEX` (or fall back to `TB_NODE_KEY_HEX`) to harden the cache at rest.
 - Light-client device probes integrate Android/iOS power and connectivity hints, cache asynchronous readings with graceful degradation, stream `the_block_light_client_device_status{field,freshness}` telemetry (fresh/cached/fallback), surface gating messages in the CLI/RPC, honour overrides stored in `~/.the_block/light_client.toml`, and embed the latest device snapshot inside compressed log uploads.
  - Runtime-backed HTTP client coverage now spans the node/CLI stacks, and the metrics aggregator and gateway HTTP servers now run on the in-house `httpd` router with the first-party TLS layer; remaining HTTP migrations focus on tooling stubs documented in [`JSON-RPC`](docs/apis_and_tooling.md#json-rpc) and [`Document Map`](docs/overview.md#document-map).
@@ -220,6 +221,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 **Outstanding focus areas:**
 - Ship governance treasury disbursement tooling and explorer timelines before opening external treasury submissions.
 - Integrate compute-market SLA slashing atop the lane-aware matcher and document remediation dashboards for operators.
+- Align BlockTorch (metal-tensor) with compute market readiness: publish the spec checklist, determinism requirements, and coordinator milestones from `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md` Part XII.
 - Continue WAN-scale QUIC chaos drills for relay fan-out while publishing mitigation recipes from the new telemetry traces and validating cross-provider failover through the transport registry.
 - Finish multisig wallet UX polish (batched signer discovery, richer CLI prompts) so remote signers can run production workflows.
 - Expand bridge and DEX documentation with signer-set payloads, explorer telemetry, and release-verifier guidance ahead of the next tag.
@@ -270,7 +272,7 @@ Highlights: governance/ledger/metrics aggregator encode via the first-party seri
 
 ## 1 · Project Mission & Scope — Production-Grade Mandate
 
-**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (BLOCK) proof‑of‑work + proof‑of-service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility. Treasury, governance, and RPC surfaces now expose BLOCK-denominated fields (`amount`, `balance`, `price`, etc.) without the old `_ct`/`_it` suffixes; treat any remaining `*_CT` identifiers (e.g., subsidy counters) as named BLOCK ledgers rather than separate tokens.
+**The‑Block** is a *formally‑specified*, **Rust-first**, single-token (BLOCK) proof‑of‑work + proof‑of-service blockchain kernel destined for main-net deployment with legacy industrial sub-ledgers retained for compatibility. Treasury, governance, and RPC surfaces now expose BLOCK-denominated fields (`amount`, `balance`, `price`, etc.) without the `_ct`/`_it` suffixes; any stray `*_CT` identifiers should be treated as archival anchors to the migrated names rather than new tokens.
 The repository owns exactly four responsibility domains:
 
 | Domain        | In-Scope Artifacts                                                     | Out-of-Scope (must live in sibling repos) |
@@ -288,14 +290,13 @@ The repository owns exactly four responsibility domains:
 | Memory- & Thread-Safety       | `#![forbid(unsafe_code)]`; FFI boundary capped at 2 % LOC; Miri & AddressSanitizer in nightly CI. | 0 undefined-behaviour findings in continuous fuzz. |
 | Portability                   | Cross-compile matrix: Linux glibc & musl, macOS, Windows‑WSL; reproducible Docker images. | Successful `cargo test --release` on all targets per PR. |
 
-### Economic Model — Unified CT Subsidy Engine
+### Economic Model — Unified BLOCK Subsidy Engine
 
-- Subsidy accounting now lives in the shared CT ledger. Industrial workloads
-  remain tracked as labelled CT subaccounts rather than a separate capped
-  token, and all operator rewards settle in transferable CT minted directly
+- Subsidy accounting now lives in the shared BLOCK ledger. Industrial workloads
+  remain tracked as labelled lane subaccounts rather than a separate capped
+  token, and all operator rewards settle in transferable BLOCK minted directly
   in the coinbase.
-- Every block carries three subsidy fields: `STORAGE_SUB_CT`,
-  `READ_SUB_CT`, and `COMPUTE_SUB_CT`.
+- Every block carries three subsidy fields: `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB`.
 - `industrial_backlog` and `industrial_utilization` gauges feed
   `Block::industrial_subsidies()`; these metrics surface the queued work and
   realised throughput that the subsidy governor uses when retuning
@@ -318,7 +319,7 @@ The repository owns exactly four responsibility domains:
   \]
 
   with hysteresis `ΔN ≈ √N*` to damp flash joins/leaves.
- - See [`CT Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers) for full derivations and worked examples.
+- See [`BLOCK Supply`, `Fee Lanes`, and `Settlement`](docs/economics_and_governance.md#block-supply-and-sub-ledgers) for full derivations and worked examples.
 
 ## 2 · Repository Layout
 
@@ -382,7 +383,7 @@ Proceed only if you understand that errors here translate directly into on-chain
 ### Vision Snapshot
 
 *The-Block* ultimately targets a civic-grade chain: a one-second base layer
-that anchors notarized micro-shards, dual Consumer/Industrial tokens, and an
+that anchors notarized micro-shards, lane-aware BLOCK accounting, and an
 inflation-subsidy meter that rewards honest node work. Governance follows the
 "service guarantees citizenship" maxim—badges earned by uptime grant one
 vote per node, with shard-based districts to check capture. This repository is
@@ -393,7 +394,7 @@ the kernel of that architecture.
 The codebase already ships a reproducible kernel with:
 
 - dynamic difficulty retargeting and one-second block cadence,
-- unified CT fee routing with decay-driven emissions and legacy industrial sub-ledger reporting,
+- unified BLOCK fee routing with decay-driven emissions and legacy industrial sub-ledger reporting,
 - purge-loop infrastructure with telemetry counters and TTL/orphan sweeps,
 - a minimal TCP gossip layer and JSON-RPC control surface,
 - cross-language serialization tests and a Python demo.
@@ -415,14 +416,14 @@ The following section is the complete, up‑to‑date vision. It supersedes any 
 Service Guarantees Citizenship: A Civic-Scale Architecture for a One-Second L1, Notarized Micro‑Shards, and Contribution‑Weighted Governance
 
 ## Abstract
-The-Block is a production-grade, people-powered blockchain designed to make everyday digital life faster, cheaper, and more trustworthy while rewarding real service. A simple, auditable 1-second L1 handles value and policy; sub-second micro-shards batch heavy AI/data into notarized roots per tick. Economics now revolve around a single transferable CT, with consumer and industrial sub-ledgers governing payout share and personal rebates acting as expiring bill reducers rather than tokens. Governance binds rights to earned service via bicameral votes (Operators + Builders), quorum, and timelocks. The networking model extends beyond classic blockchains: nearby devices form a "people-built internet" (LocalNet + Range Boost) where proximity and motion become infrastructure, coverage earns more where it’s scarce, and money maps to useful time and reach. Launch proceeds consumer-first (single USDC pool), with industrial lanes lighting once readiness trips.
+The-Block is a production-grade, people-powered blockchain designed to make everyday digital life faster, cheaper, and more trustworthy while rewarding real service. A simple, auditable 1-second L1 handles value and policy; sub-second micro-shards batch heavy AI/data into notarized roots per tick. Economics now revolve around a single transferable BLOCK; consumer and industrial lanes track payout share and rebate accruals—everything still settles in BLOCK. Governance binds rights to earned service via bicameral votes (Operators + Builders), quorum, and timelocks. The networking model extends beyond classic blockchains: nearby devices form a "people-built internet" (LocalNet + Range Boost) where proximity and motion become infrastructure, coverage earns more where it’s scarce, and money maps to useful time and reach. Launch proceeds consumer-first (single USDC pool), with industrial lanes lighting once readiness trips.
 
 ## 1. Introduction & Current State
 Public chains excel in different slices—monetary credibility (Bitcoin), programmability (Ethereum), low latency (Solana), payments (XRP)—but none marries auditability, sub‑second data, wide participation, and service‑tied rights. Our blueprint: keep L1 minimal and deterministic; push heavy work to shards; pay for accepted results; and let “service guarantee citizenship.”
 
 Already in‑repo:
 - 1‑second L1 kernel (Rust), difficulty retarget, mempool validation
-- dual‑token model, decay‑based emissions, fee selectors
+- single‑token (BLOCK) model with consumer/industrial lanes, decay‑based emissions, fee selectors
 - purge loops (TTL/orphan) with telemetry
 - minimal gossip + JSON‑RPC node
 - cross‑language determinism tests, Python demo
@@ -434,9 +435,9 @@ L1: value transfers, governance, shard‑root receipts; fixed 256‑bit header; 
 ### 2.2 Service Identity & Roles
 Nodes attest uptime and verifiable work (bandwidth/storage/compute). Each epoch, percentile ranking assigns roles: target ~70% Consumer / ~30% Industrial; roles lock for the epoch with hysteresis to prevent flapping.
 
-### 2.3 Economics: Unified CT Supply
-- CT is the sole transferable unit covering fees, staking, and rewards. Governance manages its emission curve and circulating float.
-- Industrial workloads draw from a dedicated CT sub-ledger that governs payout share without introducing a separate token. Split targets are tuned by policy rather than markets.
+### 2.3 Economics: Unified BLOCK Supply
+- BLOCK is the sole transferable unit covering fees, staking, and rewards. Governance manages its emission curve and circulating float.
+- Industrial workloads draw from a dedicated lane sub-ledger that governs payout share without introducing a separate token. Split targets are tuned by policy rather than markets.
 - Personal rebates/priority credits remain ledger entries only. They auto-apply to your own bills, expire per policy, and never circulate or affect spot pricing.
 
 ## 3. Governance: Constitution vs Rulebook
@@ -447,9 +448,9 @@ Nodes attest uptime and verifiable work (bandwidth/storage/compute). Each epoch,
 **Process:** bicameral votes (Operators/Builders); snapshot voters at create; secret ballots; param changes next epoch after timelock; upgrades require supermajority + longer timelock + rollback window; emergencies only at catalog/app layer, auto‑expire, fully logged.
 
 ## 4. Rewards, Fees, Emissions
-- Two CT subsidy sub-ledgers (consumer/industrial) accrue in every coinbase; consumer share pays uptime, industrial share weights validated work. If industrial demand spikes, governance nudges the split within bounds rather than minting a new asset.
-- Emissions anchor to block height; publish curves and tests; first-month issuance stays tame (≈0.01% of circulating CT). No variable caps; vest any pre-TGE accrual by uptime/validated work.
-- Reads stay free; writes burn personal rebates first, then CT (shard roots debit the industrial bucket, L1 transactions debit consumer). All flows settle in CT accounts.
+- Two lane-labelled subsidy sub-ledgers (consumer/industrial) accrue in every coinbase and represent BLOCK payouts; consumer share pays uptime, industrial share weights validated work. If industrial demand spikes, governance nudges the split within bounds rather than minting a new asset.
+- Emissions anchor to block height; publish curves and tests; first-month issuance stays tame (≈0.01% of circulating BLOCK). No variable caps; vest any pre-TGE accrual by uptime/validated work.
+- Reads stay free; writes burn personal rebates first, then BLOCK (shard roots debit the industrial bucket, L1 transactions debit consumer). All flows settle in BLOCK accounts.
 
 ## 5. Privacy & UX
 - Vault + Personal AI: default‑private content with revocable capabilities; explainable citations (which items answered a query); content encrypted at source; chain notarizes proofs only.
@@ -470,19 +471,19 @@ Phones earn by carrying sealed bundles along commutes; settlement releases on de
 User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, spend anywhere; roaming without passwords/SIMs; wrapped traffic and rate caps for host safety.
 
 ## 7. Compute Marketplace
-- Per-slice pricing settles entirely in CT; sealed-bid batch matches run with refundable deposits and equal pay per slice type.
+- Per-slice pricing settles entirely in BLOCK; sealed-bid batch matches run with refundable deposits and equal pay per slice type.
 - Canary lanes (transcode, authenticity checks) remain the benchmark set; heavier jobs expand under governance-approved caps with SLA telemetry.
-- Shadow intents (stake-backed) show p25–p75 bands before activation; when armed, escrows convert into CT payouts and start jobs with rebates landing as personal credits.
+- Shadow intents (stake-backed) show p25–p75 bands before activation; when armed, escrows convert into BLOCK payouts and start jobs with rebates landing as personal credits.
 - Operator guardrails: daily per-node payout caps; UI break-even/margin probes (power cost × hours/shard × watts).
 
 ## 8. Compute‑Backed Money (CBM) & Instant Apps
-- CBM: daily redeem curves—X CT buys Y seconds standard compute or Z MB delivered; protocol enforces redeemability with a minimal backstop from marketplace fees.
+- CBM: daily redeem curves—X BLOCK buys Y seconds standard compute or Z MB delivered; protocol enforces redeemability with a minimal backstop from marketplace fees.
 - Instant Apps: tap‑to‑use applets execute via nearby compute/caches and settle later; creators paid per use in CBM; users often pay zero if they contributed.
 
 ## 9. Launch Plan
-- CT TGE: seed initial liquidity against a single USDC pool, time-lock LP shares, slow-start 48h, and publish pool math plus addresses.
+- BLOCK TGE: seed initial liquidity against a single USDC pool, time-lock LP shares, slow-start 48h, and publish pool math plus addresses.
 - Marketplace preview: stake-backed intents show pricing bands without filling orders until governance opens the lanes.
-- Readiness gates industrial payouts on sustained node capacity, liquidity, and votes; once tripped, start canary lanes, migrate shadow intents into live CT escrows, and credit rebates as ledger entries.
+- Readiness gates industrial payouts on sustained node capacity, liquidity, and votes; once tripped, start canary lanes, migrate shadow intents into live BLOCK escrows, and credit rebates as ledger entries.
 - Vesting & caps: any pre-TGE accrual vests by uptime/validated work; cap total pre-launch claims.
 
 ## 10. SDKs
@@ -496,9 +497,9 @@ User‑shared, rate‑limited guest Wi‑Fi with one‑tap join; earn at home, s
 - Founder exit: burn protocol admin keys; reproducible builds; move marks/domains to a standards non‑profit; bicameral governance; public irrevocability txs.
 
 ## 12. Dashboard & Metrics
-- Home: CT/day (USD est.), 7-day sparkline; readiness score & bottleneck; node mix; inflation; circulating supply.
+- Home: BLOCK/day (USD est.), 7-day sparkline; readiness score & bottleneck; node mix; inflation; circulating supply.
 - Marketplace: job cards w/ p25–p75, p_adj; est. duration on your device; break‑even/margin; refundable capacity stakes.
-- Wallet/Swap: balances, recent tx; DEX swap (USDC↔CT); no fiat in-app.
+- Wallet/Swap: balances, recent tx; DEX swap (USDC↔BLOCK); no fiat in-app.
 - Policy: emissions curve; live R(t,b); reserve inventory; jurisdiction pack hashes; transparency log.
 
 ## 13. Focus Areas
@@ -514,13 +515,13 @@ See [Document Map](docs/overview.md#document-map) for cross-links into the canon
 - Modular wallet framework with hardware signer support and CLI utilities.
 - Cluster-wide `metrics-aggregator` service and graceful `compute.job_cancel` RPC for reputation-aware rollbacks.
 - Cross-chain exchange adapters, light-client crate, indexer with explorer, and benchmark/simulation tools.
-- Free-read architecture with receipt batching, execution receipts, governance-tuned CT subsidy ledger accounting, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
+- Free-read architecture with receipt batching, execution receipts, governance-tuned BLOCK subsidy ledger accounting, token-bucket rate limiting, and traffic analytics via `gateway.reads_since`.
 - Fee-priority mempool with EIP-1559 base fee evolution; high-fee transactions evict low-fee ones and each block nudges the base fee toward a target fullness.
 - Bridge primitives with relayer proofs and lock/unlock flows exposed via `blockctl bridge deposit`/`withdraw`.
 - Persistent contracts and on-disk key/value state with opcode ABI generation and `contract` CLI for deploy/call.
 - DexStore-backed order books and trade logs with multi-hop trust-line routing that scores paths by cost and surfaces fallback routes.
 - Governance-tunable mempool fee floor parameters stream to telemetry, explorer history, and rollback logs, while wallet fee warnings emit localized prompts and DID anchors propagate through RPC, CLI, and explorer views.
-- CT balance and rate-limit webhooks; mobile light client registers push endpoints and triggers notifications on changes.
+- BLOCK balance and rate-limit webhooks; mobile light client registers push endpoints and triggers notifications on changes.
 - Jittered RPC client with exponential backoff and env-configured timeout windows to prevent request stampedes.
 - CI settlement audit job verifying explorer receipt indexes against ledger anchors.
 - Fuzz coverage harness that installs LLVM tools on demand and reports missing `.profraw` artifacts.
@@ -646,13 +647,29 @@ The following items block mainnet readiness and should be prioritized. Each task
 - **Explorer + CLI parity** — Work with the explorer maintainers so badge history, policy timelines, and treasury dashboards load from a single canonical snapshot JSON (shared between `cli/`, `explorer/`, and `metrics-aggregator/`), preventing drift across operator tooling.
 
 ### 15.B Compute Market & SLA Controls
-- **SLA-aware matcher** — Layer slashing logic atop the lane-aware matcher in `node/src/compute_market/matcher.rs`, coordinating with `lane scheduler` modules and `ReceiptStore` durability so failed work emits slash receipts anchored in the CT subsidy sub-ledger (per `AGENTS.md:95-105` and `AGENTS.md:123`).
+- **SLA-aware matcher** — Layer slashing logic atop the lane-aware matcher in `node/src/compute_market/matcher.rs`, coordinating with `lane scheduler` modules and `ReceiptStore` durability so failed work emits slash receipts anchored in the BLOCK subsidy sub-ledger (per `AGENTS.md:95-105` and `AGENTS.md:123`).
 - **Docs + status surfaces** — Describe the slashing lifecycle in [`docs/architecture.md#compute-marketplace`](docs/architecture.md#compute-marketplace), update CLI/explorer lane health views, and expose telemetry such as `match_loop_latency_seconds{lane}`, fairness counters, and slash totals via the metrics aggregator.
 - **Test coverage** — Expand `node/src/compute_market/tests/` and top-level `tests/` to cover fairness windows, starvation protection, SLA triggers, receipt persistence, and replay after restarts; include deterministic replays that validate persisted receipts, plus fuzzing for receipt serialization.
 - **Remediation tooling** — Ship Grafana panels (sourced from `monitoring/`) and CLI commands that summarize per-lane degradation so operators can triage slashed jobs rapidly.
-- **Ledger integration** — Ensure slashing updates propagate through `node/src/treasury_executor.rs`, ledger snapshots, and governance reporting so payouts and per-lane quotas remain in sync with the unified CT ledger.
+- **Ledger integration** — Ensure slashing updates propagate through `node/src/treasury_executor.rs`, ledger snapshots, and governance reporting so payouts and per-lane quotas remain in sync with the unified BLOCK ledger.
+
+#### 15.B.1 BlockTorch Compute Framework Checklist (Priority Order)
+
+These steps translate `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md` Part XII into a delivery checklist. Complete them in order and keep the referenced sections aligned.
+
+1. **Finalize naming + scope** — Confirm the BlockTorch rebrand scope, keep `metal-backend/` as the canonical code path, and align README/handbook wording with the spec (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#122-the-blocktorch-vision-becoming-the-cuda-of-blockchain-compute`).
+2. **Publish the spec bundle** — Kernel signatures, determinism rules, gradient wire format, SNARK circuit spec, and marketplace job protocol (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#126-the-industry-standard-play`).
+3. **Ship the coordinator** — Build the distributed training coordinator that posts compute jobs, selects bidders, and aggregates gradients (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#124-distributed-training-architecture-for-the-compute-marketplace`).
+4. **Lock determinism** — Define the deterministic op subset, ordered reductions, fixed-point/rounding rules, and RNG seeding across backends (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#124-distributed-training-architecture-for-the-compute-marketplace`).
+5. **Gradient serialization + attestation** — Standardize gradient hashes, signatures, and metadata so proofs and settlements stay replayable (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#127-integration-with-existing-compute-market-infrastructure`).
+6. **SNARK proof integration** — Implement gradient proof circuits and hit the overhead targets (<50% proof time, <100ms verify) (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#128-local-testing-methodology`).
+7. **Pricing + settlement wiring** — Use `ORCHARD_TENSOR_PROFILE` to price hardware/proof costs, then flow receipts through the compute market settlement path (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#1210-economic-integration-with-subsidy-and-tariff-systems`).
+8. **Backend expansion plan** — Publish the backend interface and target CUDA/ROCm priorities after Metal/CPU stability (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#125-hardware-optimization-strategy`).
+9. **Observability surfaces** — Wire worker/job/proof status into RPC and dashboards (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#129-dashboard-integration-strategy`).
+10. **Testnet rollout gates** — Complete local three-machine validation, then stage testnet jobs with deterministic output checks (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#128-local-testing-methodology`).
 
 ### 15.C Networking, Transport & Range-Boost Reliability
+- **Chain sync reliability pass** — Validate the async gossip listener, periodic `ChainRequest` pull loop (`TB_P2P_CHAIN_SYNC_INTERVAL_MS`), and broadcast retry behavior in `node/src/net/peer.rs` + `node/src/net/mod.rs`; ensure `node/tests/net_integration.rs` + `node/tests/chaos.rs` converge on every run and keep `docs/architecture.md#networking-and-propagation` in sync with the final knobs/behavior.
 - **Chaos drill automation** — Script WAN-scale QUIC chaos drills (fault injection across providers) touching `node/src/net`, `node/src/p2p`, and `range_boost/`, validating handshake fallback, fanout scoring, mutual-TLS rotation, and recovery flows (`AGENTS.md:124`).
 - **Documentation + runbooks** — Update [`docs/architecture.md#networking-and-propagation`](docs/architecture.md#networking-and-propagation) and [`docs/operations.md`](docs/operations.md#bootstrap-and-configuration) with mitigation recipes, cross-provider failover guides, and CLI/RPC introspection examples derived from the new telemetry traces.
 - **Regression coverage** — Add tests for transport capability advertisement, failover timing, and range-boost TTL/fanout invariants. Make sure fuzz/nextest suites exercise both in-house and stub overlay backends.
@@ -681,7 +698,7 @@ The following items block mainnet readiness and should be prioritized. Each task
 - **Proposal payloads** — Implement governance payloads that distinguish batch vs real-time settlement, extend explorer/CLI history, and harden snapshot/rollback auditing across `governance/`, `node/src/energy.rs`, and `cli/src/energy.rs` (`AGENTS.md:130`; `docs/overview.md:44-49`).
 - **Oracle verifier** — Production Ed25519 verification now lives inside `crates/energy-market` and `crates/oracle-adapter`; next steps are enforcing quorum + expiry policies, logging slashing telemetry, and persisting receipts to both sled trees and ledger checkpoints (`AGENTS.md:131`).
 - **CLI + schema parity** — Harden the new provider/receipt/dispute CLI flows with JSON schema exports aligned to [`docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts`](docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts). Back the endpoints with deterministic replay and fuzz coverage across provider mixes.
-- **Documentation refresh** — Update [`docs/economics_and_governance.md`](docs/economics_and_governance.md#ct-supply-and-sub-ledgers) and [`docs/architecture.md#energy-governance-and-rpc-next-tasks`](docs/architecture.md#energy-governance-and-rpc-next-tasks) with the new governance hooks, rollback auditing steps, and oracle dependency graphs.
+- **Documentation refresh** — Update [`docs/economics_and_governance.md`](docs/economics_and_governance.md#block-supply-and-sub-ledgers) and [`docs/architecture.md#energy-governance-and-rpc-next-tasks`](docs/architecture.md#energy-governance-and-rpc-next-tasks) with the new governance hooks, rollback auditing steps, and oracle dependency graphs.
 
 ### 15.H Energy Interfaces & Telemetry
 - **RPC parity + schemas** — Enforce auth/rate-limit parity for all `energy.*` RPCs, add structured errors for signature/timestamp/meter failures, and publish JSON schema snippets with round-trip CLI tests (per `AGENTS.md:132`).
@@ -705,7 +722,7 @@ The following items block mainnet readiness and should be prioritized. Each task
 - **Presence attestation plumbing** ✅ COMPLETE — Sled-backed `PresenceCache` implemented in `node/src/localnet/presence.rs` with TTL expiry, freshness histograms, and governance-controlled configuration. The cache stores `PresenceReceipt` structs keyed by `{beacon_id, bucket_id}` with radius/confidence metadata. Governance params (`TB_PRESENCE_TTL_SECS`, `TB_PRESENCE_RADIUS_METERS`, `TB_PRESENCE_PROOF_CACHE_SIZE`, `TB_PRESENCE_MIN_CONFIDENCE_BPS`) are wired through `node/src/governance/params.rs`. RPCs `ad_market.list_presence_cohorts` and `ad_market.reserve_presence` are implemented in `node/src/rpc/ad_market.rs` with CLI commands in `cli/src/ad_market.rs` (`presence list`, `presence reserve`). Further work: expand `node/tests/ad_market_rpc.rs` for integration tests. Owners: `@ad-market`, `@gateway-stack`.
 - **Presence RPC schemas** — JSON schemas for `ad_market.list_presence_cohorts` and `ad_market.reserve_presence` are defined in [`docs/apis_and_tooling.md#presence-cohort-json-schemas`](docs/apis_and_tooling.md#presence-cohort-json-schemas). Error codes `-32034` through `-32039` cover presence/privacy failures. Governance knobs (`TB_PRESENCE_TTL_SECS`, `TB_PRESENCE_RADIUS_METERS`, `TB_PRESENCE_PROOF_CACHE_SIZE`, `presence_min_crowd_size`, `presence_min_confidence_bps`) must be wired through `node/src/governance/params.rs` and exposed in `cli/src/gov.rs`. Owners: `@ad-market`, `@gov-core`.
 - **Multi-signal auctions + CLI/RPC parity** — Teach `crates/ad_market/src/budget.rs`, `node/src/rpc/ad_market.rs`, `cli/src/ad_market.rs`, `cli/src/explorer.rs`, and `cli/src/gov.rs` about selector-specific bids, presence/domain filters, conversion-value payloads, and governance-controlled knobs. Ensure explorer payouts and governance proposals expose the new selector metadata. Owners: `@ad-market`, `@gov-core`.
-- **Observability + dashboards** ✅ METRICS ADDED — New telemetry metrics added to `node/src/telemetry.rs`: `AD_SEGMENT_READY_TOTAL` (gauge with domain_tier/presence_bucket/interest_tag labels), `AD_PRIVACY_BUDGET_REMAINING_PPM` (gauge by campaign_id), `AD_BIDDING_LATENCY_MICROS` (gauge by auction_type), `DNS_AUCTION_BIDS_TOTAL` (counter by domain_tier), plus existing `AD_AUCTION_TOP_BID_USD`, `AD_BID_SHADING_FACTOR_BPS`, `AD_PRIVACY_BUDGET_UTILIZATION_RATIO`, `AD_CONVERSION_VALUE_CT_TOTAL`, `AD_PRESENCE_RESERVATION_TOTAL`. DNS telemetry functions (`record_dns_auction_completed`, `adjust_dns_stake_locked`, `update_dns_auction_status_metrics`) are wired in `node/src/gateway/dns.rs`. Further work: aggregate to `metrics-aggregator/src/lib.rs` and refresh Grafana dashboards. Owners: `@telemetry-ops`, `@ad-market`.
+- **Observability + dashboards** ✅ METRICS ADDED — New telemetry metrics added to `node/src/telemetry.rs`: `AD_SEGMENT_READY_TOTAL` (gauge with domain_tier/presence_bucket/interest_tag labels), `AD_PRIVACY_BUDGET_REMAINING_PPM` (gauge by campaign_id), `AD_BIDDING_LATENCY_MICROS` (gauge by auction_type), `DNS_AUCTION_BIDS_TOTAL` (counter by domain_tier), plus existing `AD_AUCTION_TOP_BID_USD`, `AD_BID_SHADING_FACTOR_BPS`, `AD_PRIVACY_BUDGET_UTILIZATION_RATIO`, `AD_CONVERSION_VALUE_TOTAL`, `AD_PRESENCE_RESERVATION_TOTAL`. DNS telemetry functions (`record_dns_auction_completed`, `adjust_dns_stake_locked`, `update_dns_auction_status_metrics`) are wired in `node/src/gateway/dns.rs`. Further work: aggregate to `metrics-aggregator/src/lib.rs` and refresh Grafana dashboards. Owners: `@telemetry-ops`, `@ad-market`.
 - **Privacy budgets + docs/tests** — Harden `crates/ad_market/src/privacy.rs` to clamp selector combinations, enforce k-anonymity, and expose deterministic tests. Document the contract in `docs/security_and_privacy.md` and mirror selector/TODO entries in `docs/apis_and_tooling.md` and the LE portal runbooks. Owners: `@ad-market`, `@security`.
 
 ### 15.L Docs & Onboarding Parity
@@ -725,14 +742,14 @@ This section consolidates actionable playbooks from §§18–19. It is included 
 ### 17.1 Updated Vision & Next Steps
 
 - Phase A (0–2 weeks): Consumer‑first TGE and preview
-  - Single USDC/CT pool seeded and time-locked; 48h slow-start; publish pool math/addresses.
+  - Single USDC/BLOCK pool seeded and time-locked; 48h slow-start; publish pool math/addresses.
   - Dashboard readiness index and bottleneck tile; earnings sparkline; vesting view (if enabled).
   - Shadow marketplace with stake‑backed intents; p25–p75 bands and p_adj; break‑even/margin probe.
   - LocalNet short relays with receipts and paid relays; strict defaults and battery/data caps.
   - Offline money/messaging (canary): escrowed receipts, delayed settlement on reconnect; small group “split later”; SOS broadcast.
 - Phase B (2–6 weeks): People‑Built Internet primitives
   - Range Boost delay‑tolerant store‑and‑forward; optional lighthouse recognition; coverage/delivery earnings.
-  - Hotspot Exchange: host/guest modes, wrapped traffic; subsidy meters backed by CT.
+  - Hotspot Exchange: host/guest modes, wrapped traffic; subsidy meters backed by BLOCK.
   - Carry‑to‑Earn sealed bundle courier for commuter routes; privacy explainer; Neighborhood Update Accelerator for instant large downloads.
 - Phase C (6–10 weeks): Industrial canary lanes + SDKs v1
   - Transcode and authenticity‑check lanes; sealed‑bid batches; small deposits; per‑slice pricing; daily payout caps; operator diagnostics.
@@ -771,10 +788,10 @@ Note: Older “dual pools at TGE,” “merchant‑first discounts,” or protoc
 ### 17.5 Architecture & Telemetry Highlights (from Agents‑Sup)
 
 - Consensus & Mining: PoW with BLAKE3; dynamic retarget over ~120 blocks with clamp [¼, ×4]; headers carry difficulty; coinbase fields must match tx[0]; decay rewards.
-- Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct_ct` carries an arbitrary 0–100 split with sequential nonce validation.
+- Accounts & Transactions: Account balances, nonces, pending totals; Ed25519, domain‑tagged signing; `pct` carries an arbitrary 0–100 split with sequential nonce validation.
 - Storage: in‑memory `SimpleDb` prototype; schema versioning and migrations; isolated temp dirs for tests.
 - Networking & Gossip: QUIC/TCP transport with `PeerSet`; per-peer drop reasons and reputation-aware rate limits surface via `net.peer_stats` and the `net` CLI. JSON‑RPC server in `src/bin/node.rs`; integration tests cover `mempool.stats`, `localnet.submit_receipt`, `dns.publish_record`, `gateway.policy`, and `microshard.roots.last`.
-- Inflation subsidies: CT minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. Ledger snapshots now flow through the CT subsidy store described in [Economics and Governance § CT Supply](docs/economics_and_governance.md#ct-supply-and-sub-ledgers) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the same formula; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
+- Inflation subsidies: BLOCK minted per byte, read, and compute with governance-controlled multipliers; reads and writes are rewarded without per-user fees. `industrial_backlog` and `industrial_utilization` metrics, along with `Block::industrial_subsidies()`, surface queued work and realised throughput feeding those multipliers. Ledger snapshots now flow through the BLOCK subsidy store described in [Economics and Governance § BLOCK Supply](docs/economics_and_governance.md#block-supply-and-sub-ledgers) and supersede the old `read_reward_pool`. Subsidy multipliers (`beta/gamma/kappa/lambda`) retune each epoch via the same formula; changes are logged under `governance/history` and surfaced in telemetry. An emergency parameter
   `kill_switch_subsidy_reduction` can temporarily scale all multipliers down by
   a voted percentage, granting governance a rapid-response lever during economic
   shocks.
@@ -1169,7 +1186,7 @@ A trait-based, multi-provider signature verification system for energy market or
   - **Status**: ✅ Resolved — RPC now calls `GovStore::advance_disbursement_status`, enforcing vote windows and timelocks before execution.
 
 - `node/src/rpc/treasury.rs:621`: `rollback_disbursement()` has TODO: "Create compensating ledger entry if it was already executed"`
-  - **Status**: ✅ Resolved — `GovStore::cancel_disbursement` now differentiates cancellations vs rollbacks and records positive CT/IT deltas when undoing an executed payout.
+  - **Status**: ✅ Resolved — `GovStore::cancel_disbursement` now differentiates cancellations vs rollbacks and records positive BLOCK deltas when undoing an executed payout.
 
 #### Missing Store Methods
 The following methods were referenced in early drafts but don't exist in `governance/src/store.rs`:

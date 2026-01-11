@@ -26,11 +26,15 @@ fn build_signed_tx(
         amount_consumer: 1,
         amount_industrial: 0,
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: Vec::new(),
     };
-    sign_tx(sk.to_vec(), payload).unwrap()
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
 }
 
 #[testkit::tb_serial]
@@ -39,8 +43,8 @@ fn eviction_keeps_high_fee() {
     let dir = temp_dir("mp_evict");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.max_mempool_size_consumer = 1;
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 10_000, 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 10_000).unwrap();
     let (ska, _) = generate_keypair();
     let (skb, _) = generate_keypair();
     let low = build_signed_tx(&ska, "alice", "bob", 1000, 1);
@@ -56,9 +60,9 @@ fn block_sorts_by_fee() {
     init();
     let dir = temp_dir("mp_sort");
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
-    bc.add_account("miner".into(), 0, 0).unwrap();
-    bc.add_account("alice".into(), 10_000, 0).unwrap();
-    bc.add_account("bob".into(), 10_000, 0).unwrap();
+    bc.add_account("miner".into(), 0).unwrap();
+    bc.add_account("alice".into(), 10_000).unwrap();
+    bc.add_account("bob".into(), 10_000).unwrap();
     let (ska, _) = generate_keypair();
     let (skb, _) = generate_keypair();
     let low = build_signed_tx(&ska, "alice", "miner", 1000, 1);

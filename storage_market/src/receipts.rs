@@ -11,7 +11,7 @@ pub struct StorageSettlementReceipt {
     pub contract_id: String,
     pub provider: String,
     pub bytes: u64,
-    pub price_ct: u64,
+    pub price: u64,
     pub block_height: u64,
     pub provider_escrow: u64,
 }
@@ -25,14 +25,14 @@ impl StorageSettlementReceipt {
         block_height: u64,
     ) -> Option<Self> {
         // Only emit receipts for successful proofs with payment
-        if proof.outcome == ProofOutcome::Success && proof.amount_accrued_ct > 0 {
+        if proof.outcome == ProofOutcome::Success && proof.amount_accrued > 0 {
             Some(Self {
                 contract_id: proof.object_id.clone(),
                 provider: proof.provider_id.clone(),
                 bytes,
-                price_ct: price_per_block,
+                price: price_per_block,
                 block_height,
-                provider_escrow: proof.remaining_deposit_ct,
+                provider_escrow: proof.remaining_deposit,
             })
         } else {
             None
@@ -50,9 +50,9 @@ mod tests {
             object_id: "obj_123".into(),
             provider_id: "provider_a".into(),
             outcome: ProofOutcome::Success,
-            slashed_ct: 0,
-            amount_accrued_ct: 100,
-            remaining_deposit_ct: 900,
+            slashed: 0,
+            amount_accrued: 100,
+            remaining_deposit: 900,
             proof_successes: 1,
             proof_failures: 0,
         };
@@ -64,7 +64,7 @@ mod tests {
         assert_eq!(receipt.contract_id, "obj_123");
         assert_eq!(receipt.provider, "provider_a");
         assert_eq!(receipt.bytes, 1024);
-        assert_eq!(receipt.price_ct, 10);
+        assert_eq!(receipt.price, 10);
         assert_eq!(receipt.block_height, 100);
         assert_eq!(receipt.provider_escrow, 900);
     }
@@ -75,9 +75,9 @@ mod tests {
             object_id: "obj_123".into(),
             provider_id: "provider_a".into(),
             outcome: ProofOutcome::Failure,
-            slashed_ct: 10,
-            amount_accrued_ct: 0,
-            remaining_deposit_ct: 890,
+            slashed: 10,
+            amount_accrued: 0,
+            remaining_deposit: 890,
             proof_successes: 0,
             proof_failures: 1,
         };
@@ -92,9 +92,9 @@ mod tests {
             object_id: "obj_123".into(),
             provider_id: "provider_a".into(),
             outcome: ProofOutcome::Success,
-            slashed_ct: 0,
-            amount_accrued_ct: 0, // No payment
-            remaining_deposit_ct: 900,
+            slashed: 0,
+            amount_accrued: 0, // No payment
+            remaining_deposit: 900,
             proof_successes: 1,
             proof_failures: 0,
         };

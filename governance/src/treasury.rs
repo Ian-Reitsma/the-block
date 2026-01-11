@@ -284,10 +284,8 @@ pub enum DisbursementValidationError {
 #[serde(crate = "foundation_serialization::serde")]
 pub enum DisbursementError {
     InsufficientFunds {
-        required_ct: u64,
-        required_it: u64,
-        available_ct: u64,
-        available_it: u64,
+        required: u64,
+        available: u64,
     },
     InvalidTarget {
         destination: String,
@@ -383,10 +381,10 @@ pub fn validate_disbursement_payload(
         ));
     }
 
-    // Validate destination address format (basic check - starts with "ct" for mainnet)
-    if !payload.disbursement.destination.starts_with("ct1") {
+    // Validate destination address format (basic check - starts with "tb1" for mainnet)
+    if !payload.disbursement.destination.starts_with("tb1") {
         return Err(DisbursementValidationError::InvalidDestination(format!(
-            "address must start with 'ct1', got: {}",
+            "address must start with 'tb1', got: {}",
             payload.disbursement.destination
         )));
     }
@@ -586,7 +584,7 @@ mod tests {
                 rollback_window_epochs: 1,
             },
             disbursement: DisbursementDetails {
-                destination: "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".into(),
+                destination: "tb1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9".into(),
                 amount: 100_000,
                 memo: "Test payment".into(),
                 scheduled_epoch: 1000,

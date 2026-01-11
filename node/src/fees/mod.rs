@@ -1,6 +1,11 @@
 #[cfg(feature = "telemetry")]
 pub mod policy;
 
+// Advanced lane-based pricing modules
+pub mod congestion;
+pub mod lane_pricing;
+pub mod market_signals;
+
 /// Target gas used per block when adjusting the base fee.
 ///
 /// This value intentionally mirrors Ethereum's `targetGasUsed` and keeps

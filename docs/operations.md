@@ -6,6 +6,24 @@
 
 ---
 
+## Telemetry Wiring
+
+### Runtime Reactor
+
+- `runtime_read_without_ready_total` increments when reads succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.
+- `runtime_write_without_ready_total` increments when writes succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.
+
+### Runtime Tuning Knobs
+
+- `runtime.reactor_idle_poll_ms`: maximum sleep between reactor polls (ms).
+- `runtime.io_read_backoff_ms`: fallback delay before retrying reads when readiness is missing (ms).
+- `runtime.io_write_backoff_ms`: fallback delay before retrying writes when readiness is missing (ms).
+
+### TLS Handshake Timeouts
+
+- HTTP servers use `ServerConfig.tls_handshake_timeout` for TLS handshakes.
+- HTTP clients use `ClientConfig.tls_handshake_timeout` or `TlsConnectorBuilder::handshake_timeout`.
+
 ## Treasury Stuck
 
 ### Symptoms
@@ -118,8 +136,8 @@ done
 current=$(contract-cli gov treasury balance | jq .balance)
 pending=$(contract-cli gov treasury list --status queued | jq '[.disbursements[].amount] | add')
 
-echo "Current balance: $current CT"
-echo "Pending disbursements: $pending CT"
+echo "Current balance: $current BLOCK"
+echo "Pending disbursements: $pending BLOCK"
 
 if [ $current -lt $pending ]; then
   echo "INSUFFICIENT FUNDS"
@@ -525,14 +543,14 @@ watch -n 10 'prometheus_query "receipt_validation_errors_total"'
 
 ## Explorer Treasury Schema Migration
 
-Run this playbook whenever the explorer SQLite database still contains the legacy `amount_ct`/`amount_it` columns in `treasury_disbursements`.
+Run this playbook whenever the explorer SQLite database still contains the legacy `amount`/`amount_it` columns in `treasury_disbursements`.
 
 1. **Stop explorer** so the migration can take an exclusive lock on the DB file.
 2. Run the helper (defaults to `explorer.db` in the current directory):
    ```bash
    cargo run -p explorer --bin explorer-migrate-treasury -- /var/lib/explorer/explorer.db
    ```
-   The tool applies the three `ALTER TABLE` statements (`ADD COLUMN status_payload`, `RENAME COLUMN amount_ct TO amount`, `DROP COLUMN amount_it`). Statements that have already landed are reported as `skipped`.
+   The tool applies the three `ALTER TABLE` statements (`ADD COLUMN status_payload`, `RENAME COLUMN amount TO amount`, `DROP COLUMN amount_it`). Statements that have already landed are reported as `skipped`.
 3. Restart explorer, then validate `/governance/treasury/disbursements` and the treasury dashboards before announcing completion.
 
 ---
@@ -560,10 +578,10 @@ RUST_LOG=debug cargo test -p the_block --test settlement_audit --release -- --no
 test settlement_audit ... ok
 
 Ledger conservation verified:
-  Initial balance: 10,000,000 CT
-  Accruals: 1,500,000 CT
-  Executed disbursements: 2,000,000 CT
-  Final balance: 9,500,000 CT
+  Initial balance: 10,000,000 BLOCK
+  Accruals: 1,500,000 BLOCK
+  Executed disbursements: 2,000,000 BLOCK
+  Final balance: 9,500,000 BLOCK
 ```
 
 **Failed audit** (example):
@@ -571,9 +589,9 @@ Ledger conservation verified:
 test settlement_audit ... FAILED
 
 Assertion failed:
-  Expected balance: 9,500,000 CT
-  Actual balance: 9,300,000 CT
-  Discrepancy: 200,000 CT (2.1%)
+  Expected balance: 9,500,000 BLOCK
+  Actual balance: 9,300,000 BLOCK
+  Discrepancy: 200,000 BLOCK (2.1%)
 
 Investigation:
   1. Find missing disbursement: ID 4521

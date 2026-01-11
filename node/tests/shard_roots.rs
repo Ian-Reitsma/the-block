@@ -17,26 +17,18 @@ fn shard_roots_persist() {
 
     let acc1 = Account {
         address: addr1.clone(),
-        balance: TokenBalance {
-            consumer: 10,
-            industrial: 0,
-        },
+        balance: TokenBalance { amount: 10 },
         nonce: 0,
-        pending_consumer: 0,
-        pending_industrial: 0,
+        pending_amount: 0,
         pending_nonce: 0,
         pending_nonces: HashSet::new(),
         sessions: Vec::new(),
     };
     let acc2 = Account {
         address: addr2.clone(),
-        balance: TokenBalance {
-            consumer: 0,
-            industrial: 5,
-        },
+        balance: TokenBalance { amount: 5 },
         nonce: 0,
-        pending_consumer: 0,
-        pending_industrial: 0,
+        pending_amount: 0,
         pending_nonce: 0,
         pending_nonces: HashSet::new(),
         sessions: Vec::new(),

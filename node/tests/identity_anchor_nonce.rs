@@ -1,13 +1,18 @@
 #![cfg(feature = "integration-tests")]
 use crypto_suite::signatures::ed25519::SigningKey;
-use foundation_serialization::json::{Map, Number, Value};
-use runtime::{io::read_to_end, net::TcpStream};
+use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
+use foundation_serialization::json::Value;
+use std::collections::HashSet;
 use std::convert::TryInto;
-use std::net::SocketAddr;
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use sys::tempfile::tempdir;
-use the_block::{generate_keypair, rpc::run_rpc_server, transaction::TxDidAnchor, Blockchain};
-use util::timeout::expect_timeout;
+use the_block::identity::{handle_registry::HandleRegistry, DidRegistry};
+use the_block::{
+    generate_keypair,
+    rpc::{fuzz_dispatch_request, fuzz_runtime_config},
+    transaction::TxDidAnchor,
+    Blockchain,
+};
 
 mod util;
 
@@ -34,29 +39,6 @@ impl Drop for EnvVarGuard {
     }
 }
 
-async fn rpc_request(addr: &str, body: &Value) -> Value {
-    let addr: SocketAddr = addr.parse().expect("valid socket address");
-    let mut stream = expect_timeout(TcpStream::connect(addr))
-        .await
-        .expect("connect to RPC server");
-    let payload = foundation_serialization::json::to_string(body).expect("serialize request");
-    let req = format!(
-        "POST / HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n{}",
-        payload.len(),
-        payload
-    );
-    expect_timeout(stream.write_all(req.as_bytes()))
-        .await
-        .expect("send request");
-    let mut resp = Vec::new();
-    expect_timeout(read_to_end(&mut stream, &mut resp))
-        .await
-        .expect("read response");
-    let resp = String::from_utf8(resp).expect("response is utf8");
-    let body_idx = resp.find("\r\n\r\n").expect("headers terminator present");
-    foundation_serialization::json::from_str(&resp[body_idx + 4..]).expect("parse response body")
-}
-
 fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> Value {
     let pk_bytes = sk.verifying_key().to_bytes();
     let mut tx = TxDidAnchor {
@@ -72,18 +54,6 @@ fn anchor_payload(sk: &SigningKey, doc: &str, nonce: u64) -> Value {
     foundation_serialization::json::to_value(tx).expect("serialize anchor payload")
 }
 
-fn build_request(id: u64, params: Value) -> Value {
-    let mut root = Map::new();
-    root.insert("jsonrpc".to_string(), Value::String("2.0".to_string()));
-    root.insert("id".to_string(), Value::Number(Number::from(id)));
-    root.insert(
-        "method".to_string(),
-        Value::String("identity.anchor".to_string()),
-    );
-    root.insert("params".to_string(), params);
-    Value::Object(root)
-}
-
 #[testkit::tb_serial]
 fn identity_anchor_nonces_are_scoped_per_address() {
     runtime::block_on(async {
@@ -95,16 +65,15 @@ fn identity_anchor_nonces_are_scoped_per_address() {
         let mining = Arc::new(AtomicBool::new(false));
         let did_db_path = dir.path().join("did.db");
         let _did_env = EnvVarGuard::set("TB_DID_DB_PATH", did_db_path.to_str().expect("did path"));
-
-        let (tx_ready, rx_ready) = runtime::sync::oneshot::channel();
-        let server = the_block::spawn(run_rpc_server(
-            Arc::clone(&bc),
-            Arc::clone(&mining),
-            "127.0.0.1:0".to_string(),
-            Default::default(),
-            tx_ready,
-        ));
-        let addr = expect_timeout(rx_ready).await.expect("server ready");
+        let runtime_cfg = fuzz_runtime_config();
+        let nonces = Arc::new(Mutex::new(HashSet::new()));
+        let handles = Arc::new(Mutex::new(HandleRegistry::open(
+            dir.path()
+                .join("handles.db")
+                .to_str()
+                .expect("handles path"),
+        )));
+        let dids = Arc::new(Mutex::new(DidRegistry::open(&did_db_path)));
 
         let (sk1_bytes, _) = generate_keypair();
         let sk1 = SigningKey::from_bytes(&sk1_bytes.try_into().expect("sk1 length"));
@@ -118,24 +87,72 @@ fn identity_anchor_nonces_are_scoped_per_address() {
 
         assert_ne!(addr1_hex, addr2_hex, "distinct addresses required");
 
-        let req1 = build_request(1, anchor1.clone());
-        let resp1 = rpc_request(&addr, &req1).await;
-        assert_eq!(resp1["result"]["address"].as_str(), Some(addr1_hex));
-        assert_eq!(resp1["result"]["nonce"].as_u64(), Some(1));
-        assert!(resp1.get("error").is_none());
+        let req1 = RpcRequest::new("identity.anchor", anchor1.clone()).with_id(1);
+        let resp1 = fuzz_dispatch_request(
+            Arc::clone(&bc),
+            Arc::clone(&mining),
+            Arc::clone(&nonces),
+            Arc::clone(&handles),
+            Arc::clone(&dids),
+            Arc::clone(&runtime_cfg),
+            None,
+            None,
+            req1,
+            None,
+            None,
+        );
+        match resp1 {
+            RpcResponse::Result { result, .. } => {
+                assert_eq!(result["address"].as_str(), Some(addr1_hex));
+                assert_eq!(result["nonce"].as_u64(), Some(1));
+            }
+            RpcResponse::Error { error, .. } => panic!("anchor1 error: {:?}", error),
+        }
 
-        let req2 = build_request(2, anchor2.clone());
-        let resp2 = rpc_request(&addr, &req2).await;
-        assert_eq!(resp2["result"]["address"].as_str(), Some(addr2_hex));
-        assert_eq!(resp2["result"]["nonce"].as_u64(), Some(1));
-        assert!(resp2.get("error").is_none());
+        let req2 = RpcRequest::new("identity.anchor", anchor2.clone()).with_id(2);
+        let resp2 = fuzz_dispatch_request(
+            Arc::clone(&bc),
+            Arc::clone(&mining),
+            Arc::clone(&nonces),
+            Arc::clone(&handles),
+            Arc::clone(&dids),
+            Arc::clone(&runtime_cfg),
+            None,
+            None,
+            req2,
+            None,
+            None,
+        );
+        match resp2 {
+            RpcResponse::Result { result, .. } => {
+                assert_eq!(result["address"].as_str(), Some(addr2_hex));
+                assert_eq!(result["nonce"].as_u64(), Some(1));
+            }
+            RpcResponse::Error { error, .. } => panic!("anchor2 error: {:?}", error),
+        }
 
-        let replay_req = build_request(3, anchor1.clone());
-        let replay = rpc_request(&addr, &replay_req).await;
-        assert_eq!(replay["error"]["code"].as_i64(), Some(-32000));
-        assert_eq!(replay["error"]["message"].as_str(), Some("replayed nonce"));
-
-        server.abort();
-        let _ = server.await;
+        let replay_req = RpcRequest::new("identity.anchor", anchor1.clone()).with_id(3);
+        let replay = fuzz_dispatch_request(
+            Arc::clone(&bc),
+            Arc::clone(&mining),
+            Arc::clone(&nonces),
+            Arc::clone(&handles),
+            Arc::clone(&dids),
+            Arc::clone(&runtime_cfg),
+            None,
+            None,
+            replay_req,
+            None,
+            None,
+        );
+        match replay {
+            RpcResponse::Error { error, .. } => {
+                assert_eq!(error.code, -32000);
+                assert_eq!(error.message(), "replayed nonce");
+            }
+            RpcResponse::Result { result, .. } => {
+                panic!("expected replay error, got result {result:?}");
+            }
+        }
     });
 }

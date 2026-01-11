@@ -47,9 +47,21 @@ impl std::fmt::Display for RpcError {
 impl std::error::Error for RpcError {}
 
 /// Parameters embedded in an RPC request.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
 #[serde(transparent)]
 pub struct Params(Value);
+
+// Custom Deserialize implementation to handle all JSON value types correctly
+// This works around potential issues with #[serde(transparent)] in foundation_serde
+impl<'de> Deserialize<'de> for Params {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: foundation_serialization::de::Deserializer<'de>,
+    {
+        // Deserialize as a Value first, which handles all JSON types
+        Value::deserialize(deserializer).map(Params)
+    }
+}
 
 impl Params {
     /// Construct parameters from a JSON value.
@@ -176,28 +188,92 @@ impl Request {
                 limit: max_body,
             });
         }
-        Ok(Self::from_slice(body)?)
+        Self::from_slice(body).map_err(Into::into)
     }
 }
 
 /// RPC response envelope dispatched to clients.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(untagged)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Response {
     Result {
-        #[serde(rename = "jsonrpc")]
         version: String,
         result: Value,
-        #[serde(default = "foundation_serialization::defaults::default")]
         id: Option<Value>,
     },
     Error {
-        #[serde(rename = "jsonrpc")]
         version: String,
         error: RpcError,
-        #[serde(default = "foundation_serialization::defaults::default")]
         id: Option<Value>,
     },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct ResponseHelper {
+    #[serde(rename = "jsonrpc", default)]
+    version: Option<String>,
+    #[serde(default)]
+    result: Option<Value>,
+    #[serde(default)]
+    error: Option<RpcError>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    id: Option<Value>,
+}
+
+impl Serialize for Response {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: foundation_serialization::serde::Serializer,
+    {
+        use foundation_serialization::serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("Response", 3)?;
+        match self {
+            Response::Result {
+                version,
+                result,
+                id,
+            } => {
+                state.serialize_field("jsonrpc", version)?;
+                state.serialize_field("result", result)?;
+                state.serialize_field("id", id)?;
+            }
+            Response::Error { version, error, id } => {
+                state.serialize_field("jsonrpc", version)?;
+                state.serialize_field("error", error)?;
+                state.serialize_field("id", id)?;
+            }
+        }
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Response {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: foundation_serialization::de::Deserializer<'de>,
+    {
+        let helper = ResponseHelper::deserialize(deserializer)?;
+        let version = helper.version.unwrap_or_else(|| VERSION.to_string());
+        match (helper.result, helper.error) {
+            (Some(result), None) => Ok(Response::Result {
+                version,
+                result,
+                id: helper.id,
+            }),
+            (None, Some(error)) => Ok(Response::Error {
+                version,
+                error,
+                id: helper.id,
+            }),
+            (Some(_), Some(_)) => Err(<D::Error as foundation_serialization::de::Error>::custom(
+                "rpc response contains both result and error",
+            )),
+            (None, None) => Err(<D::Error as foundation_serialization::de::Error>::custom(
+                "rpc response missing result/error",
+            )),
+        }
+    }
 }
 
 impl Response {

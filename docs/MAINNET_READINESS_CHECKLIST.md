@@ -147,7 +147,7 @@ prometheus_query 'treasury_balance' # Should return data
   - [ ] "Queue Depth by Status" (current backlog)
   - [ ] "Execution Errors" (error types and count)
   - [ ] "Execution Lag" (queued-to-executed histogram)
-  - [ ] "Balance Trend" (CT/IT over time)
+  - [ ] "Balance Trend" (BLOCK over time)
   - [ ] "Executor Health" (tick duration, success rate)
 - [ ] All panels use correct metric names
 - [ ] Alert thresholds configured:
@@ -183,7 +183,7 @@ cargo test -p the_block --test treasury_lifecycle -- --nocapture
 
 - [ ] `cargo test -p the_block --test settlement_audit --release` passes
 - [ ] Treasury transfers included in audit
-- [ ] CT conservation: `initial_balance + accruals - executed = current_balance + pending`
+- [ ] BLOCK conservation: `initial_balance + accruals - executed = current_balance + pending`
 - [ ] No duplicate settlements
 - [ ] Rollback compensations correct
 
@@ -293,23 +293,19 @@ cargo test -p node energy_rpc::error_contract -- --nocapture
 
 - [ ] `node/src/telemetry/energy.rs` emits:
   - [ ] `energy_provider_total`
-  - [ ] `energy_provider_status` (gauge of active providers)
   - [ ] `energy_pending_credits_total` (kWh)
-  - [ ] `energy_settlements_total{provider}`
-  - [ ] `energy_settlement_ct_total`
+  - [ ] `energy_settlement_total{provider}`
   - [ ] `energy_active_disputes_total`
-  - [ ] `oracle_latency_seconds` (histogram)
+  - [ ] `oracle_inclusion_lag_seconds` (histogram)
   - [ ] `energy_signature_verification_failures_total{reason}`
-  - [ ] `energy_slashing_total{provider,reason}`
-  - [ ] `energy_slashed_ct_total`
-  - [ ] `energy_reputation_score` (gauge per provider)
-  - [ ] `energy_reputation_confidence`
+  - [ ] `energy_disputes_resolved_total{outcome="slashed"}`
+  - [ ] `energy_treasury_fee_total`
 
 **Verification**:
 ```bash
 prometheus_query 'energy_provider_total'
-prometheus_query 'oracle_latency_seconds'
-prometheus_query 'energy_slashing_total'
+prometheus_query 'oracle_inclusion_lag_seconds'
+prometheus_query 'energy_disputes_resolved_total{outcome="slashed"}'
 ```
 
 ### 2.7 Grafana Dashboard
@@ -456,7 +452,7 @@ grep -c "\[\] " docs/operations.md | head  # Checklists for each runbook
 ### 3.4 Metrics-Aggregator Endpoints
 
 - [ ] `/treasury/summary` returns:
-  - [ ] Current balance (CT, IT)
+  - [ ] Current balance (BLOCK)
   - [ ] Backlog by status
   - [ ] Recent errors
   - [ ] Executor status

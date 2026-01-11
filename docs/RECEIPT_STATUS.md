@@ -38,8 +38,9 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 ### 4. Telemetry Layer
 - ✅ [node/src/telemetry/receipts.rs:8-205](node/src/telemetry/receipts.rs) - Complete metrics
 - ✅ Per-market counters: `RECEIPTS_STORAGE`, `RECEIPTS_COMPUTE`, etc.
-- ✅ Settlement amount tracking: `RECEIPT_SETTLEMENT_*_CT`
+- ✅ Settlement amount tracking: `RECEIPT_SETTLEMENT_*` (BLOCK-denominated)
 - ✅ Block-level gauges: `RECEIPTS_*_PER_BLOCK`
+- ✅ Treasury balance history exported through the metrics aggregator now encodes `delta` (legacy `` keys were removed), so operators must emit the updated field name across CLI/automation.
 - ✅ Total receipt size: `RECEIPT_BYTES_TOTAL`
 
 ### 5. Deterministic Metrics Engine
@@ -61,7 +62,7 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 - `campaign_id`: Campaign identifier
 - `publisher`: Host address receiving payment
 - `impressions`: Number delivered
-- `spend_ct`: Payment amount (CT)
+- `spend`: Payment amount (BLOCK)
 - `block_height`: Settlement block (set to `index`)
 - `conversions`: Conversion events
 
@@ -74,7 +75,7 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 - `contract_id`: Storage contract ID
 - `provider`: Provider address
 - `bytes`: Data size contracted
-- `price_ct`: Payment (CT)
+- `price`: Payment (BLOCK)
 - `block_height`: Settlement block
 - `provider_escrow`: Provider's escrow balance
 
@@ -89,7 +90,7 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 - `contract_id`: Energy contract ID (derived from meter hash)
 - `provider`: Grid operator address
 - `energy_units`: kWh delivered (fixed-point * 1000)
-- `price_ct`: Payment (CT)
+- `price`: Payment (BLOCK)
 - `block_height`: Settlement block (set to `receipt.block_settled`)
 - `proof_hash`: Meter reading hash (32 bytes)
 
@@ -104,7 +105,7 @@ The receipt system is **production-ready**. All four markets (Ad, Storage, Energ
 - `job_id`: Compute job ID
 - `provider`: Worker address
 - `compute_units`: Units consumed
-- `payment_ct`: Payment (CT)
+- `payment`: Payment (BLOCK)
 - `block_height`: Settlement block (now set correctly)
 - `verified`: SNARK verification success
 
@@ -205,7 +206,7 @@ Follow the pattern in [INSTRUCTIONS.md](INSTRUCTIONS.md):
        pub settlement_id: String,
        pub provider: String,
        pub units: u64,
-       pub payment_ct: u64,
+       pub payment: u64,
        pub block_height: u64, // CRITICAL: Set at emission time
        pub proof_data: [u8; 32],
    }
@@ -313,11 +314,11 @@ receipts_compute_per_block
 receipts_energy_per_block
 receipts_ad_per_block
 
-# Settlement amounts (current block, CT)
-receipt_settlement_storage_ct
-receipt_settlement_compute_ct
-receipt_settlement_energy_ct
-receipt_settlement_ad_ct
+# Settlement amounts (current block, BLOCK)
+receipt_settlement_storage
+receipt_settlement_compute
+receipt_settlement_energy
+receipt_settlement_ad
 
 # Total receipt serialization size
 receipt_bytes_total

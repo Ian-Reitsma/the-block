@@ -177,6 +177,45 @@
                     <main>
                         <h1 id="apis-and-tooling"><a class="header" href="#apis-and-tooling">APIs and Tooling</a></h1>
 <p>Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry, and schemas.</p>
+<h2 id="how-to-think-about-apis-here"><a class="header" href="#how-to-think-about-apis-here">How to Think About APIs Here</a></h2>
+<blockquote>
+<p><strong>For newcomers:</strong> There are three main ways to interact with The Block:</p>
+<div class="table-wrapper"><table><thead><tr><th>Interface</th><th>What It Is</th><th>When to Use</th></tr></thead><tbody>
+<tr><td><strong>JSON-RPC</strong></td><td>Machine-to-machine API (JSON over HTTP)</td><td>Building apps, automation, integrations</td></tr>
+<tr><td><strong>CLI (<code>contract-cli</code>)</strong></td><td>Command-line tool — a "friendly face" over RPC</td><td>Manual operations, debugging, scripting</td></tr>
+<tr><td><strong>Explorer &amp; Dashboards</strong></td><td>Web UI for viewing chain state</td><td>Human operators watching the network</td></tr>
+</tbody></table>
+</div>
+<p>All three talk to the same underlying node. The CLI is essentially a wrapper around RPC calls with nice formatting.</p>
+</blockquote>
+<h2 id="rpc-namespace-overview"><a class="header" href="#rpc-namespace-overview">RPC Namespace Overview</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Namespace</th><th>What It Does</th><th>Example Method</th><th>Code</th></tr></thead><tbody>
+<tr><td><code>consensus</code></td><td>Block production, finality, validator info</td><td><code>consensus.block_height</code></td><td><code>node/src/rpc/consensus.rs</code></td></tr>
+<tr><td><code>consensus.pos</code></td><td>Proof-of-Stake validator operations</td><td><code>consensus.pos.register</code>, <code>consensus.pos.bond</code></td><td><code>node/src/rpc/pos.rs</code></td></tr>
+<tr><td><code>ledger</code></td><td>Account balances, transaction history</td><td><code>ledger.balance</code></td><td><code>node/src/rpc/ledger.rs</code></td></tr>
+<tr><td><code>storage</code></td><td>File storage operations</td><td><code>storage.put</code>, <code>storage.get</code></td><td><code>node/src/rpc/storage.rs</code></td></tr>
+<tr><td><code>compute_market</code></td><td>Submit jobs, query receipts, SLA history</td><td><code>compute_market.submit_job</code></td><td><code>node/src/rpc/compute_market.rs</code></td></tr>
+<tr><td><code>ad_market</code></td><td>Ad bidding, cohort queries, policy snapshots</td><td><code>ad_market.submit_bid</code>, <code>ad_market.policy_snapshot</code></td><td><code>node/src/rpc/ad_market.rs</code></td></tr>
+<tr><td><code>governance</code></td><td>Proposals, voting, parameters</td><td><code>governance.proposals</code></td><td><code>node/src/rpc/governance.rs</code></td></tr>
+<tr><td><code>governor</code></td><td>Launch readiness gates, staged rollout</td><td><code>governor.status</code>, <code>governor.decisions</code></td><td><code>node/src/rpc/governor.rs</code></td></tr>
+</tbody></table>
+</div>
+<p><code>governor.status</code> now returns the deterministic <code>economics_prev_market_metrics</code> array (ppm values per market) alongside the gate states and intents, so dashboards and CLI tooling can correlate the Prometheus gauges <code>economics_prev_market_metrics_{utilization,provider_margin}_ppm</code> with the persisted sample the governor records.
+| <code>treasury</code> | Disbursements, balances | <code>treasury.balance</code>, <code>treasury.submit_disbursement</code> | <code>node/src/rpc/treasury.rs</code> |
+| <code>energy</code> | Energy market operations | <code>energy.register_provider</code>, <code>energy.settle</code> | <code>node/src/rpc/energy.rs</code> |
+| <code>peer</code> | Network peer info | <code>peer.list</code>, <code>peer.stats</code> | <code>node/src/rpc/peer.rs</code> |
+| <code>vm</code> | Smart contract execution | <code>vm.call</code>, <code>vm.trace</code> | <code>node/src/rpc/vm.rs</code> |
+| <code>state_stream</code> | Light-client streaming | <code>state_stream.subscribe</code> | <code>node/src/rpc/state_stream.rs</code> |
+| <code>scheduler</code> | Scheduler queue statistics | <code>scheduler.stats</code> | <code>node/src/rpc/scheduler.rs</code> |
+| <code>jurisdiction</code> | Jurisdiction policy management | <code>jurisdiction.status</code>, <code>jurisdiction.set</code> | <code>node/src/rpc/jurisdiction.rs</code> |
+| <code>node</code> | Node configuration and privacy settings | <code>node.get_ack_privacy</code>, <code>node.set_ack_privacy</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>config</code> | Runtime configuration reload | <code>config.reload</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>mesh</code> | LocalNet peer discovery | <code>mesh.peers</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>rent</code> | Storage rent escrow status | <code>rent.escrow.balance</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>gateway</code> | Gateway, DNS, venue, mobile cache operations | <code>gateway.dns_lookup</code>, <code>gateway.venue_status</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>settlement</code> | Compute market settlement auditing | <code>settlement.audit</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>anomaly</code> | Telemetry anomaly labeling | <code>anomaly.label</code> | <code>node/src/rpc/mod.rs</code> |
+| <code>analytics</code> | Aggregated analytics stats (telemetry feature) | <code>analytics</code> | <code>node/src/rpc/analytics.rs</code> |</p>
 <h2 id="json-rpc"><a class="header" href="#json-rpc">JSON-RPC</a></h2>
 <ul>
 <li>Server lives in <code>node/src/rpc</code>. Namespaces: <code>consensus</code>, <code>ledger</code>, <code>storage</code>, <code>compute_market</code>, <code>ad_market</code>, <code>governance</code>, <code>peer</code>, <code>treasury</code>, <code>vm</code>, <code>logs</code>, <code>state_stream</code>, <code>analytics</code>.</li>
@@ -184,24 +223,62 @@
 <li>Fault handling: clients clamp <code>TB_RPC_FAULT_RATE</code>, saturate exponential backoff after 31 attempts, and expose regression coverage for bounded retries.</li>
 <li>Streaming: <code>state_stream</code> (light-client snapshots), <code>compute.job_cancel</code>, and telemetry correlations.</li>
 </ul>
-<h2 id="cli-tb-cli"><a class="header" href="#cli-tb-cli">CLI (<code>tb-cli</code>)</a></h2>
+<h2 id="cli-contract-cli"><a class="header" href="#cli-contract-cli">CLI (<code>contract-cli</code>)</a></h2>
 <ul>
 <li>Main entry in <code>cli/src/main.rs</code>. Subcommands include: <code>node</code>, <code>gov</code>, <code>wallet</code>, <code>bridge</code>, <code>dex</code>, <code>compute</code>, <code>storage</code>, <code>gateway</code>, <code>mesh</code>, <code>light</code>, <code>telemetry</code>, <code>probe</code>, <code>diagnostics</code>, <code>service-badge</code>, <code>remediation</code>, <code>ai</code>, <code>ann</code>, <code>identity</code>.</li>
-<li><code>tb-cli energy</code> wraps the <code>energy.*</code> RPCs (<code>register</code>, <code>market</code>, <code>settle</code>, <code>submit-reading</code>). It prints friendly tables by default and supports <code>--verbose</code>/<code>--format json</code> when you need machine-readable payloads or to export providers/receipts for explorer ingestion. See <code>docs/testnet/ENERGY_QUICKSTART.md</code> for scripted walkthroughs and dispute drills.</li>
-<li>Provider trust roots live in <code>config/default.toml</code> under <code>energy.provider_keys</code>. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings are rejected once keys are registered.</li>
-<li>Use <code>tb-cli --help</code> or <code>tb-cli &lt;cmd&gt; --help</code>. Structured output via <code>--format json</code> for automation.</li>
+<li><code>contract-cli energy</code> wraps the <code>energy.*</code> RPCs (<code>register</code>, <code>market</code>, <code>receipts</code>, <code>credits</code>, <code>settle</code>, <code>submit-reading</code>, <code>disputes</code>, <code>flag-dispute</code>, <code>resolve-dispute</code>). It prints friendly tables by default and supports <code>--verbose</code>/<code>--format json</code> when you need machine-readable payloads or to export providers/receipts/disputes for explorer ingestion. See <code>docs/testnet/ENERGY_QUICKSTART.md</code> for scripted walkthroughs and dispute drills.</li>
+<li>Provider trust roots live in <code>config/default.toml</code> under <code>energy.provider_keys</code>. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings will be rejected once keys are registered.</li>
+<li>Use <code>contract-cli --help</code> or <code>contract-cli &lt;cmd&gt; --help</code>. Structured output via <code>--format json</code> for automation.</li>
 <li>CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.</li>
 </ul>
+<h3 id="cli-command-reference"><a class="header" href="#cli-command-reference">CLI Command Reference</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Purpose</th><th>Code</th></tr></thead><tbody>
+<tr><td><code>contract-cli node</code></td><td>Node lifecycle (start, stop, status)</td><td><code>cli/src/node.rs</code></td></tr>
+<tr><td><code>contract-cli gov</code></td><td>Governance proposals, voting, parameters</td><td><code>cli/src/gov.rs</code></td></tr>
+<tr><td><code>contract-cli gov disburse</code></td><td>Treasury disbursement workflow</td><td><code>cli/src/gov.rs</code></td></tr>
+<tr><td><code>contract-cli wallet</code></td><td>Wallet creation, signing, balances</td><td><code>cli/src/wallet.rs</code></td></tr>
+<tr><td><code>contract-cli bridge</code></td><td>Cross-chain bridge operations</td><td><code>cli/src/bridge.rs</code></td></tr>
+<tr><td><code>contract-cli dex</code></td><td>DEX trading, order books, trust lines</td><td><code>cli/src/dex.rs</code></td></tr>
+<tr><td><code>contract-cli compute</code></td><td>Compute market jobs, receipts, proofs</td><td><code>cli/src/compute.rs</code></td></tr>
+<tr><td><code>contract-cli storage</code></td><td>File storage operations</td><td><code>cli/src/storage.rs</code></td></tr>
+<tr><td><code>contract-cli energy</code></td><td>Energy market (register, settle, readings)</td><td><code>cli/src/energy.rs</code></td></tr>
+<tr><td><code>contract-cli gateway</code></td><td>Gateway and DNS management</td><td><code>cli/src/gateway.rs</code></td></tr>
+<tr><td><code>contract-cli mesh</code></td><td>LocalNet/mesh peer operations</td><td><code>cli/src/mesh.rs</code></td></tr>
+<tr><td><code>contract-cli light</code></td><td>Light client sync and proofs</td><td><code>cli/src/light_sync.rs</code></td></tr>
+<tr><td><code>contract-cli telemetry</code></td><td>Telemetry metrics and wrappers</td><td><code>cli/src/telemetry.rs</code></td></tr>
+<tr><td><code>contract-cli probe</code></td><td>Network probing and diagnostics</td><td><code>cli/src/probe.rs</code></td></tr>
+<tr><td><code>contract-cli diagnostics</code></td><td>Debug dumps (mempool, scheduler, gossip, RPC)</td><td><code>cli/src/debug_cli.rs</code></td></tr>
+<tr><td><code>contract-cli service-badge</code></td><td>Badge issuance, revocation, verification</td><td><code>cli/src/service_badge.rs</code></td></tr>
+<tr><td><code>contract-cli remediation</code></td><td>Network partition recovery tools</td><td><code>cli/src/remediation.rs</code></td></tr>
+<tr><td><code>contract-cli ai</code></td><td>AI diagnostics and analysis</td><td><code>cli/src/ai.rs</code></td></tr>
+<tr><td><code>contract-cli ann</code></td><td>Ad network/ANN mesh operations</td><td><code>cli/src/ann.rs</code></td></tr>
+<tr><td><code>contract-cli identity</code></td><td>DID and handle management</td><td><code>cli/src/identity.rs</code></td></tr>
+<tr><td><code>contract-cli config</code></td><td>Configuration management</td><td><code>cli/src/config.rs</code></td></tr>
+<tr><td><code>contract-cli logs</code></td><td>Log searching and filtering</td><td><code>cli/src/logs.rs</code></td></tr>
+<tr><td><code>contract-cli tls</code></td><td>TLS certificate management</td><td><code>cli/src/tls.rs</code></td></tr>
+<tr><td><code>contract-cli scheduler</code></td><td>Scheduler queue statistics</td><td><code>cli/src/scheduler.rs</code></td></tr>
+<tr><td><code>contract-cli explorer</code></td><td>Explorer sync and queries</td><td><code>cli/src/explorer.rs</code></td></tr>
+<tr><td><code>contract-cli wasm</code></td><td>WASM build and deployment</td><td><code>cli/src/wasm.rs</code></td></tr>
+<tr><td><code>contract-cli contract</code></td><td>Smart contract deploy/call</td><td><code>cli/src/contract_dev.rs</code></td></tr>
+<tr><td><code>contract-cli vm</code></td><td>VM tracing and debugging</td><td><code>cli/src/vm.rs</code></td></tr>
+</tbody></table>
+</div>
+<p><strong>Energy CLI</strong> (<code>contract-cli energy</code>) wraps the <code>energy.*</code> RPCs (<code>register</code>, <code>market</code>, <code>settle</code>, <code>submit-reading</code>). It prints friendly tables by default and supports <code>--verbose</code>/<code>--format json</code> when you need machine-readable payloads. See <code>docs/testnet/ENERGY_QUICKSTART.md</code> for walkthroughs.</p>
 <h3 id="energy-rpc-payloads-auth-and-error-contracts"><a class="header" href="#energy-rpc-payloads-auth-and-error-contracts">Energy RPC payloads, auth, and error contracts</a></h3>
 <ul>
-<li>Endpoints live under <code>energy.*</code> and inherit the RPC server’s mutual-TLS/auth policy (<code>TB_RPC_AUTH_TOKEN</code>, allowlists) plus IP-based rate limiting defined in <code>docs/operations.md#gateway-policy</code>. Use <code>tb-cli diagnostics rpc-policy</code> to inspect the live policy before enabling public oracle submitters.</li>
+<li>Endpoints live under <code>energy.*</code> and inherit the RPC server’s mutual-TLS/auth policy (<code>TB_RPC_AUTH_TOKEN</code>, allowlists) plus IP-based rate limiting defined in <code>docs/operations.md#gateway-policy</code>. Use <code>contract-cli diagnostics rpc-policy</code> to inspect the live policy before enabling public oracle submitters.</li>
 <li>Endpoint map:</li>
 </ul>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Description</th><th>Request Body</th></tr></thead><tbody>
 <tr><td><code>energy.register_provider</code></td><td>Register capacity/jurisdiction/meter binding plus stake.</td><td><code>{ "capacity_kwh": u64, "price_per_kwh": u64, "meter_address": "string", "jurisdiction": "US_CA", "stake": u64, "owner": "account-id" }</code></td></tr>
-<tr><td><code>energy.market_state</code></td><td>Fetch snapshot of providers, outstanding meter credits, and receipts; pass <code>{"provider_id":"energy-0x01"}</code> to filter.</td><td>optional object</td></tr>
+<tr><td><code>energy.market_state</code></td><td>Fetch snapshot of providers, outstanding meter credits, receipts, and open disputes; pass <code>{"provider_id":"energy-0x01"}</code> to filter.</td><td>optional object</td></tr>
 <tr><td><code>energy.submit_reading</code></td><td>Submit signed meter total to mint a credit.</td><td><code>MeterReadingPayload</code> JSON (below)</td></tr>
 <tr><td><code>energy.settle</code></td><td>Burn credit + capacity to settle kWh and produce <code>EnergyReceipt</code>.</td><td><code>{ "provider_id": "energy-0x01", "buyer": "acct"?, "kwh_consumed": u64, "meter_hash": "0x..." }</code></td></tr>
+<tr><td><code>energy.receipts</code></td><td>Paginated settlement history (optionally filtered by provider).</td><td><code>{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }</code></td></tr>
+<tr><td><code>energy.credits</code></td><td>Paginated meter-credit listing (optionally filtered by provider).</td><td><code>{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }</code></td></tr>
+<tr><td><code>energy.disputes</code></td><td>Paginated dispute log with optional filters (provider, status, meter hash).</td><td><code>{ "provider_id"?: "energy-0x00", "status"?: "open", "meter_hash"?: "hex", "page"?: u64, "page_size"?: u64 }</code></td></tr>
+<tr><td><code>energy.flag_dispute</code></td><td>Open a dispute tied to a <code>meter_hash</code>.</td><td><code>{ "meter_hash": "hex", "reason": "string", "reporter"?: "account" }</code></td></tr>
+<tr><td><code>energy.resolve_dispute</code></td><td>Resolve an existing dispute, recording a resolver/note.</td><td><code>{ "dispute_id": u64, "resolver"?: "account", "resolution_note"?: "string" }</code></td></tr>
 </tbody></table>
 </div>
 <ul>
@@ -211,7 +288,8 @@
   "status": "ok",
   "providers": [ { "provider_id": "energy-0x00", "capacity_kwh": 10_000, "...": "..." } ],
   "credits": [ { "provider": "energy-0x00", "meter_hash": "e3c3…", "amount_kwh": 120, "timestamp": 123456 } ],
-  "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ]
+  "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ],
+  "disputes": [ { "id": 1, "meter_hash": "e3c3…", "provider_id": "energy-0x00", "status": "open", "reason": "bad reading", "opened_at": 1234567890 } ]
 }
 </code></pre>
 <ul>
@@ -235,8 +313,58 @@
 </ul>
 </li>
 <li>Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, and meter mismatches produce structured failures instead of panics.</li>
-<li>Observer tooling: <code>tb-cli energy market --verbose</code> dumps the whole response; <code>tb-cli diagnostics rpc-log --method energy.submit_reading</code> tails submissions with auth metadata so you can trace rate-limit hits.</li>
-<li>Per the architecture roadmap, the next RPC/CLI work items are: adding authenticated disputes + receipt listings, wiring explorer/CLI visualizations for param history, and enforcing per-endpoint rate limiting once the QUIC chaos drills complete (tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>).</li>
+<li>Observer tooling: <code>contract-cli energy market --verbose</code> dumps the whole response, <code>contract-cli energy receipts|credits --json</code> streams paginated settlements/credits, and <code>contract-cli diagnostics rpc-log --method energy.submit_reading</code> tails submissions with auth metadata so you can trace rate-limit hits. <code>contract-cli energy disputes|flag-dispute|resolve-dispute</code> mirrors the RPC contracts for dispute management.</li>
+<li>Remaining RPC/CLI work items (tracked in <code>docs/architecture.md#energy-governance-and-rpc-next-tasks</code>) focus on explorer timelines, richer governance payloads, and tightening per-endpoint rate limiting once the QUIC chaos drills complete.</li>
+</ul>
+<h3 id="treasury-disbursement-cli-rpc-and-schema"><a class="header" href="#treasury-disbursement-cli-rpc-and-schema">Treasury disbursement CLI, RPC, and schema</a></h3>
+<ul>
+<li>Disbursement proposals live inside the governance namespace. CLI entrypoints sit under <code>contract-cli gov disburse</code>:
+<ul>
+<li><code>create</code> scaffolds a JSON template (see <code>examples/governance/disbursement_example.json</code>) and fills in proposer defaults (badge identity, default timelock/rollback windows).</li>
+<li><code>preview --json &lt;file&gt;</code> validates the payload against the schema and prints the derived timeline: quorum requirements, vote window, activation epoch, timelock height, and resulting treasury deltas.</li>
+<li><code>submit --json &lt;file&gt;</code> posts the signed proposal to the node via <code>gov.treasury.submit_disbursement</code>; dry-run with <code>--check</code> to ensure hashes match before sending live traffic.</li>
+<li><code>show --id &lt;proposal-id&gt;</code> renders the explorer-style timeline (metadata, quorum/vote tallies, timelock window, execution tx hash, receipts, rollback annotations).</li>
+<li><code>queue</code>, <code>execute</code>, and <code>rollback</code> mirror the on-chain transitions for operators who hold the treasury executor lease. <code>queue</code> acknowledges that the proposal passed and seeds the executor queue (it derives the current epoch from the node unless <code>--epoch</code> is supplied), <code>execute</code> pushes the signed transaction (recording <code>tx_hash</code>, nonce, receipts), and <code>rollback</code> reverts executions within the bounded window.</li>
+</ul>
+</li>
+<li><code>DisbursementPayload</code> JSON schema (shared by CLI, explorer, RPC, and tests):</li>
+</ul>
+<pre><code class="language-jsonc">{
+  "proposal": {
+    "title": "2024-Q2 Core Grants",
+    "summary": "Fund three core contributors + auditor retainer.",
+    "deps": [1203, 1207],
+    "attachments": [
+      { "name": "proposal-pdf", "uri": "ipfs://bafy..." }
+    ],
+    "quorum": { "operators": 0.67, "builders": 0.67 },
+    "vote_window_epochs": 6,
+    "timelock_epochs": 2,
+    "rollback_window_epochs": 1
+  },
+  "disbursement": {
+    "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
+    "amount": 125_000_000,
+    "memo": "Core grants Q2",
+    "scheduled_epoch": 180_500,
+    "expected_receipts": [
+      { "account": "foundation", "amount": 100_000_000 },
+      { "account": "audit-retainer", "amount": 25_000_000 }
+    ]
+  }
+}
+</code></pre>
+<ul>
+<li>RPC exposure:
+<ul>
+<li><code>gov.treasury.submit_disbursement { payload, signature }</code> – create proposal from JSON.</li>
+<li><code>gov.treasury.disbursement { id }</code> – fetch canonical status/timeline for a single record.</li>
+<li><code>gov.treasury.queue_disbursement { id, current_epoch? }</code>, <code>gov.treasury.execute_disbursement { id, tx_hash, receipts }</code>, <code>gov.treasury.rollback_disbursement { id, reason }</code> – maintenance hooks for executor operators (all auth gated). Passing <code>current_epoch = 0</code> tells the node to derive it from block height automatically.</li>
+<li><code>gov.treasury.list_disbursements { cursor?, status?, limit? }</code> – explorer/CLI listings.</li>
+</ul>
+</li>
+<li>CLI exposes <code>--schema</code> and <code>--check</code> flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under <code>examples/governance/</code> in sync by running <code>contract-cli gov disburse preview --json … --check</code> during docs tests.</li>
+<li>Explorer’s REST API mirrors the RPC fields so UI timelines and CLI scripts stay aligned; see <code>explorer/src/treasury.rs</code>.</li>
 </ul>
 <h2 id="gateway-http-and-cdn-surfaces"><a class="header" href="#gateway-http-and-cdn-surfaces">Gateway HTTP and CDN Surfaces</a></h2>
 <ul>
@@ -248,23 +376,23 @@
 <ul>
 <li>Outbound clients live in <code>crates/httpd::{client.rs,blocking.rs}</code>. <code>httpd::Client</code> wraps the runtime <code>TcpStream</code>, supports HTTPS via the in-house TLS connector, and exposes:
 <ul>
-<li><code>ClientConfig { connect_timeout, request_timeout, max_response_bytes, tls }</code>.</li>
+<li><code>ClientConfig { connect_timeout, request_timeout, read_timeout?, max_response_bytes, tls }</code>.</li>
 <li><code>Client::with_tls_from_env(&amp;["TB_NODE_TLS","TB_HTTP_TLS"])</code> to reuse the same certs as RPC/gateway surfaces.</li>
 <li><code>RequestBuilder::json(value)</code> for canonical JSON encoding and <code>send()</code> for async execution. Blocking variants offer the same API for CLI tools.</li>
 </ul>
 </li>
 <li>TLS rotation:
 <ul>
-<li>Set <code>TB_NET_CERT_STORE_PATH</code> to control where mutual-TLS certs are stored. <code>tb-cli net rotate-cert</code> and <code>tb-cli net rotate-key</code> (see <code>cli/src/net.rs</code>) wrap the RPCs that rotate QUIC certs and peer keys.</li>
-<li>Diagnostics: <code>tb-cli net quic failures --url &lt;rpc&gt;</code> lists handshake failures; <code>tb-cli net overlay-status</code> confirms which overlay backend is active and where the peer DB lives.</li>
+<li>Set <code>TB_NET_CERT_STORE_PATH</code> to control where mutual-TLS certs are stored. <code>contract-cli net rotate-cert</code> and <code>contract-cli net rotate-key</code> (see <code>cli/src/net.rs</code>) wrap the RPCs that rotate QUIC certs and peer keys.</li>
+<li>Diagnostics: <code>contract-cli net quic failures --url &lt;rpc&gt;</code> lists handshake failures; <code>contract-cli net overlay-status</code> confirms which overlay backend is active and where the peer DB lives.</li>
 </ul>
 </li>
-<li>HTTP troubleshooting: both the node and CLI honour <code>TB_RPC_TIMEOUT_MS</code>, <code>TB_RPC_TIMEOUT_JITTER_MS</code>, and <code>TB_RPC_MAX_RETRIES</code>. Use <code>tb-cli net dns verify</code> to confirm TXT records and <code>tb-cli net gossip-status</code> to inspect HTTP routing metadata exposed via gossip debug RPCs.</li>
+<li>HTTP troubleshooting: both the node and CLI honour <code>TB_RPC_TIMEOUT_MS</code>, <code>TB_RPC_TIMEOUT_JITTER_MS</code>, and <code>TB_RPC_MAX_RETRIES</code>. Use <code>contract-cli net dns verify</code> to confirm TXT records and <code>contract-cli net gossip-status</code> to inspect HTTP routing metadata exposed via gossip debug RPCs.</li>
 </ul>
 <h2 id="dns-and-naming"><a class="header" href="#dns-and-naming">DNS and Naming</a></h2>
 <ul>
 <li>Publishing: <code>node/src/gateway/dns.rs</code> writes <code>.block</code> zone files or external DNS records using schemas under <code>docs/spec/dns_record.schema.json</code>.</li>
-<li>CLI: <code>tb-cli gateway dns publish</code>, <code>tb-cli gateway dns audit</code>.</li>
+<li>CLI: <code>contract-cli gateway dns publish</code>, <code>contract-cli gateway dns audit</code>.</li>
 </ul>
 <h2 id="explorer-and-log-indexer"><a class="header" href="#explorer-and-log-indexer">Explorer and Log Indexer</a></h2>
 <ul>
@@ -290,26 +418,294 @@
 </ul>
 <h2 id="storage-and-blob-apis"><a class="header" href="#storage-and-blob-apis">Storage and Blob APIs</a></h2>
 <ul>
-<li>CLI: <code>tb-cli storage put|get|manifest|repair</code>, <code>tb-cli blob summarize</code>, <code>tb-cli storage providers</code>.</li>
+<li>CLI: <code>contract-cli storage put|get|manifest|repair</code>, <code>contract-cli blob summarize</code>, <code>contract-cli storage providers</code>.</li>
 <li>RPC: <code>storage.put_blob</code>, <code>storage.get_manifest</code>, <code>storage.list_providers</code>.</li>
 <li>Blob manifests follow the binary schema in <code>node/src/storage/manifest_binary.rs</code>; object receipts encode <code>StoreReceipt</code> structs consumed by the ledger.</li>
 </ul>
 <h2 id="compute-energy-and-ad-market-apis"><a class="header" href="#compute-energy-and-ad-market-apis">Compute, Energy, and Ad Market APIs</a></h2>
 <ul>
-<li>Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (<code>compute.job_cancel</code>). Courier snapshots stream through <code>compute_market.courier_status</code>, proof bundles (with fingerprints + circuit artifacts) are downloadable via <code>compute_market.sla_history(limit)</code>, <code>tb-cli compute proofs --limit N</code> pretty-prints recent SLA/proof entries, <code>tb-cli explorer sync-proofs --db explorer.db</code> ingests them into the explorer SQLite tables (<code>compute_sla_history</code> + <code>compute_sla_proofs</code>), and the explorer HTTP server exposes <code>/compute/sla/history?limit=N</code> so dashboards can render proof fingerprints without RPC access. The <code>snark</code> CLI (<code>cli/src/snark.rs</code>) still outputs attested circuit artifacts for out-of-band prover rollout.</li>
+<li>Compute RPC/CLI: reserve capacity, post workloads, submit receipts, inspect fairness metrics, cancel jobs (<code>compute.job_cancel</code>). Courier snapshots stream through <code>compute_market.courier_status</code>, proof bundles (with fingerprints + circuit artifacts) are downloadable via <code>compute_market.sla_history(limit)</code>, <code>contract-cli compute proofs --limit N</code> pretty-prints recent SLA/proof entries, <code>contract-cli explorer sync-proofs --db explorer.db</code> ingests them into the explorer SQLite tables (<code>compute_sla_history</code> + <code>compute_sla_proofs</code>), and the explorer HTTP server exposes <code>/compute/sla/history?limit=N</code> so dashboards can render proof fingerprints without RPC access. The <code>snark</code> CLI (<code>cli/src/snark.rs</code>) still outputs attested circuit artifacts for out-of-band prover rollout.</li>
 <li>Energy RPC/CLI: <code>energy.register_provider</code>, <code>energy.market_state</code>, <code>energy.settle</code>, and <code>energy.submit_reading</code> expose the <code>crates/energy-market</code> state plus oracle submissions. Governance feeds <code>energy_min_stake</code>, <code>energy_oracle_timeout_blocks</code>, and <code>energy_slashing_rate_bps</code> into this module, so operators can tune the market via proposals rather than recompiling.</li>
-<li>Ad market RPC/CLI: reserve impressions, commit deliveries, record conversions, audit ANN proofs, manage mesh queues.</li>
+<li>Ad market RPC/CLI: campaigns now target multi-signal cohorts (domain tiers, badge mixes, interest tags, and proof-of-presence buckets). Key endpoints:
+<ul>
+<li><code>ad_market.inventory</code>, <code>ad_market.list_campaigns</code>, <code>ad_market.distribution</code>, <code>ad_market.budget</code>, <code>ad_market.broker_state</code>, <code>ad_market.readiness</code> return selector-aware snapshots. Every <code>CohortPriceSnapshot</code>/<code>ReadinessSnapshot</code> carries <code>selectors_version</code>, <code>domain_tier</code>, <code>interest_tags</code>, optional <code>presence_bucket</code>, and privacy-budget gauges so downstream tooling can render per-segment pricing/utilization/freshness.</li>
+<li><code>ad_market.register_campaign</code> accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: <code>contract-cli ad-market register --file campaign.json</code> enforces the same schema and exposes <code>--selector</code> helpers for quick edits.</li>
+<li>Presence APIs: <code>ad_market.list_presence_cohorts</code> enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and <code>ad_market.reserve_presence</code> lets campaigns reserve slots for high-value cohorts. CLI: <code>contract-cli ad-market presence list|reserve</code>.</li>
+<li>Conversion/value APIs: <code>ad_market.record_conversion</code> now supports <code>value</code>, <code>currency_code</code>, <code>selector_weights[]</code>, and <code>attribution_window_secs</code> so advertisers can compute ROAS per selector. CLI supports <code>contract-cli ad-market record-conversion --file conversion.json</code>.</li>
 </ul>
+</li>
+</ul>
+<h3 id="presence-cohort-json-schemas"><a class="header" href="#presence-cohort-json-schemas">Presence Cohort JSON Schemas</a></h3>
+<h4 id="ad_marketlist_presence_cohorts--request-schema"><a class="header" href="#ad_marketlist_presence_cohorts--request-schema"><code>ad_market.list_presence_cohorts</code> — Request Schema</a></h4>
+<pre><code class="language-json">{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ListPresenceCohortsRequest",
+  "type": "object",
+  "properties": {
+    "region": {
+      "type": "string",
+      "description": "ISO 3166-1 alpha-2 region filter (e.g., 'US', 'EU')",
+      "pattern": "^[A-Z]{2}$"
+    },
+    "domain_tier": {
+      "type": "string",
+      "enum": ["premium", "reserved", "community", "unverified"],
+      "description": "Filter by domain tier from .block auctions"
+    },
+    "min_confidence_bps": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000,
+      "description": "Minimum presence confidence in basis points (0-10000)"
+    },
+    "interest_tag": {
+      "type": "string",
+      "description": "Filter by interest tag ID from governance registry"
+    },
+    "beacon_id": {
+      "type": "string",
+      "description": "Filter by specific beacon/venue identifier"
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["localnet", "range_boost"],
+      "description": "Filter by presence proof source"
+    },
+    "include_expired": {
+      "type": "boolean",
+      "default": false,
+      "description": "Include buckets past TB_PRESENCE_TTL_SECS (for debugging)"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 100,
+      "description": "Maximum cohorts to return"
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Pagination cursor from previous response"
+    }
+  },
+  "additionalProperties": false
+}
+</code></pre>
+<h4 id="ad_marketlist_presence_cohorts--response-schema"><a class="header" href="#ad_marketlist_presence_cohorts--response-schema"><code>ad_market.list_presence_cohorts</code> — Response Schema</a></h4>
+<pre><code class="language-json">{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ListPresenceCohortsResponse",
+  "type": "object",
+  "required": ["status", "cohorts", "privacy_budget"],
+  "properties": {
+    "status": { "type": "string", "const": "ok" },
+    "cohorts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PresenceCohortSummary"
+      }
+    },
+    "privacy_budget": {
+      "type": "object",
+      "required": ["remaining_ppm"],
+      "properties": {
+        "remaining_ppm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "Remaining privacy budget in parts per million"
+        },
+        "denied_count": {
+          "type": "integer",
+          "description": "Number of cohorts redacted due to k-anonymity"
+        }
+      }
+    },
+    "next_cursor": {
+      "type": "string",
+      "description": "Cursor for next page (absent when no more results)"
+    }
+  },
+  "definitions": {
+    "PresenceCohortSummary": {
+      "type": "object",
+      "required": ["bucket", "ready_slots", "privacy_guardrail", "selector_prices"],
+      "properties": {
+        "bucket": { "$ref": "#/definitions/PresenceBucket" },
+        "ready_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Available impression slots meeting readiness thresholds"
+        },
+        "privacy_guardrail": {
+          "type": "string",
+          "enum": ["ok", "k_anonymity_redacted", "budget_exhausted", "opt_in_required"],
+          "description": "Reason code if data is limited"
+        },
+        "selector_prices": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/SelectorBidSpec" }
+        },
+        "freshness_histogram": {
+          "type": "object",
+          "description": "Distribution of proof ages (buckets: &lt;1h, 1-6h, 6-24h, &gt;24h)",
+          "properties": {
+            "under_1h_ppm": { "type": "integer" },
+            "1h_to_6h_ppm": { "type": "integer" },
+            "6h_to_24h_ppm": { "type": "integer" },
+            "over_24h_ppm": { "type": "integer" }
+          }
+        },
+        "domain_tier_supply": {
+          "type": "object",
+          "description": "Supply breakdown by domain tier within this presence bucket",
+          "additionalProperties": { "type": "integer" }
+        }
+      }
+    },
+    "PresenceBucket": {
+      "type": "object",
+      "required": ["bucket_id", "kind", "beacon_id", "radius_meters", "minted_at_micros", "expires_at_micros", "confidence_bps"],
+      "properties": {
+        "bucket_id": { "type": "string", "description": "Deterministic hash of bucket parameters" },
+        "kind": { "type": "string", "enum": ["localnet", "range_boost"] },
+        "beacon_id": { "type": "string", "description": "Venue/beacon identifier" },
+        "radius_meters": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "minted_at_micros": { "type": "integer", "description": "Unix timestamp in microseconds" },
+        "expires_at_micros": { "type": "integer", "description": "Expiry per TB_PRESENCE_TTL_SECS" },
+        "confidence_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "venue_id": { "type": "string" },
+        "crowd_size_hint": { "type": "integer", "minimum": 0 },
+        "presence_badge": { "type": "string", "description": "Badge token for venue-grade attestations" }
+      }
+    },
+    "SelectorBidSpec": {
+      "type": "object",
+      "required": ["selector_id", "clearing_price_usd_micros"],
+      "properties": {
+        "selector_id": { "type": "string", "description": "blake3(domain||domain_tier||interest_tags||presence_bucket||version)" },
+        "clearing_price_usd_micros": { "type": "integer", "minimum": 0 },
+        "shading_factor_bps": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 0 },
+        "slot_cap": { "type": "integer", "minimum": 0 },
+        "max_pacing_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    }
+  }
+}
+</code></pre>
+<h4 id="ad_marketreserve_presence--request-schema"><a class="header" href="#ad_marketreserve_presence--request-schema"><code>ad_market.reserve_presence</code> — Request Schema</a></h4>
+<pre><code class="language-json">{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReservePresenceRequest",
+  "type": "object",
+  "required": ["campaign_id", "presence_bucket_id", "slot_count"],
+  "properties": {
+    "campaign_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Existing campaign ID from ad_market.register_campaign"
+    },
+    "presence_bucket_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Bucket ID from ad_market.list_presence_cohorts"
+    },
+    "slot_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000,
+      "description": "Number of impression slots to reserve"
+    },
+    "expires_at_micros": {
+      "type": "integer",
+      "description": "Optional explicit expiry; defaults to bucket expiry or TB_PRESENCE_TTL_SECS"
+    },
+    "selector_budget": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/SelectorBidSpec" },
+      "description": "Optional per-selector bid overrides for this reservation"
+    },
+    "max_bid_usd_micros": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum bid cap for this reservation"
+    }
+  },
+  "definitions": {
+    "SelectorBidSpec": {
+      "type": "object",
+      "required": ["selector_id", "clearing_price_usd_micros"],
+      "properties": {
+        "selector_id": { "type": "string" },
+        "clearing_price_usd_micros": { "type": "integer", "minimum": 0 },
+        "shading_factor_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "slot_cap": { "type": "integer", "minimum": 0 },
+        "max_pacing_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+      }
+    }
+  },
+  "additionalProperties": false
+}
+</code></pre>
+<h4 id="ad_marketreserve_presence--response-schema"><a class="header" href="#ad_marketreserve_presence--response-schema"><code>ad_market.reserve_presence</code> — Response Schema</a></h4>
+<pre><code class="language-json">{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ReservePresenceResponse",
+  "type": "object",
+  "required": ["status", "reservation_id", "expires_at_micros"],
+  "properties": {
+    "status": { "type": "string", "const": "ok" },
+    "reservation_id": {
+      "type": "string",
+      "description": "Unique reservation key for cancellation/inspection"
+    },
+    "expires_at_micros": {
+      "type": "integer",
+      "description": "When this reservation expires (bucket expiry or custom)"
+    },
+    "reserved_budget_usd_micros": {
+      "type": "integer",
+      "description": "Budget committed to this reservation"
+    },
+    "effective_selectors": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/SelectorBidSpec" },
+      "description": "Merged selector specs after applying reservation overrides"
+    }
+  }
+}
+</code></pre>
+<h3 id="presence--privacy-error-codes"><a class="header" href="#presence--privacy-error-codes">Presence &amp; Privacy Error Codes</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Code</th><th>Name</th><th>Description</th><th>Resolution</th></tr></thead><tbody>
+<tr><td><code>-32034</code></td><td><code>INVALID_PRESENCE_BUCKET</code></td><td>Presence bucket is expired, malformed, or not found</td><td>Check <code>expires_at_micros</code> against <code>TB_PRESENCE_TTL_SECS</code>; refresh bucket via <code>ad_market.list_presence_cohorts</code></td></tr>
+<tr><td><code>-32035</code></td><td><code>FORBIDDEN_SELECTOR_COMBO</code></td><td>Selector combination violates privacy policy (e.g., premium domain + tight presence without opt-in)</td><td>Review <code>presence_filters</code> and <code>domain_filters</code> in campaign; may require explicit opt-in in metadata</td></tr>
+<tr><td><code>-32036</code></td><td><code>UNKNOWN_SELECTOR</code></td><td>Interest tag or domain tier not in governance registry</td><td>Query <code>governance.interest_tags</code> or DNS tier registry</td></tr>
+<tr><td><code>-32037</code></td><td><code>INSUFFICIENT_PRIVACY_BUDGET</code></td><td>Request would exceed per-selector or per-family epsilon/delta limits</td><td>Wait for budget decay (per <code>PrivacyBudgetManager</code> cooldown), reduce request scope, or aggregate selectors</td></tr>
+<tr><td><code>-32038</code></td><td><code>HOLDOUT_OVERLAP</code></td><td>Reservation conflicts with active holdout assignment</td><td>Cancel conflicting reservation or wait for holdout window to close</td></tr>
+<tr><td><code>-32039</code></td><td><code>SELECTOR_WEIGHT_MISMATCH</code></td><td><code>selector_weights[]</code> in conversion record don't sum to 1,000,000 ppm</td><td>Adjust weights; total must equal exactly 1,000,000 ppm</td></tr>
+</tbody></table>
+</div>
+<h3 id="governance-knobs-for-presence"><a class="header" href="#governance-knobs-for-presence">Governance Knobs for Presence</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Parameter</th><th>Env Var</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>presence_ttl_secs</code></td><td><code>TB_PRESENCE_TTL_SECS</code></td><td>86400</td><td>Maximum age of presence proofs before expiry</td></tr>
+<tr><td><code>presence_radius_meters</code></td><td><code>TB_PRESENCE_RADIUS_METERS</code></td><td>500</td><td>Default radius for presence bucket aggregation</td></tr>
+<tr><td><code>presence_proof_cache_size</code></td><td><code>TB_PRESENCE_PROOF_CACHE_SIZE</code></td><td>10000</td><td>Maximum cached <code>PresenceReceipt</code> entries per node</td></tr>
+<tr><td><code>presence_min_crowd_size</code></td><td>via governance params</td><td>5</td><td>Minimum crowd count for venue-grade attestations</td></tr>
+<tr><td><code>presence_min_confidence_bps</code></td><td>via governance params</td><td>8000</td><td>Minimum confidence for presence targeting</td></tr>
+</tbody></table>
+</div>
+<p>Dashboards must be refreshed (per <code>docs/operations.md#telemetry-wiring</code>) whenever new selectors or RPC knobs land; capture the <code>/wrappers</code> hash plus Grafana screenshots in every PR.</p>
 <h2 id="light-client-streaming"><a class="header" href="#light-client-streaming">Light-Client Streaming</a></h2>
 <ul>
-<li>RPC: <code>light.subscribe</code>, <code>light.get_block_range</code>, <code>light.get_device_status</code>, <code>state_stream.subscribe</code>. CLI: <code>tb-cli light sync</code>, <code>tb-cli light snapshot</code>, <code>tb-cli light device-status</code>.</li>
+<li>RPC: <code>light.subscribe</code>, <code>light.get_block_range</code>, <code>light.get_device_status</code>, <code>state_stream.subscribe</code>. CLI: <code>contract-cli light sync</code>, <code>contract-cli light snapshot</code>, <code>contract-cli light device-status</code>.</li>
 <li>Mobile heuristics (battery, bandwidth, overrides) persist under <code>~/.the_block/light_client.toml</code>.</li>
 </ul>
 <h2 id="bridge-dex-and-identity-apis"><a class="header" href="#bridge-dex-and-identity-apis">Bridge, DEX, and Identity APIs</a></h2>
 <ul>
 <li>Bridge RPC: <code>bridge.submit_proof</code>, <code>bridge.challenge</code>, <code>bridge.status</code>, <code>bridge.claim_reward</code>. CLI mirrors the same set.</li>
 <li>DEX RPC/CLI: order placement, swaps, trust-line routing, escrow proofs, HTLC settlement.</li>
-<li>Identity RPC: DID registration, revocation, handle lookup; CLI uses <code>tb-cli identity</code>.</li>
+<li>Identity RPC: DID registration, revocation, handle lookup; CLI uses <code>contract-cli identity</code>.</li>
 </ul>
 <h2 id="wallet-apis"><a class="header" href="#wallet-apis">Wallet APIs</a></h2>
 <ul>

@@ -1,7 +1,7 @@
 #![cfg(feature = "python-bindings")]
 #![cfg(feature = "integration-tests")]
 use testkit::tb_prop_test;
-use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
+use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload, SignedTransaction};
 
 mod util;
 use util::temp::temp_dir;
@@ -11,29 +11,56 @@ fn init() {
     ONCE.call_once(|| {});
 }
 
+fn build_signed_tx(
+    sk: &[u8],
+    from: &str,
+    to: &str,
+    consumer: u64,
+    industrial: u64,
+    fee: u64,
+    nonce: u64,
+) -> SignedTransaction {
+    let payload = RawTxPayload {
+        from_: from.to_string(),
+        to: to.to_string(),
+        amount_consumer: consumer,
+        amount_industrial: industrial,
+        fee,
+        pct: 100,
+        nonce,
+        memo: Vec::new(),
+    };
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
+}
+
 tb_prop_test!(nonce_and_supply_hold, |runner| {
     runner
         .add_case("empty sequence", || {
             init();
             let dir = temp_dir("nonce_supply_prop_empty");
             let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+            bc.min_fee_per_byte_consumer = 0;
+            bc.min_fee_per_byte_industrial = 0;
             bc.recompute_difficulty();
-            bc.add_account("a".into(), 0, 0).unwrap();
-            bc.add_account("b".into(), 0, 0).unwrap();
-            let (sk, _pk) = generate_keypair();
+            bc.add_account("a".into(), 0).unwrap();
+            bc.add_account("b".into(), 0).unwrap();
+            let (sk, pk) = generate_keypair();
+            // Verify keypair is valid size
+            assert_eq!(sk.len(), 32, "Secret key must be 32 bytes");
+            assert_eq!(pk.len(), 32, "Public key must be 32 bytes");
             bc.mine_block("a").unwrap();
-            let payload = RawTxPayload {
-                from_: "a".into(),
-                to: "b".into(),
-                amount_consumer: 1,
-                amount_industrial: 1,
-                fee: 1000,
-                pct_ct: 100,
-                nonce: 1,
-                memo: Vec::new(),
-            };
-            let tx = sign_tx(sk.clone(), payload).unwrap();
-            bc.submit_transaction(tx).unwrap();
+            let tx = build_signed_tx(&sk, "a", "b", 1, 0, 1000, 1);
+            // Verify transaction signature before submitting
+            assert!(
+                the_block::transaction::verify_signed_tx(&tx),
+                "Transaction signature verification failed"
+            );
+            bc.submit_transaction(tx)
+                .unwrap_or_else(|e| panic!("Failed to submit transaction: {:?}", e));
             bc.mine_block("a").unwrap();
             assert_eq!(bc.accounts.get("a").unwrap().nonce, 1);
         })
@@ -44,39 +71,39 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             init();
             let dir = temp_dir("nonce_supply_prop");
             let mut bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 0).unwrap();
+            bc.min_fee_per_byte_consumer = 0;
+            bc.min_fee_per_byte_industrial = 0;
             bc.recompute_difficulty();
-            bc.add_account("a".into(), 0, 0).unwrap();
-            bc.add_account("b".into(), 0, 0).unwrap();
-            let (sk, _pk) = generate_keypair();
+            bc.add_account("a".into(), 0).unwrap();
+            bc.add_account("b".into(), 0).unwrap();
+            let (sk, pk) = generate_keypair();
+            // Verify keypair is valid size
+            assert_eq!(sk.len(), 32, "Secret key must be 32 bytes");
+            assert_eq!(pk.len(), 32, "Public key must be 32 bytes");
             bc.mine_block("a").unwrap();
             let mut expected_nonce = 0u64;
             let rounds = rng.range_usize(1..=8);
             for _ in 0..rounds {
                 let consumer = rng.range_u64(0..=50) % 5;
-                let industrial = rng.range_u64(0..=50) % 5;
-                let payload = RawTxPayload {
-                    from_: "a".into(),
-                    to: "b".into(),
-                    amount_consumer: consumer,
-                    amount_industrial: industrial,
-                    fee: 1000,
-                    pct_ct: 100,
-                    nonce: expected_nonce + 1,
-                    memo: Vec::new(),
-                };
-                let tx = sign_tx(sk.clone(), payload).unwrap();
-                bc.submit_transaction(tx).unwrap();
+                let industrial = 0; // Single token via consumer lane only
+                let tx = build_signed_tx(&sk, "a", "b", consumer, industrial, 1000, expected_nonce + 1);
+                // Verify transaction signature before submitting
+                assert!(
+                    the_block::transaction::verify_signed_tx(&tx),
+                    "Transaction signature verification failed at nonce {}",
+                    expected_nonce + 1
+                );
+                bc.submit_transaction(tx)
+                    .unwrap_or_else(|e| panic!("Failed to submit transaction at nonce {}: {:?}", expected_nonce + 1, e));
                 bc.mine_block("a").unwrap();
                 expected_nonce += 1;
                 assert_eq!(bc.accounts.get("a").unwrap().nonce, expected_nonce);
-                let mut total_c = 0u64;
-                let mut _total_i = 0u64;
+                let mut total = 0u64;
                 for acc in bc.accounts.values() {
-                    total_c += acc.balance.consumer;
-                    _total_i += acc.balance.industrial;
+                    total += acc.balance.amount;
                 }
-                let em_c = bc.circulating_supply();
-                assert_eq!(total_c, em_c);
+                let circulating = bc.circulating_supply();
+                assert_eq!(total, circulating);
             }
         })
         .expect("register random case");

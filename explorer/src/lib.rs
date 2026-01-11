@@ -1140,8 +1140,8 @@ pub struct ComputeSlaHistoryRecord {
     pub outcome: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outcome_reason: Option<String>,
-    pub burned_ct: u64,
-    pub refunded_ct: u64,
+    pub burned: u64,
+    pub refunded: u64,
     pub deadline: u64,
     pub resolved_at: u64,
     pub proofs: Vec<ComputeSlaProofRecord>,
@@ -1236,27 +1236,20 @@ fn decode_hex_array<const N: usize>(
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderSettlementRecord {
     pub provider: String,
-    pub ct: u64,
+    pub consumer: u64,
     pub industrial: u64,
     pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RolePayoutBreakdown {
-    pub total_ct: u64,
-    pub total_it: u64,
-    pub viewer_ct: u64,
-    pub viewer_it: u64,
-    pub host_ct: u64,
-    pub host_it: u64,
-    pub hardware_ct: u64,
-    pub hardware_it: u64,
-    pub verifier_ct: u64,
-    pub verifier_it: u64,
-    pub liquidity_ct: u64,
-    pub liquidity_it: u64,
-    pub miner_ct: u64,
-    pub miner_it: u64,
+    pub total: u64,
+    pub viewer: u64,
+    pub host: u64,
+    pub hardware: u64,
+    pub verifier: u64,
+    pub liquidity: u64,
+    pub miner: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1365,19 +1358,18 @@ pub struct BlockPayoutBreakdown {
     pub advertising: RolePayoutBreakdown,
     pub total_usd_micros: u64,
     pub settlement_count: u64,
-    pub ct_price_usd_micros: u64,
-    pub it_price_usd_micros: u64,
+    pub price_usd_micros: u64,
     pub treasury_events: Vec<TreasuryTimelineEvent>,
 }
 
 impl BlockPayoutBreakdown {
     pub fn from_block(block: &Block) -> Self {
-        let read_total = block.read_sub_ct.get();
-        let read_viewer = block.read_sub_viewer_ct.get();
-        let read_host = block.read_sub_host_ct.get();
-        let read_hardware = block.read_sub_hardware_ct.get();
-        let read_verifier = block.read_sub_verifier_ct.get();
-        let read_liquidity = block.read_sub_liquidity_ct.get();
+        let read_total = block.read_sub.get();
+        let read_viewer = block.read_sub_viewer.get();
+        let read_host = block.read_sub_host.get();
+        let read_hardware = block.read_sub_hardware.get();
+        let read_verifier = block.read_sub_verifier.get();
+        let read_liquidity = block.read_sub_liquidity.get();
         let read_roles_sum = read_viewer
             .saturating_add(read_host)
             .saturating_add(read_hardware)
@@ -1385,59 +1377,35 @@ impl BlockPayoutBreakdown {
             .saturating_add(read_liquidity);
         let read_miner = read_total.saturating_sub(read_roles_sum);
         let read_breakdown = RolePayoutBreakdown {
-            total_ct: read_total,
-            total_it: 0,
-            viewer_ct: read_viewer,
-            viewer_it: 0,
-            host_ct: read_host,
-            host_it: 0,
-            hardware_ct: read_hardware,
-            hardware_it: 0,
-            verifier_ct: read_verifier,
-            verifier_it: 0,
-            liquidity_ct: read_liquidity,
-            liquidity_it: 0,
-            miner_ct: read_miner,
-            miner_it: 0,
+            total: read_total,
+            viewer: read_viewer,
+            host: read_host,
+            hardware: read_hardware,
+            verifier: read_verifier,
+            liquidity: read_liquidity,
+            miner: read_miner,
         };
 
-        let ad_viewer = block.ad_viewer_ct.get();
-        let ad_host = block.ad_host_ct.get();
-        let ad_hardware = block.ad_hardware_ct.get();
-        let ad_verifier = block.ad_verifier_ct.get();
-        let ad_liquidity = block.ad_liquidity_ct.get();
-        let ad_miner = block.ad_miner_ct.get();
+        let ad_viewer = block.ad_viewer.get();
+        let ad_host = block.ad_host.get();
+        let ad_hardware = block.ad_hardware.get();
+        let ad_verifier = block.ad_verifier.get();
+        let ad_liquidity = block.ad_liquidity.get();
+        let ad_miner = block.ad_miner.get();
         let ad_total = ad_viewer
             .saturating_add(ad_host)
             .saturating_add(ad_hardware)
             .saturating_add(ad_verifier)
             .saturating_add(ad_liquidity)
             .saturating_add(ad_miner);
-        let ad_host_it = block.ad_host_it.get();
-        let ad_hardware_it = block.ad_hardware_it.get();
-        let ad_verifier_it = block.ad_verifier_it.get();
-        let ad_liquidity_it = block.ad_liquidity_it.get();
-        let ad_miner_it = block.ad_miner_it.get();
-        let ad_total_it = ad_host_it
-            .saturating_add(ad_hardware_it)
-            .saturating_add(ad_verifier_it)
-            .saturating_add(ad_liquidity_it)
-            .saturating_add(ad_miner_it);
         let ad_breakdown = RolePayoutBreakdown {
-            total_ct: ad_total,
-            viewer_ct: ad_viewer,
-            total_it: ad_total_it,
-            viewer_it: 0,
-            host_ct: ad_host,
-            host_it: ad_host_it,
-            hardware_ct: ad_hardware,
-            hardware_it: ad_hardware_it,
-            verifier_ct: ad_verifier,
-            verifier_it: ad_verifier_it,
-            liquidity_ct: ad_liquidity,
-            liquidity_it: ad_liquidity_it,
-            miner_ct: ad_miner,
-            miner_it: ad_miner_it,
+            total: ad_total,
+            viewer: ad_viewer,
+            host: ad_host,
+            hardware: ad_hardware,
+            verifier: ad_verifier,
+            liquidity: ad_liquidity,
+            miner: ad_miner,
         };
 
         let treasury_events = block
@@ -1453,8 +1421,7 @@ impl BlockPayoutBreakdown {
             advertising: ad_breakdown,
             total_usd_micros: block.ad_total_usd_micros,
             settlement_count: block.ad_settlement_count,
-            ct_price_usd_micros: block.ad_oracle_ct_price_usd_micros,
-            it_price_usd_micros: block.ad_oracle_it_price_usd_micros,
+            price_usd_micros: block.ad_oracle_price_usd_micros,
             treasury_events,
         }
     }
@@ -1479,12 +1446,12 @@ impl BlockPayoutBreakdown {
             .or_else(|| map.get("index").and_then(|value| value.as_u64()))
             .unwrap_or(0);
 
-        let read_total = Self::field_u64(map, "read_sub_ct");
-        let read_viewer = Self::field_u64(map, "read_sub_viewer_ct");
-        let read_host = Self::field_u64(map, "read_sub_host_ct");
-        let read_hardware = Self::field_u64(map, "read_sub_hardware_ct");
-        let read_verifier = Self::field_u64(map, "read_sub_verifier_ct");
-        let read_liquidity = Self::field_u64(map, "read_sub_liquidity_ct");
+        let read_total = Self::field_u64(map, "read_sub");
+        let read_viewer = Self::field_u64(map, "read_sub_viewer");
+        let read_host = Self::field_u64(map, "read_sub_host");
+        let read_hardware = Self::field_u64(map, "read_sub_hardware");
+        let read_verifier = Self::field_u64(map, "read_sub_verifier");
+        let read_liquidity = Self::field_u64(map, "read_sub_liquidity");
         let read_roles_sum = read_viewer
             .saturating_add(read_host)
             .saturating_add(read_hardware)
@@ -1492,69 +1459,43 @@ impl BlockPayoutBreakdown {
             .saturating_add(read_liquidity);
         let read_miner = read_total.saturating_sub(read_roles_sum);
         let read_breakdown = RolePayoutBreakdown {
-            total_ct: read_total,
-            total_it: Self::field_u64(map, "read_sub_it"),
-            viewer_ct: read_viewer,
-            viewer_it: 0,
-            host_ct: read_host,
-            host_it: 0,
-            hardware_ct: read_hardware,
-            hardware_it: 0,
-            verifier_ct: read_verifier,
-            verifier_it: 0,
-            liquidity_ct: read_liquidity,
-            liquidity_it: 0,
-            miner_ct: read_miner,
-            miner_it: 0,
+            total: read_total,
+            viewer: read_viewer,
+            host: read_host,
+            hardware: read_hardware,
+            verifier: read_verifier,
+            liquidity: read_liquidity,
+            miner: read_miner,
         };
 
-        let ad_viewer = Self::field_u64(map, "ad_viewer_ct");
-        let ad_host = Self::field_u64(map, "ad_host_ct");
-        let ad_hardware = Self::field_u64(map, "ad_hardware_ct");
-        let ad_verifier = Self::field_u64(map, "ad_verifier_ct");
-        let ad_liquidity = Self::field_u64(map, "ad_liquidity_ct");
-        let ad_miner = Self::field_u64(map, "ad_miner_ct");
+        let ad_viewer = Self::field_u64(map, "ad_viewer");
+        let ad_host = Self::field_u64(map, "ad_host");
+        let ad_hardware = Self::field_u64(map, "ad_hardware");
+        let ad_verifier = Self::field_u64(map, "ad_verifier");
+        let ad_liquidity = Self::field_u64(map, "ad_liquidity");
+        let ad_miner = Self::field_u64(map, "ad_miner");
         let ad_total = ad_viewer
             .saturating_add(ad_host)
             .saturating_add(ad_hardware)
             .saturating_add(ad_verifier)
             .saturating_add(ad_liquidity)
             .saturating_add(ad_miner);
-        let ad_host_it = Self::field_u64(map, "ad_host_it");
-        let ad_hardware_it = Self::field_u64(map, "ad_hardware_it");
-        let ad_verifier_it = Self::field_u64(map, "ad_verifier_it");
-        let ad_liquidity_it = Self::field_u64(map, "ad_liquidity_it");
-        let ad_miner_it = Self::field_u64(map, "ad_miner_it");
-        let ad_total_it = ad_host_it
-            .saturating_add(ad_hardware_it)
-            .saturating_add(ad_verifier_it)
-            .saturating_add(ad_liquidity_it)
-            .saturating_add(ad_miner_it);
         let ad_breakdown = RolePayoutBreakdown {
-            total_ct: ad_total,
-            viewer_ct: ad_viewer,
-            total_it: ad_total_it,
-            viewer_it: 0,
-            host_ct: ad_host,
-            host_it: ad_host_it,
-            hardware_ct: ad_hardware,
-            hardware_it: ad_hardware_it,
-            verifier_ct: ad_verifier,
-            verifier_it: ad_verifier_it,
-            liquidity_ct: ad_liquidity,
-            liquidity_it: ad_liquidity_it,
-            miner_ct: ad_miner,
-            miner_it: ad_miner_it,
+            total: ad_total,
+            viewer: ad_viewer,
+            host: ad_host,
+            hardware: ad_hardware,
+            verifier: ad_verifier,
+            liquidity: ad_liquidity,
+            miner: ad_miner,
         };
 
         let total_usd = Self::field_u64(map, "total_usd_micros")
             .max(Self::field_u64(map, "ad_total_usd_micros"));
         let settlement_count = Self::field_u64(map, "settlement_count")
             .max(Self::field_u64(map, "ad_settlement_count"));
-        let ct_price = Self::field_u64(map, "ct_price_usd_micros")
-            .max(Self::field_u64(map, "ad_oracle_ct_price_usd_micros"));
-        let it_price = Self::field_u64(map, "it_price_usd_micros")
-            .max(Self::field_u64(map, "ad_oracle_it_price_usd_micros"));
+        let price = Self::field_u64(map, "price_usd_micros")
+            .max(Self::field_u64(map, "ad_oracle_price_usd_micros"));
 
         Some(Self {
             hash,
@@ -1563,8 +1504,7 @@ impl BlockPayoutBreakdown {
             advertising: ad_breakdown,
             total_usd_micros: total_usd,
             settlement_count,
-            ct_price_usd_micros: ct_price,
-            it_price_usd_micros: it_price,
+            price_usd_micros: price,
             treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
         })
     }
@@ -1589,8 +1529,7 @@ impl BlockPayoutBreakdown {
                 advertising,
                 total_usd_micros: Self::field_u64(map, "total_usd_micros"),
                 settlement_count: Self::field_u64(map, "settlement_count"),
-                ct_price_usd_micros: Self::field_u64(map, "ct_price_usd_micros"),
-                it_price_usd_micros: Self::field_u64(map, "it_price_usd_micros"),
+                price_usd_micros: Self::field_u64(map, "price_usd_micros"),
                 treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
             });
         }
@@ -1613,12 +1552,8 @@ impl BlockPayoutBreakdown {
             Self::number(self.settlement_count),
         );
         map.insert(
-            "ct_price_usd_micros".into(),
-            Self::number(self.ct_price_usd_micros),
-        );
-        map.insert(
-            "it_price_usd_micros".into(),
-            Self::number(self.it_price_usd_micros),
+            "price_usd_micros".into(),
+            Self::number(self.price_usd_micros),
         );
         let events = self
             .treasury_events
@@ -1633,75 +1568,34 @@ impl BlockPayoutBreakdown {
 impl RolePayoutBreakdown {
     fn to_json_value(&self) -> json::Value {
         let mut map = json::Map::new();
+        map.insert("total".into(), BlockPayoutBreakdown::number(self.total));
+        map.insert("viewer".into(), BlockPayoutBreakdown::number(self.viewer));
+        map.insert("host".into(), BlockPayoutBreakdown::number(self.host));
         map.insert(
-            "total_ct".into(),
-            BlockPayoutBreakdown::number(self.total_ct),
+            "hardware".into(),
+            BlockPayoutBreakdown::number(self.hardware),
         );
         map.insert(
-            "total_it".into(),
-            BlockPayoutBreakdown::number(self.total_it),
+            "verifier".into(),
+            BlockPayoutBreakdown::number(self.verifier),
         );
         map.insert(
-            "viewer_ct".into(),
-            BlockPayoutBreakdown::number(self.viewer_ct),
+            "liquidity".into(),
+            BlockPayoutBreakdown::number(self.liquidity),
         );
-        map.insert(
-            "viewer_it".into(),
-            BlockPayoutBreakdown::number(self.viewer_it),
-        );
-        map.insert("host_ct".into(), BlockPayoutBreakdown::number(self.host_ct));
-        map.insert("host_it".into(), BlockPayoutBreakdown::number(self.host_it));
-        map.insert(
-            "hardware_ct".into(),
-            BlockPayoutBreakdown::number(self.hardware_ct),
-        );
-        map.insert(
-            "hardware_it".into(),
-            BlockPayoutBreakdown::number(self.hardware_it),
-        );
-        map.insert(
-            "verifier_ct".into(),
-            BlockPayoutBreakdown::number(self.verifier_ct),
-        );
-        map.insert(
-            "verifier_it".into(),
-            BlockPayoutBreakdown::number(self.verifier_it),
-        );
-        map.insert(
-            "liquidity_ct".into(),
-            BlockPayoutBreakdown::number(self.liquidity_ct),
-        );
-        map.insert(
-            "liquidity_it".into(),
-            BlockPayoutBreakdown::number(self.liquidity_it),
-        );
-        map.insert(
-            "miner_ct".into(),
-            BlockPayoutBreakdown::number(self.miner_ct),
-        );
-        map.insert(
-            "miner_it".into(),
-            BlockPayoutBreakdown::number(self.miner_it),
-        );
+        map.insert("miner".into(), BlockPayoutBreakdown::number(self.miner));
         json::Value::Object(map)
     }
 
     fn from_json_value(map: &json::Value) -> Option<Self> {
         Some(Self {
-            total_ct: BlockPayoutBreakdown::field_u64(map, "total_ct"),
-            total_it: BlockPayoutBreakdown::field_u64(map, "total_it"),
-            viewer_ct: BlockPayoutBreakdown::field_u64(map, "viewer_ct"),
-            viewer_it: BlockPayoutBreakdown::field_u64(map, "viewer_it"),
-            host_ct: BlockPayoutBreakdown::field_u64(map, "host_ct"),
-            host_it: BlockPayoutBreakdown::field_u64(map, "host_it"),
-            hardware_ct: BlockPayoutBreakdown::field_u64(map, "hardware_ct"),
-            hardware_it: BlockPayoutBreakdown::field_u64(map, "hardware_it"),
-            verifier_ct: BlockPayoutBreakdown::field_u64(map, "verifier_ct"),
-            verifier_it: BlockPayoutBreakdown::field_u64(map, "verifier_it"),
-            liquidity_ct: BlockPayoutBreakdown::field_u64(map, "liquidity_ct"),
-            liquidity_it: BlockPayoutBreakdown::field_u64(map, "liquidity_it"),
-            miner_ct: BlockPayoutBreakdown::field_u64(map, "miner_ct"),
-            miner_it: BlockPayoutBreakdown::field_u64(map, "miner_it"),
+            total: BlockPayoutBreakdown::field_u64(map, "total"),
+            viewer: BlockPayoutBreakdown::field_u64(map, "viewer"),
+            host: BlockPayoutBreakdown::field_u64(map, "host"),
+            hardware: BlockPayoutBreakdown::field_u64(map, "hardware"),
+            verifier: BlockPayoutBreakdown::field_u64(map, "verifier"),
+            liquidity: BlockPayoutBreakdown::field_u64(map, "liquidity"),
+            miner: BlockPayoutBreakdown::field_u64(map, "miner"),
         })
     }
 }
@@ -2198,7 +2092,7 @@ impl Explorer {
             params![],
         )?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS compute_settlement (provider TEXT PRIMARY KEY, ct INTEGER, industrial INTEGER, updated_at INTEGER)",
+            "CREATE TABLE IF NOT EXISTS compute_settlement (provider TEXT PRIMARY KEY, consumer INTEGER, industrial INTEGER, updated_at INTEGER)",
             params![],
         )?;
         conn.execute(
@@ -2206,7 +2100,7 @@ impl Explorer {
             params![],
         )?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS compute_sla_history (job_id TEXT PRIMARY KEY, provider TEXT NOT NULL, buyer TEXT NOT NULL, outcome TEXT NOT NULL, outcome_reason TEXT, burned_ct INTEGER NOT NULL, refunded_ct INTEGER NOT NULL, deadline INTEGER NOT NULL, resolved_at INTEGER NOT NULL)",
+            "CREATE TABLE IF NOT EXISTS compute_sla_history (job_id TEXT PRIMARY KEY, provider TEXT NOT NULL, buyer TEXT NOT NULL, outcome TEXT NOT NULL, outcome_reason TEXT, burned INTEGER NOT NULL, refunded INTEGER NOT NULL, deadline INTEGER NOT NULL, resolved_at INTEGER NOT NULL)",
             params![],
         )?;
         conn.execute(
@@ -2796,11 +2690,11 @@ impl Explorer {
         let mut conn = self.conn()?;
         let tx = conn.transaction()?;
         for bal in balances {
-            let ct = i64::try_from(bal.ct).unwrap_or(i64::MAX);
+            let consumer = i64::try_from(bal.consumer).unwrap_or(i64::MAX);
             let industrial = i64::try_from(bal.industrial).unwrap_or(i64::MAX);
             tx.execute(
-                "INSERT OR REPLACE INTO compute_settlement (provider, ct, industrial, updated_at) VALUES (?1, ?2, ?3, ?4)",
-                params![&bal.provider, ct, industrial, bal.updated_at],
+                "INSERT OR REPLACE INTO compute_settlement (provider, consumer, industrial, updated_at) VALUES (?1, ?2, ?3, ?4)",
+                params![&bal.provider, consumer, industrial, bal.updated_at],
             )?;
         }
         tx.commit()?;
@@ -2809,14 +2703,14 @@ impl Explorer {
 
     pub fn settlement_balances(&self) -> DbResult<Vec<ProviderSettlementRecord>> {
         let conn = self.conn()?;
-        let mut stmt =
-            conn.prepare("SELECT provider, ct, industrial, updated_at FROM compute_settlement")?;
+        let mut stmt = conn
+            .prepare("SELECT provider, consumer, industrial, updated_at FROM compute_settlement")?;
         let rows = stmt.query_map(params![], |row| {
-            let ct: i64 = row.get(1)?;
+            let consumer: i64 = row.get(1)?;
             let industrial: i64 = row.get(2)?;
             Ok(ProviderSettlementRecord {
                 provider: row.get(0)?,
-                ct: ct.max(0) as u64,
+                consumer: consumer.max(0) as u64,
                 industrial: industrial.max(0) as u64,
                 updated_at: row.get(3)?,
             })
@@ -2834,15 +2728,15 @@ impl Explorer {
         for entry in entries {
             let (outcome, reason) = sla_outcome_fields(&entry.outcome);
             tx.execute(
-                "INSERT OR REPLACE INTO compute_sla_history (job_id, provider, buyer, outcome, outcome_reason, burned_ct, refunded_ct, deadline, resolved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT OR REPLACE INTO compute_sla_history (job_id, provider, buyer, outcome, outcome_reason, burned, refunded, deadline, resolved_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     &entry.job_id,
                     &entry.provider,
                     &entry.buyer,
                     outcome,
                     reason.unwrap_or(""),
-                    clamp_i64(entry.burned_ct),
-                    clamp_i64(entry.refunded_ct),
+                    clamp_i64(entry.burned),
+                    clamp_i64(entry.refunded),
                     clamp_i64(entry.deadline),
                     clamp_i64(entry.resolved_at),
                 ],
@@ -2860,7 +2754,7 @@ impl Explorer {
     pub fn compute_sla_history(&self, limit: usize) -> DbResult<Vec<ComputeSlaHistoryRecord>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT job_id, provider, buyer, outcome, outcome_reason, burned_ct, refunded_ct, deadline, resolved_at FROM compute_sla_history ORDER BY resolved_at DESC LIMIT ?1",
+            "SELECT job_id, provider, buyer, outcome, outcome_reason, burned, refunded, deadline, resolved_at FROM compute_sla_history ORDER BY resolved_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![clamp_i64(limit as u64)], |row| {
             Ok(ComputeSlaHistoryRecord {
@@ -2876,8 +2770,8 @@ impl Explorer {
                         Some(reason)
                     }
                 },
-                burned_ct: row.get::<_, i64>(5)? as u64,
-                refunded_ct: row.get::<_, i64>(6)? as u64,
+                burned: row.get::<_, i64>(5)? as u64,
+                refunded: row.get::<_, i64>(6)? as u64,
                 deadline: row.get::<_, i64>(7)? as u64,
                 resolved_at: row.get::<_, i64>(8)? as u64,
                 proofs: Vec::new(),
@@ -3209,16 +3103,9 @@ impl Explorer {
 
     pub fn index_treasury_disbursements(&self, records: &[TreasuryDisbursement]) -> DbResult<()> {
         let mut conn = self.conn()?;
+        // Ensure status_payload column exists (added in later schema version)
         let _ = conn.execute(
             "ALTER TABLE treasury_disbursements ADD COLUMN status_payload TEXT",
-            params![],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE treasury_disbursements RENAME COLUMN amount_ct TO amount",
-            params![],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE treasury_disbursements DROP COLUMN amount_it",
             params![],
         );
         let tx = conn.transaction()?;

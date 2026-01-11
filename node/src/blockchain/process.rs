@@ -26,13 +26,9 @@ pub struct StateDelta {
 fn default_account(address: String) -> Account {
     Account {
         address,
-        balance: TokenBalance {
-            consumer: 0,
-            industrial: 0,
-        },
+        balance: TokenBalance { amount: 0 },
         nonce: 0,
-        pending_consumer: 0,
-        pending_industrial: 0,
+        pending_amount: 0,
         pending_nonce: 0,
         pending_nonces: HashSet::new(),
         sessions: Vec::new(),
@@ -92,7 +88,7 @@ pub fn validate_and_apply(
         let _tx_timer = TransactionProcessingTimer::new();
 
         verify_stateless(tx)?;
-        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.pct_ct, tx.payload.fee)
+        let (fee_c, fee_i) = crate::fee::decompose(tx.payload.pct, tx.payload.fee)
             .map_err(|_| TxAdmissionError::FeeOverflow)?;
         if tx.payload.from_ != zero_address {
             let sender_key = tx.payload.from_.clone();
@@ -103,22 +99,21 @@ pub fn validate_and_apply(
                 Ordering::Greater => return Err(TxAdmissionError::NonceGap),
                 Ordering::Equal => {}
             }
-            let total_c = tx.payload.amount_consumer + fee_c;
-            let total_i = tx.payload.amount_industrial + fee_i;
-            if sender.balance.consumer < total_c || sender.balance.industrial < total_i {
+            // Total BLOCK tokens: amount (both lanes) + fees
+            let total_amount =
+                tx.payload.amount_consumer + tx.payload.amount_industrial + fee_c + fee_i;
+            if sender.balance.amount < total_amount {
                 #[cfg(feature = "telemetry")]
                 BLOCK_APPLY_FAIL_TOTAL.inc();
                 return Err(TxAdmissionError::InsufficientBalance);
             }
-            sender.balance.consumer -= total_c;
-            sender.balance.industrial -= total_i;
+            sender.balance.amount -= total_amount;
             sender.nonce = tx.payload.nonce;
             touched.insert(sender_key);
         }
         let recv_key = tx.payload.to.clone();
         let recv = ensure_account_mut(&mut accounts, &chain.accounts, &recv_key);
-        recv.balance.consumer += tx.payload.amount_consumer;
-        recv.balance.industrial += tx.payload.amount_industrial;
+        recv.balance.amount += tx.payload.amount_consumer + tx.payload.amount_industrial;
         touched.insert(recv_key);
     }
     let mut deltas = Vec::new();
@@ -191,6 +186,10 @@ impl<'a> ExecutionContext<'a> {
             let bytes = ShardState::new(shard, root).to_bytes();
             self.chain
                 .write_shard_state(shard, key, bytes, &mut self.db_deltas)?;
+            let root_key = format!("shard_root:{shard}");
+            self.chain
+                .db
+                .insert_with_delta(&root_key, root.to_vec(), &mut self.db_deltas)?;
         }
         Ok(())
     }
@@ -249,8 +248,8 @@ pub fn commit(chain: &mut Blockchain, deltas: Vec<StateDelta>) -> std::io::Resul
 }
 
 /// Apply rebate claims to a block's coinbase totals after subsidy calculation.
-pub fn apply_coinbase_rebates(block: &mut Block, rebate_ct: u64) {
-    crate::light_client::proof_tracker::apply_rebates(block, rebate_ct);
+pub fn apply_coinbase_rebates(block: &mut Block, rebate_amount: u64) {
+    crate::light_client::proof_tracker::apply_rebates(block, rebate_amount);
 }
 
 pub(crate) fn shard_state_root(
@@ -263,8 +262,9 @@ pub(crate) fn shard_state_root(
         .filter(|(addr, _)| address::shard_id(addr) == shard)
     {
         let mut data = Vec::new();
-        data.extend_from_slice(&acc.balance.consumer.to_le_bytes());
-        data.extend_from_slice(&acc.balance.industrial.to_le_bytes());
+        // Write amount in first field, 0 in second for backward compat during migration
+        data.extend_from_slice(&acc.balance.amount.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
         data.extend_from_slice(&acc.nonce.to_le_bytes());
         trie.insert(addr.as_bytes(), &data);
     }

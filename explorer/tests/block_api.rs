@@ -24,15 +24,9 @@ fn block_lookup_and_payout_breakdown() {
     let ad_verifier = 5u64;
     let ad_liquidity = 3u64;
     let ad_miner = 2u64;
-    let ad_host_it = 7u64;
-    let ad_hardware_it = 5u64;
-    let ad_verifier_it = 3u64;
-    let ad_liquidity_it = 2u64;
-    let ad_miner_it = 1u64;
     let ad_total_usd_micros = 125_000u64;
     let ad_settlement_count = 4u64;
-    let ad_ct_price = 1_200_000u64;
-    let ad_it_price = 900_000u64;
+    let ad_price = 1_200_000u64;
     let zero_array = format!("{:?}", [0u8; 32]);
 
     let block_json = format!(
@@ -45,35 +39,26 @@ fn block_lookup_and_payout_breakdown() {
             "retune_hint": 0,
             "nonce": 0,
             "hash": "b1",
-            "coinbase_consumer": 0,
+            "coinbase_block": 0,
             "coinbase_industrial": 0,
-            "storage_sub_ct": 0,
-            "read_sub_ct": {read_total},
-            "read_sub_viewer_ct": {read_viewer},
-            "read_sub_host_ct": {read_host},
-            "read_sub_hardware_ct": {read_hardware},
-            "read_sub_verifier_ct": {read_verifier},
-            "read_sub_liquidity_ct": {read_liquidity},
-            "ad_viewer_ct": {ad_viewer},
-            "ad_host_ct": {ad_host},
-            "ad_hardware_ct": {ad_hardware},
-            "ad_verifier_ct": {ad_verifier},
-            "ad_liquidity_ct": {ad_liquidity},
-            "ad_miner_ct": {ad_miner},
-            "ad_host_it": {ad_host_it},
-            "ad_hardware_it": {ad_hardware_it},
-            "ad_verifier_it": {ad_verifier_it},
-            "ad_liquidity_it": {ad_liquidity_it},
-            "ad_miner_it": {ad_miner_it},
+            "storage_sub": 0,
+            "read_sub": {read_total},
+            "read_sub_viewer": {read_viewer},
+            "read_sub_host": {read_host},
+            "read_sub_hardware": {read_hardware},
+            "read_sub_verifier": {read_verifier},
+            "read_sub_liquidity": {read_liquidity},
+            "ad_viewer": {ad_viewer},
+            "ad_host": {ad_host},
+            "ad_hardware": {ad_hardware},
+            "ad_verifier": {ad_verifier},
+            "ad_liquidity": {ad_liquidity},
+            "ad_miner": {ad_miner},
             "ad_total_usd_micros": {ad_total_usd_micros},
             "ad_settlement_count": {ad_settlement_count},
-            "ad_oracle_ct_price_usd_micros": {ad_ct_price},
-            "ad_oracle_it_price_usd_micros": {ad_it_price},
-            "compute_sub_ct": 0,
-            "proof_rebate_ct": 0,
-            "storage_sub_it": 0,
-            "read_sub_it": 0,
-            "compute_sub_it": 0,
+            "ad_oracle_price_usd_micros": {ad_price},
+            "compute_sub": 0,
+            "proof_rebate": 0,
             "read_root": {zero_array},
             "fee_checksum": "",
             "state_root": "",
@@ -99,62 +84,47 @@ fn block_lookup_and_payout_breakdown() {
         .expect("payout breakdown present");
     assert_eq!(payouts.hash, "b1");
     assert_eq!(payouts.height, height);
-    assert_eq!(payouts.read_subsidy.total_ct, read_total);
-    assert_eq!(payouts.read_subsidy.viewer_ct, read_viewer);
-    assert_eq!(payouts.read_subsidy.host_ct, read_host);
-    assert_eq!(payouts.read_subsidy.hardware_ct, read_hardware);
-    assert_eq!(payouts.read_subsidy.verifier_ct, read_verifier);
-    assert_eq!(payouts.read_subsidy.liquidity_ct, read_liquidity);
+    assert_eq!(payouts.read_subsidy.total, read_total);
+    assert_eq!(payouts.read_subsidy.viewer, read_viewer);
+    assert_eq!(payouts.read_subsidy.host, read_host);
+    assert_eq!(payouts.read_subsidy.hardware, read_hardware);
+    assert_eq!(payouts.read_subsidy.verifier, read_verifier);
+    assert_eq!(payouts.read_subsidy.liquidity, read_liquidity);
     assert_eq!(
-        payouts.read_subsidy.miner_ct,
+        payouts.read_subsidy.miner,
         read_total - (read_viewer + read_host + read_hardware + read_verifier + read_liquidity)
     );
 
     assert_eq!(
-        payouts.advertising.total_ct,
+        payouts.advertising.total,
         ad_viewer + ad_host + ad_hardware + ad_verifier + ad_liquidity + ad_miner
     );
-    assert_eq!(
-        payouts.advertising.total_it,
-        ad_host_it + ad_hardware_it + ad_verifier_it + ad_liquidity_it + ad_miner_it
-    );
-    assert_eq!(payouts.advertising.viewer_ct, ad_viewer);
-    assert_eq!(payouts.advertising.host_ct, ad_host);
-    assert_eq!(payouts.advertising.hardware_ct, ad_hardware);
-    assert_eq!(payouts.advertising.verifier_ct, ad_verifier);
-    assert_eq!(payouts.advertising.liquidity_ct, ad_liquidity);
-    assert_eq!(payouts.advertising.miner_ct, ad_miner);
-    assert_eq!(payouts.advertising.viewer_it, 0);
-    assert_eq!(payouts.advertising.host_it, ad_host_it);
-    assert_eq!(payouts.advertising.hardware_it, ad_hardware_it);
-    assert_eq!(payouts.advertising.verifier_it, ad_verifier_it);
-    assert_eq!(payouts.advertising.liquidity_it, ad_liquidity_it);
-    assert_eq!(payouts.advertising.miner_it, ad_miner_it);
+    assert_eq!(payouts.advertising.viewer, ad_viewer);
+    assert_eq!(payouts.advertising.host, ad_host);
+    assert_eq!(payouts.advertising.hardware, ad_hardware);
+    assert_eq!(payouts.advertising.verifier, ad_verifier);
+    assert_eq!(payouts.advertising.liquidity, ad_liquidity);
+    assert_eq!(payouts.advertising.miner, ad_miner);
     assert_eq!(payouts.total_usd_micros, ad_total_usd_micros);
     assert_eq!(payouts.settlement_count, ad_settlement_count);
-    assert_eq!(payouts.ct_price_usd_micros, ad_ct_price);
-    assert_eq!(payouts.it_price_usd_micros, ad_it_price);
+    assert_eq!(payouts.price_usd_micros, ad_price);
 }
 
 #[test]
-fn block_lookup_handles_liquidity_split_extremes() {
+fn block_lookup_handles_zero_advertising() {
     let dir = tempfile::tempdir().expect("tempdir");
     let db_path = dir.path().join("explorer.db");
     let explorer = Explorer::open(&db_path).expect("open explorer");
 
     let height = 22u64;
-    let ad_liquidity_ct = 0u64;
-    let ad_liquidity_it = 17u64;
-    let ad_host_ct = 9u64;
-    let ad_host_it = 4u64;
+    let ad_liquidity = 0u64;
+    let ad_host = 9u64;
     let ad_viewer = 11u64;
-    let ad_hardware_ct = 5u64;
-    let ad_verifier_ct = 3u64;
-    let ad_miner_ct = 2u64;
-    let ad_miner_it = 6u64;
+    let ad_hardware = 5u64;
+    let ad_verifier = 3u64;
+    let ad_miner = 2u64;
     let ad_total_usd_micros = 310_000u64;
-    let ad_ct_price = 950_000u64;
-    let ad_it_price = 1_050_000u64;
+    let ad_price = 950_000u64;
     let zero_array = format!("{:?}", [0u8; 32]);
 
     let block_json = format!(
@@ -166,36 +136,27 @@ fn block_lookup_handles_liquidity_split_extremes() {
             "difficulty": 0,
             "retune_hint": 0,
             "nonce": 0,
-            "hash": "split-extreme",
-            "coinbase_consumer": 0,
+            "hash": "zero-ad",
+            "coinbase_block": 0,
             "coinbase_industrial": 0,
-            "storage_sub_ct": 0,
-            "read_sub_ct": 0,
-            "read_sub_viewer_ct": 0,
-            "read_sub_host_ct": 0,
-            "read_sub_hardware_ct": 0,
-            "read_sub_verifier_ct": 0,
-            "read_sub_liquidity_ct": 0,
-            "ad_viewer_ct": {ad_viewer},
-            "ad_host_ct": {ad_host_ct},
-            "ad_hardware_ct": {ad_hardware_ct},
-            "ad_verifier_ct": {ad_verifier_ct},
-            "ad_liquidity_ct": {ad_liquidity_ct},
-            "ad_miner_ct": {ad_miner_ct},
-            "ad_host_it": {ad_host_it},
-            "ad_hardware_it": 0,
-            "ad_verifier_it": 0,
-            "ad_liquidity_it": {ad_liquidity_it},
-            "ad_miner_it": {ad_miner_it},
+            "storage_sub": 0,
+            "read_sub": 0,
+            "read_sub_viewer": 0,
+            "read_sub_host": 0,
+            "read_sub_hardware": 0,
+            "read_sub_verifier": 0,
+            "read_sub_liquidity": 0,
+            "ad_viewer": {ad_viewer},
+            "ad_host": {ad_host},
+            "ad_hardware": {ad_hardware},
+            "ad_verifier": {ad_verifier},
+            "ad_liquidity": {ad_liquidity},
+            "ad_miner": {ad_miner},
             "ad_total_usd_micros": {ad_total_usd_micros},
             "ad_settlement_count": 2,
-            "ad_oracle_ct_price_usd_micros": {ad_ct_price},
-            "ad_oracle_it_price_usd_micros": {ad_it_price},
-            "compute_sub_ct": 0,
-            "proof_rebate_ct": 0,
-            "storage_sub_it": 0,
-            "read_sub_it": 0,
-            "compute_sub_it": 0,
+            "ad_oracle_price_usd_micros": {ad_price},
+            "compute_sub": 0,
+            "proof_rebate": 0,
             "read_root": {zero_array},
             "fee_checksum": "",
             "state_root": "",
@@ -211,32 +172,25 @@ fn block_lookup_handles_liquidity_split_extremes() {
     let conn = Connection::open(&db_path).expect("open sqlite");
     conn.execute(
         "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
-        params!["split-extreme", height as i64, block_json.as_bytes()],
+        params!["zero-ad", height as i64, block_json.as_bytes()],
     )
     .expect("insert block");
 
     let payouts = explorer
-        .block_payouts("split-extreme")
+        .block_payouts("zero-ad")
         .expect("payout query")
         .expect("payout breakdown present");
 
-    assert_eq!(payouts.hash, "split-extreme");
+    assert_eq!(payouts.hash, "zero-ad");
     assert_eq!(payouts.height, height);
-    assert_eq!(payouts.advertising.liquidity_ct, 0);
-    assert_eq!(payouts.advertising.liquidity_it, ad_liquidity_it);
-    assert_eq!(payouts.advertising.host_ct, ad_host_ct);
-    assert_eq!(payouts.advertising.host_it, ad_host_it);
+    assert_eq!(payouts.advertising.liquidity, 0);
+    assert_eq!(payouts.advertising.host, ad_host);
     assert_eq!(
-        payouts.advertising.total_ct,
-        ad_viewer + ad_host_ct + ad_hardware_ct + ad_verifier_ct + ad_miner_ct
-    );
-    assert_eq!(
-        payouts.advertising.total_it,
-        ad_host_it + ad_liquidity_it + ad_miner_it
+        payouts.advertising.total,
+        ad_viewer + ad_host + ad_hardware + ad_verifier + ad_miner
     );
     assert_eq!(payouts.total_usd_micros, ad_total_usd_micros);
-    assert_eq!(payouts.ct_price_usd_micros, ad_ct_price);
-    assert_eq!(payouts.it_price_usd_micros, ad_it_price);
+    assert_eq!(payouts.price_usd_micros, ad_price);
 }
 
 #[test]
@@ -255,8 +209,8 @@ fn legacy_block_without_role_totals_uses_json_fallback() {
     let legacy_block_json = format!(
         r#"{{
             "index": {height},
-            "read_sub_ct": {read_total},
-            "ad_miner_ct": {ad_miner}
+            "read_sub": {read_total},
+            "ad_miner": {ad_miner}
         }}"#
     );
 
@@ -275,25 +229,23 @@ fn legacy_block_without_role_totals_uses_json_fallback() {
     assert_eq!(payouts.hash, "legacy-hash");
     assert_eq!(payouts.height, height);
 
-    assert_eq!(payouts.read_subsidy.total_ct, read_total);
-    assert_eq!(payouts.read_subsidy.viewer_ct, 0);
-    assert_eq!(payouts.read_subsidy.host_ct, 0);
-    assert_eq!(payouts.read_subsidy.hardware_ct, 0);
-    assert_eq!(payouts.read_subsidy.verifier_ct, 0);
-    assert_eq!(payouts.read_subsidy.liquidity_ct, 0);
-    assert_eq!(payouts.read_subsidy.miner_ct, read_total);
+    assert_eq!(payouts.read_subsidy.total, read_total);
+    assert_eq!(payouts.read_subsidy.viewer, 0);
+    assert_eq!(payouts.read_subsidy.host, 0);
+    assert_eq!(payouts.read_subsidy.hardware, 0);
+    assert_eq!(payouts.read_subsidy.verifier, 0);
+    assert_eq!(payouts.read_subsidy.liquidity, 0);
+    assert_eq!(payouts.read_subsidy.miner, read_total);
 
-    assert_eq!(payouts.advertising.total_ct, ad_miner);
-    assert_eq!(payouts.advertising.total_it, 0);
-    assert_eq!(payouts.advertising.viewer_ct, 0);
-    assert_eq!(payouts.advertising.host_ct, 0);
-    assert_eq!(payouts.advertising.hardware_ct, 0);
-    assert_eq!(payouts.advertising.verifier_ct, 0);
-    assert_eq!(payouts.advertising.liquidity_ct, 0);
-    assert_eq!(payouts.advertising.miner_ct, ad_miner);
+    assert_eq!(payouts.advertising.total, ad_miner);
+    assert_eq!(payouts.advertising.viewer, 0);
+    assert_eq!(payouts.advertising.host, 0);
+    assert_eq!(payouts.advertising.hardware, 0);
+    assert_eq!(payouts.advertising.verifier, 0);
+    assert_eq!(payouts.advertising.liquidity, 0);
+    assert_eq!(payouts.advertising.miner, ad_miner);
     assert_eq!(payouts.total_usd_micros, 0);
-    assert_eq!(payouts.ct_price_usd_micros, 0);
-    assert_eq!(payouts.it_price_usd_micros, 0);
+    assert_eq!(payouts.price_usd_micros, 0);
 }
 
 #[test]
@@ -315,40 +267,28 @@ fn binary_and_json_snapshots_mix_without_breaking_payouts() {
     let ad_verifier = 40u64;
     let ad_liquidity = 30u64;
     let ad_miner = 20u64;
-    let ad_host_it = 14u64;
-    let ad_hardware_it = 9u64;
-    let ad_verifier_it = 6u64;
-    let ad_liquidity_it = 4u64;
-    let ad_miner_it = 3u64;
     let ad_total_usd_micros = 2_450_000u64;
     let ad_settlement_count = 9u64;
-    let ad_ct_price = 1_050_000u64;
-    let ad_it_price = 880_000u64;
+    let ad_price = 1_050_000u64;
 
     let block = Block {
         index: height,
         hash: "binary-hash".into(),
-        read_sub_ct: TokenAmount::new(read_total),
-        read_sub_viewer_ct: TokenAmount::new(read_viewer),
-        read_sub_host_ct: TokenAmount::new(read_host),
-        read_sub_hardware_ct: TokenAmount::new(read_hardware),
-        read_sub_verifier_ct: TokenAmount::new(read_verifier),
-        read_sub_liquidity_ct: TokenAmount::new(read_liquidity),
-        ad_viewer_ct: TokenAmount::new(ad_viewer),
-        ad_host_ct: TokenAmount::new(ad_host),
-        ad_hardware_ct: TokenAmount::new(ad_hardware),
-        ad_verifier_ct: TokenAmount::new(ad_verifier),
-        ad_liquidity_ct: TokenAmount::new(ad_liquidity),
-        ad_miner_ct: TokenAmount::new(ad_miner),
-        ad_host_it: TokenAmount::new(ad_host_it),
-        ad_hardware_it: TokenAmount::new(ad_hardware_it),
-        ad_verifier_it: TokenAmount::new(ad_verifier_it),
-        ad_liquidity_it: TokenAmount::new(ad_liquidity_it),
-        ad_miner_it: TokenAmount::new(ad_miner_it),
+        read_sub: TokenAmount::new(read_total),
+        read_sub_viewer: TokenAmount::new(read_viewer),
+        read_sub_host: TokenAmount::new(read_host),
+        read_sub_hardware: TokenAmount::new(read_hardware),
+        read_sub_verifier: TokenAmount::new(read_verifier),
+        read_sub_liquidity: TokenAmount::new(read_liquidity),
+        ad_viewer: TokenAmount::new(ad_viewer),
+        ad_host: TokenAmount::new(ad_host),
+        ad_hardware: TokenAmount::new(ad_hardware),
+        ad_verifier: TokenAmount::new(ad_verifier),
+        ad_liquidity: TokenAmount::new(ad_liquidity),
+        ad_miner: TokenAmount::new(ad_miner),
         ad_total_usd_micros,
         ad_settlement_count,
-        ad_oracle_ct_price_usd_micros: ad_ct_price,
-        ad_oracle_it_price_usd_micros: ad_it_price,
+        ad_oracle_price_usd_micros: ad_price,
         ..Block::default()
     };
 
@@ -363,8 +303,8 @@ fn binary_and_json_snapshots_mix_without_breaking_payouts() {
     let legacy_json = r#"{
         "index": 99,
         "hash": "json-hash",
-        "read_sub_ct": 777,
-        "ad_miner_ct": 55
+        "read_sub": 777,
+        "ad_miner": 55
     }"#;
     conn.execute(
         "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
@@ -378,41 +318,30 @@ fn binary_and_json_snapshots_mix_without_breaking_payouts() {
         .expect("binary breakdown present");
     assert_eq!(binary_payouts.hash, "binary-hash");
     assert_eq!(binary_payouts.height, height);
-    assert_eq!(binary_payouts.read_subsidy.total_ct, read_total);
-    assert_eq!(binary_payouts.read_subsidy.viewer_ct, read_viewer);
-    assert_eq!(binary_payouts.read_subsidy.host_ct, read_host);
-    assert_eq!(binary_payouts.read_subsidy.hardware_ct, read_hardware);
-    assert_eq!(binary_payouts.read_subsidy.verifier_ct, read_verifier);
-    assert_eq!(binary_payouts.read_subsidy.liquidity_ct, read_liquidity);
+    assert_eq!(binary_payouts.read_subsidy.total, read_total);
+    assert_eq!(binary_payouts.read_subsidy.viewer, read_viewer);
+    assert_eq!(binary_payouts.read_subsidy.host, read_host);
+    assert_eq!(binary_payouts.read_subsidy.hardware, read_hardware);
+    assert_eq!(binary_payouts.read_subsidy.verifier, read_verifier);
+    assert_eq!(binary_payouts.read_subsidy.liquidity, read_liquidity);
     assert_eq!(
-        binary_payouts.read_subsidy.miner_ct,
+        binary_payouts.read_subsidy.miner,
         read_total - (read_viewer + read_host + read_hardware + read_verifier + read_liquidity)
     );
 
     assert_eq!(
-        binary_payouts.advertising.total_ct,
+        binary_payouts.advertising.total,
         ad_viewer + ad_host + ad_hardware + ad_verifier + ad_liquidity + ad_miner
     );
-    assert_eq!(
-        binary_payouts.advertising.total_it,
-        ad_host_it + ad_hardware_it + ad_verifier_it + ad_liquidity_it + ad_miner_it
-    );
-    assert_eq!(binary_payouts.advertising.viewer_ct, ad_viewer);
-    assert_eq!(binary_payouts.advertising.host_ct, ad_host);
-    assert_eq!(binary_payouts.advertising.hardware_ct, ad_hardware);
-    assert_eq!(binary_payouts.advertising.verifier_ct, ad_verifier);
-    assert_eq!(binary_payouts.advertising.liquidity_ct, ad_liquidity);
-    assert_eq!(binary_payouts.advertising.miner_ct, ad_miner);
-    assert_eq!(binary_payouts.advertising.viewer_it, 0);
-    assert_eq!(binary_payouts.advertising.host_it, ad_host_it);
-    assert_eq!(binary_payouts.advertising.hardware_it, ad_hardware_it);
-    assert_eq!(binary_payouts.advertising.verifier_it, ad_verifier_it);
-    assert_eq!(binary_payouts.advertising.liquidity_it, ad_liquidity_it);
-    assert_eq!(binary_payouts.advertising.miner_it, ad_miner_it);
+    assert_eq!(binary_payouts.advertising.viewer, ad_viewer);
+    assert_eq!(binary_payouts.advertising.host, ad_host);
+    assert_eq!(binary_payouts.advertising.hardware, ad_hardware);
+    assert_eq!(binary_payouts.advertising.verifier, ad_verifier);
+    assert_eq!(binary_payouts.advertising.liquidity, ad_liquidity);
+    assert_eq!(binary_payouts.advertising.miner, ad_miner);
     assert_eq!(binary_payouts.total_usd_micros, ad_total_usd_micros);
     assert_eq!(binary_payouts.settlement_count, ad_settlement_count);
-    assert_eq!(binary_payouts.ct_price_usd_micros, ad_ct_price);
-    assert_eq!(binary_payouts.it_price_usd_micros, ad_it_price);
+    assert_eq!(binary_payouts.price_usd_micros, ad_price);
 
     let json_payouts = explorer
         .block_payouts("json-hash")
@@ -420,6 +349,6 @@ fn binary_and_json_snapshots_mix_without_breaking_payouts() {
         .expect("json breakdown present");
     assert_eq!(json_payouts.hash, "json-hash");
     assert_eq!(json_payouts.height, 99);
-    assert_eq!(json_payouts.read_subsidy.total_ct, 777);
-    assert_eq!(json_payouts.advertising.miner_ct, 55);
+    assert_eq!(json_payouts.read_subsidy.total, 777);
+    assert_eq!(json_payouts.advertising.miner, 55);
 }

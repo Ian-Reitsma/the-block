@@ -37,6 +37,8 @@ use the_block::serve_metrics;
 use the_block::treasury_executor::{
     memo_dependency_check, spawn_executor as spawn_treasury_executor, ExecutorParams,
 };
+#[cfg(feature = "telemetry")]
+use the_block::ReadAckError;
 use the_block::{
     compute_market::{courier::CourierStore, courier_store::ReceiptStore, matcher},
     gateway::dns::{install_ledger_context, BlockchainLedger},
@@ -44,8 +46,6 @@ use the_block::{
     rpc::run_rpc_server_with_market,
     sign_tx, spawn_purge_loop_thread, Blockchain, RawTxPayload, ReadAck, ShutdownFlag,
 };
-#[cfg(feature = "telemetry")]
-use the_block::ReadAckError;
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};

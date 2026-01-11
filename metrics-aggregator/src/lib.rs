@@ -231,27 +231,22 @@ const METRIC_BRIDGE_REMEDIATION_ACK_TARGET_SECONDS: &str = "bridge_remediation_a
 const METRIC_BRIDGE_REMEDIATION_SPOOL_ARTIFACTS: &str = "bridge_remediation_spool_artifacts";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL: &str = "explorer_block_payout_read_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL: &str = "explorer_block_payout_ad_total";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL: &str = "explorer_block_payout_ad_it_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_USD_TOTAL: &str = "explorer_block_payout_ad_usd_total";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_SETTLEMENT_COUNT: &str =
     "explorer_block_payout_ad_settlement_count";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS: &str =
-    "explorer_block_payout_ad_ct_price_usd_micros";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS: &str =
-    "explorer_block_payout_ad_it_price_usd_micros";
+const METRIC_EXPLORER_BLOCK_PAYOUT_AD_PRICE_USD_MICROS: &str =
+    "explorer_block_payout_ad_price_usd_micros";
 const METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN: &str =
     "explorer_block_payout_read_last_seen_timestamp";
 const METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN: &str =
     "explorer_block_payout_ad_last_seen_timestamp";
-const METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN: &str =
-    "explorer_block_payout_ad_it_last_seen_timestamp";
 const METRIC_EXPLORER_COMPUTE_SLA_OUTCOME_TOTAL: &str = "explorer_compute_sla_outcome_total";
 const METRIC_EXPLORER_COMPUTE_SLA_LAST_SEEN: &str = "explorer_compute_sla_last_seen_timestamp";
 const METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL: &str = "explorer_compute_sla_poll_error_total";
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
-const METRIC_TREASURY_AMOUNT_CT: &str = "treasury_disbursement_amount";
+const METRIC_TREASURY_AMOUNT: &str = "treasury_disbursement_amount";
 const METRIC_TREASURY_SNAPSHOT_AGE: &str = "treasury_disbursement_snapshot_age_seconds";
 const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
     "treasury_disbursement_scheduled_oldest_age_seconds";
@@ -466,7 +461,6 @@ pub struct AppState {
     tls_warning_counters: Arc<Mutex<HashMap<(String, String, String), f64>>>,
     explorer_read_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     explorer_ad_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
-    explorer_ad_it_payout_counters: Arc<Mutex<HashMap<(String, String), f64>>>,
     bridge_anomalies: Arc<Mutex<BridgeAnomalyDetector>>,
     bridge_remediation: Arc<Mutex<BridgeRemediationEngine>>,
     bridge_hooks: BridgeRemediationHooks,
@@ -551,7 +545,6 @@ impl AppState {
             tls_warning_counters: Arc::new(Mutex::new(HashMap::new())),
             explorer_read_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             explorer_ad_payout_counters: Arc::new(Mutex::new(HashMap::new())),
-            explorer_ad_it_payout_counters: Arc::new(Mutex::new(HashMap::new())),
             bridge_anomalies: Arc::new(Mutex::new(BridgeAnomalyDetector::default())),
             bridge_remediation: Arc::new(Mutex::new(BridgeRemediationEngine::default())),
             bridge_hooks: BridgeRemediationHooks::from_env(),
@@ -1638,14 +1631,6 @@ impl AppState {
             &registry.explorer_block_payout_ad_total,
             &registry.explorer_block_payout_ad_last_seen,
         );
-        self.record_explorer_payout_metric(
-            peer_id,
-            metrics,
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
-            &self.explorer_ad_it_payout_counters,
-            &registry.explorer_block_payout_ad_it_total,
-            &registry.explorer_block_payout_ad_it_last_seen,
-        );
         self.record_explorer_payout_summary(peer_id, metrics);
     }
 
@@ -1760,21 +1745,11 @@ impl AppState {
             }
         }
         if let Some(value) =
-            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS)
+            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_PRICE_USD_MICROS)
         {
             if value.is_finite() {
                 registry
-                    .explorer_block_payout_ad_ct_price_usd_micros
-                    .with_label_values(&[peer_id])
-                    .set(value);
-            }
-        }
-        if let Some(value) =
-            extract_scalar_metric(metrics, METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS)
-        {
-            if value.is_finite() {
-                registry
-                    .explorer_block_payout_ad_it_price_usd_micros
+                    .explorer_block_payout_ad_price_usd_micros
                     .with_label_values(&[peer_id])
                     .set(value);
             }
@@ -1828,14 +1803,11 @@ struct AggregatorMetrics {
     bridge_remediation_spool_artifacts: Gauge,
     explorer_block_payout_read_total: CounterVec,
     explorer_block_payout_ad_total: CounterVec,
-    explorer_block_payout_ad_it_total: CounterVec,
     explorer_block_payout_ad_usd_total: GaugeVec,
     explorer_block_payout_ad_settlement_count: GaugeVec,
-    explorer_block_payout_ad_ct_price_usd_micros: GaugeVec,
-    explorer_block_payout_ad_it_price_usd_micros: GaugeVec,
+    explorer_block_payout_ad_price_usd_micros: GaugeVec,
     explorer_block_payout_read_last_seen: GaugeVec,
     explorer_block_payout_ad_last_seen: GaugeVec,
-    explorer_block_payout_ad_it_last_seen: GaugeVec,
     explorer_compute_sla_outcome_total: GaugeVec,
     explorer_compute_sla_last_seen: Gauge,
     explorer_compute_sla_poll_error_total: Counter,
@@ -1849,10 +1821,8 @@ struct AggregatorMetrics {
     ad_readiness_min_provider_count: Gauge,
     ad_readiness_total_usd_micros: Gauge,
     ad_readiness_settlement_count: Gauge,
-    ad_readiness_ct_price_usd_micros: Gauge,
-    ad_readiness_it_price_usd_micros: Gauge,
-    ad_readiness_market_ct_price_usd_micros: Gauge,
-    ad_readiness_market_it_price_usd_micros: Gauge,
+    ad_readiness_price_usd_micros: Gauge,
+    ad_readiness_market_price_usd_micros: Gauge,
     ad_readiness_utilization_observed_ppm: GaugeVec,
     ad_readiness_utilization_target_ppm: GaugeVec,
     ad_readiness_utilization_delta_ppm: GaugeVec,
@@ -2104,20 +2074,12 @@ fn ad_readiness_to_value(readiness: &AdReadinessTelemetry) -> Value {
         Value::from(readiness.settlement_count),
     );
     map.insert(
-        "ct_price_usd_micros".into(),
-        Value::from(readiness.ct_price_usd_micros),
+        "price_usd_micros".into(),
+        Value::from(readiness.price_usd_micros),
     );
     map.insert(
-        "it_price_usd_micros".into(),
-        Value::from(readiness.it_price_usd_micros),
-    );
-    map.insert(
-        "market_ct_price_usd_micros".into(),
-        Value::from(readiness.market_ct_price_usd_micros),
-    );
-    map.insert(
-        "market_it_price_usd_micros".into(),
-        Value::from(readiness.market_it_price_usd_micros),
+        "market_price_usd_micros".into(),
+        Value::from(readiness.market_price_usd_micros),
     );
     let cohorts: Vec<Value> = readiness
         .cohort_utilization
@@ -2312,20 +2274,12 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
             .get("settlement_count")
             .and_then(Value::as_u64)
             .unwrap_or(0);
-        let ct_price_usd_micros = readiness_obj
-            .get("ct_price_usd_micros")
+        let price_usd_micros = readiness_obj
+            .get("price_usd_micros")
             .and_then(Value::as_u64)
             .unwrap_or(0);
-        let it_price_usd_micros = readiness_obj
-            .get("it_price_usd_micros")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let market_ct_price_usd_micros = readiness_obj
-            .get("market_ct_price_usd_micros")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let market_it_price_usd_micros = readiness_obj
-            .get("market_it_price_usd_micros")
+        let market_price_usd_micros = readiness_obj
+            .get("market_price_usd_micros")
             .and_then(Value::as_u64)
             .unwrap_or(0);
         let blockers = readiness_obj
@@ -2415,10 +2369,8 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
             last_updated,
             total_usd_micros,
             settlement_count,
-            ct_price_usd_micros,
-            it_price_usd_micros,
-            market_ct_price_usd_micros,
-            market_it_price_usd_micros,
+            price_usd_micros,
+            market_price_usd_micros,
             cohort_utilization,
             utilization_summary,
         })
@@ -2554,14 +2506,10 @@ impl AggregatorMetrics {
                     .set(snapshot.total_usd_micros as f64);
                 self.ad_readiness_settlement_count
                     .set(snapshot.settlement_count as f64);
-                self.ad_readiness_ct_price_usd_micros
-                    .set(snapshot.ct_price_usd_micros as f64);
-                self.ad_readiness_it_price_usd_micros
-                    .set(snapshot.it_price_usd_micros as f64);
-                self.ad_readiness_market_ct_price_usd_micros
-                    .set(snapshot.market_ct_price_usd_micros as f64);
-                self.ad_readiness_market_it_price_usd_micros
-                    .set(snapshot.market_it_price_usd_micros as f64);
+                self.ad_readiness_price_usd_micros
+                    .set(snapshot.price_usd_micros as f64);
+                self.ad_readiness_market_price_usd_micros
+                    .set(snapshot.market_price_usd_micros as f64);
                 let mut new_labels: HashSet<(String, String, String)> =
                     HashSet::with_capacity(snapshot.cohort_utilization.len());
                 for entry in &snapshot.cohort_utilization {
@@ -2622,10 +2570,8 @@ impl AggregatorMetrics {
                 self.ad_readiness_min_provider_count.set(0.0);
                 self.ad_readiness_total_usd_micros.set(0.0);
                 self.ad_readiness_settlement_count.set(0.0);
-                self.ad_readiness_ct_price_usd_micros.set(0.0);
-                self.ad_readiness_it_price_usd_micros.set(0.0);
-                self.ad_readiness_market_ct_price_usd_micros.set(0.0);
-                self.ad_readiness_market_it_price_usd_micros.set(0.0);
+                self.ad_readiness_price_usd_micros.set(0.0);
+                self.ad_readiness_market_price_usd_micros.set(0.0);
                 let mut active = self
                     .ad_readiness_utilization_labels
                     .lock()
@@ -3328,8 +3274,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         .expect("register treasury_disbursement_count");
     let treasury_disbursement_amount = GaugeVec::new(
         Opts::new(
-            METRIC_TREASURY_AMOUNT_CT,
-            "Treasury disbursement CT totals grouped by status",
+            METRIC_TREASURY_AMOUNT,
+            "Treasury disbursement BLOCK totals grouped by status",
         ),
         &["status"],
     );
@@ -3366,14 +3312,14 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         .expect("register treasury_executor_lease_released");
     let treasury_balance_current = Gauge::new(
         METRIC_TREASURY_BALANCE_CURRENT,
-        "Current treasury balance in CT",
+        "Current treasury balance in BLOCK",
     );
     registry
         .register(Box::new(treasury_balance_current.clone()))
         .expect("register treasury_balance_current");
     let treasury_balance_last_delta = Gauge::new(
         METRIC_TREASURY_BALANCE_LAST_DELTA,
-        "Most recent treasury balance delta in CT",
+        "Most recent treasury balance delta in BLOCK",
     );
     registry
         .register(Box::new(treasury_balance_last_delta.clone()))
@@ -3479,7 +3425,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let explorer_block_payout_read_total = CounterVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_TOTAL,
-            "Read subsidy CT routed to each role from finalized blocks",
+            "Read subsidy BLOCK routed to each role from finalized blocks",
         ),
         &LABEL_ROLE,
     )
@@ -3494,7 +3440,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     let explorer_block_payout_ad_total = CounterVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
-            "Advertising CT routed to each role from finalized blocks",
+            "Advertising BLOCK routed to each role from finalized blocks",
         ),
         &LABEL_ROLE,
     )
@@ -3505,21 +3451,6 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     seed_role_counter(
         &explorer_block_payout_ad_total,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_TOTAL,
-    );
-    let explorer_block_payout_ad_it_total = CounterVec::new(
-        Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
-            "Advertising IT routed to each role from finalized blocks",
-        ),
-        &LABEL_ROLE,
-    )
-    .expect("build explorer_block_payout_ad_it_total counter vec");
-    registry
-        .register(Box::new(explorer_block_payout_ad_it_total.clone()))
-        .expect("register explorer_block_payout_ad_it_total");
-    seed_role_counter(
-        &explorer_block_payout_ad_it_total,
-        METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_TOTAL,
     );
     let explorer_block_payout_ad_usd_total = GaugeVec::new(
         Opts::new(
@@ -3541,30 +3472,16 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(explorer_block_payout_ad_settlement_count.clone()))
         .expect("register explorer_block_payout_ad_settlement_count");
-    let explorer_block_payout_ad_ct_price_usd_micros = GaugeVec::new(
+    let explorer_block_payout_ad_price_usd_micros = GaugeVec::new(
         Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_CT_PRICE_USD_MICROS,
-            "Explorer-reported CT oracle price used for advertising settlements",
+            METRIC_EXPLORER_BLOCK_PAYOUT_AD_PRICE_USD_MICROS,
+            "Explorer-reported oracle price used for advertising settlements",
         ),
         &LABEL_PEER,
     );
     registry
-        .register(Box::new(
-            explorer_block_payout_ad_ct_price_usd_micros.clone(),
-        ))
-        .expect("register explorer_block_payout_ad_ct_price_usd_micros");
-    let explorer_block_payout_ad_it_price_usd_micros = GaugeVec::new(
-        Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_PRICE_USD_MICROS,
-            "Explorer-reported IT oracle price used for advertising settlements",
-        ),
-        &LABEL_PEER,
-    );
-    registry
-        .register(Box::new(
-            explorer_block_payout_ad_it_price_usd_micros.clone(),
-        ))
-        .expect("register explorer_block_payout_ad_it_price_usd_micros");
+        .register(Box::new(explorer_block_payout_ad_price_usd_micros.clone()))
+        .expect("register explorer_block_payout_ad_price_usd_micros");
     let explorer_block_payout_read_last_seen = GaugeVec::new(
         Opts::new(
             METRIC_EXPLORER_BLOCK_PAYOUT_READ_LAST_SEEN,
@@ -3592,20 +3509,6 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     seed_role_gauge(
         &explorer_block_payout_ad_last_seen,
         METRIC_EXPLORER_BLOCK_PAYOUT_AD_LAST_SEEN,
-    );
-    let explorer_block_payout_ad_it_last_seen = GaugeVec::new(
-        Opts::new(
-            METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
-            "Unix timestamp of the most recent advertising IT payout per role",
-        ),
-        &LABEL_ROLE,
-    );
-    registry
-        .register(Box::new(explorer_block_payout_ad_it_last_seen.clone()))
-        .expect("register explorer_block_payout_ad_it_last_seen");
-    seed_role_gauge(
-        &explorer_block_payout_ad_it_last_seen,
-        METRIC_EXPLORER_BLOCK_PAYOUT_AD_IT_LAST_SEEN,
     );
     let explorer_compute_sla_outcome_total = GaugeVec::new(
         Opts::new(
@@ -3704,34 +3607,20 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         )
         .expect("register ad_readiness_settlement_count");
     ad_readiness_settlement_count.set(0.0);
-    let ad_readiness_ct_price_usd_micros = registry
+    let ad_readiness_price_usd_micros = registry
         .register_gauge(
-            "ad_readiness_ct_price_usd_micros",
-            "Most recent consumer-token oracle price used for advertising settlements",
+            "ad_readiness_price_usd_micros",
+            "Most recent oracle price used for advertising settlements",
         )
-        .expect("register ad_readiness_ct_price_usd_micros");
-    ad_readiness_ct_price_usd_micros.set(0.0);
-    let ad_readiness_it_price_usd_micros = registry
+        .expect("register ad_readiness_price_usd_micros");
+    ad_readiness_price_usd_micros.set(0.0);
+    let ad_readiness_market_price_usd_micros = registry
         .register_gauge(
-            "ad_readiness_it_price_usd_micros",
-            "Most recent industrial-token oracle price used for advertising settlements",
+            "ad_readiness_market_price_usd_micros",
+            "Current marketplace oracle price",
         )
-        .expect("register ad_readiness_it_price_usd_micros");
-    ad_readiness_it_price_usd_micros.set(0.0);
-    let ad_readiness_market_ct_price_usd_micros = registry
-        .register_gauge(
-            "ad_readiness_market_ct_price_usd_micros",
-            "Current marketplace consumer-token oracle price",
-        )
-        .expect("register ad_readiness_market_ct_price_usd_micros");
-    ad_readiness_market_ct_price_usd_micros.set(0.0);
-    let ad_readiness_market_it_price_usd_micros = registry
-        .register_gauge(
-            "ad_readiness_market_it_price_usd_micros",
-            "Current marketplace industrial-token oracle price",
-        )
-        .expect("register ad_readiness_market_it_price_usd_micros");
-    ad_readiness_market_it_price_usd_micros.set(0.0);
+        .expect("register ad_readiness_market_price_usd_micros");
+    ad_readiness_market_price_usd_micros.set(0.0);
     let ad_readiness_utilization_observed_ppm = GaugeVec::new(
         Opts::new(
             "ad_readiness_utilization_observed_ppm",
@@ -3834,14 +3723,11 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         bridge_remediation_spool_artifacts,
         explorer_block_payout_read_total,
         explorer_block_payout_ad_total,
-        explorer_block_payout_ad_it_total,
         explorer_block_payout_ad_usd_total,
         explorer_block_payout_ad_settlement_count,
-        explorer_block_payout_ad_ct_price_usd_micros,
-        explorer_block_payout_ad_it_price_usd_micros,
+        explorer_block_payout_ad_price_usd_micros,
         explorer_block_payout_read_last_seen,
         explorer_block_payout_ad_last_seen,
-        explorer_block_payout_ad_it_last_seen,
         explorer_compute_sla_outcome_total,
         explorer_compute_sla_last_seen,
         explorer_compute_sla_poll_error_total,
@@ -3855,10 +3741,8 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         ad_readiness_min_provider_count,
         ad_readiness_total_usd_micros,
         ad_readiness_settlement_count,
-        ad_readiness_ct_price_usd_micros,
-        ad_readiness_it_price_usd_micros,
-        ad_readiness_market_ct_price_usd_micros,
-        ad_readiness_market_it_price_usd_micros,
+        ad_readiness_price_usd_micros,
+        ad_readiness_market_price_usd_micros,
         ad_readiness_utilization_observed_ppm,
         ad_readiness_utilization_target_ppm,
         ad_readiness_utilization_delta_ppm,
@@ -8396,7 +8280,6 @@ fn parse_legacy_balance_history(bytes: &[u8]) -> io::Result<Vec<TreasuryBalanceS
         let balance = parse_u64_field(obj.get("balance"), "balance")?;
         let delta = obj
             .get("delta")
-            .or_else(|| obj.get("delta_ct"))
             .map(|value| parse_i64_field(Some(value), "delta"))
             .transpose()?
             .unwrap_or(0);
@@ -9782,10 +9665,8 @@ mod tests {
         metrics.record_ad_readiness(None);
         assert_eq!(metrics.ad_readiness_total_usd_micros.get(), 0.0);
         assert_eq!(metrics.ad_readiness_settlement_count.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_market_ct_price_usd_micros.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_market_it_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_market_price_usd_micros.get(), 0.0);
         assert_eq!(metrics.utilization_label_count(), 0);
         let dir = tempfile::tempdir().unwrap();
         let state = AppState::new("tok".into(), dir.path().join("ad_ready.json"), 60);
@@ -9802,10 +9683,8 @@ mod tests {
             last_updated: 77,
             total_usd_micros: 1_500,
             settlement_count: 4,
-            ct_price_usd_micros: 2_500,
-            it_price_usd_micros: 5_000,
-            market_ct_price_usd_micros: 2_750,
-            market_it_price_usd_micros: 5_500,
+            price_usd_micros: 2_500,
+            market_price_usd_micros: 2_750,
             cohort_utilization: vec![AdReadinessCohortTelemetry {
                 domain: "example.test".into(),
                 provider: Some("provider-ready".into()),
@@ -9844,16 +9723,8 @@ mod tests {
         assert_eq!(metrics.ad_readiness_min_provider_count.get(), 1.0);
         assert_eq!(metrics.ad_readiness_total_usd_micros.get(), 1_500.0);
         assert_eq!(metrics.ad_readiness_settlement_count.get(), 4.0);
-        assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 2_500.0);
-        assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 5_000.0);
-        assert_eq!(
-            metrics.ad_readiness_market_ct_price_usd_micros.get(),
-            2_750.0
-        );
-        assert_eq!(
-            metrics.ad_readiness_market_it_price_usd_micros.get(),
-            5_500.0
-        );
+        assert_eq!(metrics.ad_readiness_price_usd_micros.get(), 2_500.0);
+        assert_eq!(metrics.ad_readiness_market_price_usd_micros.get(), 2_750.0);
         let utilization_observed = metrics
             .ad_readiness_utilization_observed_ppm
             .with_label_values(&["example.test", "provider-ready", "premium"])
@@ -9885,10 +9756,8 @@ mod tests {
         assert_eq!(metrics.ad_readiness_min_provider_count.get(), 0.0);
         assert_eq!(metrics.ad_readiness_total_usd_micros.get(), 0.0);
         assert_eq!(metrics.ad_readiness_settlement_count.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_ct_price_usd_micros.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_it_price_usd_micros.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_market_ct_price_usd_micros.get(), 0.0);
-        assert_eq!(metrics.ad_readiness_market_it_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_price_usd_micros.get(), 0.0);
+        assert_eq!(metrics.ad_readiness_market_price_usd_micros.get(), 0.0);
         assert_eq!(metrics.utilization_label_count(), 0);
     }
 

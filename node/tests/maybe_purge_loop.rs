@@ -37,8 +37,8 @@ fn env_driven_purge_loop_drops_entries() {
     bc.min_fee_per_byte_consumer = 0;
     bc.min_fee_per_byte_industrial = 0;
     bc.base_fee = 0;
-    bc.add_account("a".into(), 10, 10).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.add_account("a".into(), 20).unwrap();
+    bc.add_account("b".into(), 0).unwrap();
     let (sk, _pk) = generate_keypair();
     let payload = RawTxPayload {
         from_: "a".into(),
@@ -46,7 +46,7 @@ fn env_driven_purge_loop_drops_entries() {
         amount_consumer: 1,
         amount_industrial: 1,
         fee: 1,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };

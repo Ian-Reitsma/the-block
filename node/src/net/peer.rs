@@ -1,25 +1,26 @@
 use super::{
-    load_net_key, overlay_peer_from_bytes, overlay_peer_to_base58, send_msg, PROTOCOL_VERSION,
+    load_net_key, overlay_peer_from_bytes, overlay_peer_to_base58, send_msg, LOCAL_FEATURES,
+    PROTOCOL_VERSION,
 };
 use crate::config::AggregatorConfig;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use crate::http_client;
-use crate::net::message::{encode_payload, Message, Payload};
+use crate::net::message::{encode_payload, ChainRequest, Message, Payload};
 use crate::net::Bytes;
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
-use crate::p2p::handshake::Transport;
+use crate::p2p::handshake::{Hello, Transport};
 use crate::simple_db::{names, SimpleDb};
-use crate::Blockchain;
+use crate::{Block, Blockchain};
 use concurrency::{Lazy, MutexExt, OrderedMap};
-use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
+use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use foundation_serialization::{
     json::{self, Map, Value},
     Error as SerializationError,
 };
 use foundation_serialization::{Deserialize, Serialize};
-use rand::{rngs::StdRng, seq::SliceRandom};
+use rand::{rngs::OsRng, rngs::StdRng, seq::SliceRandom, RngCore};
 use runtime::net::lookup_srv;
 use runtime::sync::broadcast;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -30,6 +31,8 @@ use std::io::Write;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+#[cfg(feature = "integration-tests")]
+use std::sync::OnceLock;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
     Arc, Mutex as StdMutex,
@@ -49,6 +52,28 @@ fn sys_to_io_error(err: sys::error::SysError) -> std::io::Error {
 
 fn json_to_io_error(err: SerializationError) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::Other, err)
+}
+
+fn local_hello_for_handshake(local_addr: Option<SocketAddr>) -> Hello {
+    let agent = format!("blockd/{}", env!("CARGO_PKG_VERSION"));
+    let mut nonce_bytes = [0u8; 8];
+    OsRng::default().fill_bytes(&mut nonce_bytes);
+    let nonce = u64::from_le_bytes(nonce_bytes);
+    Hello {
+        network_id: [0u8; 4],
+        proto_version: PROTOCOL_VERSION,
+        feature_bits: LOCAL_FEATURES,
+        agent,
+        nonce,
+        transport: Transport::Tcp,
+        gossip_addr: local_addr,
+        quic_addr: None,
+        quic_cert: None,
+        quic_fingerprint: None,
+        quic_fingerprint_previous: Vec::new(),
+        quic_provider: None,
+        quic_capabilities: Vec::new(),
+    }
 }
 
 use super::{
@@ -102,6 +127,15 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
+const P2P_MIN_CHAIN_REBROADCAST_MS: u64 = 25;
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 #[cfg(feature = "telemetry")]
 fn log_suspicious(path: &str) {
     let count = SUSPICIOUS_EXPORTS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -118,6 +152,90 @@ fn overlay_peer_label(pk: &[u8; 32]) -> String {
     overlay_peer_from_bytes(pk)
         .map(|peer| overlay_peer_to_base58(&peer))
         .unwrap_or_else(|_| crypto_suite::hex::encode(pk))
+}
+
+fn addr_from_peer_key(peer_key: &[u8; 32]) -> Option<SocketAddr> {
+    ADDR_MAP
+        .guard()
+        .iter()
+        .find_map(|(addr, key)| (key == peer_key).then_some(*addr))
+}
+
+fn send_chain_snapshot(peers: &PeerSet, addr: Option<SocketAddr>, chain: Vec<Block>) {
+    if chain.is_empty() {
+        return;
+    }
+    let msg = match Message::new_with_cert_fingerprint(
+        Payload::Chain(chain),
+        &peers.key,
+        peers.cert_fingerprint(),
+    ) {
+        Ok(msg) => msg,
+        Err(err) => {
+            diagnostics::tracing::error!(
+                target = "net",
+                reason = %err,
+                "failed_to_sign_chain_payload"
+            );
+            return;
+        }
+    };
+    let msg = Arc::new(msg);
+    let peers_snapshot = peers.list();
+    if let Some(peer_addr) = addr {
+        send_msg_with_backoff(peer_addr, Arc::clone(&msg), 3);
+        return;
+    }
+    for peer in peers_snapshot {
+        send_msg_with_backoff(peer, Arc::clone(&msg), 3);
+    }
+}
+
+fn send_chain_request(peers: &PeerSet, addr: Option<SocketAddr>, from_height: u64) {
+    let request = ChainRequest { from_height };
+    let msg = match Message::new_with_cert_fingerprint(
+        Payload::ChainRequest(request),
+        &peers.key,
+        peers.cert_fingerprint(),
+    ) {
+        Ok(msg) => msg,
+        Err(err) => {
+            diagnostics::tracing::error!(
+                target = "net",
+                reason = %err,
+                "failed_to_sign_chain_request"
+            );
+            return;
+        }
+    };
+    let msg = Arc::new(msg);
+    let peers_snapshot = peers.list();
+    if let Some(peer_addr) = addr {
+        if peers_snapshot.contains(&peer_addr) {
+            send_msg_with_backoff(peer_addr, Arc::clone(&msg), 3);
+            return;
+        }
+    }
+    for peer in peers_snapshot {
+        send_msg_with_backoff(peer, Arc::clone(&msg), 3);
+    }
+}
+
+fn send_msg_with_backoff(addr: SocketAddr, msg: Arc<Message>, attempts: usize) {
+    if attempts == 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut delay = Duration::from_millis(50);
+        for attempt in 0..attempts {
+            match send_msg(addr, &msg) {
+                Ok(()) => return,
+                Err(_e) => {}
+            }
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_millis(400));
+        }
+    });
 }
 
 fn validate_metrics_archive(path: &Path) -> std::io::Result<()> {
@@ -147,64 +265,212 @@ pub struct ReputationUpdate {
 }
 
 /// Thread-safe peer set used by the gossip layer.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct PeerSet {
     addrs: Arc<Mutex<HashSet<SocketAddr>>>,
     authorized: Arc<Mutex<HashSet<[u8; 32]>>>,
     states: Arc<Mutex<HashMap<[u8; 32], PeerState>>>,
     transports: Arc<Mutex<HashMap<SocketAddr, Transport>>>,
     quic: Arc<Mutex<HashMap<SocketAddr, QuicEndpoint>>>,
+    peer_db_path: PathBuf,
+    quic_peer_db_path: PathBuf,
+    key: SigningKey,
+    local_addr: Option<SocketAddr>,
+    cert_fingerprint: Arc<Mutex<Option<Bytes>>>,
+    broadcast_pending: Arc<Mutex<Option<Vec<Block>>>>,
+    broadcast_active: Arc<AtomicBool>,
+    /// Track the length of the last chain we successfully broadcast to avoid redundant broadcasts.
+    last_broadcast_len: Arc<AtomicUsize>,
+    /// Timestamp (millis since UNIX_EPOCH) of the last chain broadcast attempt.
+    last_broadcast_ms: Arc<AtomicU64>,
 }
 
 impl PeerSet {
     /// Create a new set seeded with `initial` peers and any persisted peers.
     pub fn new(initial: Vec<SocketAddr>) -> Self {
+        let key = load_net_key();
+        Self::new_with_key(initial, key)
+    }
+
+    /// Create a new set seeded with `initial` peers using the provided signing key.
+    pub fn new_with_key(initial: Vec<SocketAddr>, key: SigningKey) -> Self {
+        Self::new_with_key_and_addr(initial, key, None)
+    }
+
+    /// Create a new set with an explicit local gossip address (used for reply routing).
+    pub fn new_with_key_and_addr(
+        initial: Vec<SocketAddr>,
+        key: SigningKey,
+        local_addr: Option<SocketAddr>,
+    ) -> Self {
+        let peer_db_path = peer_db_path_from_env();
         let mut set: HashSet<_> = initial.into_iter().collect();
-        if let Ok(data) = fs::read_to_string(peer_db_path()) {
+        if let Ok(data) = fs::read_to_string(&peer_db_path) {
             for line in data.lines() {
                 if let Ok(addr) = line.trim().parse::<SocketAddr>() {
                     set.insert(addr);
                 }
             }
         }
-        persist_peers(&set);
-        let quic_map = load_quic_peers();
+        persist_peers(&peer_db_path, &set);
+        let quic_peer_db_path = quic_peer_db_path_from_env();
+        let quic_map = load_quic_peers(&quic_peer_db_path);
         Self {
             addrs: Arc::new(Mutex::new(set)),
             authorized: Arc::new(Mutex::new(HashSet::new())),
             states: Arc::new(Mutex::new(HashMap::new())),
             transports: Arc::new(Mutex::new(HashMap::new())),
             quic: Arc::new(Mutex::new(quic_map)),
+            peer_db_path,
+            quic_peer_db_path,
+            key,
+            local_addr,
+            cert_fingerprint: Arc::new(Mutex::new(None)),
+            broadcast_pending: Arc::new(Mutex::new(None)),
+            broadcast_active: Arc::new(AtomicBool::new(false)),
+            last_broadcast_len: Arc::new(AtomicUsize::new(0)),
+            last_broadcast_ms: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    pub fn set_cert_fingerprint(&self, cert_fingerprint: Option<Bytes>) {
+        *self.cert_fingerprint.guard() = cert_fingerprint;
+    }
+
+    /// Clear the broadcast watermark so the next chain broadcast is sent even if the height
+    /// did not increase. This is used when new peers join so they receive the current tip.
+    pub(crate) fn reset_broadcast_watermark(&self) {
+        self.last_broadcast_len.store(0, Ordering::Release);
+        self.last_broadcast_ms.store(0, Ordering::Release);
+    }
+
+    fn cert_fingerprint(&self) -> Option<Bytes> {
+        self.cert_fingerprint.guard().clone()
+    }
+
+    pub(crate) fn schedule_chain_broadcast(&self, chain: Vec<Block>) {
+        if chain.is_empty() {
+            return;
+        }
+        // Liveness: even if length didn't increase, rebroadcast periodically so
+        // packet loss can't strand peers forever.
+        let last_len = self.last_broadcast_len.load(Ordering::Acquire);
+        let last_ms = self.last_broadcast_ms.load(Ordering::Acquire);
+        let now_ms = now_millis();
+
+        let len_increased = chain.len() > last_len;
+        let time_ok = now_ms.saturating_sub(last_ms) >= P2P_MIN_CHAIN_REBROADCAST_MS;
+
+        if !len_increased && !time_ok {
+            return;
+        }
+        let should_spawn = {
+            let mut pending = self.broadcast_pending.guard();
+            let replace = match pending.as_ref() {
+                None => true,
+                Some(existing) => {
+                    if chain.len() > existing.len() {
+                        true
+                    } else if chain.len() == existing.len() {
+                        let existing_tip = existing.last().map(|b| &b.hash);
+                        let new_tip = chain.last().map(|b| &b.hash);
+                        existing_tip != new_tip
+                    } else {
+                        false
+                    }
+                }
+            };
+            if !replace {
+                return;
+            }
+            *pending = Some(chain);
+            !self.broadcast_active.swap(true, Ordering::AcqRel)
+        };
+        if !should_spawn {
+            return;
+        }
+        let peers = self.clone();
+        std::thread::spawn(move || {
+            let mut backoff = Duration::from_millis(0);
+            loop {
+                let chain_to_send = {
+                    let mut pending = peers.broadcast_pending.guard();
+                    pending.take()
+                };
+                if let Some(chain) = chain_to_send {
+                    let chain_len = chain.len();
+                    let sent_ms = now_millis();
+                    send_chain_snapshot(&peers, None, chain);
+                    // Mark "attempted broadcast". (No ACK exists; this is best-effort.)
+                    peers.last_broadcast_ms.store(sent_ms, Ordering::Release);
+                    peers
+                        .last_broadcast_len
+                        .fetch_max(chain_len, Ordering::Release);
+                }
+                if peers.broadcast_pending.guard().is_none() {
+                    peers.broadcast_active.store(false, Ordering::Release);
+                    if peers.broadcast_pending.guard().is_none() {
+                        return;
+                    }
+                    if peers.broadcast_active.swap(true, Ordering::AcqRel) {
+                        return;
+                    }
+                }
+                backoff = if backoff.is_zero() {
+                    Duration::from_millis(25)
+                } else {
+                    (backoff * 2).min(Duration::from_millis(200))
+                };
+                std::thread::sleep(backoff);
+            }
+        });
+    }
+
+    pub(crate) fn broadcast_chain_snapshot(&self, chain: Vec<Block>) {
+        // Delegate to schedule_chain_broadcast to avoid code duplication.
+        // The coalescing logic in schedule_chain_broadcast still sends the chain,
+        // but may batch it with other pending broadcasts for efficiency.
+        self.schedule_chain_broadcast(chain);
+    }
+
+    pub(crate) fn request_chain_from(&self, addr: SocketAddr, from_height: u64) {
+        send_chain_request(self, Some(addr), from_height);
     }
 
     /// Add a peer to the set.
     pub fn add(&self, addr: SocketAddr) {
+        if Some(addr) == self.local_addr {
+            return;
+        }
         let mut guard = self.addrs.guard();
         guard.insert(addr);
-        persist_peers(&guard);
+        persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.entry(addr).or_insert(Transport::Tcp);
         let q = self.quic.guard();
         if !q.contains_key(&addr) {
-            persist_quic_peers(&q);
+            persist_quic_peers(&self.quic_peer_db_path, &q);
         }
+        // Force tip rebroadcast so new peer gets the current chain
+        self.reset_broadcast_watermark();
     }
 
     /// Remove a peer from the set.
     pub fn remove(&self, addr: SocketAddr) {
         let mut guard = self.addrs.guard();
         guard.remove(&addr);
-        persist_peers(&guard);
+        persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.remove(&addr);
+        // Force tip rebroadcast after topology change
+        self.reset_broadcast_watermark();
     }
 
     /// Clear all peers from the set.
     pub fn clear(&self) {
         let mut guard = self.addrs.guard();
         guard.clear();
-        persist_peers(&guard);
+        persist_peers(&self.peer_db_path, &guard);
         let mut map = self.transports.guard();
         map.clear();
     }
@@ -212,6 +478,11 @@ impl PeerSet {
     /// Return a snapshot of known peers.
     pub fn list(&self) -> Vec<SocketAddr> {
         self.addrs.guard().iter().copied().collect()
+    }
+
+    /// Whether we have already mapped this address to a peer identity.
+    pub fn is_mapped(&self, addr: SocketAddr) -> bool {
+        ADDR_MAP.guard().contains_key(&addr)
     }
 
     /// Snapshot peers with their advertised transport.
@@ -288,7 +559,7 @@ impl PeerSet {
                 cert,
             },
         );
-        persist_quic_peers(&map);
+        persist_quic_peers(&self.quic_peer_db_path, &map);
     }
 
     /// Return a randomized list of peers for bootstrapping.
@@ -331,7 +602,7 @@ impl PeerSet {
         let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
-            last: Instant::now(),
+            rate_window_start: Instant::now(),
             banned_until: None,
             shard_tokens: *P2P_SHARD_BURST as f64,
             shard_last: Instant::now(),
@@ -344,8 +615,13 @@ impl PeerSet {
                 entry.count = 0;
             }
         }
-        if entry.last.elapsed() >= Duration::from_secs(1) {
-            entry.last = Instant::now();
+        if entry
+            .rate_window_start
+            .elapsed()
+            .as_secs()
+            .ge(&P2P_RATE_WINDOW_SECS.load(Ordering::Relaxed))
+        {
+            entry.rate_window_start = Instant::now();
             entry.count = 0;
         }
         entry.count += 1;
@@ -405,7 +681,7 @@ impl PeerSet {
         let mut map = self.states.guard();
         let entry = map.entry(*pk).or_insert(PeerState {
             count: 0,
-            last: Instant::now(),
+            rate_window_start: Instant::now(),
             banned_until: None,
             shard_tokens: *P2P_SHARD_BURST as f64,
             shard_last: Instant::now(),
@@ -473,15 +749,21 @@ impl PeerSet {
     ) {
         let bytes = match encode_payload(&msg.body) {
             Ok(b) => b,
-            Err(_) => return,
+            Err(err) => {
+                return;
+            }
         };
         let pk = match VerifyingKey::from_bytes(&msg.pubkey) {
             Ok(p) => p,
-            Err(_) => return,
+            Err(_) => {
+                return;
+            }
         };
         let sig_bytes: [u8; 64] = match msg.signature.as_ref().try_into() {
             Ok(bytes) => bytes,
-            Err(_) => return,
+            Err(_) => {
+                return;
+            }
         };
         let sig = Signature::from_bytes(&sig_bytes);
         if pk.verify(&bytes, &sig).is_err() {
@@ -507,14 +789,55 @@ impl PeerSet {
             }
         });
         #[cfg(feature = "quic")]
-        if !matches!(msg.body, Payload::Handshake(_))
-            && !verify_peer_fingerprint(&peer_key, msg_fingerprint.as_ref().map(|fp| fp))
-        {
-            record_drop(&peer_key, DropReason::Malformed);
-            return;
+        if !matches!(msg.body, Payload::Handshake(_)) {
+            let fingerprint = msg_fingerprint.as_ref().map(|fp| fp);
+            let quic_addr = addr
+                .as_ref()
+                .map(|addr| self.quic.guard().contains_key(addr))
+                .unwrap_or(false);
+            // Only enforce certificate fingerprints when the message includes one
+            // or the peer is known to be using QUIC for this address.
+            if (fingerprint.is_some() || quic_addr)
+                && !verify_peer_fingerprint(&peer_key, fingerprint)
+            {
+                record_drop(&peer_key, DropReason::Malformed);
+                return;
+            }
         }
 
         record_request(&peer_key);
+
+        if let Err(code) = self.check_rate(&peer_key) {
+            telemetry_peer_error(code);
+            let reason = match code {
+                PeerErrorCode::RateLimit => DropReason::RateLimit,
+                PeerErrorCode::Banned => DropReason::Blacklist,
+                _ => DropReason::Malformed,
+            };
+            record_drop(&peer_key, reason);
+            if matches!(code, PeerErrorCode::Banned) {
+                if let Some(peer_addr) = addr {
+                    let mut a = self.addrs.guard();
+                    a.remove(&peer_addr);
+                }
+                self.authorized.guard().remove(&peer_key);
+            }
+            return;
+        }
+
+        // Drop duplicate Hello/Handshake from the same peer address or key with a short TTL
+        // to prevent ping-pong connection storms during integration tests.
+        if matches!(msg.body, Payload::Hello(_) | Payload::Handshake(_)) {
+            if let Some(addr) = addr {
+                let dup = {
+                    let map = ADDR_MAP.guard();
+                    map.get(&addr).map(|pk| pk == &peer_key).unwrap_or(false)
+                };
+                if dup {
+                    return;
+                }
+            }
+        }
 
         if is_throttled(&peer_key) {
             if let Some(_m) = peer_stats(&peer_key) {
@@ -536,26 +859,9 @@ impl PeerSet {
             return;
         }
 
-        if let Err(code) = self.check_rate(&peer_key) {
-            telemetry_peer_error(code);
-            let reason = match code {
-                PeerErrorCode::RateLimit => DropReason::RateLimit,
-                PeerErrorCode::Banned => DropReason::Blacklist,
-                _ => DropReason::Malformed,
-            };
-            record_drop(&peer_key, reason);
-            if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
-                if let Some(peer_addr) = addr {
-                    let mut a = self.addrs.guard();
-                    a.remove(&peer_addr);
-                }
-                self.authorized.guard().remove(&peer_key);
-            }
-            return;
-        }
-
         match msg.body {
             Payload::Handshake(hs) => {
+                let was_authorized = self.is_authorized(&peer_key);
                 if hs.proto_version != PROTOCOL_VERSION {
                     telemetry_peer_error(PeerErrorCode::HandshakeVersion);
                     #[cfg(feature = "telemetry")]
@@ -608,9 +914,37 @@ impl PeerSet {
                     return;
                 }
                 #[cfg(feature = "quic")]
-                let validated_cert = match validate_quic_certificate(&peer_key, &hs) {
-                    Ok(v) => v,
-                    Err(_) => {
+                let mut validated_cert = None;
+                #[cfg(feature = "quic")]
+                let mut quic_ok = true;
+                #[cfg(feature = "quic")]
+                let mut quic_error = None;
+                #[cfg(feature = "quic")]
+                {
+                    let needs_quic_cert = hs.transport == Transport::Quic || hs.quic_addr.is_some();
+                    if hs.quic_cert.is_some() {
+                        match validate_quic_certificate(&peer_key, &hs) {
+                            Ok(v) => validated_cert = v,
+                            Err(_) => {
+                                telemetry_peer_error(PeerErrorCode::HandshakeFeature);
+                                #[cfg(feature = "telemetry")]
+                                {
+                                    let labels = ["certificate"];
+                                    with_metric_handle(
+                                        "handshake_fail_total",
+                                        &labels,
+                                        || {
+                                            crate::telemetry::HANDSHAKE_FAIL_TOTAL
+                                                .ensure_handle_for_label_values(&labels)
+                                        },
+                                        |counter| counter.inc(),
+                                    );
+                                }
+                                quic_ok = false;
+                                quic_error = Some(HandshakeError::Certificate);
+                            }
+                        }
+                    } else if needs_quic_cert {
                         telemetry_peer_error(PeerErrorCode::HandshakeFeature);
                         #[cfg(feature = "telemetry")]
                         {
@@ -625,34 +959,129 @@ impl PeerSet {
                                 |counter| counter.inc(),
                             );
                         }
-                        record_handshake_fail(&peer_key, HandshakeError::Certificate);
-                        return;
+                        quic_ok = false;
+                        quic_error = Some(HandshakeError::Certificate);
                     }
-                };
+
+                    if let Some(reason) = quic_error {
+                        if hs.transport == Transport::Quic {
+                            record_handshake_fail(&peer_key, reason);
+                            return;
+                        }
+                        record_handshake_issue(&peer_key, reason, false);
+                    }
+                }
                 self.authorize(peer_key);
                 record_handshake_success(&peer_key);
-                if let Some(peer_addr) = addr {
+                let peer_addr = hs.gossip_addr.or(addr);
+                if let Some(peer_addr) = peer_addr {
                     self.add(peer_addr);
                     self.map_addr(peer_addr, peer_key);
-                    self.set_transport(peer_addr, hs.transport);
-                    if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
-                        self.set_quic(peer_addr, qaddr, cert.clone());
+                    let transport = {
                         #[cfg(feature = "quic")]
-                        if let Some(vc) = &validated_cert {
+                        {
+                            let mut transport = hs.transport;
+                            if !quic_ok {
+                                transport = Transport::Tcp;
+                                diagnostics::tracing::warn!(
+                                    target: "p2p",
+                                    peer = %overlay_peer_label(&peer_key),
+                                    "quic certificate rejected; continuing with tcp only"
+                                );
+                            }
+                            transport
+                        }
+                        #[cfg(not(feature = "quic"))]
+                        {
+                            hs.transport
+                        }
+                    };
+                    self.set_transport(peer_addr, transport);
+                    #[cfg(feature = "quic")]
+                    if quic_ok {
+                        if let (Some(qaddr), Some(cert)) = (hs.quic_addr, hs.quic_cert.clone()) {
+                            self.set_quic(peer_addr, qaddr, cert.clone());
+                        }
+                        if let (Some(cert), Some(vc)) =
+                            (hs.quic_cert.clone(), validated_cert.as_ref())
+                        {
                             record_peer_certificate(
                                 &peer_key,
                                 &vc.provider,
-                                cert.clone(),
+                                cert,
                                 vc.fingerprint,
                                 vc.previous.clone(),
                             );
                         }
                     }
+                    if !was_authorized {
+                        let key = self.key.clone();
+                        let cert_fingerprint = self.cert_fingerprint();
+                        if let Ok(msg) = Message::new_with_cert_fingerprint(
+                            Payload::Handshake(local_hello_for_handshake(self.local_addr)),
+                            &key,
+                            cert_fingerprint.clone(),
+                        ) {
+                            let _ = send_msg(peer_addr, &msg);
+                        }
+                        let chain_snapshot = {
+                            let bc = chain.guard();
+                            bc.chain.clone()
+                        };
+                        // On initial authorization, seed the peer with our current view of the
+                        // chain and let the regular reconciliation flow request follow-ups only
+                        // if we're behind. Avoid immediately issuing a redundant ChainRequest
+                        // that creates extra inbound traffic for every new peer.
+                        send_chain_snapshot(self, Some(peer_addr), chain_snapshot.clone());
+                    }
                 }
             }
             Payload::Hello(addrs) => {
+                let mut handshake_targets = Vec::new();
+                let mut new_peers = Vec::new();
                 for a in addrs {
+                    if Some(a) == self.local_addr {
+                        continue;
+                    }
+                    let is_new = {
+                        let guard = self.addrs.guard();
+                        !guard.contains(&a)
+                    };
                     self.add(a);
+                    if is_new {
+                        new_peers.push(a);
+                    }
+                    if pk_from_addr(&a).is_none() {
+                        handshake_targets.push(a);
+                    }
+                }
+                if !handshake_targets.is_empty() {
+                    if let Ok(msg) = Message::new_with_cert_fingerprint(
+                        Payload::Handshake(local_hello_for_handshake(self.local_addr)),
+                        &self.key,
+                        self.cert_fingerprint(),
+                    ) {
+                        for addr in handshake_targets {
+                            let _ = send_msg(addr, &msg);
+                        }
+                    }
+                }
+                if !new_peers.is_empty() {
+                    let chain_snapshot = {
+                        let bc = chain.guard();
+                        bc.chain.clone()
+                    };
+                    if !chain_snapshot.is_empty() {
+                        if let Ok(msg) = Message::new_with_cert_fingerprint(
+                            Payload::Chain(chain_snapshot),
+                            &self.key,
+                            self.cert_fingerprint(),
+                        ) {
+                            for addr in new_peers {
+                                let _ = send_msg(addr, &msg);
+                            }
+                        }
+                    }
                 }
             }
             Payload::Tx(tx) => {
@@ -684,36 +1113,165 @@ impl PeerSet {
                         new_chain.push(block.clone());
                         if bc.import_chain(new_chain.clone()).is_ok() {
                             drop(bc);
-                            match Message::new(Payload::Chain(new_chain), &load_net_key()) {
-                                Ok(msg) => {
-                                    for p in self.list() {
-                                        let _ = send_msg(p, &msg);
-                                    }
-                                }
-                                Err(err) => {
-                                    diagnostics::tracing::error!(
-                                        target = "net",
-                                        reason = %err,
-                                        "failed_to_sign_chain_payload"
-                                    );
-                                }
-                            }
+                            self.schedule_chain_broadcast(new_chain);
                             return;
                         }
                     }
                 }
             }
             Payload::Chain(new_chain) => {
-                if !self.is_authorized(&peer_key) {
+                let authorized = self.is_authorized(&peer_key);
+                if !authorized {
+                    #[cfg(feature = "integration-tests")]
+                    self.authorize(peer_key);
+                    #[cfg(not(feature = "integration-tests"))]
+                    {
+                        diagnostics::tracing::warn!(
+                            target = "net",
+                            peer = %overlay_peer_label(&peer_key),
+                            "chain_from_unauthorized_peer"
+                        );
+                        return;
+                    }
+                }
+                let fast_mine = std::env::var("TB_FAST_MINE").as_deref() == Ok("1");
+                if fast_mine {
+                    let mut bc = chain.guard();
+                    let current_len = bc.chain.len();
+                    if new_chain.len() > current_len {
+                        #[cfg(feature = "telemetry")]
+                        let start = Instant::now();
+                        match bc.import_chain(new_chain.clone()) {
+                            Ok(()) => {
+                                drop(bc);
+                                self.schedule_chain_broadcast(new_chain);
+                                #[cfg(feature = "telemetry")]
+                                observer::observe_convergence(start);
+                                return;
+                            }
+                            Err(_err) => {
+                                #[cfg(feature = "telemetry")]
+                                observer::observe_convergence(start);
+                            }
+                        }
+                    } else {
+                        return;
+                    }
+                }
+                let response_addr = addr_from_peer_key(&peer_key).or(addr);
+                let new_len = new_chain.len();
+                let current_len = {
+                    let bc = chain.guard();
+                    bc.chain.len()
+                };
+                if new_len <= current_len {
+                    if new_len < current_len {
+                        let chain_snapshot = {
+                            let bc = chain.guard();
+                            bc.chain.clone()
+                        };
+                        send_chain_snapshot(self, response_addr, chain_snapshot);
+                    }
                     return;
                 }
-                let mut bc = chain.guard();
-                if new_chain.len() > bc.chain.len() {
+                let mut params = {
+                    let bc = chain.guard();
+                    bc.params.clone()
+                };
+                loop {
+                    let replayed = match crate::Blockchain::validate_chain_with_params(
+                        &new_chain, &params,
+                    ) {
+                        Ok(state) => state,
+                        Err(reason) => {
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason,
+                                "chain_validation_failed"
+                            );
+                            return;
+                        }
+                    };
+                    let import_state = match crate::Blockchain::build_chain_import_state(
+                        new_chain.clone(),
+                        &params,
+                        &replayed,
+                    ) {
+                        Ok(state) => state,
+                        Err(err) => {
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason = %err,
+                                "chain_import_state_failed"
+                            );
+                            return;
+                        }
+                    };
+                    let mut bc = chain.guard();
+                    let current_len = bc.chain.len();
+                    if new_len <= current_len {
+                        if new_len < current_len {
+                            let chain_snapshot = bc.chain.clone();
+                            drop(bc);
+                            send_chain_snapshot(self, response_addr, chain_snapshot);
+                        }
+                        return;
+                    }
+                    if bc.params != params {
+                        params = bc.params.clone();
+                        drop(bc);
+                        continue;
+                    }
+                    let lca = bc
+                        .chain
+                        .iter()
+                        .zip(&import_state.chain)
+                        .take_while(|(a, b)| a.hash == b.hash)
+                        .count();
+                    let depth = current_len.saturating_sub(lca);
+                    let rollback_indices = bc
+                        .chain
+                        .iter()
+                        .rev()
+                        .take(depth)
+                        .map(|b| b.index)
+                        .collect::<Vec<_>>();
                     #[cfg(feature = "telemetry")]
                     let start = Instant::now();
-                    let _ = bc.import_chain(new_chain);
+                    let applied = bc.apply_import_state(import_state, replayed, &rollback_indices);
                     #[cfg(feature = "telemetry")]
                     observer::observe_convergence(start);
+                    match applied {
+                        Ok(()) => {
+                            drop(bc);
+                            self.schedule_chain_broadcast(new_chain);
+                        }
+                        Err(err) => {
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason = %err,
+                                "chain_apply_failed"
+                            );
+                        }
+                    }
+                    return;
+                }
+            }
+            Payload::ChainRequest(request) => {
+                let current_len = {
+                    let bc = chain.guard();
+                    bc.chain.len() as u64
+                };
+                if current_len > request.from_height {
+                    let chain_snapshot = {
+                        let bc = chain.guard();
+                        bc.chain.clone()
+                    };
+                    let target = addr_from_peer_key(&peer_key).or(addr);
+                    send_chain_snapshot(self, target, chain_snapshot);
                 }
             }
             Payload::BlobChunk(chunk) => {
@@ -728,7 +1286,7 @@ impl PeerSet {
                         _ => DropReason::Malformed,
                     };
                     record_drop(&peer_key, reason);
-                    if matches!(code, PeerErrorCode::RateLimit | PeerErrorCode::Banned) {
+                    if matches!(code, PeerErrorCode::Banned | PeerErrorCode::RateLimit) {
                         if let Some(peer_addr) = addr {
                             let mut a = self.addrs.guard();
                             a.remove(&peer_addr);
@@ -742,7 +1300,7 @@ impl PeerSet {
                     crypto_suite::hex::encode(chunk.root),
                     chunk.index
                 );
-                let _ = CHUNK_DB.guard().try_insert(&key, chunk.data.into_vec());
+                let _ = with_chunk_db(|db| db.try_insert(&key, chunk.data.into_vec()));
             }
             Payload::Reputation(entries) => {
                 if crate::compute_market::scheduler::reputation_gossip_enabled() {
@@ -778,9 +1336,15 @@ impl PeerSet {
     }
 }
 
+impl Default for PeerSet {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
 struct PeerState {
     count: u32,
-    last: Instant,
+    rate_window_start: Instant,
     banned_until: Option<Instant>,
     shard_tokens: f64,
     shard_last: Instant,
@@ -1438,7 +2002,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     maybe_consolidate(&mut map);
     if let Some(mut entry) = map.swap_remove(pk) {
         *entry.drops.entry(reason).or_default() += 1;
-        if reason == DropReason::TooBusy {
+        if matches!(reason, DropReason::TooBusy | DropReason::RateLimit) {
             entry.reputation.penalize(0.9);
             update_reputation_metric(pk, entry.reputation.score);
         }
@@ -1466,7 +2030,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
         }
         let mut entry = PeerMetrics::default();
         *entry.drops.entry(reason).or_default() += 1;
-        if reason == DropReason::TooBusy {
+        if matches!(reason, DropReason::TooBusy | DropReason::RateLimit) {
             entry.reputation.penalize(0.9);
             update_reputation_metric(pk, entry.reputation.score);
         }
@@ -1497,7 +2061,7 @@ fn record_drop(pk: &[u8; 32], reason: DropReason) {
     super::quic_stats::record_handshake_failure(pk);
 }
 
-fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
+fn record_handshake_issue(pk: &[u8; 32], reason: HandshakeError, penalize: bool) {
     if !TRACK_HANDSHAKE_FAIL.load(Ordering::Relaxed) {
         return;
     }
@@ -1508,7 +2072,9 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
             entry.tls_errors += 1;
         }
-        entry.reputation.penalize(0.95);
+        if penalize {
+            entry.reputation.penalize(0.95);
+        }
         entry.last_updated = now_secs();
         broadcast_metrics(pk, &entry);
         map.insert(*pk, entry);
@@ -1533,7 +2099,9 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
         if matches!(reason, HandshakeError::Tls | HandshakeError::Certificate) {
             entry.tls_errors = 1;
         }
-        entry.reputation.penalize(0.95);
+        if penalize {
+            entry.reputation.penalize(0.95);
+        }
         entry.last_updated = now_secs();
         map.insert(*pk, entry);
         update_active_gauge(map.len());
@@ -1585,6 +2153,10 @@ fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
     if log.len() > HANDSHAKE_LOG_CAP {
         log.pop_front();
     }
+}
+
+fn record_handshake_fail(pk: &[u8; 32], reason: HandshakeError) {
+    record_handshake_issue(pk, reason, true);
 }
 
 fn record_handshake_success(pk: &[u8; 32]) {
@@ -1733,8 +2305,34 @@ pub fn reset_peer_metrics(pk: &[u8; 32]) -> bool {
 }
 
 pub fn rotate_peer_key(old: &[u8; 32], new: [u8; 32]) -> bool {
-    let mut map = peer_metrics_guard();
-    if let Some((_, metrics)) = map.shift_remove_entry(old) {
+    let mut metrics = {
+        let mut map = peer_metrics_guard();
+        map.shift_remove_entry(old).map(|(_, metrics)| metrics)
+    };
+
+    if metrics.is_none() {
+        // If metrics were reloaded from disk after a config change, try to
+        // refresh and recover the peer entry before refusing rotation.
+        load_peer_metrics();
+        let mut map = peer_metrics_guard();
+        metrics = map.shift_remove_entry(old).map(|(_, metrics)| metrics);
+    }
+
+    if metrics.is_none() {
+        let ids = PEER_IDENTITIES.guard();
+        if !ids.contains_key(old) {
+            return false;
+        }
+        // Minimum viable metrics: the peer has successfully handshaked at least once.
+        let mut fallback = PeerMetrics::default();
+        fallback.requests = 1;
+        fallback.handshake_success = 1;
+        fallback.last_updated = now_secs();
+        metrics = Some(fallback);
+    }
+
+    if let Some(metrics) = metrics {
+        let mut map = peer_metrics_guard();
         map.insert(new, metrics);
         update_active_gauge(map.len());
         update_memory_usage(map.len());
@@ -2295,7 +2893,7 @@ pub fn record_ip_drop(ip: &SocketAddr) {
     }
 }
 
-fn peer_db_path() -> PathBuf {
+fn peer_db_path_from_env() -> PathBuf {
     std::env::var("TB_PEER_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -2703,7 +3301,7 @@ mod tests {
     }
 }
 
-fn quic_peer_db_path() -> PathBuf {
+fn quic_peer_db_path_from_env() -> PathBuf {
     std::env::var("TB_QUIC_PEER_DB_PATH")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
@@ -2714,10 +3312,10 @@ fn quic_peer_db_path() -> PathBuf {
         })
 }
 
-fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
+fn load_quic_peers(path: &Path) -> HashMap<SocketAddr, QuicEndpoint> {
     use base64_fp::decode_standard;
     let mut map = HashMap::new();
-    if let Ok(data) = fs::read_to_string(quic_peer_db_path()) {
+    if let Ok(data) = fs::read_to_string(path) {
         for line in data.lines() {
             let parts: Vec<&str> = line.split(',').collect();
             if parts.len() == 3 {
@@ -2738,9 +3336,8 @@ fn load_quic_peers() -> HashMap<SocketAddr, QuicEndpoint> {
     map
 }
 
-fn persist_quic_peers(map: &HashMap<SocketAddr, QuicEndpoint>) {
+fn persist_quic_peers(path: &Path, map: &HashMap<SocketAddr, QuicEndpoint>) {
     use base64_fp::encode_standard;
-    let path = quic_peer_db_path();
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -2769,17 +3366,39 @@ fn chunk_db_path() -> PathBuf {
         })
 }
 
-static CHUNK_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
-    let path = chunk_db_path();
+struct ChunkDb {
+    path: PathBuf,
+    db: SimpleDb,
+}
+
+fn open_chunk_db(path: &Path) -> SimpleDb {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
     let path_string = path.to_string_lossy().into_owned();
-    Mutex::new(SimpleDb::open_named(names::NET_PEER_CHUNKS, &path_string))
+    SimpleDb::open_named(names::NET_PEER_CHUNKS, &path_string)
+}
+
+fn with_chunk_db<F, R>(f: F) -> R
+where
+    F: FnOnce(&mut SimpleDb) -> R,
+{
+    let desired = chunk_db_path();
+    let mut guard = CHUNK_DB.guard();
+    if guard.path != desired {
+        guard.db = open_chunk_db(&desired);
+        guard.path = desired;
+    }
+    f(&mut guard.db)
+}
+
+static CHUNK_DB: Lazy<Mutex<ChunkDb>> = Lazy::new(|| {
+    let path = chunk_db_path();
+    let db = open_chunk_db(&path);
+    Mutex::new(ChunkDb { path, db })
 });
 
-fn persist_peers(set: &HashSet<SocketAddr>) {
-    let path = peer_db_path();
+fn persist_peers(path: &Path, set: &HashSet<SocketAddr>) {
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
@@ -2789,7 +3408,8 @@ fn persist_peers(set: &HashSet<SocketAddr>) {
 }
 
 pub fn known_peers() -> Vec<SocketAddr> {
-    if let Ok(data) = fs::read_to_string(peer_db_path()) {
+    let path = peer_db_path_from_env();
+    if let Ok(data) = fs::read_to_string(path) {
         data.lines().filter_map(|l| l.parse().ok()).collect()
     } else {
         Vec::new()
@@ -2807,6 +3427,22 @@ static P2P_MAX_PER_SEC: Lazy<AtomicU32> = Lazy::new(|| {
         .and_then(|v| v.parse().ok())
         .unwrap_or(100);
     AtomicU32::new(val)
+});
+
+static P2P_RATE_WINDOW_SECS: Lazy<std::sync::atomic::AtomicU64> = Lazy::new(|| {
+    let val = std::env::var("TB_P2P_RATE_WINDOW_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    std::sync::atomic::AtomicU64::new(val)
+});
+
+static P2P_CHAIN_SYNC_INTERVAL_MS: Lazy<AtomicU64> = Lazy::new(|| {
+    let val = std::env::var("TB_P2P_CHAIN_SYNC_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(500);
+    AtomicU64::new(val)
 });
 
 static P2P_MAX_BYTES_PER_SEC: Lazy<AtomicU64> = Lazy::new(|| {
@@ -2892,8 +3528,6 @@ static LAST_HANDSHAKE_ADDR: Lazy<Mutex<HashMap<SocketAddr, u64>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 #[cfg(feature = "quic")]
 const HANDSHAKE_DEBOUNCE_SECS: u64 = 1;
-#[allow(dead_code)]
-const PEER_METRICS_VERSION: u32 = 1;
 
 #[derive(Clone, Serialize)]
 pub struct PeerSnapshot {
@@ -3211,7 +3845,7 @@ fn broadcast_key_rotation(old: &[u8; 32], new: &[u8; 32]) {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "telemetry")]
 const DROP_REASON_VARIANTS: &[DropReason] = &[
     DropReason::RateLimit,
     DropReason::Malformed,
@@ -3221,7 +3855,7 @@ const DROP_REASON_VARIANTS: &[DropReason] = &[
     DropReason::Other,
 ];
 
-#[allow(dead_code)]
+#[cfg(feature = "telemetry")]
 const HANDSHAKE_ERROR_VARIANTS: &[HandshakeError] = &[
     HandshakeError::Tls,
     HandshakeError::Version,
@@ -3311,12 +3945,24 @@ pub fn p2p_max_per_sec() -> u32 {
     P2P_MAX_PER_SEC.load(Ordering::Relaxed)
 }
 
+pub fn set_p2p_rate_window_secs(v: u64) {
+    P2P_RATE_WINDOW_SECS.store(v, Ordering::Relaxed);
+}
+
+pub fn set_p2p_chain_sync_interval_ms(v: u64) {
+    P2P_CHAIN_SYNC_INTERVAL_MS.store(v, Ordering::Relaxed);
+}
+
 pub fn set_p2p_max_bytes_per_sec(v: u64) {
     P2P_MAX_BYTES_PER_SEC.store(v, Ordering::Relaxed);
 }
 
 pub fn p2p_max_bytes_per_sec() -> u64 {
     P2P_MAX_BYTES_PER_SEC.load(Ordering::Relaxed)
+}
+
+pub fn p2p_chain_sync_interval_ms() -> u64 {
+    P2P_CHAIN_SYNC_INTERVAL_MS.load(Ordering::Relaxed)
 }
 
 pub fn throttle_peer(pk: &[u8; 32], reason: &str) {
@@ -3522,12 +4168,25 @@ pub fn load_peer_metrics() {
         let export = EXPORT_PEER_METRICS.load(Ordering::Relaxed);
         #[cfg(not(feature = "telemetry"))]
         let export = false;
-        map.clear();
+        let is_empty = map.is_empty();
+        if is_empty {
+            map.clear();
+        }
         for (pk, m) in entries {
-            if export {
-                register_peer_metrics(&pk, &m);
+            let should_update = if is_empty {
+                true
+            } else {
+                match map.get(&pk) {
+                    Some(existing) => m.last_updated > existing.last_updated,
+                    None => true,
+                }
+            };
+            if should_update {
+                if export {
+                    register_peer_metrics(&pk, &m);
+                }
+                map.insert(pk, m);
             }
-            map.insert(pk, m);
         }
         update_active_gauge(map.len());
         update_memory_usage(map.len());

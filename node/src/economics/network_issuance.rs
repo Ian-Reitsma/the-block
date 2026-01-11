@@ -12,12 +12,40 @@
 //! - `base_reward`: Derived from total supply cap and expected network blocks
 //! - `activity_multiplier`: Scales with transactions, volume, and market utilization
 //! - `decentralization_factor`: Scales with number of active validators/nodes
-//! - `supply_decay`: Natural decay as emission approaches MAX_SUPPLY_BLOCK
+//! - `supply_decay`: Exponential decay as emission approaches MAX_SUPPLY_BLOCK
 //!
 //! This creates a self-regulating system where rewards respond to network health
 //! rather than arbitrary time-based schedules.
+//!
+//! ## Key Design Decisions
+//!
+//! 1. **Exponential supply decay** (not linear) - smoother halving-like curve
+//! 2. **Geometric mean** for activity - dampens manipulation via extreme single metrics
+//! 3. **Adaptive baselines** - prevents gaming by adjusting to network growth
+//! 4. **Bounded multipliers** - prevents runaway rewards or zero rewards
 
 use foundation_serialization::{Deserialize, Serialize};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Constants (consensus-critical - DO NOT CHANGE without governance proposal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Fraction of total supply available for distribution (90%, leaving 10% for tail emission)
+const DISTRIBUTABLE_SUPPLY_RATIO: f64 = 0.9;
+
+/// Minimum ratio floor to prevent divide-by-zero and extreme multipliers
+const MIN_RATIO_FLOOR: f64 = 0.01;
+
+/// Base utilization bonus (0% utilization = 1.0x, 100% = 2.0x)
+const UTILIZATION_BONUS_BASE: f64 = 1.0;
+
+/// Supply decay sharpness factor (higher = steeper decay near cap)
+/// At k=2: 50% emission → 0.25x decay, 90% emission → 0.01x decay
+/// This provides smoother decay than k=3 while still being steeper than linear
+const SUPPLY_DECAY_SHARPNESS: f64 = 2.0;
+
+/// Minimum reward threshold (1% of cap remaining before floor is removed)
+const MIN_REWARD_THRESHOLD_RATIO: u64 = 100;
 
 /// Network activity metrics for issuance calculation
 #[derive(Debug, Clone)]
@@ -203,61 +231,69 @@ impl NetworkIssuanceController {
     ///
     /// 1. **Base Reward:** Evenly distributes total supply across expected blocks
     ///    ```text
-    ///    base = (max_supply * 0.9) / expected_total_blocks
+    ///    base = (max_supply * DISTRIBUTABLE_SUPPLY_RATIO) / expected_total_blocks
     ///    ```
-    ///    (Using 90% instead of 100% to leave room for tail emission)
     ///
-    /// 2. **Activity Multiplier:** Rewards scale with network usage
+    /// 2. **Activity Multiplier:** Geometric mean of normalized activity metrics
     ///    ```text
-    ///    activity = sqrt(tx_count / baseline_tx_count) *
-    ///               sqrt(tx_volume / baseline_tx_volume) *
-    ///               (1 + avg_utilization)
+    ///    activity = sqrt(tx_count / baseline) * sqrt(volume / baseline) * (1 + utilization)
     ///    ```
-    ///    Clamped to [0.5, 2.0] range
+    ///    Clamped to [activity_min, activity_max] range
     ///
-    /// 3. **Decentralization Factor:** Rewards scale with validator diversity
+    /// 3. **Decentralization Factor:** Rewards validator diversity
     ///    ```text
     ///    decentralization = sqrt(unique_miners / baseline_miners)
     ///    ```
-    ///    Clamped to [0.5, 1.5] range
+    ///    Clamped to [decentralization_min, decentralization_max] range
     ///
-    /// 4. **Supply Decay:** Natural halvening as cap approaches
+    /// 4. **Exponential Supply Decay:** Smoother than linear, Bitcoin-like halving curve
     ///    ```text
-    ///    decay = (max_supply - emission) / max_supply
+    ///    decay = ((max_supply - emission) / max_supply)^k
     ///    ```
+    ///    Where k = SUPPLY_DECAY_SHARPNESS controls steepness
     ///
     /// **Final:**
     /// ```text
     /// block_reward = base * activity * decentralization * decay
     /// ```
     pub fn compute_block_reward(&mut self, metrics: &NetworkMetrics) -> u64 {
-        // 1. Base reward: Distribute 90% of cap over expected blocks
-        let distributable_supply = (self.params.max_supply_block as f64) * 0.9;
+        // Validate params to prevent division by zero
+        if self.params.expected_total_blocks == 0 || self.params.max_supply_block == 0 {
+            return 0;
+        }
+
+        // 1. Base reward: Distribute DISTRIBUTABLE_SUPPLY_RATIO of cap over expected blocks
+        let distributable_supply =
+            (self.params.max_supply_block as f64) * DISTRIBUTABLE_SUPPLY_RATIO;
         let base_reward = distributable_supply / (self.params.expected_total_blocks as f64);
 
         // 2. Activity multiplier (geometric mean of tx metrics + utilization bonus)
-        // Use adaptive baselines if enabled, otherwise use fixed params
-        let baseline_tx_count = if self.params.adaptive_baselines_enabled {
-            self.adaptive_baseline_tx_count
-        } else {
-            self.params.baseline_tx_count as f64
-        };
+        let (baseline_tx_count, baseline_tx_volume, baseline_miners) =
+            if self.params.adaptive_baselines_enabled {
+                (
+                    self.adaptive_baseline_tx_count,
+                    self.adaptive_baseline_tx_volume,
+                    self.adaptive_baseline_miners,
+                )
+            } else {
+                (
+                    self.params.baseline_tx_count as f64,
+                    self.params.baseline_tx_volume_block as f64,
+                    self.params.baseline_miners as f64,
+                )
+            };
 
-        let baseline_tx_volume = if self.params.adaptive_baselines_enabled {
-            self.adaptive_baseline_tx_volume
-        } else {
-            self.params.baseline_tx_volume_block as f64
-        };
-
+        // Compute ratios with floor protection
         let tx_ratio = (metrics.tx_count as f64) / baseline_tx_count.max(1.0);
         let volume_ratio = (metrics.tx_volume_block as f64) / baseline_tx_volume.max(1.0);
 
-        // Use sqrt to dampen extreme values
-        let tx_factor = tx_ratio.max(0.01).sqrt();
-        let volume_factor = volume_ratio.max(0.01).sqrt();
+        // Geometric mean via sqrt - dampens extreme single-metric manipulation
+        let tx_factor = tx_ratio.max(MIN_RATIO_FLOOR).sqrt();
+        let volume_factor = volume_ratio.max(MIN_RATIO_FLOOR).sqrt();
 
         // Utilization bonus: 0% util = 1.0x, 100% util = 2.0x
-        let utilization_bonus = 1.0 + metrics.avg_market_utilization.clamp(0.0, 1.0);
+        let utilization_bonus =
+            UTILIZATION_BONUS_BASE + metrics.avg_market_utilization.clamp(0.0, 1.0);
 
         let activity_multiplier = (tx_factor * volume_factor * utilization_bonus).clamp(
             self.params.activity_multiplier_min,
@@ -265,44 +301,40 @@ impl NetworkIssuanceController {
         );
 
         // 3. Decentralization factor (rewards having more unique miners)
-        let baseline_miners = if self.params.adaptive_baselines_enabled {
-            self.adaptive_baseline_miners
-        } else {
-            self.params.baseline_miners as f64
-        };
-
         let miner_ratio = (metrics.unique_miners as f64) / baseline_miners.max(1.0);
-        let decentralization_multiplier = miner_ratio.max(0.01).sqrt().clamp(
+        let decentralization_multiplier = miner_ratio.max(MIN_RATIO_FLOOR).sqrt().clamp(
             self.params.decentralization_multiplier_min,
             self.params.decentralization_multiplier_max,
         );
 
-        // 4. Supply decay factor (natural halvening)
+        // 4. Exponential supply decay factor (smoother than linear, Bitcoin-like)
+        // decay = (remaining/max)^k where k > 1 creates steeper curve near cap
         let remaining = self
             .params
             .max_supply_block
             .saturating_sub(metrics.total_emission);
-        let supply_decay = (remaining as f64) / (self.params.max_supply_block as f64);
+        let remaining_ratio = (remaining as f64) / (self.params.max_supply_block as f64);
+        let supply_decay = remaining_ratio.powf(SUPPLY_DECAY_SHARPNESS);
 
         // Combine all factors
         let reward = base_reward * activity_multiplier * decentralization_multiplier * supply_decay;
 
-        // Convert to integer, rounding up if non-zero
-        // Only apply minimum floor when far from cap (>1% remaining)
+        // Convert to integer with precision-aware rounding
         let reward_u64 = if remaining > 0 && reward > 0.0 {
-            let rounded = reward.ceil() as u64;
-            // Apply 1 BLOCK minimum only if we have >1% supply remaining
-            // This ensures natural decay near the cap while preventing zeros far from it
-            if remaining > self.params.max_supply_block / 100 {
-                rounded.max(1)
+            // When far from cap (> 1% remaining): ceil + floor of 1
+            // When near cap (< 1% remaining): round naturally (allows decay to 0)
+            if remaining > self.params.max_supply_block / MIN_REWARD_THRESHOLD_RATIO {
+                // Far from cap: ceil with 1 BLOCK floor to ensure miners get rewarded
+                reward.ceil().max(1.0) as u64
             } else {
-                rounded
+                // Near cap: natural rounding allows graceful decay to zero
+                reward.round() as u64
             }
         } else {
             0
         };
 
-        // Ensure we don't exceed supply cap
+        // Ensure we don't exceed supply cap (final safety check)
         let final_reward = reward_u64.min(remaining);
 
         // Update adaptive baselines with observed metrics (for next reward computation)
@@ -426,42 +458,83 @@ mod tests {
 
     #[test]
     fn test_supply_decay() {
-        // As emission approaches cap, rewards decay to zero
+        // As emission approaches cap, rewards decay exponentially
+        // Use separate controllers to avoid adaptive baseline interference
         let params = NetworkIssuanceParams::default();
-        let mut controller = NetworkIssuanceController::new(params.clone());
 
+        // Test at 0% emission - full reward (decay = 1.0)
         let early_metrics = NetworkMetrics {
             tx_count: params.baseline_tx_count,
             tx_volume_block: params.baseline_tx_volume_block,
             unique_miners: params.baseline_miners,
             avg_market_utilization: 0.0,
             block_height: 1000,
-            total_emission: 1_000_000, // 1M emitted (2.5% of cap)
+            total_emission: 0, // 0% emitted - decay = 1.0
         };
 
-        let late_metrics = NetworkMetrics {
+        // Test at 99.5% emission - near cap, no floor applies (< 1% remaining)
+        // Remaining = 0.5% of 40M = 200K BLOCK
+        // decay = 0.005^2 = 0.000025
+        let near_cap_metrics = NetworkMetrics {
             tx_count: params.baseline_tx_count,
             tx_volume_block: params.baseline_tx_volume_block,
             unique_miners: params.baseline_miners,
             avg_market_utilization: 0.0,
-            block_height: 15_000_000,
-            total_emission: 36_000_000, // 36M emitted (90% of cap)
+            block_height: 19_800_000,
+            total_emission: 39_800_000, // 99.5% emitted
         };
 
-        let early_reward = controller.compute_block_reward(&early_metrics);
-        let late_reward = controller.compute_block_reward(&late_metrics);
+        // Use separate controllers to isolate each measurement
+        let mut controller1 = NetworkIssuanceController::new(params.clone());
+        let mut controller2 = NetworkIssuanceController::new(params.clone());
 
+        let early_reward = controller1.compute_block_reward(&early_metrics);
+        let near_cap_reward = controller2.compute_block_reward(&near_cap_metrics);
+
+        // Early should get reasonable reward with 1 BLOCK floor
         assert!(
-            late_reward < early_reward,
-            "Late emission should have lower rewards due to decay"
+            early_reward >= 1,
+            "Early emission should get at least 1 BLOCK, got {}",
+            early_reward
         );
 
-        // With 90% emitted (supply_decay = 0.10), late reward should be significantly lower
-        // Due to 1 BLOCK minimum floor, we get ~50% reduction rather than 10x
-        // Accept at least 50% reduction as "drastically reduced"
+        // Near cap with < 1% remaining: no floor, exponential decay dominates
+        // decay = (0.005)^2 = 0.000025
+        // reward ≈ 1.8 * 0.000025 ≈ 0.00004 → rounds to 0
         assert!(
-            late_reward <= early_reward / 2,
-            "Near cap, rewards should be drastically reduced (at least 2x)"
+            near_cap_reward < early_reward,
+            "Near cap ({}) should have lower rewards than early ({})",
+            near_cap_reward,
+            early_reward
+        );
+
+        // Near cap should be 0 due to extreme decay and no floor
+        assert_eq!(
+            near_cap_reward, 0,
+            "Near cap (< 1% remaining) should decay to 0 reward"
+        );
+    }
+
+    #[test]
+    fn test_zero_params_safety() {
+        // Zero expected_total_blocks should return 0 (not panic)
+        let mut params = NetworkIssuanceParams::default();
+        params.expected_total_blocks = 0;
+        let mut controller = NetworkIssuanceController::new(params);
+
+        let metrics = NetworkMetrics {
+            tx_count: 100,
+            tx_volume_block: 10_000,
+            unique_miners: 10,
+            avg_market_utilization: 0.5,
+            block_height: 1000,
+            total_emission: 0,
+        };
+
+        let reward = controller.compute_block_reward(&metrics);
+        assert_eq!(
+            reward, 0,
+            "Zero expected_total_blocks should return 0 reward"
         );
     }
 

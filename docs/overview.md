@@ -14,14 +14,15 @@
 
 The Block is the unification layer for storage, compute, networking, and governance that turns verifiable work into BLOCK rewards. Everything in the workspace is owned by the maintainers—no third-party stacks in consensus or networking—so the documentation describes what already ships in `main`, not a roadmap.
 
-> **Legacy labels:** Internally we still refer to metrics like `STORAGE_SUB_CT` even though the transferred token is BLOCK. Treat any `_ct` identifiers you see in gauges or proto files as BLOCK-denominated ledgers until those names are retired.
+> **Legacy labels:** Internal metrics now publish names such as `STORAGE_SUB`, `READ_SUB`, and `COMPUTE_SUB`; the `_CT` suffix has been retired, so treat those bucket metrics as the authoritative BLOCK denominators.
 
 ## Mission
 - Operate a one-second base layer that notarizes micro-shard roots while keeping the L1 deterministic and audit-friendly.
-- Pay operators for real service (`STORAGE_SUB_CT`, `READ_SUB_CT`, `COMPUTE_SUB_CT`) instead of speculative gas schedules.
+- Pay operators for real service (`STORAGE_SUB`, `READ_SUB`, `COMPUTE_SUB`) instead of speculative gas schedules.
 - Treat governance as an engineering surface: the same crate powers the node, CLI, explorer, and telemetry so proposals, fee-floor policies, and service-badge status never drift.
 - Ship first-party clients: the in-house HTTP/TLS stack (`crates/httpd` + `crates/transport`) fronts every RPC, gateway, and gossip surface, and dependency pivots move through governance before they land in production.
 - Automate readiness via the Launch Governor: a streak-based autopilot (`node/src/launch_governor`) watches chain/DNS (and soon economics/market) telemetry, records signed decisions, and flips runtime gates so testnet/mainnet transitions stay auditable.
+- Anchor verified ML compute in a deterministic tensor layer (BlockTorch) so compute-market workloads can be priced, proven, and replayed consistently across heterogeneous hardware.
 
 ## Responsibility Domains
 
@@ -51,7 +52,7 @@ Imagine Alice wants to store a file on The Block. Here's what happens step by st
 3. The transaction enters the mempool (waiting room)
 4. A miner includes it in the next block
 5. The block is validated and propagated to all nodes
-6. Alice's CT balance decreases; the storage provider's balance increases
+6. Alice's BLOCK balance decreases; the storage provider's balance increases
 7. Alice can now see the transaction in the explorer or CLI
 
 **Technical Breakdown:**
@@ -62,7 +63,7 @@ Imagine Alice wants to store a file on The Block. Here's what happens step by st
 | 2. **Mempool** | Transaction enters the waiting room where fee-floor policy determines priority. | `node/src/mempool` |
 | 3. **Scheduling** | The multi-lane scheduler batches consumer/industrial traffic, applies fee-floor policy, and records QoS counters. | `node/src/scheduler.rs` |
 | 4. **Consensus** | The hybrid PoW/PoS engine enforces macro-block checkpoints, PoH ticks, VDF randomness, and difficulty retune while gossip/range-boost propagate blocks. | `node/src/consensus` |
-| 5. **Rewarding** | Subsidy accounting, service-badge tracking, treasury streaming, and governance DAG state are updated; CT moves between accounts. | `node/src/governance`, `governance/` |
+| 5. **Rewarding** | Subsidy accounting, service-badge tracking, treasury streaming, and governance DAG state are updated; BLOCK moves between accounts. | `node/src/governance`, `governance/` |
 | 6. **Observability** | Runtime telemetry, metrics aggregator, and dashboards reflect the new state. | `node/src/telemetry.rs`, `metrics-aggregator/`, `monitoring/` |
 
 ## Repository Layout (live tree)
@@ -74,6 +75,7 @@ Imagine Alice wants to store a file on The Block. Here's what happens step by st
 | `metrics-aggregator/` | Aggregates Prometheus-style metrics, publishes dashboards, verifies TLS & governance state. |
 | `monitoring/` | Grafana/Prometheus templates and scripts (build via `npm ci --prefix monitoring`). |
 | `storage_market/`, `dex/`, `bridges/`, `gateway/` | Dedicated crates for specialized subsystems referenced throughout the docs. |
+| `metal-backend/` | BlockTorch tensor runtime (metal-tensor + autograd), profiling hooks, and the PyTorch bridge used for validation. |
 | `docs/` | The consolidated handbook you are reading (mdBook enabled). |
 
 ## Energy Market Snapshot
@@ -83,10 +85,10 @@ Imagine Alice wants to store a file on The Block. Here's what happens step by st
 As an energy provider, you register once, then your smart meter sends signed readings to the network. These readings turn into "credits" (promises of energy). When customers use your energy, those credits become "receipts" (proof of delivery). If someone says "this reading looks wrong," they can file a dispute — a special record that triggers review.
 
 **Example Flow:**
-1. Provider registers with capacity: 10,000 kWh, price: 50 CT per kWh
+1. Provider registers with capacity: 10,000 kWh, price: 50 BLOCK per kWh
 2. Smart meter reading: 1,000 kWh delivered → creates an `EnergyCredit`
 3. Customer settles 500 kWh → creates an `EnergyReceipt` (with treasury fee deducted)
-4. Provider receives CT in their account
+4. Provider receives BLOCK in their account
 
 **Technical Details:**
 - **Code surface** — `crates/energy-market` implements providers, credits, receipts, and telemetry; `node/src/energy.rs` persists them in sled (`SimpleDb::open_named(names::ENERGY_MARKET, …)`), applies governance hooks, and exposes health checks. RPC handlers live in `node/src/rpc/energy.rs`, the CLI entry point is `cli/src/energy.rs`, and oracle ingestion goes through `crates/oracle-adapter` plus the `services/mock-energy-oracle` binary used by the World OS drill.
@@ -114,19 +116,21 @@ Terms you'll encounter in architecture docs:
 | **Mobile cache** | Encrypted on-device cache for offline operation. State syncs once you're back online. | `gateway/`, `node/src/gateway` |
 | **Light client** | A lightweight client that follows the chain using proofs without storing everything. Good for phones and browsers. | [`architecture.md#gateway-and-client-access`](architecture.md#gateway-and-client-access) |
 | **Macro-block** | A periodic checkpoint (every N blocks) that makes syncing faster. Contains per-shard state roots. | [`architecture.md#ledger-and-consensus`](architecture.md#ledger-and-consensus) |
+| **BlockTorch** | Deterministic tensor/autograd framework (metal-backend) for verified compute workloads in the marketplace. | [`ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy) |
 | **Service badge** | A status mark in the ledger showing a node has been "good enough" recently (uptime, service quality). Affects voting weight. | `node/src/service_badge.rs`, [`economics_and_governance.md`](economics_and_governance.md) |
-| **Treasury disbursement** | Moving CT from the community fund to a destination. Requires governance votes and a timelock period. | `governance/src/treasury.rs`, [`economics_and_governance.md`](economics_and_governance.md) |
+| **Treasury disbursement** | Moving BLOCK from the community fund to a destination. Requires governance votes and a timelock period. | `governance/src/treasury.rs`, [`economics_and_governance.md`](economics_and_governance.md) |
 
 ## Document Map
 All remaining detail sits in six focused guides:
 - [`docs/architecture.md`](architecture.md) — ledger, networking, storage, compute, bridges, gateway, telemetry.
 - [`docs/architecture.md#launch-governor`](architecture.md#launch-governor) — autopilot design, gate signals, env vars, and RPCs.
-- [`docs/economics_and_governance.md`](economics_and_governance.md) — CT supply, fees, treasury, proposals, service badges, kill switches.
+- [`docs/economics_and_governance.md`](economics_and_governance.md) — BLOCK supply, fees, treasury, proposals, service badges, kill switches.
 - [`docs/operations.md`](operations.md) — bootstrap, deployments, telemetry wiring, dashboards, runbooks, chaos & recovery.
 - [`docs/security_and_privacy.md`](security_and_privacy.md) — threat modelling, cryptography, remote signer flows, jurisdiction policy packs, LE portal, supply-chain controls.
 - [`docs/developer_handbook.md`](developer_handbook.md) — environment setup, coding standards, testing/fuzzing, simulation, dependency policy, tooling.
 - [`docs/apis_and_tooling.md`](apis_and_tooling.md) — JSON-RPC, CLI, gateway HTTP & DNS, explorer, probe CLI, metrics endpoints, schema references.
 - [`docs/subsystem_atlas.md`](subsystem_atlas.md) — workspace atlas + node subsystem index that maps every directory/file to plain-English context so newcomers know where to start.
+- [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md) — economic strategy deep-dive, including the BlockTorch compute framework roadmap.
 - **🆕 [`RECEIPT_INTEGRATION_INDEX.md`](../RECEIPT_INTEGRATION_INDEX.md) — Receipt integration guide**: Market audit trails, consensus validation, telemetry system, metrics derivation. See this for the complete receipt integration status, implementation guides, and next steps (December 2025).
 
 For historical breadcrumbs the removed per-subsystem files now redirect through [`docs/LEGACY_MAPPING.md`](LEGACY_MAPPING.md).
@@ -147,6 +151,7 @@ Engineering work proceeds against the backlog enumerated in `AGENTS.md §§0.6, 
 - **Spec & Quality guardrails** — All teams must prove spec/implementation alignment (`AGENTS.md:93-101`) before writing code. File doc diffs first, cite the Document Map owner, and attach the standard test cadence transcript (`just lint`, `just fmt`, `just test-fast`, tiered `just test-full`, `cargo test -p the_block --test replay`, settlement audit, `scripts/fuzz_coverage.sh`) to every review. Observability for new surfaces must route through `node/src/telemetry`, `metrics-aggregator/`, and `monitoring/`, with `/wrappers` documentation updates in `docs/operations.md`.
 - **Governance + treasury** — Governance, ledger, CLI, explorer, and telemetry artifacts need multi-stage treasury approvals, attested release bundles, disbursement lag/failure metrics, and deterministic replay coverage. Work-in-progress lives in `governance/`, `node/src/governance`, `node/src/treasury_executor.rs`, `cli/src/governance`, `docs/economics_and_governance.md`, and `docs/operations.md`.
 - **Compute-market SLA controls** — `node/src/compute_market/**`, `monitoring/`, and explorer dashboards must implement SLA slashing, fairness windows, deterministic receipt replays, and operator remediation tooling. Documentation resides in `docs/architecture.md#compute-marketplace`.
+- **BlockTorch compute framework** — The metal-backend stack and coordinator plan follow the Part XII checklist in `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md` and the priority ordering in `AGENTS.md §15.B.1`.
 - **Networking + range-boost reliability** — `node/src/net`, `node/src/p2p`, `range_boost/`, `crates/transport`, and `metrics-aggregator/` must support WAN-scale QUIC chaos drills with runbooks documented in `docs/architecture.md#networking-and-propagation` and `docs/operations.md#bootstrap-and-configuration`.
 - **Wallet/remote signer UX** — `cli/src/wallet`, `node/src/identity`, `remote_signer/`, and `tests/remote_signer_*.rs` are responsible for batched signer discovery, telemetry, and LE portal updates mirrored into `docs/security_and_privacy.md` and `docs/apis_and_tooling.md`.
 - **Bridges + DEX** — `bridges/`, `dex/`, explorer timelines, and `docs/architecture.md#token-bridges`/`#dex-and-trust-lines` must cover signer-set payloads, telemetry pipelines, proofs, and release-verifier workflows documented under `docs/security_and_privacy.md#release-provenance-and-supply-chain`.

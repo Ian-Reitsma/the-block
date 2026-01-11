@@ -24,6 +24,7 @@ fn read_json(path: &Path) -> json::Value {
 fn chaos_xtask_archives_and_reports_failover() {
     let repo = repo_root();
     let temp = tempdir().expect("temp dir");
+    let target_dir = temp.path().join("target");
     let chaos_dir = temp.path().join("chaos");
     let archive_dir = temp.path().join("archive");
     let publish_dir = temp.path().join("publish");
@@ -31,6 +32,8 @@ fn chaos_xtask_archives_and_reports_failover() {
     let status = Command::new("cargo")
         .current_dir(&repo)
         .env("TB_SIM_SEED", "1337")
+        // Isolate build artifacts so concurrent cargo invocations do not race.
+        .env("CARGO_TARGET_DIR", &target_dir)
         .args(["run", "-p", "xtask", "--bin", "xtask", "--", "chaos"])
         .arg("--out-dir")
         .arg(chaos_dir.as_os_str())
@@ -144,11 +147,13 @@ fn chaos_xtask_archives_and_reports_failover() {
 fn chaos_xtask_require_diff_fails_on_identical_baseline() {
     let repo = repo_root();
     let temp = tempdir().expect("temp dir");
+    let target_dir = temp.path().join("target");
     let first_dir = temp.path().join("first");
 
     let status = Command::new("cargo")
         .current_dir(&repo)
         .env("TB_SIM_SEED", "4242")
+        .env("CARGO_TARGET_DIR", &target_dir)
         .args(["run", "-p", "xtask", "--bin", "xtask", "--", "chaos"])
         .arg("--out-dir")
         .arg(first_dir.as_os_str())
@@ -168,6 +173,7 @@ fn chaos_xtask_require_diff_fails_on_identical_baseline() {
     let status = Command::new("cargo")
         .current_dir(&repo)
         .env("TB_SIM_SEED", "4242")
+        .env("CARGO_TARGET_DIR", &target_dir)
         .args(["run", "-p", "xtask", "--bin", "xtask", "--", "chaos"])
         .arg("--out-dir")
         .arg(second_dir.as_os_str())
@@ -190,12 +196,14 @@ fn chaos_xtask_require_diff_fails_on_identical_baseline() {
 fn chaos_xtask_produces_overlay_diff_with_baseline() {
     let repo = repo_root();
     let temp = tempdir().expect("temp dir");
+    let target_dir = temp.path().join("target");
     let first_dir = temp.path().join("first");
     let archive_dir = temp.path().join("archive2");
 
     let status = Command::new("cargo")
         .current_dir(&repo)
         .env("TB_SIM_SEED", "9001")
+        .env("CARGO_TARGET_DIR", &target_dir)
         .args(["run", "-p", "xtask", "--bin", "xtask", "--", "chaos"])
         .arg("--out-dir")
         .arg(first_dir.as_os_str())
@@ -217,6 +225,7 @@ fn chaos_xtask_produces_overlay_diff_with_baseline() {
     let status = Command::new("cargo")
         .current_dir(&repo)
         .env("TB_SIM_SEED", "1337")
+        .env("CARGO_TARGET_DIR", &target_dir)
         .args(["run", "-p", "xtask", "--bin", "xtask", "--", "chaos"])
         .arg("--out-dir")
         .arg(second_dir.as_os_str())

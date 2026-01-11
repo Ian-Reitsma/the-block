@@ -36,13 +36,9 @@ fn recovers_from_crash_during_import() {
             "alice".into(),
             Account {
                 address: "alice".into(),
-                balance: TokenBalance {
-                    consumer: 100,
-                    industrial: 0,
-                },
+                balance: TokenBalance { amount: 100 },
                 nonce: 0,
-                pending_consumer: 0,
-                pending_industrial: 0,
+                pending_amount: 0,
                 pending_nonce: 0,
                 pending_nonces: HashSet::new(),
                 sessions: Vec::new(),
@@ -57,7 +53,7 @@ fn recovers_from_crash_during_import() {
                 amount_consumer: 10,
                 amount_industrial: 0,
                 fee: 0,
-                pct_ct: 100,
+                pct: 100,
                 nonce: 1,
                 memo: Vec::new(),
             },
@@ -79,6 +75,6 @@ fn recovers_from_crash_during_import() {
     }
     // reopen
     let bc2 = Blockchain::open(&path).expect("reopen blockchain");
-    assert_eq!(bc2.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc2.accounts["alice"].balance.amount, 100);
     assert!(bc2.accounts.get("bob").is_none());
 }

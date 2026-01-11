@@ -71,14 +71,16 @@ impl EdwardsPoint {
 
     pub fn scalar_mul(&self, scalar: &Scalar) -> Self {
         let mut result = EdwardsPoint::identity();
-        let base = self.clone();
-        let k = scalar.to_bytes();
-        for byte in k.iter().rev() {
-            for bit in (0..8).rev() {
-                result = result.add(&result);
-                if ((*byte >> bit) & 1) == 1 {
+        let mut base = self.clone();
+        let mut k = scalar.to_bytes();
+        for byte in k.iter_mut() {
+            let mut b = *byte;
+            for _ in 0..8 {
+                if (b & 1) == 1 {
                     result = result.add(&base);
                 }
+                base = base.add(&base);
+                b >>= 1;
             }
         }
         result

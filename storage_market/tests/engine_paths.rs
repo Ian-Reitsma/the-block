@@ -32,7 +32,7 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
         retention_blocks: 12,
         next_payment_block: 1,
         accrued: 0,
-        total_deposit_ct: 0,
+        total_deposit: 0,
         last_payment_block: None,
         storage_root: tree.root,
     };
@@ -40,7 +40,7 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
     let replica_b = ReplicaIncentive::new("backup".into(), 4, 10, 50);
 
     let registered = market.register_contract(contract, vec![replica_a, replica_b])?;
-    assert_eq!(registered.contract.total_deposit_ct, 150);
+    assert_eq!(registered.contract.total_deposit, 150);
 
     let listing = market.contracts()?;
     assert_eq!(listing.len(), 1);
@@ -48,14 +48,14 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
 
     let success = market.record_proof_outcome("obj-1", Some("primary"), 5, true)?;
     assert_eq!(success.outcome, ProofOutcome::Success);
-    assert_eq!(success.amount_accrued_ct, 40);
-    assert_eq!(success.remaining_deposit_ct, 100);
+    assert_eq!(success.amount_accrued, 40);
+    assert_eq!(success.remaining_deposit, 100);
 
     let failure = market.record_proof_outcome("obj-1", Some("backup"), 6, false)?;
     assert_eq!(failure.outcome, ProofOutcome::Failure);
-    assert_eq!(failure.slashed_ct, 10);
-    assert_eq!(failure.remaining_deposit_ct, 40);
-    assert_eq!(failure.amount_accrued_ct, 40);
+    assert_eq!(failure.slashed, 10);
+    assert_eq!(failure.remaining_deposit, 40);
+    assert_eq!(failure.amount_accrued, 40);
 
     drop(market);
 
@@ -63,13 +63,13 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
     let persisted = reopened
         .load_contract("obj-1")?
         .expect("contract should persist");
-    assert_eq!(persisted.contract.total_deposit_ct, 140);
+    assert_eq!(persisted.contract.total_deposit, 140);
     assert_eq!(
         persisted
             .replicas
             .iter()
             .find(|r| r.provider_id == "backup")
-            .map(|r| r.deposit_ct),
+            .map(|r| r.deposit),
         Some(40)
     );
 

@@ -14,13 +14,9 @@ fn block_application_is_atomic() {
         "alice".into(),
         Account {
             address: "alice".into(),
-            balance: TokenBalance {
-                consumer: 100,
-                industrial: 0,
-            },
+            balance: TokenBalance { amount: 100 },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: std::collections::HashSet::new(),
             sessions: Vec::new(),
@@ -30,13 +26,9 @@ fn block_application_is_atomic() {
         "bob".into(),
         Account {
             address: "bob".into(),
-            balance: TokenBalance {
-                consumer: 0,
-                industrial: 0,
-            },
+            balance: TokenBalance { amount: 0 },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: std::collections::HashSet::new(),
             sessions: Vec::new(),
@@ -51,7 +43,7 @@ fn block_application_is_atomic() {
         amount_consumer: 10,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 100,
+        pct: 100,
         nonce: 1,
         memo: Vec::new(),
     };
@@ -62,7 +54,7 @@ fn block_application_is_atomic() {
         amount_consumer: 200,
         amount_industrial: 0,
         fee: 0,
-        pct_ct: 100,
+        pct: 100,
         nonce: 2,
         memo: Vec::new(),
     };
@@ -77,13 +69,13 @@ fn block_application_is_atomic() {
 
     // Applying block with invalid tx2 should fail and leave state untouched
     assert!(validate_and_apply(&bc, &block).is_err());
-    assert_eq!(bc.accounts["alice"].balance.consumer, 100);
+    assert_eq!(bc.accounts["alice"].balance.amount, 100);
     assert!(bc.accounts.get("carol").is_none());
 
     // Remove invalid tx and reapply
     block.transactions = vec![coinbase.clone(), tx1];
     let deltas = validate_and_apply(&bc, &block).expect("valid block");
     commit(&mut bc, deltas).unwrap();
-    assert_eq!(bc.accounts["alice"].balance.consumer, 90);
-    assert_eq!(bc.accounts["bob"].balance.consumer, 10);
+    assert_eq!(bc.accounts["alice"].balance.amount, 90);
+    assert_eq!(bc.accounts["bob"].balance.amount, 10);
 }

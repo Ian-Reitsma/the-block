@@ -37,6 +37,8 @@ static DNS_DB: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
 static ALLOW_EXTERNAL: AtomicBool = AtomicBool::new(false);
 static DISABLE_VERIFY: AtomicBool = AtomicBool::new(false);
 const VERIFY_TTL: Duration = Duration::from_secs(3600);
+/// DNS TXT record verification prefix - external domains must have TXT record: "tb-verification={node_id}"
+const DNS_VERIFICATION_PREFIX: &str = "tb-verification=";
 static REHEARSAL: AtomicBool = AtomicBool::new(true);
 
 type TxtResolver = Box<dyn Fn(&str) -> Vec<String> + Send + Sync>;
@@ -65,8 +67,8 @@ static DNS_METRICS: Lazy<Mutex<VecDeque<DnsMetricEvent>>> =
 struct DynamicReservePricingConfig {
     /// Enable dynamic reserve pricing
     enabled: bool,
-    /// Base reserve price in CT (default 1000)
-    base_reserve_ct: u64,
+    /// Base reserve price in BLOCK (default 1000)
+    base_reserve: u64,
     /// Length sensitivity factor (default 0.1 = 10% per character)
     length_sensitivity: f64,
     /// Historical performance weight (default 0.5)
@@ -77,7 +79,7 @@ impl Default for DynamicReservePricingConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            base_reserve_ct: 1000,
+            base_reserve: 1000,
             length_sensitivity: 0.1,
             history_weight: 0.5,
         }
@@ -113,10 +115,10 @@ fn compute_dynamic_reserve_price(domain: &str, prior_auction: Option<&DomainAuct
         .clone();
 
     if !config.enabled {
-        return config.base_reserve_ct;
+        return config.base_reserve;
     }
 
-    let base = config.base_reserve_ct as f64;
+    let base = config.base_reserve as f64;
 
     // 1. Length multiplier (shorter = more valuable)
     // 3-char domains: 1.0x, 4-char: 0.9x, 5-char: 0.8x, etc.
@@ -147,7 +149,7 @@ fn compute_dynamic_reserve_price(domain: &str, prior_auction: Option<&DomainAuct
     // Combine all factors
     let final_price = base * length_multiplier * history_multiplier;
 
-    // Round and ensure minimum of 1 CT
+    // Round and ensure minimum of 1 BLOCK
     final_price.round().max(1.0) as u64
 }
 
@@ -166,7 +168,7 @@ struct DomainBidRecord {
     amount: u64,
     stake_reference: Option<String>,
     placed_at: u64,
-    stake_locked_ct: u64,
+    stake_locked: u64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -177,8 +179,8 @@ struct DomainAuctionRecord {
     seller_stake: Option<String>,
     protocol_fee_bps: u16,
     royalty_bps: u16,
-    min_bid_ct: u64,
-    stake_requirement_ct: u64,
+    min_bid: u64,
+    stake_requirement: u64,
     start_ts: u64,
     end_ts: u64,
     status: AuctionStatus,
@@ -193,7 +195,7 @@ struct DomainOwnershipRecord {
     owner_account: String,
     acquired_at: u64,
     royalty_bps: u16,
-    last_sale_price_ct: u64,
+    last_sale_price: u64,
     owner_stake: Option<String>,
 }
 
@@ -204,9 +206,9 @@ struct DomainSaleRecord {
     sold_at: u64,
     seller_account: Option<String>,
     buyer_account: String,
-    price_ct: u64,
-    protocol_fee_ct: u64,
-    royalty_fee_ct: u64,
+    price: u64,
+    protocol_fee: u64,
+    royalty_fee: u64,
     ledger_events: Vec<LedgerEventRecord>,
 }
 
@@ -308,13 +310,13 @@ fn record_txt_result(ok: bool) {
     push_metric(DnsMetricKind::TxtResult { ok });
 }
 
-fn record_auction_completed(duration_secs: u64, settlement_ct: u64) {
+fn record_auction_completed(duration_secs: u64, settlement: u64) {
     push_metric(DnsMetricKind::AuctionCompleted {
         duration_secs,
-        settlement_ct,
+        settlement,
     });
     #[cfg(feature = "telemetry")]
-    record_dns_auction_completed(duration_secs, settlement_ct);
+    record_dns_auction_completed(duration_secs, settlement);
 }
 
 fn record_auction_cancelled() {
@@ -408,11 +410,11 @@ pub fn governance_metrics_snapshot(window_secs: u64) -> DnsMetricsSnapshot {
             }
             DnsMetricKind::AuctionCompleted {
                 duration_secs,
-                settlement_ct,
+                settlement,
             } => {
                 snapshot.auction_completions = snapshot.auction_completions.saturating_add(1);
                 snapshot.settle_durations_secs.push(*duration_secs);
-                snapshot.settlement_amounts_ct.push(*settlement_ct);
+                snapshot.settlement_amounts.push(*settlement);
             }
             DnsMetricKind::AuctionCancelled => {
                 snapshot.auction_cancels = snapshot.auction_cancels.saturating_add(1);
@@ -432,7 +434,7 @@ pub fn total_locked_stake() -> u64 {
     for key in db.keys_with_prefix("dns_stake/") {
         if let Some(bytes) = db.get(&key) {
             if let Ok(record) = decode_stake(&bytes) {
-                total = total.saturating_add(record.locked_ct);
+                total = total.saturating_add(record.locked);
             }
         }
     }
@@ -447,20 +449,11 @@ struct DnsMetricEvent {
 
 #[derive(Clone, Debug)]
 enum DnsMetricKind {
-    TxtResult {
-        ok: bool,
-    },
-    AuctionCompleted {
-        duration_secs: u64,
-        settlement_ct: u64,
-    },
+    TxtResult { ok: bool },
+    AuctionCompleted { duration_secs: u64, settlement: u64 },
     AuctionCancelled,
-    StakeLock {
-        _amount: u64,
-    },
-    StakeUnlock {
-        _amount: u64,
-    },
+    StakeLock { _amount: u64 },
+    StakeUnlock { _amount: u64 },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -470,7 +463,7 @@ pub struct DnsMetricsSnapshot {
     pub auction_completions: u64,
     pub auction_cancels: u64,
     pub settle_durations_secs: Vec<u64>,
-    pub settlement_amounts_ct: Vec<u64>,
+    pub settlement_amounts: Vec<u64>,
     pub stake_unlock_events: u64,
 }
 
@@ -480,26 +473,26 @@ struct StakeEscrowRecord {
     reference: String,
     owner_account: String,
     amount: u64,
-    locked_ct: u64,
+    locked: u64,
     ledger_events: Vec<LedgerEventRecord>,
 }
 
 impl StakeEscrowRecord {
     fn available(&self) -> u64 {
-        self.amount.saturating_sub(self.locked_ct)
+        self.amount.saturating_sub(self.locked)
     }
 
     fn lock(&mut self, amount: u64) -> Result<(), AuctionError> {
         if self.available() < amount {
             return Err(AuctionError::BidInsufficientStake);
         }
-        self.locked_ct = self.locked_ct.saturating_add(amount);
+        self.locked = self.locked.saturating_add(amount);
         Ok(())
     }
 
     fn unlock(&mut self, amount: u64) -> u64 {
-        let unlock_amount = amount.min(self.locked_ct);
-        self.locked_ct = self.locked_ct.saturating_sub(unlock_amount);
+        let unlock_amount = amount.min(self.locked);
+        self.locked = self.locked.saturating_sub(unlock_amount);
         unlock_amount
     }
 
@@ -530,13 +523,9 @@ impl BlockchainLedger {
     fn blank_account(address: &str) -> Account {
         Account {
             address: address.to_string(),
-            balance: TokenBalance {
-                consumer: 0,
-                industrial: 0,
-            },
+            balance: TokenBalance { amount: 0 },
             nonce: 0,
-            pending_consumer: 0,
-            pending_industrial: 0,
+            pending_amount: 0,
             pending_nonce: 0,
             pending_nonces: HashSet::new(),
             sessions: Vec::new(),
@@ -578,18 +567,16 @@ impl DomainLedger for BlockchainLedger {
 
             match command.kind() {
                 LedgerBatchKind::Debit => {
-                    if entry.balance.consumer < command.amount() {
+                    if entry.balance.amount < command.amount() {
                         return Err(AuctionError::BidInsufficientStake);
                     }
-                    entry.balance.consumer -= command.amount();
+                    entry.balance.amount -= command.amount();
                 }
                 LedgerBatchKind::Credit => {
-                    entry.balance.consumer =
-                        entry.balance.consumer.saturating_add(command.amount());
+                    entry.balance.amount = entry.balance.amount.saturating_add(command.amount());
                 }
                 LedgerBatchKind::CreditTreasury => {
-                    entry.balance.consumer =
-                        entry.balance.consumer.saturating_add(command.amount());
+                    entry.balance.amount = entry.balance.amount.saturating_add(command.amount());
                 }
             }
             let _ = command.memo();
@@ -1008,7 +995,7 @@ pub fn seed_stake(reference: &str, owner: &str, amount: u64) {
         reference: reference.to_string(),
         owner_account: owner.to_string(),
         amount,
-        locked_ct: 0,
+        locked: 0,
         ledger_events: Vec::new(),
     };
     persist_stake(&mut db, &record).expect("seed stake");
@@ -1018,20 +1005,21 @@ pub fn seed_stake(reference: &str, owner: &str, amount: u64) {
 pub struct StakeSnapshot {
     pub owner_account: String,
     pub amount: u64,
-    pub locked_ct: u64,
+    pub locked: u64,
 }
 
 #[cfg(any(test, feature = "integration-tests"))]
 pub fn stake_snapshot(reference: &str) -> Option<StakeSnapshot> {
-    let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    load_stake(&db, reference)
-        .ok()
-        .flatten()
-        .map(|record| StakeSnapshot {
-            owner_account: record.owner_account,
-            amount: record.amount,
-            locked_ct: record.locked_ct,
-        })
+    let record = {
+        let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+        load_stake(&db, reference).ok().flatten()?
+    }; // DNS_DB lock automatically released here
+
+    Some(StakeSnapshot {
+        owner_account: record.owner_account,
+        amount: record.amount,
+        locked: record.locked,
+    })
 }
 
 pub fn register_stake(params: &Value) -> Result<Value, AuctionError> {
@@ -1051,45 +1039,47 @@ pub fn register_stake(params: &Value) -> Result<Value, AuctionError> {
     if owner.is_empty() {
         return Err(AuctionError::InvalidBidder);
     }
-    let deposit = params
-        .get("deposit_ct")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let deposit = params.get("deposit").and_then(|v| v.as_u64()).unwrap_or(0);
     if deposit == 0 {
         return Err(AuctionError::StakeAmountZero);
     }
 
     let ledger = ledger_handle()?;
 
-    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    let existing = load_stake(&db, reference)?;
-    let record = match existing {
-        Some(record) => {
-            if record.owner_account != owner {
-                return Err(AuctionError::StakeOwnerMismatch);
+    // Perform database operations with lock held, then release before building return value
+    let (tx_ref, updated) = {
+        let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+        let existing = load_stake(&db, reference)?;
+        let record = match existing {
+            Some(record) => {
+                if record.owner_account != owner {
+                    return Err(AuctionError::StakeOwnerMismatch);
+                }
+                record
             }
-            record
+            None => StakeEscrowRecord {
+                reference: reference.to_string(),
+                owner_account: owner.to_string(),
+                amount: 0,
+                locked: 0,
+                ledger_events: Vec::new(),
+            },
+        };
+
+        let mut updated = record.clone();
+        let memo = format!("dns_stake_deposit:{reference}");
+        let tx_ref = ledger.debit(owner, deposit, &memo)?;
+        updated.amount = updated.amount.saturating_add(deposit);
+        updated.push_event(LedgerEventKind::StakeDeposit, deposit, tx_ref.clone());
+
+        if let Err(err) = persist_stake(&mut db, &updated) {
+            let revert_memo = format!("dns_stake_revert:{reference}");
+            let _ = ledger.credit(owner, deposit, &revert_memo);
+            return Err(err);
         }
-        None => StakeEscrowRecord {
-            reference: reference.to_string(),
-            owner_account: owner.to_string(),
-            amount: 0,
-            locked_ct: 0,
-            ledger_events: Vec::new(),
-        },
-    };
 
-    let mut updated = record.clone();
-    let memo = format!("dns_stake_deposit:{reference}");
-    let tx_ref = ledger.debit(owner, deposit, &memo)?;
-    updated.amount = updated.amount.saturating_add(deposit);
-    updated.push_event(LedgerEventKind::StakeDeposit, deposit, tx_ref.clone());
-
-    if let Err(err) = persist_stake(&mut db, &updated) {
-        let revert_memo = format!("dns_stake_revert:{reference}");
-        let _ = ledger.credit(owner, deposit, &revert_memo);
-        return Err(err);
-    }
+        (tx_ref, updated)
+    }; // DNS_DB lock automatically released here
 
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
@@ -1115,10 +1105,7 @@ pub fn withdraw_stake(params: &Value) -> Result<Value, AuctionError> {
     if owner.is_empty() {
         return Err(AuctionError::InvalidBidder);
     }
-    let withdraw = params
-        .get("withdraw_ct")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let withdraw = params.get("withdraw").and_then(|v| v.as_u64()).unwrap_or(0);
     if withdraw == 0 {
         return Err(AuctionError::StakeAmountZero);
     }
@@ -1150,7 +1137,7 @@ pub fn withdraw_stake(params: &Value) -> Result<Value, AuctionError> {
             record_stake_unlock(withdraw);
             Ok(json_map(vec![
                 ("status", Value::String("ok".to_string())),
-                ("withdrawn_ct", Value::Number(Number::from(withdraw))),
+                ("withdrawn", Value::Number(Number::from(withdraw))),
                 ("tx_ref", Value::String(tx_ref)),
                 ("stake", stake_to_json(&updated)),
             ]))
@@ -1197,57 +1184,62 @@ pub fn cancel_sale(params: &Value) -> Result<Value, AuctionError> {
         return Err(AuctionError::InvalidSeller);
     }
 
-    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    let key = auction_key(domain);
-    let mut record = match db.get(&key) {
-        Some(bytes) => decode_auction(&bytes)?,
-        None => return Err(AuctionError::AuctionMissing),
-    };
+    // Perform all database operations with lock held, then release before building return value
+    let record = {
+        let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+        let key = auction_key(domain);
+        let mut record = match db.get(&key) {
+            Some(bytes) => decode_auction(&bytes)?,
+            None => return Err(AuctionError::AuctionMissing),
+        };
 
-    if record.status != AuctionStatus::Active {
-        return Err(AuctionError::AuctionClosed);
-    }
-    if record.seller_account.as_ref().map(|s| s.as_str()) != Some(seller) {
-        return Err(AuctionError::OwnershipMismatch);
-    }
-
-    if let Some(mut highest) = record.highest_bid.take() {
-        if let (Some(reference), amount) =
-            (highest.stake_reference.as_ref(), highest.stake_locked_ct)
-        {
-            if amount > 0 {
-                let mut stake_record = load_stake_or_err(&db, reference)?;
-                stake_record.unlock(amount);
-                persist_stake(&mut db, &stake_record)?;
-            }
+        if record.status != AuctionStatus::Active {
+            return Err(AuctionError::AuctionClosed);
         }
-        highest.stake_locked_ct = 0;
-        record.highest_bid = None;
-        for bid in record.bids.iter_mut().rev() {
-            if bid.bidder == highest.bidder && bid.placed_at == highest.placed_at {
-                bid.stake_locked_ct = 0;
-                break;
-            }
+        if record.seller_account.as_ref().map(|s| s.as_str()) != Some(seller) {
+            return Err(AuctionError::OwnershipMismatch);
         }
-    }
 
-    if let Some(reference) = record.seller_stake.as_ref() {
-        if !reference.is_empty() {
-            if let Some(mut stake_record) = load_stake(&db, reference)? {
-                if stake_record.owner_account == seller && stake_record.locked_ct > 0 {
-                    let locked = stake_record.locked_ct;
-                    stake_record.unlock(locked);
+        if let Some(mut highest) = record.highest_bid.take() {
+            if let (Some(reference), amount) =
+                (highest.stake_reference.as_ref(), highest.stake_locked)
+            {
+                if amount > 0 {
+                    let mut stake_record = load_stake_or_err(&db, reference)?;
+                    stake_record.unlock(amount);
                     persist_stake(&mut db, &stake_record)?;
                 }
             }
+            highest.stake_locked = 0;
+            record.highest_bid = None;
+            for bid in record.bids.iter_mut().rev() {
+                if bid.bidder == highest.bidder && bid.placed_at == highest.placed_at {
+                    bid.stake_locked = 0;
+                    break;
+                }
+            }
         }
-    }
 
-    record.status = AuctionStatus::Cancelled;
-    record.end_ts = now_ts();
-    let bytes = encode_auction(&record)?;
-    db.insert(&key, bytes);
-    record_auction_cancelled();
+        if let Some(reference) = record.seller_stake.as_ref() {
+            if !reference.is_empty() {
+                if let Some(mut stake_record) = load_stake(&db, reference)? {
+                    if stake_record.owner_account == seller && stake_record.locked > 0 {
+                        let locked = stake_record.locked;
+                        stake_record.unlock(locked);
+                        persist_stake(&mut db, &stake_record)?;
+                    }
+                }
+            }
+        }
+
+        record.status = AuctionStatus::Cancelled;
+        record.end_ts = now_ts();
+        let bytes = encode_auction(&record)?;
+        db.insert(&key, bytes);
+        record_auction_cancelled();
+
+        record
+    }; // DNS_DB lock automatically released here
 
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
@@ -1276,8 +1268,8 @@ fn bid_to_json(bid: &DomainBidRecord) -> Value {
                 .unwrap_or(Value::Null),
         ),
         (
-            "stake_locked_ct",
-            Value::Number(Number::from(bid.stake_locked_ct)),
+            "stake_locked",
+            Value::Number(Number::from(bid.stake_locked)),
         ),
     ])
 }
@@ -1294,11 +1286,8 @@ fn stake_to_json(record: &StakeEscrowRecord) -> Value {
         ("reference", Value::String(record.reference.clone())),
         ("owner_account", Value::String(record.owner_account.clone())),
         ("amount", Value::Number(Number::from(record.amount))),
-        ("locked_ct", Value::Number(Number::from(record.locked_ct))),
-        (
-            "available_ct",
-            Value::Number(Number::from(record.available())),
-        ),
+        ("locked", Value::Number(Number::from(record.locked))),
+        ("available", Value::Number(Number::from(record.available()))),
         ("ledger_events", events),
     ])
 }
@@ -1336,10 +1325,10 @@ fn auction_to_json(record: &DomainAuctionRecord) -> Value {
             "royalty_bps",
             Value::Number(Number::from(record.royalty_bps)),
         ),
-        ("min_bid_ct", Value::Number(Number::from(record.min_bid_ct))),
+        ("min_bid", Value::Number(Number::from(record.min_bid))),
         (
-            "stake_requirement_ct",
-            Value::Number(Number::from(record.stake_requirement_ct)),
+            "stake_requirement",
+            Value::Number(Number::from(record.stake_requirement)),
         ),
         ("start_ts", Value::Number(Number::from(record.start_ts))),
         ("end_ts", Value::Number(Number::from(record.end_ts))),
@@ -1365,8 +1354,8 @@ fn ownership_to_json(record: &DomainOwnershipRecord) -> Value {
             Value::Number(Number::from(record.royalty_bps)),
         ),
         (
-            "last_sale_price_ct",
-            Value::Number(Number::from(record.last_sale_price_ct)),
+            "last_sale_price",
+            Value::Number(Number::from(record.last_sale_price)),
         ),
         (
             "owner_stake",
@@ -1399,14 +1388,14 @@ fn sale_to_json(record: &DomainSaleRecord) -> Value {
         ),
         ("buyer_account", Value::String(record.buyer_account.clone())),
         ("sold_at", Value::Number(Number::from(record.sold_at))),
-        ("price_ct", Value::Number(Number::from(record.price_ct))),
+        ("price", Value::Number(Number::from(record.price))),
         (
-            "protocol_fee_ct",
-            Value::Number(Number::from(record.protocol_fee_ct)),
+            "protocol_fee",
+            Value::Number(Number::from(record.protocol_fee)),
         ),
         (
-            "royalty_fee_ct",
-            Value::Number(Number::from(record.royalty_fee_ct)),
+            "royalty_fee",
+            Value::Number(Number::from(record.royalty_fee)),
         ),
         ("ledger_events", events),
     ])
@@ -1459,7 +1448,7 @@ fn write_bid(writer: &mut BinaryWriter, bid: &DomainBidRecord) {
         s.field_u64("amount", bid.amount);
         s.field_option_string("stake_reference", bid.stake_reference.as_deref());
         s.field_u64("placed_at", bid.placed_at);
-        s.field_u64("stake_locked_ct", bid.stake_locked_ct);
+        s.field_u64("stake_locked", bid.stake_locked);
     });
 }
 
@@ -1487,9 +1476,9 @@ fn read_bid(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainBidRec
             let value = reader.read_u64()?;
             assign_once(&mut placed_at, value, "placed_at")
         }
-        "stake_locked_ct" => {
+        "stake_locked" => {
             let value = reader.read_u64()?;
-            assign_once(&mut stake_locked, value, "stake_locked_ct")
+            assign_once(&mut stake_locked, value, "stake_locked")
         }
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
@@ -1499,7 +1488,7 @@ fn read_bid(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainBidRec
         amount: amount.ok_or(DecodeError::MissingField("amount"))?,
         stake_reference: stake.unwrap_or(None),
         placed_at: placed_at.ok_or(DecodeError::MissingField("placed_at"))?,
-        stake_locked_ct: stake_locked.unwrap_or(0),
+        stake_locked: stake_locked.unwrap_or(0),
     })
 }
 
@@ -1558,8 +1547,8 @@ fn write_auction(writer: &mut BinaryWriter, record: &DomainAuctionRecord) {
         s.field_option_string("seller_stake", record.seller_stake.as_deref());
         s.field_with("protocol_fee_bps", |w| w.write_u16(record.protocol_fee_bps));
         s.field_with("royalty_bps", |w| w.write_u16(record.royalty_bps));
-        s.field_u64("min_bid_ct", record.min_bid_ct);
-        s.field_u64("stake_requirement_ct", record.stake_requirement_ct);
+        s.field_u64("min_bid", record.min_bid);
+        s.field_u64("stake_requirement", record.stake_requirement);
         s.field_u64("start_ts", record.start_ts);
         s.field_u64("end_ts", record.end_ts);
         s.field_u8("status", status_to_u8(record.status));
@@ -1576,8 +1565,8 @@ fn read_auction(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainAu
     let mut seller_stake: Option<Option<String>> = None;
     let mut protocol_fee_bps = None;
     let mut royalty_bps = None;
-    let mut min_bid_ct = None;
-    let mut stake_requirement_ct = None;
+    let mut min_bid = None;
+    let mut stake_requirement = None;
     let mut start_ts = None;
     let mut end_ts = None;
     let mut status = None;
@@ -1605,13 +1594,13 @@ fn read_auction(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainAu
             let value = reader.read_u16()?;
             assign_once(&mut royalty_bps, value, "royalty_bps")
         }
-        "min_bid_ct" => {
+        "min_bid" => {
             let value = reader.read_u64()?;
-            assign_once(&mut min_bid_ct, value, "min_bid_ct")
+            assign_once(&mut min_bid, value, "min_bid")
         }
-        "stake_requirement_ct" => {
+        "stake_requirement" => {
             let value = reader.read_u64()?;
-            assign_once(&mut stake_requirement_ct, value, "stake_requirement_ct")
+            assign_once(&mut stake_requirement, value, "stake_requirement")
         }
         "start_ts" => {
             let value = reader.read_u64()?;
@@ -1643,9 +1632,9 @@ fn read_auction(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainAu
         seller_stake: seller_stake.unwrap_or(None),
         protocol_fee_bps: protocol_fee_bps.ok_or(DecodeError::MissingField("protocol_fee_bps"))?,
         royalty_bps: royalty_bps.ok_or(DecodeError::MissingField("royalty_bps"))?,
-        min_bid_ct: min_bid_ct.ok_or(DecodeError::MissingField("min_bid_ct"))?,
-        stake_requirement_ct: stake_requirement_ct
-            .ok_or(DecodeError::MissingField("stake_requirement_ct"))?,
+        min_bid: min_bid.ok_or(DecodeError::MissingField("min_bid"))?,
+        stake_requirement: stake_requirement
+            .ok_or(DecodeError::MissingField("stake_requirement"))?,
         start_ts: start_ts.ok_or(DecodeError::MissingField("start_ts"))?,
         end_ts: end_ts.ok_or(DecodeError::MissingField("end_ts"))?,
         status: status.ok_or(DecodeError::MissingField("status"))?,
@@ -1660,7 +1649,7 @@ fn write_ownership(writer: &mut BinaryWriter, record: &DomainOwnershipRecord) {
         s.field_string("owner_account", &record.owner_account);
         s.field_u64("acquired_at", record.acquired_at);
         s.field_with("royalty_bps", |w| w.write_u16(record.royalty_bps));
-        s.field_u64("last_sale_price_ct", record.last_sale_price_ct);
+        s.field_u64("last_sale_price", record.last_sale_price);
         s.field_option_string("owner_stake", record.owner_stake.as_deref());
     });
 }
@@ -1690,9 +1679,9 @@ fn read_ownership(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Domain
             let value = reader.read_u16()?;
             assign_once(&mut royalty_bps, value, "royalty_bps")
         }
-        "last_sale_price_ct" => {
+        "last_sale_price" => {
             let value = reader.read_u64()?;
-            assign_once(&mut last_sale_price, value, "last_sale_price_ct")
+            assign_once(&mut last_sale_price, value, "last_sale_price")
         }
         "owner_stake" => {
             let value = reader.read_option_with(|r| r.read_string())?;
@@ -1706,8 +1695,7 @@ fn read_ownership(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Domain
         owner_account: owner_account.ok_or(DecodeError::MissingField("owner_account"))?,
         acquired_at: acquired_at.ok_or(DecodeError::MissingField("acquired_at"))?,
         royalty_bps: royalty_bps.ok_or(DecodeError::MissingField("royalty_bps"))?,
-        last_sale_price_ct: last_sale_price
-            .ok_or(DecodeError::MissingField("last_sale_price_ct"))?,
+        last_sale_price: last_sale_price.ok_or(DecodeError::MissingField("last_sale_price"))?,
         owner_stake: owner_stake.unwrap_or(None),
     })
 }
@@ -1718,9 +1706,9 @@ fn write_sale(writer: &mut BinaryWriter, record: &DomainSaleRecord) {
         s.field_option_string("seller_account", record.seller_account.as_deref());
         s.field_string("buyer_account", &record.buyer_account);
         s.field_u64("sold_at", record.sold_at);
-        s.field_u64("price_ct", record.price_ct);
-        s.field_u64("protocol_fee_ct", record.protocol_fee_ct);
-        s.field_u64("royalty_fee_ct", record.royalty_fee_ct);
+        s.field_u64("price", record.price);
+        s.field_u64("protocol_fee", record.protocol_fee);
+        s.field_u64("royalty_fee", record.royalty_fee);
         s.field_with("ledger_events", |w| {
             w.write_vec_with(&record.ledger_events, write_ledger_event)
         });
@@ -1732,7 +1720,7 @@ fn write_stake(writer: &mut BinaryWriter, record: &StakeEscrowRecord) {
         s.field_string("reference", &record.reference);
         s.field_string("owner_account", &record.owner_account);
         s.field_u64("amount", record.amount);
-        s.field_u64("locked_ct", record.locked_ct);
+        s.field_u64("locked", record.locked);
         s.field_with("ledger_events", |w| {
             w.write_vec_with(&record.ledger_events, write_ledger_event)
         });
@@ -1766,17 +1754,17 @@ fn read_sale(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainSaleR
             let value = reader.read_u64()?;
             assign_once(&mut sold_at, value, "sold_at")
         }
-        "price_ct" => {
+        "price" => {
             let value = reader.read_u64()?;
-            assign_once(&mut price, value, "price_ct")
+            assign_once(&mut price, value, "price")
         }
-        "protocol_fee_ct" => {
+        "protocol_fee" => {
             let value = reader.read_u64()?;
-            assign_once(&mut protocol_fee, value, "protocol_fee_ct")
+            assign_once(&mut protocol_fee, value, "protocol_fee")
         }
-        "royalty_fee_ct" => {
+        "royalty_fee" => {
             let value = reader.read_u64()?;
-            assign_once(&mut royalty_fee, value, "royalty_fee_ct")
+            assign_once(&mut royalty_fee, value, "royalty_fee")
         }
         "ledger_events" => {
             let value = reader.read_vec_with(|r| read_ledger_event(r))?;
@@ -1790,9 +1778,9 @@ fn read_sale(reader: &mut BinaryReader<'_>) -> binary_struct::Result<DomainSaleR
         seller_account: seller_account.unwrap_or(None),
         buyer_account: buyer_account.ok_or(DecodeError::MissingField("buyer_account"))?,
         sold_at: sold_at.ok_or(DecodeError::MissingField("sold_at"))?,
-        price_ct: price.ok_or(DecodeError::MissingField("price_ct"))?,
-        protocol_fee_ct: protocol_fee.ok_or(DecodeError::MissingField("protocol_fee_ct"))?,
-        royalty_fee_ct: royalty_fee.ok_or(DecodeError::MissingField("royalty_fee_ct"))?,
+        price: price.ok_or(DecodeError::MissingField("price"))?,
+        protocol_fee: protocol_fee.ok_or(DecodeError::MissingField("protocol_fee"))?,
+        royalty_fee: royalty_fee.ok_or(DecodeError::MissingField("royalty_fee"))?,
         ledger_events: ledger_events.unwrap_or_default(),
     })
 }
@@ -1817,9 +1805,9 @@ fn read_stake(reader: &mut BinaryReader<'_>) -> binary_struct::Result<StakeEscro
             let value = reader.read_u64()?;
             assign_once(&mut amount, value, "amount")
         }
-        "locked_ct" => {
+        "locked" => {
             let value = reader.read_u64()?;
-            assign_once(&mut locked, value, "locked_ct")
+            assign_once(&mut locked, value, "locked")
         }
         "ledger_events" => {
             let value = reader.read_vec_with(|r| read_ledger_event(r))?;
@@ -1832,7 +1820,7 @@ fn read_stake(reader: &mut BinaryReader<'_>) -> binary_struct::Result<StakeEscro
         reference: reference.ok_or(DecodeError::MissingField("reference"))?,
         owner_account: owner.ok_or(DecodeError::MissingField("owner_account"))?,
         amount: amount.ok_or(DecodeError::MissingField("amount"))?,
-        locked_ct: locked.unwrap_or(0),
+        locked: locked.unwrap_or(0),
         ledger_events: ledger_events.unwrap_or_default(),
     })
 }
@@ -1896,116 +1884,120 @@ pub fn list_for_sale(params: &Value) -> Result<Value, AuctionError> {
         .unwrap_or("")
         .trim();
 
-    // Load database and prior auction record (needed for dynamic pricing)
-    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    ensure_domain_allowed(domain, &db)?;
+    // Perform all database operations with lock held, then release before building return value
+    let record = {
+        let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+        ensure_domain_allowed(domain, &db)?;
 
-    let mut prior_record = None;
-    if let Some(bytes) = db.get(&auction_key(domain)) {
-        let existing = decode_auction(&bytes)?;
-        if existing.status == AuctionStatus::Active {
-            return Err(AuctionError::ListingActive);
-        }
-        prior_record = Some(existing);
-    }
-
-    // Compute dynamic reserve price based on domain quality
-    let computed_reserve = compute_dynamic_reserve_price(domain, prior_record.as_ref());
-
-    // Use user-provided min_bid if specified, otherwise use computed reserve
-    let min_bid = params
-        .get("min_bid_ct")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(computed_reserve);
-
-    if min_bid == 0 {
-        return Err(AuctionError::BidTooLow);
-    }
-    let mut stake_requirement = params
-        .get("stake_requirement_ct")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(min_bid);
-    if stake_requirement < min_bid {
-        stake_requirement = min_bid;
-    }
-    let duration_secs = params
-        .get("duration_secs")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(86_400);
-    let mut royalty_bps_param = params
-        .get("royalty_bps")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    if royalty_bps_param > 10_000 {
-        royalty_bps_param = 10_000;
-    }
-    let seller_account = params
-        .get("seller_account")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let mut seller_stake = params
-        .get("seller_stake")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    // Database and prior_record already loaded above for dynamic pricing
-
-    let mut protocol_fee_bps = params
-        .get("protocol_fee_bps")
-        .and_then(|v| v.as_u64())
-        .or_else(|| {
-            prior_record
-                .as_ref()
-                .map(|record| record.protocol_fee_bps as u64)
-        })
-        .unwrap_or(500);
-    if protocol_fee_bps > 10_000 {
-        protocol_fee_bps = 10_000;
-    }
-
-    let ownership = db
-        .get(&ownership_key(domain))
-        .map(|bytes| decode_ownership(&bytes))
-        .transpose()?;
-
-    let mut royalty_bps = royalty_bps_param as u16;
-    if let Some(owner) = ownership {
-        royalty_bps = owner.royalty_bps;
-        match seller_account.as_ref() {
-            Some(seller) if seller == &owner.owner_account => {}
-            _ => return Err(AuctionError::OwnershipMismatch),
-        }
-        match (owner.owner_stake.as_ref(), seller_stake.as_ref()) {
-            (Some(existing), Some(provided)) if existing != provided => {
-                return Err(AuctionError::OwnershipMismatch);
+        let mut prior_record = None;
+        if let Some(bytes) = db.get(&auction_key(domain)) {
+            let existing = decode_auction(&bytes)?;
+            if existing.status == AuctionStatus::Active {
+                return Err(AuctionError::ListingActive);
             }
-            (Some(existing), None) => {
-                seller_stake = Some(existing.clone());
-            }
-            _ => {}
+            prior_record = Some(existing);
         }
-    }
 
-    let start_ts = now_ts();
-    let end_ts = start_ts.saturating_add(duration_secs);
+        // Compute dynamic reserve price based on domain quality
+        let computed_reserve = compute_dynamic_reserve_price(domain, prior_record.as_ref());
 
-    let record = DomainAuctionRecord {
-        domain: domain.to_string(),
-        seller_account: seller_account.clone(),
-        seller_stake,
-        protocol_fee_bps: protocol_fee_bps as u16,
-        royalty_bps,
-        min_bid_ct: min_bid,
-        stake_requirement_ct: stake_requirement,
-        start_ts,
-        end_ts,
-        status: AuctionStatus::Active,
-        highest_bid: None,
-        bids: Vec::new(),
-    };
+        // Use user-provided min_bid if specified, otherwise use computed reserve
+        let min_bid = params
+            .get("min_bid")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(computed_reserve);
 
-    let bytes = encode_auction(&record)?;
-    db.insert(&auction_key(domain), bytes);
+        if min_bid == 0 {
+            return Err(AuctionError::BidTooLow);
+        }
+        let mut stake_requirement = params
+            .get("stake_requirement")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(min_bid);
+        if stake_requirement < min_bid {
+            stake_requirement = min_bid;
+        }
+        let duration_secs = params
+            .get("duration_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(86_400);
+        let mut royalty_bps_param = params
+            .get("royalty_bps")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if royalty_bps_param > 10_000 {
+            royalty_bps_param = 10_000;
+        }
+        let seller_account = params
+            .get("seller_account")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let mut seller_stake = params
+            .get("seller_stake")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Database and prior_record already loaded above for dynamic pricing
+
+        let mut protocol_fee_bps = params
+            .get("protocol_fee_bps")
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                prior_record
+                    .as_ref()
+                    .map(|record| record.protocol_fee_bps as u64)
+            })
+            .unwrap_or(500);
+        if protocol_fee_bps > 10_000 {
+            protocol_fee_bps = 10_000;
+        }
+
+        let ownership = db
+            .get(&ownership_key(domain))
+            .map(|bytes| decode_ownership(&bytes))
+            .transpose()?;
+
+        let mut royalty_bps = royalty_bps_param as u16;
+        if let Some(owner) = ownership {
+            royalty_bps = owner.royalty_bps;
+            match seller_account.as_ref() {
+                Some(seller) if seller == &owner.owner_account => {}
+                _ => return Err(AuctionError::OwnershipMismatch),
+            }
+            match (owner.owner_stake.as_ref(), seller_stake.as_ref()) {
+                (Some(existing), Some(provided)) if existing != provided => {
+                    return Err(AuctionError::OwnershipMismatch);
+                }
+                (Some(existing), None) => {
+                    seller_stake = Some(existing.clone());
+                }
+                _ => {}
+            }
+        }
+
+        let start_ts = now_ts();
+        let end_ts = start_ts.saturating_add(duration_secs);
+
+        let record = DomainAuctionRecord {
+            domain: domain.to_string(),
+            seller_account: seller_account.clone(),
+            seller_stake,
+            protocol_fee_bps: protocol_fee_bps as u16,
+            royalty_bps,
+            min_bid: min_bid,
+            stake_requirement: stake_requirement,
+            start_ts,
+            end_ts,
+            status: AuctionStatus::Active,
+            highest_bid: None,
+            bids: Vec::new(),
+        };
+
+        let bytes = encode_auction(&record)?;
+        db.insert(&auction_key(domain), bytes);
+
+        record
+    }; // DNS_DB lock automatically released here
 
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
@@ -2028,7 +2020,7 @@ pub fn place_bid(params: &Value) -> Result<Value, AuctionError> {
         return Err(AuctionError::InvalidBidder);
     }
     let amount = params
-        .get("bid_ct")
+        .get("bid")
         .and_then(|v| v.as_u64())
         .ok_or(AuctionError::BidTooLow)?;
     if amount == 0 {
@@ -2039,89 +2031,94 @@ pub fn place_bid(params: &Value) -> Result<Value, AuctionError> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    let key = auction_key(domain);
-    let mut record = match db.get(&key) {
-        Some(bytes) => decode_auction(&bytes)?,
-        None => return Err(AuctionError::AuctionMissing),
-    };
+    // Perform all database operations with lock held, then release before building return value
+    let record = {
+        let mut db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+        let key = auction_key(domain);
+        let mut record = match db.get(&key) {
+            Some(bytes) => decode_auction(&bytes)?,
+            None => return Err(AuctionError::AuctionMissing),
+        };
 
-    if record.status != AuctionStatus::Active {
-        return Err(AuctionError::AuctionClosed);
-    }
-    let now = now_ts();
-    if now >= record.end_ts {
-        return Err(AuctionError::AuctionExpired);
-    }
-    if amount < record.min_bid_ct {
-        return Err(AuctionError::BidTooLow);
-    }
-    if amount < record.stake_requirement_ct {
-        return Err(AuctionError::BidInsufficientStake);
-    }
-    if let Some(highest) = record.highest_bid.as_ref() {
-        if amount <= highest.amount {
+        if record.status != AuctionStatus::Active {
+            return Err(AuctionError::AuctionClosed);
+        }
+        let now = now_ts();
+        if now >= record.end_ts {
+            return Err(AuctionError::AuctionExpired);
+        }
+        if amount < record.min_bid {
             return Err(AuctionError::BidTooLow);
         }
-    }
-
-    let prev_highest = record.highest_bid.clone();
-
-    let mut locked_amount = 0u64;
-    let mut stake_ref_for_bid = stake_reference.clone();
-
-    if record.stake_requirement_ct > 0 {
-        let reference = stake_reference
-            .clone()
-            .ok_or(AuctionError::BidInsufficientStake)?;
-        let reuse_lock = prev_highest.as_ref().map_or(false, |prev| {
-            prev.bidder == bidder && prev.stake_reference.as_ref() == Some(&reference)
-        });
-        if reuse_lock {
-            locked_amount = prev_highest
-                .as_ref()
-                .map(|prev| prev.stake_locked_ct)
-                .unwrap_or(record.stake_requirement_ct);
-        } else {
-            let mut stake_record = load_stake_or_err(&db, &reference)?;
-            if stake_record.owner_account != bidder {
-                return Err(AuctionError::BidInsufficientStake);
-            }
-            stake_record.lock(record.stake_requirement_ct)?;
-            record_stake_lock(record.stake_requirement_ct);
-            locked_amount = record.stake_requirement_ct;
-            persist_stake(&mut db, &stake_record)?;
+        if amount < record.stake_requirement {
+            return Err(AuctionError::BidInsufficientStake);
         }
-        stake_ref_for_bid = Some(reference);
-    }
+        if let Some(highest) = record.highest_bid.as_ref() {
+            if amount <= highest.amount {
+                return Err(AuctionError::BidTooLow);
+            }
+        }
 
-    let bid = DomainBidRecord {
-        bidder: bidder.to_string(),
-        amount: amount,
-        stake_reference: stake_ref_for_bid.clone(),
-        placed_at: now,
-        stake_locked_ct: locked_amount,
-    };
-    record.highest_bid = Some(bid.clone());
-    record.bids.push(bid);
+        let prev_highest = record.highest_bid.clone();
 
-    if let Some(previous) = prev_highest {
-        if let (Some(reference), amount) =
-            (previous.stake_reference.as_ref(), previous.stake_locked_ct)
-        {
-            if amount > 0
-                && (Some(reference) != stake_ref_for_bid.as_ref() || previous.bidder != bidder)
-            {
-                let mut stake_record = load_stake_or_err(&db, reference)?;
-                stake_record.unlock(amount);
-                record_stake_unlock(amount);
+        let mut locked_amount = 0u64;
+        let mut stake_ref_for_bid = stake_reference.clone();
+
+        if record.stake_requirement > 0 {
+            let reference = stake_reference
+                .clone()
+                .ok_or(AuctionError::BidInsufficientStake)?;
+            let reuse_lock = prev_highest.as_ref().map_or(false, |prev| {
+                prev.bidder == bidder && prev.stake_reference.as_ref() == Some(&reference)
+            });
+            if reuse_lock {
+                locked_amount = prev_highest
+                    .as_ref()
+                    .map(|prev| prev.stake_locked)
+                    .unwrap_or(record.stake_requirement);
+            } else {
+                let mut stake_record = load_stake_or_err(&db, &reference)?;
+                if stake_record.owner_account != bidder {
+                    return Err(AuctionError::BidInsufficientStake);
+                }
+                stake_record.lock(record.stake_requirement)?;
+                record_stake_lock(record.stake_requirement);
+                locked_amount = record.stake_requirement;
                 persist_stake(&mut db, &stake_record)?;
             }
+            stake_ref_for_bid = Some(reference);
         }
-    }
 
-    let bytes = encode_auction(&record)?;
-    db.insert(&key, bytes);
+        let bid = DomainBidRecord {
+            bidder: bidder.to_string(),
+            amount: amount,
+            stake_reference: stake_ref_for_bid.clone(),
+            placed_at: now,
+            stake_locked: locked_amount,
+        };
+        record.highest_bid = Some(bid.clone());
+        record.bids.push(bid);
+
+        if let Some(previous) = prev_highest {
+            if let (Some(reference), amount) =
+                (previous.stake_reference.as_ref(), previous.stake_locked)
+            {
+                if amount > 0
+                    && (Some(reference) != stake_ref_for_bid.as_ref() || previous.bidder != bidder)
+                {
+                    let mut stake_record = load_stake_or_err(&db, reference)?;
+                    stake_record.unlock(amount);
+                    record_stake_unlock(amount);
+                    persist_stake(&mut db, &stake_record)?;
+                }
+            }
+        }
+
+        let bytes = encode_auction(&record)?;
+        db.insert(&key, bytes);
+
+        record
+    }; // DNS_DB lock automatically released here
 
     Ok(json_map(vec![
         ("status", Value::String("ok".to_string())),
@@ -2166,14 +2163,14 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
         }
     };
 
-    let protocol_fee_ct = winning_bid
+    let protocol_fee = winning_bid
         .amount
         .saturating_mul(record.protocol_fee_bps as u64)
         / 10_000;
 
-    let royalty_fee_ct = winning_bid.amount.saturating_mul(record.royalty_bps as u64) / 10_000;
+    let royalty_fee = winning_bid.amount.saturating_mul(record.royalty_bps as u64) / 10_000;
 
-    record_treasury_fee(protocol_fee_ct.saturating_add(royalty_fee_ct));
+    record_treasury_fee(protocol_fee.saturating_add(royalty_fee));
 
     let ownership_key = ownership_key(domain);
     let ownership = db
@@ -2204,11 +2201,11 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
 
     let seller_payout = winning_bid
         .amount
-        .saturating_sub(protocol_fee_ct)
-        .saturating_sub(royalty_fee_ct);
+        .saturating_sub(protocol_fee)
+        .saturating_sub(royalty_fee);
     if let Some(stake_ref) = record.seller_stake.as_ref() {
         if let Some(mut stake_record) = load_stake(&db, stake_ref)? {
-            let refund_amount = stake_record.unlock(stake_record.locked_ct);
+            let refund_amount = stake_record.unlock(stake_record.locked);
             persist_stake(&mut db, &stake_record)?;
             if refund_amount > 0 {
                 record_stake_unlock(refund_amount);
@@ -2239,7 +2236,7 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
         }
     }
 
-    if royalty_fee_ct > 0 {
+    if royalty_fee > 0 {
         let royalty_recipient = prior_sale
             .as_ref()
             .and_then(|sale| sale.seller_account.clone())
@@ -2249,7 +2246,7 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
                 LedgerEventKind::CreditRoyalty,
                 LedgerBatchCommand::credit(
                     &recipient,
-                    royalty_fee_ct,
+                    royalty_fee,
                     &format!("dns_auction_royalty:{domain}"),
                 ),
             ));
@@ -2257,18 +2254,18 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
             plan.push((
                 LedgerEventKind::CreditRoyalty,
                 LedgerBatchCommand::credit_treasury(
-                    royalty_fee_ct,
+                    royalty_fee,
                     &format!("dns_auction_royalty_treasury:{domain}"),
                 ),
             ));
         }
     }
 
-    if protocol_fee_ct > 0 {
+    if protocol_fee > 0 {
         plan.push((
             LedgerEventKind::CreditTreasury,
             LedgerBatchCommand::credit_treasury(
-                protocol_fee_ct,
+                protocol_fee,
                 &format!("dns_auction_protocol_fee:{domain}"),
             ),
         ));
@@ -2284,7 +2281,7 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
             .as_ref()
             .map(|o| o.royalty_bps)
             .unwrap_or(record.royalty_bps),
-        last_sale_price_ct: winning_bid.amount,
+        last_sale_price: winning_bid.amount,
         owner_stake: winning_bid.stake_reference.clone(),
     };
     let ownership_bytes = encode_ownership(&new_owner)?;
@@ -2295,9 +2292,9 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
         sold_at: now,
         seller_account: record.seller_account.clone(),
         buyer_account: winning_bid.bidder.clone(),
-        price_ct: winning_bid.amount,
-        protocol_fee_ct,
-        royalty_fee_ct,
+        price: winning_bid.amount,
+        protocol_fee,
+        royalty_fee,
         ledger_events: ledger_events,
     });
     let history_bytes = encode_sales(&history)?;
@@ -2317,15 +2314,9 @@ pub fn complete_sale(params: &Value) -> Result<Value, AuctionError> {
             json_map(vec![
                 ("domain", Value::String(domain.to_string())),
                 ("buyer_account", Value::String(winning_bid.bidder.clone())),
-                ("price_ct", Value::Number(Number::from(winning_bid.amount))),
-                (
-                    "protocol_fee_ct",
-                    Value::Number(Number::from(protocol_fee_ct)),
-                ),
-                (
-                    "royalty_fee_ct",
-                    Value::Number(Number::from(royalty_fee_ct)),
-                ),
+                ("price", Value::Number(Number::from(winning_bid.amount))),
+                ("protocol_fee", Value::Number(Number::from(protocol_fee))),
+                ("royalty_fee", Value::Number(Number::from(royalty_fee))),
             ]),
         ),
         ("ownership", ownership_to_json(&new_owner)),
@@ -2342,57 +2333,70 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
         .and_then(|v| v.as_u64())
         .unwrap_or(3600);
 
-    let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
-    let mut auctions = Vec::new();
-    let mut ownerships = Vec::new();
-    let mut history = Vec::new();
-    let mut status_counts: HashMap<AuctionStatus, u64> = HashMap::new();
-    let mut next_end_ts: Option<u64> = None;
-    let mut last_end_ts: Option<u64> = None;
-    let mut coverage_demand_ct = 0u64;
+    // Perform all database operations with lock held, extract data, then release
+    let (auctions, ownerships, history, status_counts, next_end_ts, last_end_ts, coverage_demand) = {
+        let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+        let mut auctions = Vec::new();
+        let mut ownerships = Vec::new();
+        let mut history = Vec::new();
+        let mut status_counts: HashMap<AuctionStatus, u64> = HashMap::new();
+        let mut next_end_ts: Option<u64> = None;
+        let mut last_end_ts: Option<u64> = None;
+        let mut coverage_demand = 0u64;
 
-    let domains: Vec<String> = if let Some(domain) = filter.clone() {
-        vec![domain]
-    } else {
-        db.keys_with_prefix("dns_auction/")
-            .into_iter()
-            .filter_map(|key| key.strip_prefix("dns_auction/").map(|s| s.to_string()))
-            .collect()
-    };
+        let domains: Vec<String> = if let Some(domain) = filter.clone() {
+            vec![domain]
+        } else {
+            db.keys_with_prefix("dns_auction/")
+                .into_iter()
+                .filter_map(|key| key.strip_prefix("dns_auction/").map(|s| s.to_string()))
+                .collect()
+        };
 
-    for domain in domains {
-        if let Some(bytes) = db.get(&auction_key(&domain)) {
-            let record = decode_auction(&bytes)?;
-            let entry = status_counts.entry(record.status).or_insert(0);
-            *entry = entry.saturating_add(1);
-            if matches!(record.status, AuctionStatus::Active) {
-                next_end_ts = Some(match next_end_ts {
-                    Some(current) => current.min(record.end_ts),
-                    None => record.end_ts,
-                });
-                last_end_ts = Some(match last_end_ts {
-                    Some(current) => current.max(record.end_ts),
-                    None => record.end_ts,
-                });
-                let coverage = record
-                    .highest_bid
-                    .as_ref()
-                    .map(|bid| bid.amount)
-                    .unwrap_or(record.min_bid_ct);
-                coverage_demand_ct = coverage_demand_ct.saturating_add(coverage);
+        for domain in domains {
+            if let Some(bytes) = db.get(&auction_key(&domain)) {
+                let record = decode_auction(&bytes)?;
+                let entry = status_counts.entry(record.status).or_insert(0);
+                *entry = entry.saturating_add(1);
+                if matches!(record.status, AuctionStatus::Active) {
+                    next_end_ts = Some(match next_end_ts {
+                        Some(current) => current.min(record.end_ts),
+                        None => record.end_ts,
+                    });
+                    last_end_ts = Some(match last_end_ts {
+                        Some(current) => current.max(record.end_ts),
+                        None => record.end_ts,
+                    });
+                    let coverage = record
+                        .highest_bid
+                        .as_ref()
+                        .map(|bid| bid.amount)
+                        .unwrap_or(record.min_bid);
+                    coverage_demand = coverage_demand.saturating_add(coverage);
+                }
+                auctions.push(auction_to_json(&record));
             }
-            auctions.push(auction_to_json(&record));
+            if let Some(bytes) = db.get(&ownership_key(&domain)) {
+                let record = decode_ownership(&bytes)?;
+                ownerships.push(ownership_to_json(&record));
+            }
+            if let Some(bytes) = db.get(&sale_history_key(&domain)) {
+                let records = decode_sales(&bytes)?;
+                let values: Vec<Value> = records.iter().map(sale_to_json).collect();
+                history.push((domain.clone(), Value::Array(values)));
+            }
         }
-        if let Some(bytes) = db.get(&ownership_key(&domain)) {
-            let record = decode_ownership(&bytes)?;
-            ownerships.push(ownership_to_json(&record));
-        }
-        if let Some(bytes) = db.get(&sale_history_key(&domain)) {
-            let records = decode_sales(&bytes)?;
-            let values: Vec<Value> = records.iter().map(sale_to_json).collect();
-            history.push((domain.clone(), Value::Array(values)));
-        }
-    }
+
+        (
+            auctions,
+            ownerships,
+            history,
+            status_counts,
+            next_end_ts,
+            last_end_ts,
+            coverage_demand,
+        )
+    }; // DNS_DB lock automatically released here
 
     let history_value = Value::Array(
         history
@@ -2408,7 +2412,7 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
 
     let snapshot = governance_metrics_snapshot(metrics_window_secs);
     let total_locked = total_locked_stake();
-    let coverage_ratio_ppm = ppm_ratio(total_locked, coverage_demand_ct);
+    let coverage_ratio_ppm = ppm_ratio(total_locked, coverage_demand);
     let active = *status_counts.get(&AuctionStatus::Active).unwrap_or(&0);
     let settled = *status_counts.get(&AuctionStatus::Settled).unwrap_or(&0);
     let cancelled = *status_counts.get(&AuctionStatus::Cancelled).unwrap_or(&0);
@@ -2426,7 +2430,7 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
 
     let mut stake_map = Map::new();
     stake_map.insert(
-        "total_locked_ct".into(),
+        "total_locked".into(),
         Value::Number(Number::from(total_locked)),
     );
     stake_map.insert(
@@ -2434,8 +2438,8 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
         Value::Number(Number::from(coverage_ratio_ppm)),
     );
     stake_map.insert(
-        "coverage_demand_ct".into(),
-        Value::Number(Number::from(coverage_demand_ct)),
+        "coverage_demand".into(),
+        Value::Number(Number::from(coverage_demand)),
     );
 
     let txt_ratio = ppm_ratio(snapshot.txt_successes, snapshot.txt_attempts);
@@ -2476,7 +2480,7 @@ pub fn auctions(params: &Value) -> Result<Value, AuctionError> {
         ),
         (
             "settlement_stats",
-            stats_value(&snapshot.settlement_amounts_ct),
+            stats_value(&snapshot.settlement_amounts),
         ),
         (
             "duration_stats",
@@ -2610,7 +2614,7 @@ pub fn verify_txt(domain: &str, node_id: &str) -> bool {
         let resolver = TXT_RESOLVER.lock().unwrap();
         resolver(domain)
     };
-    let needle = format!("tb-verification={}", node_id);
+    let needle = format!("{}{}", DNS_VERIFICATION_PREFIX, node_id);
     let ok = txts.iter().any(|t| t.contains(&needle));
     VERIFY_CACHE.lock().unwrap().insert(key, (ok, now));
     record_txt_result(ok);
@@ -2699,6 +2703,12 @@ pub fn dns_lookup(params: &Value) -> Value {
         .get(&format!("dns_keys/{}", domain))
         .and_then(|v| String::from_utf8(v).ok())
         .unwrap_or_default();
+    if DISABLE_VERIFY.load(Ordering::Relaxed) {
+        return json_map(vec![
+            ("record", txt.map(Value::String).unwrap_or(Value::Null)),
+            ("verified", Value::Bool(true)),
+        ]);
+    }
     let verified = txt
         .as_ref()
         .map(|_| verify_txt(domain, &pk))
@@ -2726,13 +2736,9 @@ mod tests {
                     (*address).to_string(),
                     Account {
                         address: (*address).to_string(),
-                        balance: TokenBalance {
-                            consumer: *balance,
-                            industrial: 0,
-                        },
+                        balance: TokenBalance { amount: *balance },
                         nonce: 0,
-                        pending_consumer: 0,
-                        pending_industrial: 0,
+                        pending_amount: 0,
                         pending_nonce: 0,
                         pending_nonces: HashSet::new(),
                         sessions: Vec::new(),
@@ -2744,13 +2750,9 @@ mod tests {
                 .entry("treasury".to_string())
                 .or_insert(Account {
                     address: "treasury".to_string(),
-                    balance: TokenBalance {
-                        consumer: 0,
-                        industrial: 0,
-                    },
+                    balance: TokenBalance { amount: 0 },
                     nonce: 0,
-                    pending_consumer: 0,
-                    pending_industrial: 0,
+                    pending_amount: 0,
                     pending_nonce: 0,
                     pending_nonces: HashSet::new(),
                     sessions: Vec::new(),
@@ -2793,7 +2795,7 @@ mod tests {
 
         let listing = list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(1_000))),
+            ("min_bid", Value::Number(Number::from(1_000))),
             ("protocol_fee_bps", Value::Number(Number::from(500))),
             ("royalty_bps", Value::Number(Number::from(200))),
         ]))
@@ -2803,14 +2805,14 @@ mod tests {
         let low_bid = place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("bidder-low".to_string())),
-            ("bid_ct", Value::Number(Number::from(800))),
+            ("bid", Value::Number(Number::from(800))),
         ]));
         assert!(matches!(low_bid, Err(AuctionError::BidTooLow)));
 
         let winning_bid = place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("bidder-main".to_string())),
-            ("bid_ct", Value::Number(Number::from(1_500))),
+            ("bid", Value::Number(Number::from(1_500))),
             ("stake_reference", Value::String("stake-1".to_string())),
         ]))
         .expect("winning bid");
@@ -2822,7 +2824,7 @@ mod tests {
         ]))
         .expect("sale completes");
         assert_eq!(sale["status"].as_str(), Some("ok"));
-        assert_eq!(sale["sale"]["price_ct"].as_u64(), Some(1_500));
+        assert_eq!(sale["sale"]["price"].as_u64(), Some(1_500));
 
         let treasury = captured.lock().unwrap().clone();
         assert_eq!(treasury, vec![105]);
@@ -2868,7 +2870,7 @@ mod tests {
         // Seed primary sale to establish ownership and royalty rate.
         list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(2_000))),
+            ("min_bid", Value::Number(Number::from(2_000))),
             ("protocol_fee_bps", Value::Number(Number::from(400))),
             ("royalty_bps", Value::Number(Number::from(150))),
         ]))
@@ -2876,7 +2878,7 @@ mod tests {
         place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("first-owner".to_string())),
-            ("bid_ct", Value::Number(Number::from(2_500))),
+            ("bid", Value::Number(Number::from(2_500))),
             (
                 "stake_reference",
                 Value::String("stake-primary".to_string()),
@@ -2899,7 +2901,7 @@ mod tests {
 
         let resale_listing = list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(3_000))),
+            ("min_bid", Value::Number(Number::from(3_000))),
             ("seller_account", Value::String("first-owner".to_string())),
             // Intentionally set royalty to a different value to ensure the stored value persists.
             ("royalty_bps", Value::Number(Number::from(0))),
@@ -2910,7 +2912,7 @@ mod tests {
         place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("second-owner".to_string())),
-            ("bid_ct", Value::Number(Number::from(3_600))),
+            ("bid", Value::Number(Number::from(3_600))),
             ("stake_reference", Value::String("stake-second".to_string())),
         ]))
         .expect("resale winning bid");
@@ -2957,7 +2959,7 @@ mod tests {
 
         list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(500))),
+            ("min_bid", Value::Number(Number::from(500))),
             ("duration_secs", Value::Number(Number::from(0))),
         ]))
         .expect("listing");
@@ -2965,7 +2967,7 @@ mod tests {
         let result = place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("late-bid".to_string())),
-            ("bid_ct", Value::Number(Number::from(600))),
+            ("bid", Value::Number(Number::from(600))),
         ]));
         assert!(matches!(result, Err(AuctionError::AuctionExpired)));
 
@@ -2979,14 +2981,14 @@ mod tests {
 
         list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(750))),
+            ("min_bid", Value::Number(Number::from(750))),
         ]))
         .expect("listing");
 
         let result = place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("no-stake".to_string())),
-            ("bid_ct", Value::Number(Number::from(900))),
+            ("bid", Value::Number(Number::from(900))),
         ]));
         assert!(matches!(result, Err(AuctionError::BidInsufficientStake)));
 
@@ -3002,14 +3004,14 @@ mod tests {
 
         list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(1_000))),
+            ("min_bid", Value::Number(Number::from(1_000))),
         ]))
         .expect("listing");
 
         let result = place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("short-bidder".to_string())),
-            ("bid_ct", Value::Number(Number::from(1_200))),
+            ("bid", Value::Number(Number::from(1_200))),
             ("stake_reference", Value::String("stake-short".to_string())),
         ]));
         assert!(matches!(result, Err(AuctionError::BidInsufficientStake)));
@@ -3032,14 +3034,14 @@ mod tests {
 
         list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            ("min_bid_ct", Value::Number(Number::from(1_000))),
+            ("min_bid", Value::Number(Number::from(1_000))),
         ]))
         .expect("listing");
 
         place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("bidder-a".to_string())),
-            ("bid_ct", Value::Number(Number::from(1_200))),
+            ("bid", Value::Number(Number::from(1_200))),
             ("stake_reference", Value::String("stake-a".to_string())),
         ]))
         .expect("initial bid");
@@ -3047,7 +3049,7 @@ mod tests {
         place_bid(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
             ("bidder_account", Value::String("bidder-b".to_string())),
-            ("bid_ct", Value::Number(Number::from(1_500))),
+            ("bid", Value::Number(Number::from(1_500))),
             ("stake_reference", Value::String("stake-b".to_string())),
         ]))
         .expect("outbid");
@@ -3057,7 +3059,7 @@ mod tests {
             let record = load_stake(&db, "stake-a")
                 .expect("load stake")
                 .expect("stake exists");
-            assert_eq!(record.locked_ct, 0);
+            assert_eq!(record.locked, 0);
         }
 
         {
@@ -3085,7 +3087,7 @@ mod tests {
         assert_eq!(snap.auction_completions, 1);
         assert_eq!(snap.auction_cancels, 1);
         assert_eq!(snap.stake_unlock_events, 1);
-        assert_eq!(snap.settlement_amounts_ct, vec![42]);
+        assert_eq!(snap.settlement_amounts, vec![42]);
     }
 
     #[test]
@@ -3128,8 +3130,8 @@ mod tests {
             seller_stake: None,
             protocol_fee_bps: 500,
             royalty_bps: 0,
-            min_bid_ct: base,
-            stake_requirement_ct: base,
+            min_bid: base,
+            stake_requirement: base,
             start_ts: 0,
             end_ts: 1000,
             status: AuctionStatus::Settled,
@@ -3138,7 +3140,7 @@ mod tests {
                 amount: 2000, // 2x base price
                 stake_reference: None,
                 placed_at: 500,
-                stake_locked_ct: 0,
+                stake_locked: 0,
             }),
             bids: vec![],
         };
@@ -3169,7 +3171,7 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             config.enabled = false;
-            config.base_reserve_ct = 5000;
+            config.base_reserve = 5000;
         }
 
         let price = compute_dynamic_reserve_price("xyz", None);
@@ -3184,7 +3186,7 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             config.enabled = true;
-            config.base_reserve_ct = 1000;
+            config.base_reserve = 1000;
         }
     }
 
@@ -3197,10 +3199,10 @@ mod tests {
 
         // List without specifying min_bid - should use computed reserve
         // "xyz.block" = 9 chars -> length_multiplier = 1.0 - 0.1 * (9-3) = 0.4
-        // Expected: 1000 * 0.4 = 400 CT
+        // Expected: 1000 * 0.4 = 400 BLOCK
         let listing = list_for_sale(&json_map(vec![
             ("domain", Value::String(domain.to_string())),
-            // min_bid_ct NOT specified - should default to dynamic reserve
+            // min_bid NOT specified - should default to dynamic reserve
         ]))
         .expect("listing ok");
 
@@ -3209,9 +3211,9 @@ mod tests {
         // Verify the min_bid was set to dynamic reserve price
         let auction = &listing["auction"];
         assert_eq!(
-            auction["min_bid_ct"].as_u64(),
+            auction["min_bid"].as_u64(),
             Some(400),
-            "Should use dynamic reserve (9-char domain \"xyz.block\": 400 CT)"
+            "Should use dynamic reserve (9-char domain \"xyz.block\": 400 BLOCK)"
         );
 
         clear_domain_state(domain);

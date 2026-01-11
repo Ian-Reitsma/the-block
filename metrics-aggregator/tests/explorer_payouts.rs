@@ -290,10 +290,6 @@ fn explorer_payout_summary_metrics_exposed() {
             Value::Array(vec![payout_sample("viewer", 7.0)]),
         );
         metrics.insert(
-            "explorer_block_payout_ad_it_total".to_string(),
-            Value::Array(vec![payout_sample("host", 3.0)]),
-        );
-        metrics.insert(
             "explorer_block_payout_ad_usd_total".to_string(),
             scalar_metric(64_000.0),
         );
@@ -302,12 +298,8 @@ fn explorer_payout_summary_metrics_exposed() {
             scalar_metric(8.0),
         );
         metrics.insert(
-            "explorer_block_payout_ad_ct_price_usd_micros".to_string(),
+            "explorer_block_payout_ad_price_usd_micros".to_string(),
             scalar_metric(25_000.0),
-        );
-        metrics.insert(
-            "explorer_block_payout_ad_it_price_usd_micros".to_string(),
-            scalar_metric(50_000.0),
         );
         let mut entry = Map::new();
         entry.insert("peer_id".to_string(), Value::String("explorer-node".into()));
@@ -342,20 +334,13 @@ fn explorer_payout_summary_metrics_exposed() {
         )
         .expect("settlement count metric");
         assert_eq!(settlement_count, 8.0);
-        let ct_price = scrape_peer_metric(
+        let price = scrape_peer_metric(
             &body,
-            "explorer_block_payout_ad_ct_price_usd_micros",
+            "explorer_block_payout_ad_price_usd_micros",
             "explorer-node",
         )
-        .expect("ct price metric");
-        assert_eq!(ct_price, 25_000.0);
-        let it_price = scrape_peer_metric(
-            &body,
-            "explorer_block_payout_ad_it_price_usd_micros",
-            "explorer-node",
-        )
-        .expect("it price metric");
-        assert_eq!(it_price, 50_000.0);
+        .expect("price metric");
+        assert_eq!(price, 25_000.0);
     })
 }
 

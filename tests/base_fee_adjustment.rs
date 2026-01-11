@@ -9,7 +9,7 @@ fn build_tx(sk: &[u8], from: &str, to: &str, fee: u64, tip: u64, nonce: u64) -> 
         amount_consumer: 0,
         amount_industrial: 0,
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: vec![],
     };

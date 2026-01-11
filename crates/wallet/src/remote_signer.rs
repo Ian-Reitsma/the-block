@@ -534,13 +534,17 @@ impl RemoteSigner {
                     }
                 },
                 Err(e) => {
+                    let is_timeout = is_timeout_error(&e);
                     if attempt == self.retries {
-                        if e.is_timeout() {
+                        if is_timeout {
                             return Err(WalletError::Timeout);
                         }
                         return Err(WalletError::Failure(e.to_string()));
                     }
                     warn!(%payload.trace, error=%e, "retrying signer request");
+                    if is_timeout {
+                        thread::sleep(Duration::from_millis(10));
+                    }
                 }
             }
         }
@@ -789,6 +793,32 @@ fn map_tls_error(err: io::Error) -> WalletError {
         ErrorKind::WouldBlock | ErrorKind::TimedOut => WalletError::Timeout,
         _ => WalletError::Failure(err.to_string()),
     }
+}
+
+fn is_timeout_error(err: &httpd::ClientError) -> bool {
+    if err.is_timeout() {
+        return true;
+    }
+    if let httpd::ClientError::Io(io_err) = err {
+        return matches!(
+            io_err.kind(),
+            ErrorKind::WouldBlock | ErrorKind::TimedOut | ErrorKind::Interrupted
+        ) || matches!(
+            io_err.raw_os_error(),
+            Some(11)   // EAGAIN on Linux
+                | Some(35)  // EWOULDBLOCK on macOS
+                | Some(36)
+                | Some(37)
+                | Some(60)  // ETIMEDOUT on macOS
+                | Some(10035) // WSAEWOULDBLOCK
+                | Some(10036)
+                | Some(10037)
+                | Some(110) // ETIMEDOUT on many Unixes
+                | Some(114)
+                | Some(115)
+        );
+    }
+    false
 }
 
 impl WalletSigner for RemoteSigner {

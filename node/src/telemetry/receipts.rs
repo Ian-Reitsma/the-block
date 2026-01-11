@@ -94,32 +94,32 @@ pub static RECEIPT_BYTES_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_STORAGE: Lazy<Gauge> = Lazy::new(|| {
     register_gauge(
-        "receipt_settlement_storage_ct",
-        "Total storage receipt settlement (CT) in current block",
+        "receipt_settlement_storage",
+        "Total storage receipt settlement (BLOCK) in current block",
     )
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_COMPUTE: Lazy<Gauge> = Lazy::new(|| {
     register_gauge(
-        "receipt_settlement_compute_ct",
-        "Total compute receipt settlement (CT) in current block",
+        "receipt_settlement_compute",
+        "Total compute receipt settlement (BLOCK) in current block",
     )
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_ENERGY: Lazy<Gauge> = Lazy::new(|| {
     register_gauge(
-        "receipt_settlement_energy_ct",
-        "Total energy receipt settlement (CT) in current block",
+        "receipt_settlement_energy",
+        "Total energy receipt settlement (BLOCK) in current block",
     )
 });
 
 #[cfg(feature = "telemetry")]
 pub static RECEIPT_SETTLEMENT_AD: Lazy<Gauge> = Lazy::new(|| {
     register_gauge(
-        "receipt_settlement_ad_ct",
-        "Total ad receipt settlement (CT) in current block",
+        "receipt_settlement_ad",
+        "Total ad receipt settlement (BLOCK) in current block",
     )
 });
 
@@ -213,26 +213,26 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     let mut ad_settlement = 0.0;
 
     for receipt in receipts {
-        let settlement_ct = receipt.settlement_amount() as f64;
+        let settlement = receipt.settlement_amount() as f64;
         match receipt {
             Receipt::Storage(_) => {
                 storage_count += 1;
-                storage_settlement += settlement_ct;
+                storage_settlement += settlement;
                 RECEIPTS_STORAGE.inc();
             }
             Receipt::Compute(_) => {
                 compute_count += 1;
-                compute_settlement += settlement_ct;
+                compute_settlement += settlement;
                 RECEIPTS_COMPUTE.inc();
             }
             Receipt::Energy(_) => {
                 energy_count += 1;
-                energy_settlement += settlement_ct;
+                energy_settlement += settlement;
                 RECEIPTS_ENERGY.inc();
             }
             Receipt::Ad(_) => {
                 ad_count += 1;
-                ad_settlement += settlement_ct;
+                ad_settlement += settlement;
                 RECEIPTS_AD.inc();
             }
         }

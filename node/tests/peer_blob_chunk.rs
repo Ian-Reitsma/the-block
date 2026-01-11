@@ -15,7 +15,7 @@ fn shard_rate_limiting() {
     let dir = tempdir().unwrap();
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers.txt"));
     std::env::set_var("TB_CHUNK_DB_PATH", dir.path().join("chunks"));
-    std::env::set_var("TB_P2P_SHARD_RATE", "512");
+    std::env::set_var("TB_P2P_SHARD_RATE", "0");
     std::env::set_var("TB_P2P_SHARD_BURST", "512");
 
     let peers = PeerSet::new(vec![]);
@@ -31,6 +31,7 @@ fn shard_rate_limiting() {
         agent: "test".into(),
         nonce: 0,
         transport: Transport::Tcp,
+        gossip_addr: None,
         quic_addr: None,
         quic_cert: None,
         quic_fingerprint: None,

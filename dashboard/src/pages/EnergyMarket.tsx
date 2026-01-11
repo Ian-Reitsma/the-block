@@ -83,7 +83,7 @@ export function EnergyMarket({
               <th>Buyer</th>
               <th>Seller</th>
               <th>kWh</th>
-              <th>Price (CT)</th>
+              <th>Price (BLOCK)</th>
             </tr>
           </thead>
           <tbody>

@@ -29,15 +29,10 @@ pub struct VariantAttr {
     pub rename: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum FieldDefault {
+    #[default]
     None,
     Default,
     Function(String),
-}
-
-impl Default for FieldDefault {
-    fn default() -> Self {
-        FieldDefault::None
-    }
 }

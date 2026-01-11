@@ -9,10 +9,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
-#[cfg(feature = "python-bindings")]
-use std::io::{Read, Write};
-#[cfg(feature = "python-bindings")]
-use std::net::TcpStream;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{atomic::AtomicBool, Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -30,8 +26,12 @@ use foundation_rpc::{Request as RpcRequest, Response, RpcError};
 use foundation_serialization::json::{self as json_mod, Value};
 use rand::rngs::StdRng;
 #[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use std::io::{Read, Write};
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
+use std::net::TcpStream;
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 use std::{env, path::Path, process::Command};
-#[cfg(feature = "python-bindings")]
+#[cfg(all(feature = "telemetry", feature = "python-bindings"))]
 use the_block::serve_metrics_with_shutdown;
 use the_block::{
     ad_readiness::{AdReadinessConfig, AdReadinessHandle},
@@ -422,11 +422,7 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(creative_ids.len(), 1);
     assert_eq!(creative_ids[0].as_str(), Some("creative-1"));
     assert_eq!(
-        inventory["oracle"]["ct_price_usd_micros"].as_u64(),
-        Some(MICROS_PER_DOLLAR)
-    );
-    assert_eq!(
-        inventory["oracle"]["it_price_usd_micros"].as_u64(),
+        inventory["oracle"]["price_usd_micros"].as_u64(),
         Some(MICROS_PER_DOLLAR)
     );
     let cohorts = inventory["cohort_prices"]
@@ -449,10 +445,6 @@ fn ad_market_rpc_endpoints_round_trip() {
     assert_eq!(dist["hardware_percent"].as_u64(), Some(20));
     assert_eq!(dist["verifier_percent"].as_u64(), Some(5));
     assert_eq!(dist["liquidity_percent"].as_u64(), Some(5));
-    assert_eq!(
-        dist["liquidity_split_ct_ppm"].as_u64(),
-        Some(DistributionPolicy::default().liquidity_split_ct_ppm as u64)
-    );
 
     let readiness_initial = expect_ok(harness.call("ad_market.readiness", Value::Null));
     assert_eq!(readiness_initial["status"].as_str(), Some("ok"));
@@ -500,15 +492,12 @@ fn ad_market_rpc_endpoints_round_trip() {
             .len(),
         0
     );
-    assert!(readiness_ready["ct_price_usd_micros"].as_u64().is_some());
-    assert!(readiness_ready["it_price_usd_micros"].as_u64().is_some());
+    assert!(readiness_ready["price_usd_micros"].as_u64().is_some());
     let oracle = readiness_ready["oracle"].as_object().expect("oracle map");
     let snapshot_oracle = oracle["snapshot"].as_object().expect("snapshot oracle");
-    assert!(snapshot_oracle["ct_price_usd_micros"].as_u64().is_some());
-    assert!(snapshot_oracle["it_price_usd_micros"].as_u64().is_some());
+    assert!(snapshot_oracle["price_usd_micros"].as_u64().is_some());
     let market_oracle = oracle["market"].as_object().expect("market oracle");
-    assert!(market_oracle["ct_price_usd_micros"].as_u64().is_some());
-    assert!(market_oracle["it_price_usd_micros"].as_u64().is_some());
+    assert!(market_oracle["price_usd_micros"].as_u64().is_some());
     let utilization_ready = readiness_ready
         .get("utilization")
         .and_then(Value::as_object)
@@ -1408,7 +1397,7 @@ fn autodetect_python_bridge_lib() -> Option<String> {
         return None;
     }
     let libdir = Command::new("python3")
-        .args(&[
+        .args([
             "-c",
             "import sysconfig; print(sysconfig.get_config_var('LIBDIR') or '')",
         ])
@@ -1422,7 +1411,7 @@ fn autodetect_python_bridge_lib() -> Option<String> {
         return None;
     }
     let libname = Command::new("python3")
-        .args(&[
+        .args([
             "-c",
             "import sysconfig; print(sysconfig.get_config_var('LDLIBRARY') or '')",
         ])
@@ -1737,8 +1726,7 @@ fn rpc_record_conversion_rejects_unknown_creative() {
 #[testkit::tb_serial]
 fn mesh_holdout_treatment_settlement_has_mesh_fields() {
     let mut config = MarketplaceConfig::default();
-    config.default_oracle.ct_price_usd_micros = 1_000_000;
-    config.default_oracle.it_price_usd_micros = 1_000_000;
+    config.default_oracle.price_usd_micros = 1_000_000;
     let (_dir, harness, _readiness) =
         build_in_memory_harness("ad_market_mesh_holdout_treatment", config);
     let market = harness

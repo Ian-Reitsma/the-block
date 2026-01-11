@@ -12,6 +12,10 @@ fn crash_simulated_write_is_atomic() {
     let old = b"old".to_vec();
     write_atomic(&path, &old).unwrap();
 
+    // Spawn a writer and try to catch its temp file before it renames. On fast
+    // filesystems (common on Linux) the rename can happen before we observe the
+    // temp file, so we bound the wait and fall back to using the final file if
+    // the writer finishes first.
     let mut rng = rand::thread_rng();
     let mut new = vec![0u8; 128];
     rng.fill_bytes(&mut new);
@@ -21,6 +25,7 @@ fn crash_simulated_write_is_atomic() {
         let _ = write_atomic(&path_clone, &new_clone);
     });
 
+    let start = std::time::Instant::now();
     let tmp_path = 'outer: loop {
         if let Ok(entries) = fs::read_dir(dir.path()) {
             for entry in entries.flatten() {
@@ -31,14 +36,22 @@ fn crash_simulated_write_is_atomic() {
                 {
                     let p = entry.path();
                     if p.exists() {
-                        break 'outer p;
+                        break 'outer Some(p);
                     }
                 }
             }
         }
-        thread::yield_now();
+        if handle.is_finished() {
+            break None;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(5) {
+            panic!("timed out waiting for atomic_file temp path to appear");
+        }
+        thread::sleep(std::time::Duration::from_millis(2));
     };
-    let _ = fs::rename(&tmp_path, &path);
+    if let Some(tmp_path) = tmp_path {
+        let _ = fs::rename(&tmp_path, &path);
+    }
     handle.join().unwrap();
 
     let final_bytes = fs::read(&path).unwrap();

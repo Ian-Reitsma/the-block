@@ -639,18 +639,20 @@ impl Relay {
                 }),
             }
         };
-        let shard_affinity = self
+        let mut shard_affinity: Vec<_> = self
             .shard_store
             .snapshot()
             .into_iter()
-            .map(|(shard, peers)| ShardAffinity {
-                shard,
-                peers: peers
+            .map(|(shard, peers)| {
+                let mut peers: Vec<_> = peers
                     .into_iter()
                     .map(|peer| overlay_peer_to_base58(&peer))
-                    .collect(),
+                    .collect();
+                peers.sort();
+                ShardAffinity { shard, peers }
             })
             .collect();
+        shard_affinity.sort_by_key(|sa| sa.shard);
         let partition = PartitionStatus {
             active: PARTITION_WATCH.is_partitioned(),
             marker: PARTITION_WATCH.current_marker(),

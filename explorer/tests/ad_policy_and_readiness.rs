@@ -133,14 +133,6 @@ fn ad_policy_snapshot_with_attestation() {
             .get("liquidity_percent")
             .and_then(JsonValue::as_u64)
             .is_some());
-        assert!(dist
-            .get("liquidity_split_ct_ppm")
-            .and_then(JsonValue::as_u64)
-            .is_some());
-        assert!(dist
-            .get("dual_token_settlement_enabled")
-            .and_then(JsonValue::as_bool)
-            .is_some());
         // medians present
         let med = obj
             .get("medians")
@@ -412,10 +404,8 @@ fn ad_readiness_status_stitches_governance() {
             "last_updated",
             "total_usd_micros",
             "settlement_count",
-            "ct_price_usd_micros",
-            "it_price_usd_micros",
-            "market_ct_price_usd_micros",
-            "market_it_price_usd_micros",
+            "price_usd_micros",
+            "market_price_usd_micros",
             "ready_streak_windows",
         ] {
             assert!(snap.get(key).is_some(), "missing snapshot key: {}", key);

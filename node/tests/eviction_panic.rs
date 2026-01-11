@@ -24,17 +24,23 @@ fn build_signed_tx(
     fee: u64,
     nonce: u64,
 ) -> SignedTransaction {
+    // NOTE: Post single-token migration, amount_consumer/amount_industrial represent
+    // LANE routing (not separate token types). Single BLOCK token routed via consumer lane.
     let payload = RawTxPayload {
         from_: from.into(),
         to: to.into(),
         amount_consumer: amount,
-        amount_industrial: amount,
+        amount_industrial: 0, // Single BLOCK token via consumer lane only
         fee,
-        pct_ct: 100,
+        pct: 100,
         nonce,
         memo: Vec::new(),
     };
-    sign_tx(sk.to_vec(), payload).expect("sign")
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
 }
 
 #[test]
@@ -43,9 +49,12 @@ fn eviction_panic_rolls_back() {
     let (sk, _pk) = generate_keypair();
     let dir = temp_dir("evict_panic");
     let mut bc = Blockchain::open(dir.path().to_str().unwrap()).unwrap();
+    // Disable fee floors so the test exercises eviction rollback rather than fee gating.
+    bc.min_fee_per_byte_consumer = 0;
+    bc.min_fee_per_byte_industrial = 0;
     bc.max_mempool_size_consumer = 1;
-    bc.add_account("a".into(), 10_000, 0).unwrap();
-    bc.add_account("b".into(), 0, 0).unwrap();
+    bc.add_account("a".into(), 100_000).unwrap(); // Single BLOCK token
+    bc.add_account("b".into(), 0).unwrap();
     bc.mine_block("a").unwrap();
 
     #[cfg(feature = "telemetry")]
@@ -64,8 +73,7 @@ fn eviction_panic_rolls_back() {
     assert!(bc.mempool_consumer.is_empty());
     let acc = bc.accounts.get("a").unwrap();
     assert_eq!(acc.pending_nonce, 0);
-    assert_eq!(acc.pending_consumer, 0);
-    assert_eq!(acc.pending_industrial, 0);
+    assert_eq!(acc.pending_amount, 0);
     assert!(acc.pending_nonces.is_empty());
     let tx3 = build_signed_tx(&sk, "a", "b", 1, 1000, 3);
     #[cfg(feature = "telemetry")]

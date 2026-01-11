@@ -203,7 +203,7 @@ Draft ──[vote]──> Voting ──[approved]──> Queued ──[activated
      - Telemetry (7 metrics)
      - Grafana dashboard (6 panels, alerts)
      - Integration tests (20+ cases)
-     - Settlement audit (CT conservation)
+     - Settlement audit (BLOCK conservation)
      - Replay & determinism
    - **Stride 2 (Energy)**: 10 subsections with 75+ checkpoints
      - Governance payloads
