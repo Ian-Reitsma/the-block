@@ -77,6 +77,12 @@ static SIG_CACHE: Lazy<Mutex<LruCache<[u8; 32], bool>>> = Lazy::new(|| {
     ))
 });
 
+/// Clear the signature verification cache. For testing purposes only.
+#[doc(hidden)]
+pub fn clear_signature_cache() {
+    SIG_CACHE.guard().clear();
+}
+
 static TX_SIGNER: Lazy<TransactionSigner> =
     Lazy::new(|| TransactionSigner::from_chain_id(crate::constants::CHAIN_ID));
 
@@ -739,6 +745,48 @@ mod tests {
             .verify(&msg, &signature)
             .expect("suite verification");
         assert!(verify_signed_tx(&signed));
+    }
+
+    #[test]
+    fn regress_ed25519_sign_verify_acc7_payload() {
+        // Regression case captured from orphan_fuzz flake: sign_tx must produce a signature
+        // that verifies for the same payload and key.
+        let sk: [u8; 32] = [
+            0xa0, 0xd3, 0x88, 0xc9, 0x5d, 0xf8, 0xaf, 0x6e, 0x83, 0x08, 0x4a, 0x79, 0x21, 0x9e,
+            0x17, 0x06, 0x93, 0x46, 0xfc, 0x03, 0x64, 0xbe, 0x38, 0xd1, 0x65, 0x5b, 0xcb, 0xa5,
+            0xa6, 0x8a, 0x0f, 0xbf,
+        ];
+        let payload = RawTxPayload {
+            from_: "acc7".to_string(),
+            to: "sink".to_string(),
+            amount_consumer: 1,
+            amount_industrial: 0,
+            fee: 1_000,
+            pct: 100,
+            nonce: 1,
+            memo: Vec::new(),
+        };
+        let signed = sign_tx(&sk, &payload).expect("tx signed");
+        assert_eq!(signed.public_key.len(), 32);
+        assert_eq!(signed.signature.ed25519.len(), 64);
+
+        let payload_bytes = canonical_payload_bytes(&payload);
+        let msg = TX_SIGNER.message(&payload_bytes);
+        let vk = VerifyingKey::from_bytes(&signed.public_key.clone().try_into().unwrap())
+            .expect("verifying key parse");
+        let sig_arr: [u8; SIGNATURE_LENGTH] = signed.signature.ed25519.clone().try_into().unwrap();
+        let sig = Signature::from_bytes(&sig_arr);
+        let direct = vk.verify(&msg, &sig);
+        assert!(
+            direct.is_ok(),
+            "direct ed25519 verification failed for regression payload: {:?}",
+            direct
+        );
+        let stateless = verify_signed_tx(&signed);
+        assert!(
+            stateless,
+            "verify_signed_tx failed for regression payload"
+        );
     }
 
     #[test]

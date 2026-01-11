@@ -32,7 +32,11 @@ fn build_signed_tx(
         nonce,
         memo: Vec::new(),
     };
-    sign_tx(sk.to_vec(), payload).expect("valid key")
+    // Validate secret key is exactly 32 bytes for ed25519
+    let secret: [u8; 32] = sk
+        .try_into()
+        .expect("secret key must be 32 bytes for ed25519");
+    sign_tx(secret.to_vec(), payload).expect("valid key")
 }
 
 #[test]

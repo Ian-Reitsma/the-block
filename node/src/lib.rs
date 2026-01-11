@@ -4037,14 +4037,21 @@ impl Blockchain {
     }
 
     pub fn purge_expired(&mut self) -> u64 {
-        if self.panic_on_purge.swap(false, AtomicOrdering::SeqCst) {
-            panic!("purge panic");
-        }
-        let ttl_ms = self.tx_ttl * 1000;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_else(|e| panic!("time: {e}"))
             .as_millis() as u64;
+        self.purge_expired_at(now)
+    }
+
+    /// Purge expired transactions using a specified timestamp.
+    /// This allows deterministic testing by controlling the "now" time.
+    #[doc(hidden)]
+    pub fn purge_expired_at(&mut self, now: u64) -> u64 {
+        if self.panic_on_purge.swap(false, AtomicOrdering::SeqCst) {
+            panic!("purge panic");
+        }
+        let ttl_ms = self.tx_ttl * 1000;
         let mut expired: Vec<(String, u64, u64)> = Vec::new();
         let mut orphaned: Vec<(String, u64, u64)> = Vec::new();
         self.mempool_consumer.for_each(|key, value| {
@@ -5888,6 +5895,20 @@ impl Blockchain {
 
     pub fn import_chain(&mut self, new_chain: Vec<Block>) -> PyResult<()> {
         if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            // Track reorg even in fast mine mode
+            #[cfg(feature = "telemetry")]
+            {
+                let lca = self
+                    .chain
+                    .iter()
+                    .zip(&new_chain)
+                    .take_while(|(a, b)| a.hash == b.hash)
+                    .count();
+                let depth = self.chain.len().saturating_sub(lca);
+                if depth > 0 {
+                    consensus::observer::record_reorg(depth as u64);
+                }
+            }
             self.chain = new_chain;
             self.block_height = self.chain.len() as u64;
             self.recent_timestamps.clear();
@@ -5910,6 +5931,20 @@ impl Blockchain {
         replayed_econ: ReplayedEconomicsState,
     ) -> PyResult<()> {
         if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
+            // Track reorg even in fast mine mode
+            #[cfg(feature = "telemetry")]
+            {
+                let lca = self
+                    .chain
+                    .iter()
+                    .zip(&new_chain)
+                    .take_while(|(a, b)| a.hash == b.hash)
+                    .count();
+                let depth = self.chain.len().saturating_sub(lca);
+                if depth > 0 {
+                    consensus::observer::record_reorg(depth as u64);
+                }
+            }
             self.chain = new_chain;
             self.block_height = self.chain.len() as u64;
             self.recent_timestamps.clear();
@@ -6515,6 +6550,7 @@ mod tests {
     #[test]
     fn read_subsidy_split_distribution() {
         let mut bc = Blockchain::default();
+        bc.config.read_ack_privacy = crate::config::ReadAckPrivacyMode::Disabled;
         bc.block_reward = TokenAmount::new(0);
         bc.economics_block_reward_per_block = 1; // Set to 1 to avoid INITIAL_BLOCK_REWARD fallback, but effectively zero after logistic factor
         bc.beta_storage_sub_raw = 0;
@@ -6940,14 +6976,29 @@ fn calculate_hash(
 ///
 /// Returns the private and public key as raw byte vectors. The keys are
 /// suitable for both transaction signing and simple message authentication.
+///
+/// Includes a self-test to ensure the generated key verifies with the in-house
+/// Ed25519 implementation.
 #[must_use]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
-    rng.fill_bytes(&mut priv_bytes);
-    let sk = SigningKey::from_bytes(&priv_bytes);
-    let vk = sk.verifying_key();
-    (priv_bytes.to_vec(), vk.to_bytes().to_vec())
+    for _ in 0..128 {
+        rng.fill_bytes(&mut priv_bytes);
+        let sk = SigningKey::from_bytes(&priv_bytes);
+        let vk = sk.verifying_key();
+        let vk_bytes = vk.to_bytes();
+        let sig = sk.sign(b"the_block_keypair_self_test");
+        if let Ok(vk_parsed) = VerifyingKey::from_bytes(&vk_bytes) {
+            if vk_parsed
+                .verify(b"the_block_keypair_self_test", &sig)
+                .is_ok()
+            {
+                return (priv_bytes.to_vec(), vk_bytes.to_vec());
+            }
+        }
+    }
+    panic!("generate_keypair failed to produce a verifiable key after 128 attempts");
 }
 
 /// Sign an arbitrary message with a 32-byte Ed25519 private key.

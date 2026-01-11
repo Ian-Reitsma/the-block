@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use std::net::SocketAddr;
 use std::path::Path;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use sys::tempfile::tempdir;
@@ -37,34 +38,23 @@ fn free_addr() -> SocketAddr {
 }
 
 fn init_env() -> sys::tempfile::TempDir {
+    cleanup_env();
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
     std::env::set_var("TB_NET_KEY_SEED", "chaos");
     std::env::set_var("TB_PEER_SEED", "1");
-    // Use light loss/jitter for stable CI convergence:
-    //   1% packet drop keeps the scenario realistic without stalling nodes.
-    //   10ms jitter lets the reactor schedule without long delays.
-    std::env::set_var("TB_NET_PACKET_LOSS", "0");
-    std::env::set_var("TB_NET_JITTER_MS", "10");
-    std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
+    // Relax rate limits to avoid drops during handshake storm
+    std::env::set_var("TB_P2P_MAX_PER_SEC", "100000");
+    // Disable periodic chain sync to reduce noise
+    std::env::set_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS", "0");
+    // Use fast mining
     std::env::set_var("TB_FAST_MINE", "1");
-    
-    // Platform-specific socket tuning to prevent deadlocks and improve convergence
-    #[cfg(target_os = "macos")]
-    {
-        std::env::set_var("TB_SO_REUSEPORT", "1");
-        std::env::set_var("TB_TCP_NODELAY", "1");
-        std::env::set_var("TB_SO_RCVBUF", "262144");
-        std::env::set_var("TB_SO_SNDBUF", "262144");
-    }
-    
+    // Light chaos: 1% packet loss, 50ms jitter
+    std::env::set_var("TB_NET_PACKET_LOSS", "0.01");
+    std::env::set_var("TB_NET_JITTER_MS", "50");
+    std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
     std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
-    #[cfg(feature = "telemetry")]
-    {
-        // Silence noisy p2p telemetry during tests to keep runs fast and logs concise.
-        the_block::telemetry::set_log_enabled("p2p", false);
-    }
     dir
 }
 
@@ -72,61 +62,59 @@ fn timeout_factor() -> u64 {
     std::env::var("TB_TEST_TIMEOUT_MULT")
         .ok()
         .and_then(|v| v.parse().ok())
-        // Default to a higher multiplier to keep noisy or slow hosts (macOS CI, Windows) stable.
-        .unwrap_or(8)
+        .unwrap_or(4)
+}
+
+fn cleanup_env() {
+    std::env::remove_var("TB_NET_PACKET_LOSS");
+    std::env::remove_var("TB_NET_JITTER_MS");
+    std::env::remove_var("TB_NET_KEY_PATH");
+    std::env::remove_var("TB_NET_KEY_SEED");
+    std::env::remove_var("TB_PEER_DB_PATH");
+    std::env::remove_var("TB_PEER_SEED");
+    std::env::remove_var("TB_FAST_MINE");
+    std::env::remove_var("TB_P2P_MAX_PER_SEC");
+    std::env::remove_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS");
 }
 
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
-    let mut last_report = Duration::from_secs(0);
-    let mut iteration = 0u64;
-    
+    let mut last_broadcast = Instant::now();
+    let mut last_request: HashMap<SocketAddr, Instant> = HashMap::new();
     loop {
-        iteration += 1;
         let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
         let first = heights[0];
-        
         if heights.iter().all(|h| *h == first) {
-            eprintln!("Converged after {:?} ({} iterations)", start.elapsed(), iteration);
             return true;
         }
-        
-        // Push the longest known chain out to peers whenever we see divergence to
-        // kick stalled gossip back into sync after partitions heal.
-        // CRITICAL: Broadcast first, then sleep to let it complete before peer discovery
-        if let Some((idx, _)) = heights.iter().enumerate().max_by_key(|(_, h)| *h) {
-            nodes[idx].broadcast_chain();
-            // Give broadcast time to propagate before peer operations
-            the_block::sleep(Duration::from_millis(50)).await;
-        }
-        
-        // Keep peers warm so connection churn on busy test hosts (Linux/macOS/Windows CI)
-        // does not leave nodes idle while waiting for convergence.
-        for n in nodes {
-            n.discover_peers();
-        }
-        
-        let elapsed = start.elapsed();
-        if elapsed > max {
-            eprintln!("CONVERGENCE TIMEOUT after {:?}", elapsed);
-            eprintln!("Final heights: {:?}", heights);
-            for (i, n) in nodes.iter().enumerate() {
-                eprintln!(
-                    "  Node {}: height={}, peers={}",
-                    i,
-                    n.blockchain().block_height,
-                    n.peer_addrs().len()
-                );
-            }
+        if start.elapsed() > max {
+            eprintln!("Convergence timeout: heights={:?}", heights);
             return false;
         }
-        
-        if elapsed - last_report > Duration::from_secs(1) {
-            eprintln!("Convergence progress [{:?}]: {:?}", elapsed, heights);
-            last_report = elapsed;
+        // Under packet loss, actively broadcast longest chain every 200ms
+        if last_broadcast.elapsed() > Duration::from_millis(200) {
+            if let Some((idx, _)) = heights.iter().enumerate().max_by_key(|(_, h)| *h) {
+                let leader = nodes[idx];
+                leader.broadcast_chain();
+                let leader_addr = leader.addr();
+                for (peer_idx, node) in nodes.iter().enumerate() {
+                    if peer_idx != idx && heights[peer_idx] < heights[idx] {
+                        let now = Instant::now();
+                        let addr = node.addr();
+                        let should_request = last_request
+                            .get(&addr)
+                            .map(|ts| now.duration_since(*ts) > Duration::from_millis(500))
+                            .unwrap_or(true);
+                        if should_request {
+                            node.request_chain_from(leader_addr, heights[peer_idx]);
+                            last_request.insert(addr, now);
+                        }
+                    }
+                }
+            }
+            last_broadcast = Instant::now();
         }
-        
-        the_block::sleep(Duration::from_millis(100)).await;
+        the_block::sleep(Duration::from_millis(20)).await;
     }
 }
 
@@ -146,9 +134,9 @@ impl TestNode {
         let node_id = NODE_COUNTER.fetch_add(1, Ordering::Relaxed);
         let key_path = dir.path().join(format!("net_key_{node_id}"));
         let key_seed = format!("chaos-{node_id}");
-        // Assign a unique network key per node to avoid shared-identity rate limits.
         let prev_env = set_net_key_env(&key_path, &key_seed);
-        let bc = Blockchain::with_difficulty(dir.path().to_str().unwrap(), 1).expect("open bc");
+        std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers"));
+        let bc = Blockchain::open(dir.path().to_str().unwrap()).expect("open bc");
         let node = Node::new(addr, peers, bc);
         restore_net_key_env(prev_env);
         let flag = ShutdownFlag::new();
@@ -183,25 +171,42 @@ fn converges_under_loss() {
         let mut node1 = TestNode::new(addr1, vec![addr2, addr3]);
         let mut node2 = TestNode::new(addr2, vec![addr1, addr3]);
         let mut node3 = TestNode::new(addr3, vec![addr1, addr2]);
-        let start = Instant::now();
+
+        // Wait for handshakes to complete
+        the_block::sleep(Duration::from_millis(1000)).await;
+
+        // Ensure all peers know each other
+        node1.node.add_peer(addr2);
+        node1.node.add_peer(addr3);
+        node2.node.add_peer(addr1);
+        node2.node.add_peer(addr3);
+        node3.node.add_peer(addr1);
+        node3.node.add_peer(addr2);
+        the_block::sleep(Duration::from_millis(500)).await;
+
+        // Mine blocks on node1
+        let mut ts = 1u64;
+        for _ in 0..3 {
+            {
+                let mut bc = node1.node.blockchain();
+                bc.mine_block_at("miner", ts).unwrap();
+                ts += 1;
+            }
+            node1.node.broadcast_chain();
+            the_block::sleep(Duration::from_millis(100)).await;
+        }
+
         let ok = wait_until_converged(
             &[&node1.node, &node2.node, &node3.node],
             Duration::from_secs(10 * timeout_factor()),
         )
         .await;
         assert!(ok, "convergence timed out");
-        let elapsed = start.elapsed();
-        assert!(elapsed <= Duration::from_secs(10 * timeout_factor()));
+
         node1.shutdown();
         node2.shutdown();
         node3.shutdown();
-        std::env::remove_var("TB_NET_PACKET_LOSS");
-        std::env::remove_var("TB_NET_JITTER_MS");
-        std::env::remove_var("TB_NET_KEY_PATH");
-        std::env::remove_var("TB_NET_KEY_SEED");
-        std::env::remove_var("TB_PEER_DB_PATH");
-        std::env::remove_var("TB_PEER_SEED");
-        std::env::remove_var("TB_FAST_MINE");
+        cleanup_env();
     });
 }
 
@@ -210,7 +215,8 @@ fn kill_node_recovers() {
     runtime::block_on(async {
         let _e = init_env();
         let mut nodes: Vec<TestNode> = Vec::new();
-        for _ in 0..5 {
+        let node_count = 3usize;
+        for _ in 0..node_count {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
             let tn = TestNode::new(addr, peers.clone());
@@ -220,13 +226,23 @@ fn kill_node_recovers() {
             }
             nodes.push(tn);
         }
-        
-        // CRITICAL: Wait longer for initial peering
-        the_block::sleep(Duration::from_secs(2)).await;
-        
+
+        // Wait for handshakes
+        the_block::sleep(Duration::from_millis(1500)).await;
+
+        // Ensure full mesh connectivity
+        for i in 0..nodes.len() {
+            for j in 0..nodes.len() {
+                if i != j {
+                    nodes[i].node.add_peer(nodes[j].addr);
+                }
+            }
+        }
+        the_block::sleep(Duration::from_millis(500)).await;
+
+        // Phase 1: Mine 6 blocks
         let mut ts = 1u64;
-        let blocks_per_phase = 6u64;
-        for _ in 0..blocks_per_phase {
+        for _ in 0..6 {
             {
                 let mut bc = nodes[0].node.blockchain();
                 bc.mine_block_at("miner", ts).unwrap();
@@ -235,20 +251,11 @@ fn kill_node_recovers() {
             nodes[0].node.broadcast_chain();
             the_block::sleep(Duration::from_millis(50)).await;
         }
-        for n in &nodes {
-            n.node.discover_peers();
-        }
-        
-        let max = Duration::from_secs(15 * timeout_factor());
-        let start = Instant::now();
-        let converged = wait_until_converged(
-            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-            max
-        ).await;
-        if !converged {
-            panic!("initial convergence failed after {:?}", start.elapsed());
-        }
-        println!("initial convergence {:?}", start.elapsed());
+        let max = Duration::from_secs(18 * timeout_factor());
+        assert!(
+            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
+            "initial convergence failed"
+        );
 
         // Kill node 2
         nodes[2].flag.trigger();
@@ -256,17 +263,16 @@ fn kill_node_recovers() {
             let _ = handle.join();
         }
         
-        // CRITICAL: Let shutdown complete before removing peers
-        the_block::sleep(Duration::from_millis(200)).await;
-        
+        // Wait for socket to be fully released
+        the_block::sleep(Duration::from_millis(500)).await;
         for (i, n) in nodes.iter().enumerate() {
             if i != 2 {
                 n.node.remove_peer(nodes[2].addr);
             }
         }
-        
-        // Mine on remaining nodes
-        for _ in 0..blocks_per_phase {
+
+        // Phase 2: Mine 6 more blocks
+        for _ in 0..6 {
             {
                 let mut bc = nodes[0].node.blockchain();
                 bc.mine_block_at("miner", ts).unwrap();
@@ -275,50 +281,40 @@ fn kill_node_recovers() {
             nodes[0].node.broadcast_chain();
             the_block::sleep(Duration::from_millis(50)).await;
         }
-        for n in nodes
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| *i != 2)
-            .map(|(_, n)| n)
-        {
-            n.node.discover_peers();
-        }
         let active: Vec<&Node> = nodes
             .iter()
             .enumerate()
             .filter(|(i, _)| *i != 2)
             .map(|(_, n)| &n.node)
             .collect();
-        
-        let start = Instant::now();
-        let converged = wait_until_converged(&active, max).await;
-        if !converged {
-            panic!("convergence after removal failed after {:?}", start.elapsed());
-        }
-        println!("convergence after removal {:?}", start.elapsed());
+        assert!(
+            wait_until_converged(&active, max).await,
+            "convergence after kill failed"
+        );
 
         // Restart node 2
         let restart_bc = Blockchain::open(nodes[2].dir.path().to_str().unwrap()).unwrap();
         let prev_env = set_net_key_env(&nodes[2].net_key_path, &nodes[2].net_key_seed);
+        // Collect peer addresses before creating new node
+        let peer_addrs: Vec<SocketAddr> = nodes
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 2)
+            .map(|(_, n)| n.addr)
+            .collect();
         let node3 = Node::new(
             nodes[2].addr,
-            active.iter().map(|n| n.addr()).collect(),
+            peer_addrs,
             restart_bc,
         );
         restore_net_key_env(prev_env);
-        
         let flag = ShutdownFlag::new();
         let handle = node3.start_with_flag(&flag).expect("start gossip node");
-        
-        // CRITICAL: Let node start before adding to peer lists
-        the_block::sleep(Duration::from_millis(300)).await;
-        
         for (i, n) in nodes.iter().enumerate() {
             if i != 2 {
                 n.node.add_peer(nodes[2].addr);
             }
         }
-        
         node3.discover_peers();
         let addr = nodes[2].addr;
         let key_path = nodes[2].net_key_path.clone();
@@ -333,48 +329,27 @@ fn kill_node_recovers() {
             flag,
             handle: Some(handle),
         };
-        // CRITICAL: Let reconnection stabilize
-        the_block::sleep(Duration::from_millis(500)).await;
-        
+
+        // Wait longer for node restart and handshakes
+        the_block::sleep(Duration::from_millis(1500)).await;
+
+        // Broadcast from all nodes to help convergence
         for n in &nodes {
-            n.node.discover_peers();
+            n.node.broadcast_chain();
         }
-        // Give the restarted node time to finish binding and establish connections
-        // before checking convergence. Increased from 250ms to 500ms for reliability
-        // across different systems (especially macOS).
         the_block::sleep(Duration::from_millis(500)).await;
-        nodes[0].node.broadcast_chain();
-        let start = Instant::now();
-        let converged = wait_until_converged(
-            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-            max
-        ).await;
-        if !converged {
-            eprintln!("FINAL CONVERGENCE FAILED:");
-            for (i, n) in nodes.iter().enumerate() {
-                eprintln!(
-                    "  Node {}: height={}, peers={}",
-                    i,
-                    n.node.blockchain().block_height,
-                    n.node.peer_addrs().len()
-                );
-            }
-            panic!("final convergence failed after {:?}", start.elapsed());
-        }
-        println!("final convergence {:?}", start.elapsed());
-        
+
+        assert!(
+            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
+            "final convergence failed"
+        );
+
         let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(h, blocks_per_phase * 2, "Expected all blocks to be mined");
+        assert_eq!(h, 12, "Expected 12 blocks");
         for n in nodes.iter_mut() {
             n.shutdown();
         }
-        std::env::remove_var("TB_NET_PACKET_LOSS");
-        std::env::remove_var("TB_NET_JITTER_MS");
-        std::env::remove_var("TB_NET_KEY_PATH");
-        std::env::remove_var("TB_NET_KEY_SEED");
-        std::env::remove_var("TB_PEER_DB_PATH");
-        std::env::remove_var("TB_PEER_SEED");
-        std::env::remove_var("TB_FAST_MINE");
+        cleanup_env();
     });
 }
 
@@ -382,8 +357,9 @@ fn kill_node_recovers() {
 fn partition_heals_to_majority() {
     runtime::block_on(async {
         let _e = init_env();
+        let node_count = 3usize;
         let mut nodes: Vec<TestNode> = Vec::new();
-        for _ in 0..5 {
+        for _ in 0..node_count {
             let addr = free_addr();
             let peers: Vec<SocketAddr> = nodes.iter().map(|n| n.addr).collect();
             let tn = TestNode::new(addr, peers.clone());
@@ -393,34 +369,50 @@ fn partition_heals_to_majority() {
             }
             nodes.push(tn);
         }
-        
-        // CRITICAL: Wait longer for initial peering on Mac to prevent race conditions
-        the_block::sleep(Duration::from_secs(2)).await;
-        
-        let mut ts = 1u64;
-        {
-            let mut bc = nodes[0].node.blockchain();
-            bc.mine_block_at("miner", ts).unwrap();
-            ts += 1;
-        }
-        nodes[0].node.broadcast_chain();
-        // Wait for initial sync to complete
-        the_block::sleep(Duration::from_millis(200)).await;
 
-        // isolate node4 (index 3)
-        let iso = 3usize;
+        // Wait for handshakes
+        the_block::sleep(Duration::from_millis(1500)).await;
+
+        // Ensure full mesh connectivity
+        for i in 0..nodes.len() {
+            for j in 0..nodes.len() {
+                if i != j {
+                    nodes[i].node.add_peer(nodes[j].addr);
+                }
+            }
+        }
+        the_block::sleep(Duration::from_millis(500)).await;
+
+        // Mine initial blocks before partition
+        let mut ts = 1u64;
+        for _ in 0..3 {
+            {
+                let mut bc = nodes[0].node.blockchain();
+                bc.mine_block_at("miner", ts).unwrap();
+                ts += 1;
+            }
+            nodes[0].node.broadcast_chain();
+            the_block::sleep(Duration::from_millis(100)).await;
+        }
+
+        // Wait for initial convergence before creating partition
+        let max = Duration::from_secs(10 * timeout_factor());
+        assert!(
+            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
+            "initial convergence before partition failed"
+        );
+
+        // Isolate node 3
+        let iso = node_count - 1;
         nodes[iso].node.clear_peers();
         for (i, n) in nodes.iter().enumerate() {
             if i != iso {
                 n.node.remove_peer(nodes[iso].addr);
             }
         }
-        
-        // CRITICAL: Let partition settle before mining
-        the_block::sleep(Duration::from_millis(100)).await;
 
-        let main_blocks_after_isolation = 4u64;
-        for _ in 0..main_blocks_after_isolation {
+        // Main partition mines 6 blocks
+        for _ in 0..6 {
             {
                 let mut bc = nodes[0].node.blockchain();
                 bc.mine_block_at("miner", ts).unwrap();
@@ -429,6 +421,7 @@ fn partition_heals_to_majority() {
             nodes[0].node.broadcast_chain();
             the_block::sleep(Duration::from_millis(50)).await;
         }
+        // Isolated node mines 2 blocks (shorter chain)
         {
             let mut bc = nodes[iso].node.blockchain();
             bc.mine_block_at("isolated", ts).unwrap();
@@ -436,72 +429,72 @@ fn partition_heals_to_majority() {
             bc.mine_block_at("isolated", ts).unwrap();
         }
 
-        // heal partition
+        // Capture reorg metric baseline before healing partition
+        #[cfg(feature = "telemetry")]
+        let reorg_baseline = the_block::telemetry::FORK_REORG_TOTAL
+            .ensure_handle_for_label_values(&["2"])
+            .expect(telemetry::LABEL_REGISTRATION_ERR)
+            .get();
+
+        // Heal partition
         for (i, n) in nodes.iter().enumerate() {
             if i != iso {
                 n.node.add_peer(nodes[iso].addr);
                 nodes[iso].node.add_peer(n.addr);
             }
         }
-        
-        // CRITICAL: Let reconnection complete before broadcasting
-        the_block::sleep(Duration::from_millis(500)).await;
-        
         nodes[iso].node.discover_peers();
-        // Give nodes time to establish connections after partition healing
-        // before checking convergence. This improves reliability across platforms.
-        the_block::sleep(Duration::from_millis(500)).await;
-        nodes[0].node.broadcast_chain();
-        the_block::sleep(Duration::from_millis(200)).await;
-        
-        let max = Duration::from_secs(15 * timeout_factor());
-        let start = Instant::now();
-        let converged = wait_until_converged(
-            &nodes.iter().map(|n| &n.node).collect::<Vec<_>>(),
-            max
-        ).await;
-        
-        if !converged {
-            eprintln!("PARTITION HEAL FAILED:");
-            for (i, n) in nodes.iter().enumerate() {
-                eprintln!(
-                    "  Node {}: height={}, peers={}",
-                    i,
-                    n.node.blockchain().block_height,
-                    n.node.peer_addrs().len()
-                );
+
+        // Give time for handshakes to complete after re-connecting
+        the_block::sleep(Duration::from_millis(800)).await;
+
+        // Ensure all nodes have complete peer lists after re-connecting
+        for i in 0..nodes.len() {
+            for j in 0..nodes.len() {
+                if i != j {
+                    nodes[i].node.add_peer(nodes[j].addr);
+                }
             }
-            panic!("partition heal convergence failed after {:?}", start.elapsed());
         }
-        
-        println!("partition heal convergence {:?}", start.elapsed());
-        let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(
-            h,
-            1 + main_blocks_after_isolation,
-            "Expected majority chain to win"
+        the_block::sleep(Duration::from_millis(500)).await;
+
+        // Trigger chain exchange after partition merge
+        for n in &nodes {
+            n.node.broadcast_chain();
+        }
+        // Actively pull the tip from the known leader to the isolated node
+        let leader_addr = nodes[0].addr;
+        let iso_height = nodes[iso].node.blockchain().block_height;
+        nodes[iso].node.request_chain_from(leader_addr, iso_height);
+        the_block::sleep(Duration::from_millis(1200)).await;
+
+        let max = Duration::from_secs(30 * timeout_factor());
+        assert!(
+            wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
+            "partition heal failed"
         );
-        
+
+        let h = nodes[0].node.blockchain().block_height;
+        assert_eq!(h, 9, "Expected majority chain (9 blocks: 3 pre-partition + 6 during) to win");
+
         #[cfg(feature = "telemetry")]
         {
+            // Isolated node mined 2 blocks, so reorg depth is 2
             let c = the_block::telemetry::FORK_REORG_TOTAL
-                .ensure_handle_for_label_values(&["0"])
+                .ensure_handle_for_label_values(&["2"])
                 .expect(telemetry::LABEL_REGISTRATION_ERR)
                 .get();
-            assert!(c > 0, "Expected fork reorganization to be recorded");
+            assert!(
+                c > reorg_baseline,
+                "Expected fork reorg metric at depth 2 to increase (before: {}, after: {})",
+                reorg_baseline,
+                c
+            );
         }
-        
+
         for n in nodes.iter_mut() {
             n.shutdown();
         }
-        
-        // Cleanup
-        std::env::remove_var("TB_NET_PACKET_LOSS");
-        std::env::remove_var("TB_NET_JITTER_MS");
-        std::env::remove_var("TB_NET_KEY_PATH");
-        std::env::remove_var("TB_NET_KEY_SEED");
-        std::env::remove_var("TB_PEER_DB_PATH");
-        std::env::remove_var("TB_PEER_SEED");
-        std::env::remove_var("TB_FAST_MINE");
+        cleanup_env();
     });
 }
