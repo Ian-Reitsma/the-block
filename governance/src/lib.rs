@@ -21,6 +21,7 @@ mod circuit_breaker_integration_test;
 pub mod codec;
 pub mod controller;
 pub mod disbursement_auth;
+pub mod energy_params;
 pub mod kalman;
 pub mod params;
 pub mod proposals;
@@ -41,6 +42,7 @@ pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
+pub use energy_params::{EnergySettlementMode, EnergySettlementPayload};
 pub use params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,
@@ -146,6 +148,9 @@ pub enum ParamKey {
     EnergyMinStake,
     EnergyOracleTimeoutBlocks,
     EnergySlashingRateBps,
+    EnergySettlementMode,
+    EnergySettlementQuorumPpm,
+    EnergySettlementExpiryBlocks,
 
     // ===== Economic Control Laws =====
 

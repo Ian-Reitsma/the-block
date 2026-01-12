@@ -28,6 +28,42 @@ pub type H256 = [u8; 32];
 
 const BASIS_POINTS_DIVISOR: u64 = 10_000;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettlementMode {
+    Batch,
+    #[default]
+    RealTime,
+}
+
+impl Serialize for SettlementMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: foundation_serialization::serde::Serializer,
+    {
+        let disc: u8 = match self {
+            SettlementMode::Batch => 0,
+            SettlementMode::RealTime => 1,
+        };
+        serializer.serialize_u8(disc)
+    }
+}
+
+impl<'de> Deserialize<'de> for SettlementMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: foundation_serialization::serde::Deserializer<'de>,
+    {
+        let disc = u8::deserialize(deserializer)?;
+        match disc {
+            0 => Ok(SettlementMode::Batch),
+            1 => Ok(SettlementMode::RealTime),
+            other => Err(<D::Error as foundation_serialization::de::Error>::custom(
+                format!("invalid settlement_mode discriminant: {other}"),
+            )),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct EnergyProvider {
@@ -290,6 +326,10 @@ pub struct EnergyMarketConfig {
     pub jurisdiction_fee_bps: u16,
     pub oracle_timeout_blocks: u64,
     pub slashing_rate_bps: u16,
+    #[serde(default)]
+    pub settlement_mode: SettlementMode,
+    #[serde(default)]
+    pub quorum_threshold_ppm: u32,
     // Dynamic fee parameters
     pub dynamic_fees_enabled: bool,
     pub congestion_sensitivity: f64,
@@ -311,6 +351,8 @@ impl Default for EnergyMarketConfig {
             jurisdiction_fee_bps: 0,
             oracle_timeout_blocks: 0,
             slashing_rate_bps: 0,
+            settlement_mode: SettlementMode::RealTime,
+            quorum_threshold_ppm: 0,
             // Dynamic fee defaults
             dynamic_fees_enabled: true,
             congestion_sensitivity: 0.1, // Controls how aggressively fees respond to congestion
@@ -356,6 +398,10 @@ pub enum EnergyMarketError {
     CreditExpired(H256),
     #[error("signature verification failed: {0}")]
     SignatureVerificationFailed(#[from] VerificationError),
+    #[error("settlement gated by batch policy until block {next_block}")]
+    SettlementNotDue { next_block: BlockNumber },
+    #[error("settlement below quorum: required {required_ppm} ppm, actual {actual_ppm} ppm")]
+    SettlementBelowQuorum { required_ppm: u32, actual_ppm: u32 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -626,6 +672,26 @@ impl EnergyMarket {
             .credits
             .get_mut(&meter_hash)
             .ok_or(EnergyMarketError::UnknownReading(meter_hash))?;
+        if let SettlementMode::Batch = self.config.settlement_mode {
+            let interval = self.config.oracle_timeout_blocks.max(1);
+            let elapsed = block.saturating_sub(credit.timestamp);
+            let remainder = elapsed % interval;
+            if remainder != 0 {
+                let next = block.saturating_add(interval - remainder);
+                return Err(EnergyMarketError::SettlementNotDue { next_block: next });
+            }
+        }
+        if self.config.quorum_threshold_ppm > 0 {
+            let capacity = provider.capacity_kwh.max(1);
+            let actual_ppm =
+                ((kwh_consumed as u128).saturating_mul(1_000_000) / capacity as u128) as u32;
+            if actual_ppm < self.config.quorum_threshold_ppm {
+                return Err(EnergyMarketError::SettlementBelowQuorum {
+                    required_ppm: self.config.quorum_threshold_ppm,
+                    actual_ppm,
+                });
+            }
+        }
         if self.config.oracle_timeout_blocks > 0
             && block
                 .saturating_sub(credit.timestamp)

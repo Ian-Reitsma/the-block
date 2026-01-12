@@ -2409,6 +2409,13 @@ impl GovStore {
                                     params.energy_oracle_timeout_blocks
                                 }
                                 ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
+                                ParamKey::EnergySettlementMode => params.energy_settlement_mode,
+                                ParamKey::EnergySettlementQuorumPpm => {
+                                    params.energy_settlement_quorum_ppm
+                                }
+                                ParamKey::EnergySettlementExpiryBlocks => {
+                                    params.energy_settlement_expiry_blocks
+                                }
                                 ParamKey::KappaCpuSub => params.kappa_cpu_sub,
                                 ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
                                 ParamKey::ProofRebateLimit => params.proof_rebate_limit,
@@ -2649,6 +2656,9 @@ impl GovStore {
                 ParamKey::EnergyMinStake => params.energy_min_stake,
                 ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
                 ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
+                ParamKey::EnergySettlementMode => params.energy_settlement_mode,
+                ParamKey::EnergySettlementQuorumPpm => params.energy_settlement_quorum_ppm,
+                ParamKey::EnergySettlementExpiryBlocks => params.energy_settlement_expiry_blocks,
                 ParamKey::KappaCpuSub => params.kappa_cpu_sub,
                 ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
                 ParamKey::ProofRebateLimit => params.proof_rebate_limit,
@@ -2761,6 +2771,9 @@ impl GovStore {
             ParamKey::EnergyMinStake => params.energy_min_stake,
             ParamKey::EnergyOracleTimeoutBlocks => params.energy_oracle_timeout_blocks,
             ParamKey::EnergySlashingRateBps => params.energy_slashing_rate_bps,
+            ParamKey::EnergySettlementMode => params.energy_settlement_mode,
+            ParamKey::EnergySettlementQuorumPpm => params.energy_settlement_quorum_ppm,
+            ParamKey::EnergySettlementExpiryBlocks => params.energy_settlement_expiry_blocks,
             ParamKey::KappaCpuSub => params.kappa_cpu_sub,
             ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
             ParamKey::ProofRebateLimit => params.proof_rebate_limit,

@@ -74,34 +74,34 @@ tb_prop_test!(orphan_counter_never_exceeds_mempool, |runner| {
                 );
                 // Verify signature length is correct
                 assert_eq!(
-                    tx.signature.ed25519.len(), 64,
+                    tx.signature.ed25519.len(),
+                    64,
                     "Signature must be 64 bytes for account {}, got {}",
-                    name, tx.signature.ed25519.len()
+                    name,
+                    tx.signature.ed25519.len()
                 );
                 // Detailed verification with debug info
                 let verify_result = the_block::transaction::verify_signed_tx(&tx);
                 if !verify_result {
-                    let payload_bytes = the_block::transaction::canonical_payload_bytes(&tx.payload);
+                    let payload_bytes =
+                        the_block::transaction::canonical_payload_bytes(&tx.payload);
                     let signer = crypto_suite::transactions::TransactionSigner::from_chain_id(
                         the_block::consensus::CHAIN_ID,
                     );
                     let msg = signer.message(&payload_bytes);
                     let pk_arr: Option<[u8; 32]> = tx.public_key.as_slice().try_into().ok();
-                    let sig_arr: Option<[u8; 64]> =
-                        tx.signature.ed25519.as_slice().try_into().ok();
+                    let sig_arr: Option<[u8; 64]> = tx.signature.ed25519.as_slice().try_into().ok();
                     let mut key_parse_ok = false;
                     let sig_parse_ok = sig_arr.is_some();
                     let mut direct_verify_ok = false;
                     if let (Some(pk_bytes), Some(sig_bytes)) = (pk_arr, sig_arr) {
-                        match crypto_suite::signatures::ed25519::VerifyingKey::from_bytes(
-                            &pk_bytes,
-                        ) {
+                        match crypto_suite::signatures::ed25519::VerifyingKey::from_bytes(&pk_bytes)
+                        {
                             Ok(vk) => {
                                 key_parse_ok = true;
-                                let sig =
-                                    crypto_suite::signatures::ed25519::Signature::from_bytes(
-                                        &sig_bytes,
-                                    );
+                                let sig = crypto_suite::signatures::ed25519::Signature::from_bytes(
+                                    &sig_bytes,
+                                );
                                 direct_verify_ok = vk.verify(&msg, &sig).is_ok();
                             }
                             Err(_) => {
@@ -137,8 +137,9 @@ tb_prop_test!(orphan_counter_never_exceeds_mempool, |runner| {
                         &tx2.signature.ed25519
                     );
                 }
-                bc.submit_transaction(tx)
-                    .unwrap_or_else(|e| panic!("Failed to submit transaction for {}: {:?}", name, e));
+                bc.submit_transaction(tx).unwrap_or_else(|e| {
+                    panic!("Failed to submit transaction for {}: {:?}", name, e)
+                });
             }
             let mut keys = Vec::new();
             bc.mempool_consumer.for_each(|key, _value| {

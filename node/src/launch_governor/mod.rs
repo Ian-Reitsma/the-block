@@ -618,6 +618,14 @@ impl SharedState {
         }
     }
 
+    fn seed_from_provider(&self, provider: &dyn SignalProvider, window_secs: u64) {
+        let economics_sample = provider.economics_sample(window_secs);
+        self.set_economics_prev_metrics(deterministic_metrics::snapshot_from_metrics(
+            &economics_sample.market_metrics,
+        ));
+        self.set_economics_sample(economics_sample_snapshot(&economics_sample));
+    }
+
     fn set_economics_sample(&self, sample: JsonValue) {
         if let Ok(mut guard) = self.economics_sample.lock() {
             *guard = Some(sample);
@@ -712,6 +720,9 @@ pub fn spawn(chain: Arc<Mutex<Blockchain>>, config: GovernorConfig) -> Option<Go
         shared.set_autopilot_enabled(guard.params.launch_economics_autopilot != 0);
         shared.set_schema_version(guard.schema_version() as u64);
     }
+    let signal_provider: Arc<dyn SignalProvider> =
+        Arc::new(LiveSignalProvider::new(Arc::clone(&chain)));
+    shared.seed_from_provider(signal_provider.as_ref(), config.window_secs);
     {
         let mut pending = shared.pending.lock().unwrap_or_else(|e| e.into_inner());
         let mut existing = shared.store.list_pending();
@@ -719,8 +730,6 @@ pub fn spawn(chain: Arc<Mutex<Blockchain>>, config: GovernorConfig) -> Option<Go
         *pending = existing;
     }
     let cancel = CancellationToken::new();
-    let signal_provider: Arc<dyn SignalProvider> =
-        Arc::new(LiveSignalProvider::new(Arc::clone(&chain)));
     let shared_task = Arc::clone(&shared);
     let cancel_task = cancel.clone();
     let handle = runtime::spawn(async move {
@@ -1960,11 +1969,13 @@ impl EconomicsController {
 mod tests {
     use super::*;
     use crate::economics::{MarketMetric, MarketMetrics};
+    use sys::tempfile::tempdir;
 
     #[allow(dead_code)] // Test utility struct for future test expansion
     struct MockProvider {
         chain_samples: VecDeque<ChainSample>,
         dns_samples: VecDeque<DnsSample>,
+        economics_samples: VecDeque<EconomicsSample>,
     }
 
     #[allow(dead_code)] // Test utility methods for future test expansion
@@ -1973,6 +1984,7 @@ mod tests {
             Self {
                 chain_samples: VecDeque::new(),
                 dns_samples: VecDeque::new(),
+                economics_samples: VecDeque::new(),
             }
         }
 
@@ -1982,6 +1994,10 @@ mod tests {
 
         fn push_dns(&mut self, sample: DnsSample) {
             self.dns_samples.push_back(sample);
+        }
+
+        fn push_economics(&mut self, sample: EconomicsSample) {
+            self.economics_samples.push_back(sample);
         }
     }
 
@@ -1995,13 +2011,53 @@ mod tests {
         }
 
         fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {
-            EconomicsSample::default()
+            self.economics_samples
+                .front()
+                .cloned()
+                .unwrap_or_default()
         }
     }
 
     #[test]
     fn block_smoothness_zero_when_empty() {
         assert_eq!(block_smoothness(&[]), 0.0);
+    }
+
+    #[test]
+    fn seed_from_provider_populates_status_snapshot() {
+        let mut provider = MockProvider::new();
+        let sample = EconomicsSample {
+            epoch_tx_count: 11,
+            epoch_tx_volume_block: 22,
+            epoch_treasury_inflow_block: 33,
+            block_reward_per_block: 44,
+            market_metrics: healthy_market_metrics(),
+        };
+        provider.push_economics(sample.clone());
+
+        let dir = tempdir().expect("temp dir");
+        let config = GovernorConfig {
+            enabled: true,
+            db_path: dir.path().join("governor_db"),
+            base_path: dir.path().to_path_buf(),
+            window_secs: 30,
+        };
+        let store = GovernorStore::open(&config.db_path);
+        let shared = SharedState::new(&config, store);
+        shared.seed_from_provider(&provider, config.window_secs);
+
+        let status = shared.status();
+        let block_reward = status
+            .economics_sample
+            .as_object()
+            .and_then(|map| map.get("block_reward"))
+            .and_then(JsonValue::as_u64)
+            .unwrap();
+        assert_eq!(block_reward, sample.block_reward_per_block);
+        assert!(
+            !status.economics_prev_market_metrics.is_empty(),
+            "seeded metrics should be captured for governor.status"
+        );
     }
 
     #[test]

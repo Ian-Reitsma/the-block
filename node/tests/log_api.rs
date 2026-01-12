@@ -107,8 +107,10 @@ fn tail_streams_indexed_rows() -> Result<()> {
             std::env::set_var("TB_LOG_DB_PATH", db_path.to_string_lossy().to_string());
 
             // Verify the log was actually indexed before starting the server
-            let mut test_filter = the_block::log_indexer::LogFilter::default();
-            test_filter.passphrase = Some("secret".into());
+            let test_filter = the_block::log_indexer::LogFilter {
+                passphrase: Some("secret".into()),
+                ..Default::default()
+            };
             let indexed_entries = the_block::log_indexer::search_logs(&db_path, &test_filter)?;
             assert_eq!(
                 indexed_entries.len(),

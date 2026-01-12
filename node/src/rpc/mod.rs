@@ -238,11 +238,22 @@ fn status_value(status: &str) -> Value {
 mod tests {
     use super::{
         drop_counts_to_value, handshake_fail_counts_to_value, peer_metrics_to_value, DropReason,
-        HandshakeError,
+        execute_rpc, HandshakeError, RpcClientErrorCode, RpcResponse, RpcState,
     };
+    use crate::identity::{handle_registry::HandleRegistry, DidRegistry};
     use crate::net::peer::{PeerMetrics, PeerReputation};
-    use foundation_serialization::json::Value;
-    use std::collections::HashMap;
+    use crate::rpc::fuzz_runtime_config;
+    use crate::Blockchain;
+    use foundation_rpc::Request as RpcRequest;
+    use foundation_serialization::json::{Map, Value};
+    use runtime::sync::semaphore::Semaphore;
+    use std::collections::{HashMap, HashSet};
+    use std::net::IpAddr;
+    use std::sync::{
+        atomic::AtomicBool,
+        Arc, Mutex,
+    };
+    use sys::tempfile::tempdir;
 
     #[test]
     fn drop_counts_are_deterministically_ordered() {
@@ -344,6 +355,52 @@ mod tests {
 
         assert_eq!(map["throttle_reason"], Value::String("cooldown".into()));
     }
+
+    #[test]
+    fn energy_requests_respect_dedicated_rate_limit() {
+        let dir = tempdir().expect("temp dir");
+        let bc = Arc::new(Mutex::new(Blockchain::new(
+            dir.path().to_str().expect("path utf8"),
+        )));
+        let handles = Arc::new(Mutex::new(HandleRegistry::open(
+            dir.path().to_str().expect("path utf8"),
+        )));
+        let dids = Arc::new(Mutex::new(DidRegistry::open(dir.path())));
+        let state = RpcState {
+            bc,
+            mining: Arc::new(AtomicBool::new(false)),
+            nonces: Arc::new(Mutex::new(HashSet::new())),
+            handles,
+            dids,
+            runtime_cfg: fuzz_runtime_config(),
+            market: None,
+            ad_readiness: None,
+            governor: None,
+            clients: Arc::new(Mutex::new(HashMap::new())),
+            energy_clients: Arc::new(Mutex::new(HashMap::new())),
+            tokens_per_sec: 128.0,
+            energy_tokens_per_sec: 1.0,
+            ban_secs: 1,
+            client_timeout: 1,
+            concurrent: Arc::new(Semaphore::new(4)),
+        };
+
+        let req = RpcRequest::new("energy.market_state", Value::Object(Map::new()));
+        let ip: IpAddr = "127.0.0.1".parse().expect("loopback ip");
+        let first = execute_rpc(&state, req.clone(), None, Some(ip));
+        match first {
+            RpcResponse::Result { .. } => {}
+            other => panic!("unexpected energy response: {other:?}"),
+        }
+
+        let second = execute_rpc(&state, req, None, Some(ip));
+        match second {
+            RpcResponse::Error { error, .. } => {
+                assert_eq!(error.code, RpcClientErrorCode::RateLimit.rpc_code());
+            }
+            other => panic!("expected rate-limit error, got {other:?}"),
+        }
+    }
 }
 
 fn error_value(message: impl Into<String>) -> Value {
@@ -375,7 +432,9 @@ struct RpcState {
     ad_readiness: Option<crate::ad_readiness::AdReadinessHandle>,
     governor: Option<Arc<launch_governor::GovernorHandle>>,
     clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    energy_clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
     tokens_per_sec: f64,
+    energy_tokens_per_sec: f64,
     ban_secs: u64,
     client_timeout: u64,
     concurrent: Arc<Semaphore>,
@@ -410,6 +469,22 @@ impl RpcState {
                     })
                     .close();
                 Some(response)
+            }
+        }
+    }
+
+    fn check_energy_rate_limit(&self, ip: IpAddr) -> Option<RpcError> {
+        match limiter::check_client(
+            &ip,
+            &self.energy_clients,
+            self.energy_tokens_per_sec,
+            self.ban_secs,
+            self.client_timeout,
+        ) {
+            Ok(_) => None,
+            Err(code) => {
+                telemetry_rpc_error(code);
+                Some(rpc_error(code.rpc_code(), code.message()))
             }
         }
     }
@@ -481,6 +556,18 @@ pub struct RpcRuntimeConfig {
     admin_token: Option<String>,
     relay_only: bool,
 }
+
+const ENERGY_METHODS: &[&str] = &[
+    "energy.register_provider",
+    "energy.market_state",
+    "energy.receipts",
+    "energy.credits",
+    "energy.disputes",
+    "energy.settle",
+    "energy.submit_reading",
+    "energy.flag_dispute",
+    "energy.resolve_dispute",
+];
 
 const PUBLIC_METHODS: &[&str] = &[
     "balance",
@@ -763,6 +850,14 @@ fn execute_rpc(
         }
         None => false,
     };
+
+    if ENERGY_METHODS.contains(&method_str) {
+        if let Some(ip) = peer_ip {
+            if let Some(err) = state.check_energy_rate_limit(ip) {
+                return RpcResponse::error(err, id);
+            }
+        }
+    }
 
     let dispatch_result = || {
         dispatch(
@@ -2670,44 +2765,44 @@ fn dispatch(
             let now = req.params.get("now").and_then(|v| v.as_u64()).unwrap_or(0);
             serialize_response(htlc::refund(id, now))?
         }
-        "energy.register_provider" => energy::register(&req.params),
+        "energy.register_provider" => energy::register(&req.params)?,
         "energy.market_state" => {
             let provider = req
                 .params
                 .get("provider_id")
                 .and_then(|value| value.as_str());
-            energy::market_state(provider)
+            energy::market_state(provider)?
         }
-        "energy.receipts" => energy::receipts(&req.params),
-        "energy.credits" => energy::credits(&req.params),
-        "energy.disputes" => energy::disputes(&req.params),
+        "energy.receipts" => energy::receipts(&req.params)?,
+        "energy.credits" => energy::credits(&req.params)?,
+        "energy.disputes" => energy::disputes(&req.params)?,
         "energy.settle" => {
             let height = bc
                 .lock()
                 .map(|guard| guard.block_height)
                 .unwrap_or_default();
-            energy::settle(&req.params, height)
+            energy::settle(&req.params, height)?
         }
         "energy.submit_reading" => {
             let height = bc
                 .lock()
                 .map(|guard| guard.block_height)
                 .unwrap_or_default();
-            energy::submit_reading(&req.params, height)
+            energy::submit_reading(&req.params, height)?
         }
         "energy.flag_dispute" => {
             let height = bc
                 .lock()
                 .map(|guard| guard.block_height)
                 .unwrap_or_default();
-            energy::flag_dispute(&req.params, height)
+            energy::flag_dispute(&req.params, height)?
         }
         "energy.resolve_dispute" => {
             let height = bc
                 .lock()
                 .map(|guard| guard.block_height)
                 .unwrap_or_default();
-            energy::resolve_dispute(&req.params, height)
+            energy::resolve_dispute(&req.params, height)?
         }
         "storage_upload" => {
             let object_id = req
@@ -3164,10 +3259,15 @@ pub async fn run_rpc_server_with_market(
         });
     let dids = Arc::new(Mutex::new(DidRegistry::open(&did_path)));
     let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
+    let energy_clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
     let tokens_per_sec = std::env::var("TB_RPC_TOKENS_PER_SEC")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(100.0);
+    let energy_tokens_per_sec = std::env::var("TB_RPC_ENERGY_TOKENS_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20.0);
     let ban_secs = std::env::var("TB_RPC_BAN_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -3203,7 +3303,9 @@ pub async fn run_rpc_server_with_market(
         ad_readiness: readiness,
         governor,
         clients,
+        energy_clients,
         tokens_per_sec,
+        energy_tokens_per_sec,
         ban_secs,
         client_timeout,
         concurrent: Arc::new(Semaphore::new(1024)),
@@ -3286,7 +3388,9 @@ pub fn fuzz_dispatch_request(
         ad_readiness: readiness,
         governor: None,
         clients: Arc::new(Mutex::new(HashMap::new())),
+        energy_clients: Arc::new(Mutex::new(HashMap::new())),
         tokens_per_sec: 128.0,
+        energy_tokens_per_sec: 64.0,
         ban_secs: 1,
         client_timeout: 1,
         concurrent: Arc::new(Semaphore::new(64)),

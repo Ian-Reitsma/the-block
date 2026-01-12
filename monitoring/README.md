@@ -1,9 +1,9 @@
 # Monitoring
-Guidance aligns with the dependency-sovereignty pivot; runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced.
+Guidance aligns with the dependency-sovereignty pivot; runtime, transport, overlay, storage_engine, coding, crypto_suite, and codec wrappers are live with governance overrides enforced. The foundation dashboard + metrics-aggregator are the only operational path—`render_foundation_dashboard.py` reads `/metrics` and `/wrappers` directly so operators never rely on legacy Grafana JSON for live views.
 
 Dashboards are generated from `metrics.json`. The native and Docker scripts
 run `monitoring/tools/render_foundation_dashboard.py` in a loop, producing
-`monitoring/output/index.html` that summarises the latest telemetry snapshot.
+`monitoring/output/index.html` that summarises the latest telemetry snapshot pulled from the first-party endpoints.
 
 ```bash
 npm ci --prefix monitoring
@@ -13,8 +13,9 @@ python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/met
 
 `make -C monitoring lint` still rebuilds `grafana/dashboard.json` via the Rust
 build script so historical Grafana dashboards remain reproducible, but the
-first-party viewer consumes the JSON schema directly. Custom overrides in
-`dashboard_overrides.json` are merged during generation.
+first-party viewer consumes the JSON schema directly and Grafana/Prometheus
+artifacts are legacy only—do not extend them. Custom overrides in
+`dashboard_overrides.json` are merged during generation and should stay minimal.
 
 Use `make dashboard` at the repository root to regenerate the dashboard schema
 manually. Edits to `metrics.json` or the overrides file automatically trigger
@@ -22,7 +23,7 @@ regeneration during builds.
 
 Wrapper metrics appear in the generated dashboards under the **Other** row. The
 panels plot `runtime_backend_info`, `transport_provider_info`,
-`transport_provider_connect_total`, `coding_algorithm_info`,
+`transport_provider_connect_total`, `storage_engine_*`, `coding_algorithm_info`,
 `codec_*`, `crypto_*`, and `dependency_policy_violation*` so operators can trace
 backend failovers or policy drift alongside the rest of the telemetry feed.
 Runtime health panels also chart reactor metrics such as

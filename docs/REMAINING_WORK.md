@@ -423,29 +423,12 @@ grep -c "bash" docs/operations.md   # Should have 20+ CLI command examples
 
 ---
 
-## Optional: Energy Governance Payloads (Skip for Phase 1)
+## Energy Governance Payloads ✅ IMPLEMENTED
 
-**File**: `governance/src/energy_params.rs` (advanced implementation)
-
-Define energy settlement parameters for governance control:
-
-```rust
-pub struct EnergySettlementPayload {
-    pub mode: EnergyMode,  // Batch vs RealTime
-    pub quorum_threshold_ppm: u32,
-    pub expiry_blocks: u64,
-}
-
-pub enum EnergyMode {
-    Batch { blocks_per_settlement: u64 },
-    RealTime { latency_bound_ms: u64 },
-}
-```
-
-Integration:
-1. Parse in `governance/src/params.rs`
-2. Activate in `node/src/energy.rs::set_governance_params()`
-3. Test via `cargo test -p governance_spec energy_params`
+- **Files**: `governance/src/energy_params.rs`, `governance/src/params.rs`, `node/src/governance/params.rs`, `node/src/energy.rs`
+- **Fields**: settlement `mode` (Batch|RealTime), `quorum_threshold_ppm`, `expiry_blocks`
+- **Runtime**: applied via `set_governance_params()` and enforced in settlement admission
+- **Tests**: `cargo test -p governance_spec energy_params -- --nocapture` and `cargo test -p the_block --all-features energy_oracle_enforcement_and_disputes -- --nocapture`
 
 ---
 
@@ -512,9 +495,8 @@ bash scripts/verify_metrics_coverage.sh
 
 ## Execution Checklist
 
-- [ ] Create `monitoring/grafana_treasury_dashboard.json` (45 min)
-- [ ] Create `monitoring/grafana_energy_dashboard.json` (45 min)
-- [ ] Verify both dashboards show data in Grafana (10 min)
+- [ ] Regenerate first-party dashboard via `python monitoring/tools/render_foundation_dashboard.py http://<node-ip>:<metrics-port>/metrics`
+- [ ] Verify energy + treasury panels render from metrics.json (Grafana/Prometheus artifacts remain legacy)
 - [ ] Create CI gate job (45 min)
 - [ ] Test CI gate locally (15 min)
 - [ ] Add operations runbooks to `docs/operations.md` (1 hour)

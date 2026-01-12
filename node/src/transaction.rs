@@ -783,10 +783,7 @@ mod tests {
             direct
         );
         let stateless = verify_signed_tx(&signed);
-        assert!(
-            stateless,
-            "verify_signed_tx failed for regression payload"
-        );
+        assert!(stateless, "verify_signed_tx failed for regression payload");
     }
 
     #[test]

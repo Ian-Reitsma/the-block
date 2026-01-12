@@ -68,10 +68,18 @@ pub struct Event {
     priority: bool,
 }
 
-impl Event {
-    fn new(
-        token: Token,
-        ident: Option<usize>,
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EventFlags {
+    pub readable: bool,
+    pub writable: bool,
+    pub error: bool,
+    pub read_closed: bool,
+    pub write_closed: bool,
+    pub priority: bool,
+}
+
+impl EventFlags {
+    pub fn new(
         readable: bool,
         writable: bool,
         error: bool,
@@ -80,14 +88,27 @@ impl Event {
         priority: bool,
     ) -> Self {
         Self {
-            token,
-            ident,
             readable,
             writable,
             error,
             read_closed,
             write_closed,
             priority,
+        }
+    }
+}
+
+impl Event {
+    fn new(token: Token, ident: Option<usize>, flags: EventFlags) -> Self {
+        Self {
+            token,
+            ident,
+            readable: flags.readable,
+            writable: flags.writable,
+            error: flags.error,
+            read_closed: flags.read_closed,
+            write_closed: flags.write_closed,
+            priority: flags.priority,
         }
     }
 

@@ -373,8 +373,10 @@ mod tests {
     #[test]
     fn basepoint_add_matches_scalar_addition() {
         // Deterministic scalars to exercise group law: B*(a+b) == B*a + B*b
-        let a_bytes = hex_to_array::<32>("0100000000000000000000000000000000000000000000000000000000000000");
-        let b_bytes = hex_to_array::<32>("0200000000000000000000000000000000000000000000000000000000000000");
+        let a_bytes =
+            hex_to_array::<32>("0100000000000000000000000000000000000000000000000000000000000000");
+        let b_bytes =
+            hex_to_array::<32>("0200000000000000000000000000000000000000000000000000000000000000");
         let ab_bytes =
             hex_to_array::<32>("0300000000000000000000000000000000000000000000000000000000000000");
         let a = Scalar::from_bytes_mod_order(&a_bytes);
@@ -410,15 +412,18 @@ mod tests {
         let r_scalar = Scalar::from_bytes_mod_order_wide(&r_digest);
         let vk = signing_key.verifying_key();
         let a_point = EdwardsPoint::mul_base(&a_scalar);
-        assert_eq!(a_point.compress(), vk.point.compress(), "public key mismatch");
+        assert_eq!(
+            a_point.compress(),
+            vk.point.compress(),
+            "public key mismatch"
+        );
         let mut r_bytes = [0u8; 32];
         let mut s_bytes = [0u8; 32];
         let sig_bytes = sig.to_bytes();
         r_bytes.copy_from_slice(&sig_bytes[..32]);
         s_bytes.copy_from_slice(&sig_bytes[32..]);
         let r_point = CompressedPoint(r_bytes).decompress().expect("r decompress");
-        let s_scalar =
-            Scalar::from_canonical_bytes(&s_bytes).expect("s canonical");
+        let s_scalar = Scalar::from_canonical_bytes(&s_bytes).expect("s canonical");
         let public_bytes = vk.to_bytes();
         let k_digest = Sha512::digest_chunks(&[&r_bytes, &public_bytes, &msg]);
         let k_scalar = Scalar::from_bytes_mod_order_wide(&k_digest);
@@ -427,14 +432,23 @@ mod tests {
         let r_plus = ka.add(&r_point);
         let calc_s = Scalar::mul_add(&k_scalar, &a_scalar, &r_scalar);
         let direct = EdwardsPoint::mul_base(&calc_s);
-        let recomposed = EdwardsPoint::mul_base(&r_scalar).add(&EdwardsPoint::mul_base(&a_scalar).scalar_mul(&k_scalar));
+        let recomposed = EdwardsPoint::mul_base(&r_scalar)
+            .add(&EdwardsPoint::mul_base(&a_scalar).scalar_mul(&k_scalar));
         let zero = Scalar::from_bytes_mod_order(&[0u8; 32]);
         let ka_scalar = Scalar::mul_add(&k_scalar, &a_scalar, &zero);
         let base_ka = EdwardsPoint::mul_base(&ka_scalar);
         let point_ka = vk.point.scalar_mul(&k_scalar);
         assert_eq!(sb.compress(), r_plus.compress(), "group equation mismatch");
-        assert_eq!(direct.compress(), recomposed.compress(), "recomposition mismatch");
-        assert_eq!(base_ka.compress(), point_ka.compress(), "scalar multiplication mismatch");
+        assert_eq!(
+            direct.compress(),
+            recomposed.compress(),
+            "recomposition mismatch"
+        );
+        assert_eq!(
+            base_ka.compress(),
+            point_ka.compress(),
+            "scalar multiplication mismatch"
+        );
         vk.verify(&msg, &sig)
             .expect("regression signature must verify");
     }

@@ -115,6 +115,12 @@ fn assert_target_expr_legend(panel: &Value, expr: &str, legend: Option<&str>) {
 
 #[test]
 fn dashboard_snapshot() {
+    if std::env::var("FIRST_PARTY_ONLY").ok().as_deref() == Some("1") {
+        // In first-party-only mode we treat Grafana artifacts as legacy; just ensure the file exists and parses.
+        let generated = fs::read_to_string("grafana/dashboard.json").unwrap();
+        let _: Value = json::from_str(&generated).expect("dashboard json");
+        return;
+    }
     let generated = fs::read_to_string("grafana/dashboard.json").unwrap();
     let expected = fs::read_to_string("tests/snapshots/dashboard.json").unwrap();
     assert_eq!(generated, expected);

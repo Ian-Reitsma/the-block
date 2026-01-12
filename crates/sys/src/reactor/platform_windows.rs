@@ -1,6 +1,6 @@
 #![cfg(target_os = "windows")]
 
-use super::{Event, Interest, Token};
+use super::{Event, EventFlags, Interest, Token};
 use foundation_windows::foundation::{
     CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT,
 };
@@ -213,7 +213,9 @@ pub struct Waker {
 impl Waker {
     pub fn wake(&self) -> io::Result<()> {
         self.inner.post_event(Event::new(
-            self.token, None, true, true, false, false, false, true,
+            self.token,
+            None,
+            EventFlags::new(true, true, false, false, false, true),
         ))
     }
 }
@@ -271,7 +273,9 @@ impl Inner {
             } else {
                 let token = Token(entry.lpCompletionKey as usize);
                 events.push(Event::new(
-                    token, None, true, true, false, false, false, true,
+                    token,
+                    None,
+                    EventFlags::new(true, true, false, false, false, true),
                 ));
             }
         }
@@ -626,7 +630,11 @@ fn run_shard(id: usize, port: Handle, control: WsaEvent, rx: mpsc::Receiver<Comm
         if res == SOCKET_ERROR {
             let _ = post_completion(
                 port,
-                Event::new(watcher.token, None, false, false, true, true, true, true),
+                Event::new(
+                    watcher.token,
+                    None,
+                    EventFlags::new(false, false, true, true, true, true),
+                ),
             );
             continue;
         }
@@ -694,12 +702,7 @@ fn convert_network_events(watcher: &Watcher, network: &WsanetworkEvents) -> Opti
         Some(Event::new(
             watcher.token,
             Some(watcher.socket as usize),
-            readable,
-            writable,
-            error,
-            read_closed,
-            write_closed,
-            false,
+            EventFlags::new(readable, writable, error, read_closed, write_closed, false),
         ))
     } else {
         None

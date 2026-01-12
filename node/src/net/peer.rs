@@ -1179,20 +1179,19 @@ impl PeerSet {
                     bc.params.clone()
                 };
                 loop {
-                    let replayed = match crate::Blockchain::validate_chain_with_params(
-                        &new_chain, &params,
-                    ) {
-                        Ok(state) => state,
-                        Err(reason) => {
-                            diagnostics::tracing::warn!(
-                                target = "net",
-                                peer = %overlay_peer_label(&peer_key),
-                                reason,
-                                "chain_validation_failed"
-                            );
-                            return;
-                        }
-                    };
+                    let replayed =
+                        match crate::Blockchain::validate_chain_with_params(&new_chain, &params) {
+                            Ok(state) => state,
+                            Err(reason) => {
+                                diagnostics::tracing::warn!(
+                                    target = "net",
+                                    peer = %overlay_peer_label(&peer_key),
+                                    reason,
+                                    "chain_validation_failed"
+                                );
+                                return;
+                            }
+                        };
                     let import_state = match crate::Blockchain::build_chain_import_state(
                         new_chain.clone(),
                         &params,

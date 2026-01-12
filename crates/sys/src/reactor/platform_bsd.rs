@@ -7,7 +7,7 @@
     target_os = "dragonfly",
 ))]
 
-use super::{Event, Interest, Token};
+use super::{Event, EventFlags, Interest, Token};
 use crate::bsd_kqueue::{ffi, Kevent as KEvent, Timespec};
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 use std::ffi::c_void;
@@ -377,12 +377,7 @@ fn convert_event(raw: KEvent) -> Event {
     Event::new(
         token,
         Some(raw.ident),
-        readable,
-        writable,
-        error,
-        read_closed,
-        write_closed,
-        priority,
+        EventFlags::new(readable, writable, error, read_closed, write_closed, priority),
     )
 }
 

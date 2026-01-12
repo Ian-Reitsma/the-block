@@ -7,7 +7,8 @@ use the_block::{
     energy::{self, GovernanceEnergyParams},
     generate_keypair,
     governance::{
-        GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
+        EnergySettlementMode, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote,
+        VoteChoice,
         ACTIVATION_DELAY,
     },
     scheduler::{self, current_default_weights, ServiceClass},
@@ -438,4 +439,19 @@ fn energy_params_update_market_runtime() {
     let (_, status) = apply_param(ParamKey::EnergySlashingRateBps, 250, 0, 10_000);
     assert_eq!(status, ProposalStatus::Passed);
     assert_eq!(energy::governance_params().slashing_rate_bps, 250);
+    let (_, status) = apply_param(ParamKey::EnergySettlementMode, 0, 0, 1);
+    assert_eq!(status, ProposalStatus::Passed);
+    assert_eq!(
+        energy::governance_params().settlement.mode,
+        EnergySettlementMode::Batch
+    );
+    let (_, status) = apply_param(ParamKey::EnergySettlementQuorumPpm, 750_000, 0, 1_000_000);
+    assert_eq!(status, ProposalStatus::Passed);
+    assert_eq!(
+        energy::governance_params().settlement.quorum_threshold_ppm,
+        750_000
+    );
+    let (_, status) = apply_param(ParamKey::EnergySettlementExpiryBlocks, 12, 0, 100_000);
+    assert_eq!(status, ProposalStatus::Passed);
+    assert_eq!(energy::governance_params().settlement.expiry_blocks, 12);
 }

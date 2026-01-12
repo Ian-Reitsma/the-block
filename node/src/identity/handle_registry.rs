@@ -158,8 +158,7 @@ impl HandleRegistry {
         let vk = VerifyingKey::from_bytes(&crate::to_array_32(pubkey).ok_or(HandleError::BadSig)?)
             .map_err(|_| HandleError::BadSig)?;
         let sig = Signature::from_bytes(&crate::to_array_64(sig).ok_or(HandleError::BadSig)?);
-        vk.verify(&msg, &sig)
-            .map_err(|_| HandleError::BadSig)?;
+        vk.verify(&msg, &sig).map_err(|_| HandleError::BadSig)?;
         // handle duplication
         let key = Self::handle_key(&handle_norm);
         if let Some(raw) = self.db.get(&key) {

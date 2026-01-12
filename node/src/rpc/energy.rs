@@ -1,15 +1,24 @@
 #![forbid(unsafe_code)]
 
-use crate::energy::{self, DisputeFilter, DisputeStatus};
+use crate::energy::{self, DisputeError, DisputeFilter, DisputeStatus};
 use crypto_suite::hex;
-use energy_market::{EnergyCredit, EnergyProvider, EnergyReceipt, MeterReading, H256};
-use foundation_rpc::Params;
+use energy_market::{EnergyCredit, EnergyMarketError, EnergyProvider, EnergyReceipt, MeterReading, H256};
+use foundation_rpc::{Params, RpcError};
 use foundation_serialization::json::{Map, Number, Value};
 
-fn error_value(message: impl Into<String>) -> Value {
-    let mut map = Map::new();
-    map.insert("error".into(), Value::String(message.into()));
-    Value::Object(map)
+const ERR_SIGNATURE_INVALID: i32 = -33001;
+const ERR_METER_MISMATCH: i32 = -33003;
+const ERR_QUORUM_FAILED: i32 = -33004;
+const ERR_SETTLEMENT_CONFLICT: i32 = -33005;
+const ERR_PROVIDER_INACTIVE: i32 = -33006;
+const ERR_INVALID_PARAMS: i32 = -32602;
+
+fn energy_rpc_error(code: i32, message: impl Into<String>) -> RpcError {
+    RpcError::new(code, message)
+}
+
+fn invalid_params(message: impl Into<String>) -> RpcError {
+    energy_rpc_error(ERR_INVALID_PARAMS, message)
 }
 
 fn number(value: u64) -> Value {
@@ -115,25 +124,25 @@ fn dispute_value(dispute: &energy::EnergyDispute) -> Value {
     Value::Object(map)
 }
 
-fn params_object(params: &Params) -> Result<&Map, Value> {
+fn params_object(params: &Params) -> Result<&Map, RpcError> {
     params
         .as_map()
-        .ok_or_else(|| error_value("parameters must be an object"))
+        .ok_or_else(|| invalid_params("parameters must be an object"))
 }
 
-fn require_string(params: &Map, key: &str) -> Result<String, Value> {
+fn require_string(params: &Map, key: &str) -> Result<String, RpcError> {
     params
         .get(key)
         .and_then(|value| value.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| error_value(format!("missing or invalid '{key}'")))
+        .ok_or_else(|| invalid_params(format!("missing or invalid '{key}'")))
 }
 
-fn require_u64(params: &Map, key: &str) -> Result<u64, Value> {
+fn require_u64(params: &Map, key: &str) -> Result<u64, RpcError> {
     params
         .get(key)
         .and_then(|value| value.as_u64())
-        .ok_or_else(|| error_value(format!("missing or invalid '{key}'")))
+        .ok_or_else(|| invalid_params(format!("missing or invalid '{key}'")))
 }
 
 fn optional_string(params: &Map, key: &str) -> Option<String> {
@@ -143,19 +152,19 @@ fn optional_string(params: &Map, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn decode_hash(hex_value: &str) -> Result<H256, Value> {
+fn decode_hash(hex_value: &str) -> Result<H256, RpcError> {
     let bytes = hex::decode(hex_value)
-        .map_err(|_| error_value("meter hash must be hex-encoded 32 bytes"))?;
+        .map_err(|_| invalid_params("meter hash must be hex-encoded 32 bytes"))?;
     if bytes.len() != 32 {
-        return Err(error_value("meter hash must be 32 bytes"));
+        return Err(invalid_params("meter hash must be 32 bytes"));
     }
     let mut out = [0u8; 32];
     out.copy_from_slice(&bytes);
     Ok(out)
 }
 
-fn decode_signature(hex_value: &str) -> Result<Vec<u8>, Value> {
-    hex::decode(hex_value).map_err(|_| error_value("signature must be hex encoded"))
+fn decode_signature(hex_value: &str) -> Result<Vec<u8>, RpcError> {
+    hex::decode(hex_value).map_err(|_| invalid_params("signature must be hex encoded"))
 }
 
 fn dispute_status_from_str(label: &str) -> Option<DisputeStatus> {
@@ -173,39 +182,109 @@ fn dispute_status_label(status: DisputeStatus) -> &'static str {
     }
 }
 
-pub fn register(params: &Params) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
-    let capacity = match require_u64(params, "capacity_kwh") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let price = match require_u64(params, "price_per_kwh") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let stake = match require_u64(params, "stake") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let meter_address = match require_string(params, "meter_address") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let jurisdiction = match require_string(params, "jurisdiction") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let owner = require_string(params, "owner").unwrap_or_else(|_| "anonymous".into());
-    match energy::register_provider(owner, capacity, price, meter_address, jurisdiction, stake) {
-        Ok(provider) => provider_value(&provider),
-        Err(err) => error_value(err.to_string()),
+fn map_energy_error(err: EnergyMarketError) -> RpcError {
+    match err {
+        EnergyMarketError::ProviderExists { provider_id } => energy_rpc_error(
+            ERR_PROVIDER_INACTIVE,
+            format!("provider already registered: {provider_id}"),
+        ),
+        EnergyMarketError::MeterAddressInUse { meter_address } => energy_rpc_error(
+            ERR_PROVIDER_INACTIVE,
+            format!("meter address already claimed: {meter_address}"),
+        ),
+        EnergyMarketError::InsufficientStake { stake, min } => energy_rpc_error(
+            ERR_PROVIDER_INACTIVE,
+            format!("stake {stake} below required minimum {min}"),
+        ),
+        EnergyMarketError::InsufficientCapacity {
+            provider_id,
+            requested_kwh,
+            available_kwh,
+        } => energy_rpc_error(
+            ERR_PROVIDER_INACTIVE,
+            format!(
+                "insufficient capacity for provider {provider_id}: requested {requested_kwh} kWh but only {available_kwh} kWh remain"
+            ),
+        ),
+        EnergyMarketError::UnknownProvider(provider_id) => {
+            energy_rpc_error(ERR_PROVIDER_INACTIVE, format!("unknown provider {provider_id}"))
+        }
+        EnergyMarketError::StaleReading { provider_id } => energy_rpc_error(
+            ERR_METER_MISMATCH,
+            format!("reading timestamp regression for provider {provider_id}"),
+        ),
+        EnergyMarketError::InvalidMeterValue { provider_id } => energy_rpc_error(
+            ERR_METER_MISMATCH,
+            format!("reading totalized kWh decreased for provider {provider_id}"),
+        ),
+        EnergyMarketError::UnknownReading(hash) => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("meter reading hash {hash:?} not tracked"),
+        ),
+        EnergyMarketError::InsufficientCredit {
+            requested_kwh,
+            available_kwh,
+        } => energy_rpc_error(
+            ERR_PROVIDER_INACTIVE,
+            format!("requested {requested_kwh} kWh exceeds credit {available_kwh}"),
+        ),
+        EnergyMarketError::CreditExpired(hash) => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("meter reading {hash:?} expired"),
+        ),
+        EnergyMarketError::SignatureVerificationFailed(reason) => {
+            energy_rpc_error(ERR_SIGNATURE_INVALID, format!("signature verification failed: {reason}"))
+        }
+        EnergyMarketError::SettlementNotDue { next_block } => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("settlement gated by batch policy until block {next_block}"),
+        ),
+        EnergyMarketError::SettlementBelowQuorum {
+            required_ppm,
+            actual_ppm,
+        } => energy_rpc_error(
+            ERR_QUORUM_FAILED,
+            format!("settlement below quorum: required {required_ppm} ppm, actual {actual_ppm} ppm"),
+        ),
     }
 }
 
-pub fn market_state(filter_provider: Option<&str>) -> Value {
+fn map_dispute_error(err: DisputeError) -> RpcError {
+    match err {
+        DisputeError::UnknownMeterReading { meter_hash } => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("meter hash {meter_hash:?} not tracked for disputes"),
+        ),
+        DisputeError::AlreadyOpen { meter_hash } => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("dispute already open for meter hash {meter_hash:?}"),
+        ),
+        DisputeError::UnknownDispute { dispute_id } => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("dispute {dispute_id} not found"),
+        ),
+        DisputeError::AlreadyResolved { dispute_id } => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            format!("dispute {dispute_id} already resolved"),
+        ),
+    }
+}
+
+pub fn register(params: &Params) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let capacity = require_u64(params, "capacity_kwh")?;
+    let price = require_u64(params, "price_per_kwh")?;
+    let stake = require_u64(params, "stake")?;
+    let meter_address = require_string(params, "meter_address")?;
+    let jurisdiction = require_string(params, "jurisdiction")?;
+    let owner = require_string(params, "owner").unwrap_or_else(|_| "anonymous".into());
+    match energy::register_provider(owner, capacity, price, meter_address, jurisdiction, stake) {
+        Ok(provider) => Ok(provider_value(&provider)),
+        Err(err) => Err(map_energy_error(err)),
+    }
+}
+
+pub fn market_state(filter_provider: Option<&str>) -> Result<Value, RpcError> {
     let snapshot = energy::market_snapshot();
     let energy::EnergySnapshot {
         providers,
@@ -255,26 +334,27 @@ pub fn market_state(filter_provider: Option<&str>) -> Value {
     map.insert("credits".into(), Value::Array(credits));
     map.insert("receipts".into(), Value::Array(receipts));
     map.insert("disputes".into(), Value::Array(disputes));
-    Value::Object(map)
+    Ok(Value::Object(map))
 }
 
-pub fn disputes(params: &Params) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
+pub fn disputes(params: &Params) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
     let provider_id = params.get("provider_id").and_then(|value| value.as_str());
     let status = match params.get("status").and_then(|value| value.as_str()) {
         Some(label) => match dispute_status_from_str(label) {
             Some(status) => Some(status),
-            None => return error_value("invalid dispute status (expected 'open' or 'resolved')"),
+            None => {
+                return Err(invalid_params(
+                    "invalid dispute status (expected 'open' or 'resolved')",
+                ))
+            }
         },
         None => None,
     };
     let meter_hash = match params.get("meter_hash").and_then(|value| value.as_str()) {
         Some(hash) => match decode_hash(hash) {
             Ok(decoded) => Some(decoded),
-            Err(err) => return err,
+            Err(err) => return Err(err),
         },
         None => None,
     };
@@ -299,14 +379,11 @@ pub fn disputes(params: &Params) -> Value {
     map.insert("page_size".into(), number(page.page_size as u64));
     map.insert("total".into(), number(page.total as u64));
     map.insert("disputes".into(), Value::Array(disputes));
-    Value::Object(map)
+    Ok(Value::Object(map))
 }
 
-pub fn receipts(params: &Params) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
+pub fn receipts(params: &Params) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
     let provider_id = params.get("provider_id").and_then(|value| value.as_str());
     let page = params
         .get("page")
@@ -324,14 +401,11 @@ pub fn receipts(params: &Params) -> Value {
     map.insert("page_size".into(), number(page.page_size as u64));
     map.insert("total".into(), number(page.total as u64));
     map.insert("receipts".into(), Value::Array(receipts));
-    Value::Object(map)
+    Ok(Value::Object(map))
 }
 
-pub fn credits(params: &Params) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
+pub fn credits(params: &Params) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
     let provider_id = params.get("provider_id").and_then(|value| value.as_str());
     let page = params
         .get("page")
@@ -349,97 +423,51 @@ pub fn credits(params: &Params) -> Value {
     map.insert("page_size".into(), number(page.page_size as u64));
     map.insert("total".into(), number(page.total as u64));
     map.insert("credits".into(), Value::Array(credits));
-    Value::Object(map)
+    Ok(Value::Object(map))
 }
 
-pub fn flag_dispute(params: &Params, block: u64) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
-    let meter_hash = match require_string(params, "meter_hash").and_then(|hex| decode_hash(&hex)) {
-        Ok(hash) => hash,
-        Err(err) => return err,
-    };
-    let reason = match require_string(params, "reason") {
-        Ok(reason) => reason,
-        Err(err) => return err,
-    };
+pub fn flag_dispute(params: &Params, block: u64) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let meter_hash = require_string(params, "meter_hash").and_then(|hex| decode_hash(&hex))?;
+    let reason = require_string(params, "reason")?;
     let reporter = optional_string(params, "reporter").unwrap_or_else(|| "anonymous".into());
     match energy::flag_dispute(reporter, meter_hash, reason, block) {
-        Ok(dispute) => dispute_value(&dispute),
-        Err(err) => error_value(err.to_string()),
+        Ok(dispute) => Ok(dispute_value(&dispute)),
+        Err(err) => Err(map_dispute_error(err)),
     }
 }
 
-pub fn resolve_dispute(params: &Params, block: u64) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
-    let dispute_id = match require_u64(params, "dispute_id") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
+pub fn resolve_dispute(params: &Params, block: u64) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let dispute_id = require_u64(params, "dispute_id")?;
     let resolver = optional_string(params, "resolver").unwrap_or_else(|| "system".into());
     let note = optional_string(params, "resolution_note");
     match energy::resolve_dispute(dispute_id, resolver, note, block) {
-        Ok(dispute) => dispute_value(&dispute),
-        Err(err) => error_value(err.to_string()),
+        Ok(dispute) => Ok(dispute_value(&dispute)),
+        Err(err) => Err(map_dispute_error(err)),
     }
 }
 
-pub fn settle(params: &Params, block: u64) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
-    let provider_id = match require_string(params, "provider_id") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
+pub fn settle(params: &Params, block: u64) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let provider_id = require_string(params, "provider_id")?;
     let buyer = require_string(params, "buyer").unwrap_or_else(|_| "anonymous".into());
-    let kwh = match require_u64(params, "kwh_consumed") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let meter_hash = match require_string(params, "meter_hash").and_then(|hash| decode_hash(&hash))
-    {
-        Ok(hash) => hash,
-        Err(err) => return err,
-    };
+    let kwh = require_u64(params, "kwh_consumed")?;
+    let meter_hash = require_string(params, "meter_hash").and_then(|hash| decode_hash(&hash))?;
     match energy::settle_energy_delivery(buyer, &provider_id, kwh, block, meter_hash) {
-        Ok(receipt) => receipt_value(&receipt),
-        Err(err) => error_value(err.to_string()),
+        Ok(receipt) => Ok(receipt_value(&receipt)),
+        Err(err) => Err(map_energy_error(err)),
     }
 }
 
-pub fn submit_reading(params: &Params, block: u64) -> Value {
-    let params = match params_object(params) {
-        Ok(map) => map,
-        Err(err) => return err,
-    };
-    let provider_id = match require_string(params, "provider_id") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let meter_address = match require_string(params, "meter_address") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let kwh_reading = match require_u64(params, "kwh_reading") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let timestamp = match require_u64(params, "timestamp") {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
-    let signature = match require_string(params, "signature").and_then(|sig| decode_signature(&sig))
-    {
-        Ok(value) => value,
-        Err(err) => return err,
-    };
+pub fn submit_reading(params: &Params, block: u64) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let provider_id = require_string(params, "provider_id")?;
+    let meter_address = require_string(params, "meter_address")?;
+    let kwh_reading = require_u64(params, "kwh_reading")?;
+    let timestamp = require_u64(params, "timestamp")?;
+    let signature =
+        require_string(params, "signature").and_then(|sig| decode_signature(&sig))?;
     let reading = MeterReading {
         provider_id,
         meter_address,
@@ -448,7 +476,37 @@ pub fn submit_reading(params: &Params, block: u64) -> Value {
         signature,
     };
     match energy::submit_meter_reading(reading, block) {
-        Ok(credit) => credit_value(&credit),
-        Err(err) => error_value(err.to_string()),
+        Ok(credit) => Ok(credit_value(&credit)),
+        Err(err) => Err(map_energy_error(err)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn energy_error_mapping_preserves_quorum_context() {
+        let rpc_err = map_energy_error(EnergyMarketError::SettlementBelowQuorum {
+            required_ppm: 750_000,
+            actual_ppm: 250_000,
+        });
+        assert_eq!(rpc_err.code, ERR_QUORUM_FAILED);
+        assert!(
+            rpc_err.message.contains("required 750000")
+                && rpc_err.message.contains("actual 250000"),
+            "message should preserve quorum details: {}",
+            rpc_err.message
+        );
+    }
+
+    #[test]
+    fn dispute_error_mapping_preserves_context() {
+        let rpc_err =
+            map_dispute_error(DisputeError::UnknownDispute { dispute_id: 42 });
+        assert_eq!(rpc_err.code, ERR_SETTLEMENT_CONFLICT);
+        assert!(rpc_err
+            .message
+            .contains("dispute 42 not found"));
     }
 }

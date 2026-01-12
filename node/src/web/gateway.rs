@@ -990,6 +990,7 @@ mod tests {
     use super::*;
     use crate::ad_readiness::{AdReadinessConfig, AdReadinessHandle};
     use crate::storage::pipeline;
+    #[cfg(feature = "telemetry")]
     use crate::telemetry;
     use ad_market::{
         badge::ann::{SoftIntentReceipt, WalletAnnIndexSnapshot},

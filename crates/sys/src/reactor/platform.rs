@@ -1,4 +1,4 @@
-use super::{Event, Interest, Token};
+use super::{Event, EventFlags, Interest, Token};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{self, ErrorKind};
@@ -250,12 +250,7 @@ fn convert_event(raw: EpollEvent) -> Event {
     Event::new(
         token,
         None,
-        readable,
-        writable,
-        error,
-        read_closed,
-        write_closed,
-        priority,
+        EventFlags::new(readable, writable, error, read_closed, write_closed, priority),
     )
 }
 

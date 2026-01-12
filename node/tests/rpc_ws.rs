@@ -99,18 +99,32 @@ async fn rpc_server_addr() -> Result<std::net::SocketAddr> {
     }
 
     let (addr, handle, dir) = spawn_rpc_server().await;
-    let mut guard = RPC_SERVER.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(existing_addr) = guard.as_ref().map(|state| state.addr) {
-        drop(guard);
-        handle.abort();
-        let _ = handle.await;
+    let mut handle_opt = Some(handle);
+    let existing_addr = {
+        let mut guard = RPC_SERVER.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(existing_addr) = guard.as_ref().map(|state| state.addr) {
+            Some(existing_addr)
+        } else {
+            let handle = handle_opt
+                .take()
+                .expect("handle only moved into state once");
+            *guard = Some(RpcServerState {
+                addr,
+                _handle: handle,
+                _dir: dir,
+            });
+            None
+        }
+    };
+
+    if let Some(existing_addr) = existing_addr {
+        if let Some(handle) = handle_opt {
+            handle.abort();
+            let _ = handle.await;
+        }
         return Ok(existing_addr);
     }
-    *guard = Some(RpcServerState {
-        addr,
-        _handle: handle,
-        _dir: dir,
-    });
+
     Ok(addr)
 }
 

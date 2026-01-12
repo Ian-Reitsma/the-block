@@ -132,12 +132,15 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 }
 ```
 
-- Error strings bubble up from `energy_market::EnergyMarketError` and always return `{ "error": "<string>" }` so clients can check `.error`. Expect the following failure families:
-  - `ProviderExists`, `MeterAddressInUse`, `UnknownProvider` when IDs collide.
-  - `InsufficientStake`, `InsufficientCapacity`, `InsufficientCredit` for quota/stake mismatches.
-  - `StaleReading`, `InvalidMeterValue`, `CreditExpired` when timestamps regress or expiry exceeded.
-  - Signature/format errors: RPC rejects payloads where `meter_hash` is not 32 bytes, numbers are missing, or signatures fail decoding (and, once the oracle verifier lands, cryptographic verification failures).
-- Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, and meter mismatches produce structured failures instead of panics.
+- Errors map to JSON-RPC codes instead of opaque strings. The server returns RPC errors with `code`/`message` populated; clients should branch on `code`:
+  - `-33006` Provider inactive/conflict (`ProviderExists`, `MeterAddressInUse`, `UnknownProvider`, `InsufficientStake`, `InsufficientCapacity`, `InsufficientCredit`)
+  - `-33005` Settlement conflict (`CreditExpired`, `SettlementNotDue`, `UnknownReading`, dispute errors: `UnknownMeterReading`, `AlreadyOpen`, `UnknownDispute`, `AlreadyResolved`)
+  - `-33004` Quorum failed (`SettlementBelowQuorum`)
+  - `-33003` Meter mismatch (`StaleReading`, `InvalidMeterValue`)
+  - `-33001` Signature invalid (`SignatureVerificationFailed`)
+  - `-32602` Invalid params (missing/ill-typed JSON fields)
+- Signature/format errors: RPC rejects payloads where `meter_hash` is not 32 bytes, numbers are missing, or signatures fail decoding. Bad signatures map to `-33001`.
+- Negative tests live next to the RPC module; mimic them for client libraries so bad signatures, stale timestamps, meter mismatches, and quorum/settlement gating produce structured failures instead of panics. IP-based rate limiting for `energy.*` endpoints uses `TB_RPC_ENERGY_TOKENS_PER_SEC` (default 20 tokens/sec) and surfaces `-32001` rate-limit errors.
 - Observer tooling: `contract-cli energy market --verbose` dumps the whole response, `contract-cli energy receipts|credits --json` streams paginated settlements/credits, and `contract-cli diagnostics rpc-log --method energy.submit_reading` tails submissions with auth metadata so you can trace rate-limit hits. `contract-cli energy disputes|flag-dispute|resolve-dispute` mirrors the RPC contracts for dispute management.
 - Remaining RPC/CLI work items (tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`) focus on explorer timelines, richer governance payloads, and tightening per-endpoint rate limiting once the QUIC chaos drills complete.
 

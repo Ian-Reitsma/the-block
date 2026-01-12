@@ -1,4 +1,5 @@
 use super::ParamKey;
+use crate::EnergySettlementMode;
 use bridge_types::BridgeIncentiveParameters;
 use foundation_math::linalg::{Matrix, Vector};
 use foundation_serialization::{binary, json, Deserialize, Serialize};
@@ -131,6 +132,9 @@ pub trait RuntimeAdapter {
     fn set_energy_min_stake(&mut self, _v: u64) {}
     fn set_energy_oracle_timeout_blocks(&mut self, _v: u64) {}
     fn set_energy_slashing_rate_bps(&mut self, _v: u64) {}
+    fn set_energy_settlement_mode(&mut self, _mode: EnergySettlementMode) {}
+    fn set_energy_settlement_quorum_ppm(&mut self, _v: u32) {}
+    fn set_energy_settlement_expiry_blocks(&mut self, _v: u64) {}
     fn set_bridge_incentives(
         &mut self,
         _min_bond: u64,
@@ -243,6 +247,18 @@ impl<'a> Runtime<'a> {
 
     pub fn set_energy_slashing_rate_bps(&mut self, value: u64) {
         self.adapter.set_energy_slashing_rate_bps(value);
+    }
+
+    pub fn set_energy_settlement_mode(&mut self, mode: EnergySettlementMode) {
+        self.adapter.set_energy_settlement_mode(mode);
+    }
+
+    pub fn set_energy_settlement_quorum_ppm(&mut self, value: u32) {
+        self.adapter.set_energy_settlement_quorum_ppm(value);
+    }
+
+    pub fn set_energy_settlement_expiry_blocks(&mut self, value: u64) {
+        self.adapter.set_energy_settlement_expiry_blocks(value);
     }
 
     pub fn set_ad_distribution(
@@ -386,6 +402,18 @@ const fn default_energy_oracle_timeout_blocks() -> i64 {
 }
 
 const fn default_energy_slashing_rate_bps() -> i64 {
+    0
+}
+
+const fn default_energy_settlement_mode() -> i64 {
+    1 // RealTime
+}
+
+const fn default_energy_settlement_quorum_ppm() -> i64 {
+    0
+}
+
+const fn default_energy_settlement_expiry_blocks() -> i64 {
     0
 }
 
@@ -624,6 +652,12 @@ pub struct Params {
     pub energy_oracle_timeout_blocks: i64,
     #[serde(default = "default_energy_slashing_rate_bps")]
     pub energy_slashing_rate_bps: i64,
+    #[serde(default = "default_energy_settlement_mode")]
+    pub energy_settlement_mode: i64,
+    #[serde(default = "default_energy_settlement_quorum_ppm")]
+    pub energy_settlement_quorum_ppm: i64,
+    #[serde(default = "default_energy_settlement_expiry_blocks")]
+    pub energy_settlement_expiry_blocks: i64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub treasury_percent: i64,
     #[serde(default = "default_proof_rebate_limit")]
@@ -792,6 +826,9 @@ impl Default for Params {
             energy_min_stake: default_energy_min_stake(),
             energy_oracle_timeout_blocks: default_energy_oracle_timeout_blocks(),
             energy_slashing_rate_bps: default_energy_slashing_rate_bps(),
+            energy_settlement_mode: default_energy_settlement_mode(),
+            energy_settlement_quorum_ppm: default_energy_settlement_quorum_ppm(),
+            energy_settlement_expiry_blocks: default_energy_settlement_expiry_blocks(),
             treasury_percent: 0,
             proof_rebate_limit: default_proof_rebate_limit(),
             rent_rate_per_byte: 0,
@@ -1026,6 +1063,18 @@ impl Params {
             Value::Number(self.energy_slashing_rate_bps.into()),
         );
         map.insert(
+            "energy_settlement_mode".into(),
+            Value::Number(self.energy_settlement_mode.into()),
+        );
+        map.insert(
+            "energy_settlement_quorum_ppm".into(),
+            Value::Number(self.energy_settlement_quorum_ppm.into()),
+        );
+        map.insert(
+            "energy_settlement_expiry_blocks".into(),
+            Value::Number(self.energy_settlement_expiry_blocks.into()),
+        );
+        map.insert(
             "treasury_percent".into(),
             Value::Number(self.treasury_percent.into()),
         );
@@ -1257,6 +1306,18 @@ impl Params {
             energy_min_stake: take_i64("energy_min_stake")?,
             energy_oracle_timeout_blocks: take_i64("energy_oracle_timeout_blocks")?,
             energy_slashing_rate_bps: take_i64("energy_slashing_rate_bps")?,
+            energy_settlement_mode: obj
+                .get("energy_settlement_mode")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_settlement_mode),
+            energy_settlement_quorum_ppm: obj
+                .get("energy_settlement_quorum_ppm")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_settlement_quorum_ppm),
+            energy_settlement_expiry_blocks: obj
+                .get("energy_settlement_expiry_blocks")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_energy_settlement_expiry_blocks),
             treasury_percent: take_i64("treasury_percent")?,
             proof_rebate_limit: take_i64("proof_rebate_limit")?,
             rent_rate_per_byte: take_i64("rent_rate_per_byte")?,
@@ -1900,6 +1961,27 @@ fn apply_energy_slashing_rate_bps(v: i64, p: &mut Params) -> Result<(), ()> {
     Ok(())
 }
 
+fn apply_energy_settlement_mode(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.energy_settlement_mode = v.clamp(0, 1);
+    Ok(())
+}
+
+fn apply_energy_settlement_quorum_ppm(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.energy_settlement_quorum_ppm = v;
+    Ok(())
+}
+
+fn apply_energy_settlement_expiry_blocks(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.energy_settlement_expiry_blocks = v;
+    Ok(())
+}
+
 fn apply_runtime_energy_min_stake(v: i64, rt: &mut Runtime) -> Result<(), ()> {
     rt.set_energy_min_stake(v.max(0) as u64);
     Ok(())
@@ -1912,6 +1994,26 @@ fn apply_runtime_energy_oracle_timeout(v: i64, rt: &mut Runtime) -> Result<(), (
 
 fn apply_runtime_energy_slashing_rate(v: i64, rt: &mut Runtime) -> Result<(), ()> {
     rt.set_energy_slashing_rate_bps(v.clamp(0, 10_000) as u64);
+    Ok(())
+}
+
+fn apply_runtime_energy_settlement_mode(v: i64, rt: &mut Runtime) -> Result<(), ()> {
+    let mode = if v == 0 {
+        EnergySettlementMode::Batch
+    } else {
+        EnergySettlementMode::RealTime
+    };
+    rt.set_energy_settlement_mode(mode);
+    Ok(())
+}
+
+fn apply_runtime_energy_settlement_quorum_ppm(v: i64, rt: &mut Runtime) -> Result<(), ()> {
+    rt.set_energy_settlement_quorum_ppm(v.clamp(0, 1_000_000) as u32);
+    Ok(())
+}
+
+fn apply_runtime_energy_settlement_expiry_blocks(v: i64, rt: &mut Runtime) -> Result<(), ()> {
+    rt.set_energy_settlement_expiry_blocks(v.max(0) as u64);
     Ok(())
 }
 
@@ -1961,7 +2063,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 65] = [
+    static REGS: [ParamSpec; 68] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -2709,6 +2811,36 @@ pub fn registry() -> &'static [ParamSpec] {
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_energy_slashing_rate_bps,
             apply_runtime: apply_runtime_energy_slashing_rate,
+        },
+        ParamSpec {
+            key: ParamKey::EnergySettlementMode,
+            default: default_energy_settlement_mode(),
+            min: 0,
+            max: 1,
+            unit: "mode",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_settlement_mode,
+            apply_runtime: apply_runtime_energy_settlement_mode,
+        },
+        ParamSpec {
+            key: ParamKey::EnergySettlementQuorumPpm,
+            default: default_energy_settlement_quorum_ppm(),
+            min: 0,
+            max: 1_000_000,
+            unit: "ppm",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_settlement_quorum_ppm,
+            apply_runtime: apply_runtime_energy_settlement_quorum_ppm,
+        },
+        ParamSpec {
+            key: ParamKey::EnergySettlementExpiryBlocks,
+            default: default_energy_settlement_expiry_blocks(),
+            min: 0,
+            max: 100_000,
+            unit: "blocks",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_energy_settlement_expiry_blocks,
+            apply_runtime: apply_runtime_energy_settlement_expiry_blocks,
         },
     ];
     &REGS

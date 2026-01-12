@@ -14,9 +14,10 @@ use crypto_suite::hex;
 use diagnostics::tracing::{info, warn};
 use energy_market::{
     AccountId, EnergyCredit, EnergyMarket, EnergyMarketConfig, EnergyMarketError, EnergyProvider,
-    EnergyReceipt, MeterReading, ProviderId, SignatureScheme, H256,
+    EnergyReceipt, MeterReading, ProviderId, SettlementMode, SignatureScheme, H256,
 };
 use foundation_serialization::{binary, Deserialize, Serialize};
+use governance_spec::{EnergySettlementMode, EnergySettlementPayload};
 use std::io;
 use std::sync::{Mutex, MutexGuard};
 use thiserror::Error;
@@ -29,6 +30,7 @@ pub struct GovernanceEnergyParams {
     pub min_stake: u64,
     pub oracle_timeout_blocks: u64,
     pub slashing_rate_bps: u16,
+    pub settlement: EnergySettlementPayload,
 }
 
 impl Default for GovernanceEnergyParams {
@@ -37,6 +39,7 @@ impl Default for GovernanceEnergyParams {
             min_stake: EnergyMarketConfig::default().min_stake,
             oracle_timeout_blocks: EnergyMarketConfig::default().oracle_timeout_blocks,
             slashing_rate_bps: EnergyMarketConfig::default().slashing_rate_bps,
+            settlement: EnergySettlementPayload::default(),
         }
     }
 }
@@ -297,12 +300,27 @@ pub fn configure_provider_keys(configs: &[ProviderKeyConfig]) -> Result<(), Prov
 fn apply_params_to_market(store: &mut EnergyMarketStore, params: GovernanceEnergyParams) {
     let mut cfg = store.market.config().clone();
     cfg.min_stake = params.min_stake;
-    cfg.oracle_timeout_blocks = params.oracle_timeout_blocks;
+    cfg.oracle_timeout_blocks = if params.settlement.expiry_blocks > 0 {
+        params.settlement.expiry_blocks
+    } else {
+        params.oracle_timeout_blocks
+    };
     cfg.slashing_rate_bps = params.slashing_rate_bps;
+    cfg.quorum_threshold_ppm = params.settlement.quorum_threshold_ppm;
+    cfg.settlement_mode = match params.settlement.mode {
+        EnergySettlementMode::Batch => SettlementMode::Batch,
+        EnergySettlementMode::RealTime => SettlementMode::RealTime,
+    };
     store.market.set_config(cfg);
 }
 
 pub fn set_governance_params(params: GovernanceEnergyParams) {
+    let mut params = params;
+    if let Err(err) = params.settlement.validate() {
+        warn!(%err, "invalid energy governance payload; clamping");
+        params.settlement.quorum_threshold_ppm =
+            params.settlement.quorum_threshold_ppm.min(1_000_000);
+    }
     {
         let mut guard = ENERGY_PARAMS
             .lock()

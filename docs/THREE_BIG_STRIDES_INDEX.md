@@ -158,8 +158,8 @@ Draft ──[vote]──> Voting ──[approved]──> Queued ──[activated
 
 ### Remaining Work for Stride 2
 
-- [ ] Energy governance payloads (`governance/src/energy_params.rs`)
-- [ ] Integration test suite (`tests/integration/energy_oracle_test.rs`)
+- [x] Energy governance payloads (`governance/src/energy_params.rs`)
+- [x] Integration test suite (`node/tests/energy_oracle_test.rs`)
 - [ ] Granal dashboard enhancements
 
 ---
@@ -265,7 +265,7 @@ the-block/
 │     └── treasury_lifecycle_test.rs       ⬑ 20+ integration tests
 ├── monitoring/
 │  ├── grafana_treasury_dashboard.json  ⏳ 6 panels (to be created)
-│  └── grafana_energy_dashboard.json    ⏳ 8 panels (to be created)
+│  └── grafana_energy_dashboard.json    (legacy, first-party dashboard is canonical)
 ├── .github/
 │  └── workflows/
 │     └── fast-mainnet.yml                ⏳ CI gate job (to be created)

@@ -49,6 +49,14 @@ TABLE_TEMPLATE = """<table>
 </table>"""
 
 ROW_TEMPLATE = "<tr class=\"metric-row\"><td><code>{name}</code></td><td>{desc}</td><td>{value}</td></tr>"
+WRAPPER_GROUPS = {
+    "Runtime": ("runtime_",),
+    "Transport": ("transport_",),
+    "Storage": ("storage_",),
+    "Coding": ("coding_",),
+    "Codec": ("codec_",),
+    "Crypto": ("crypto_",),
+}
 
 REFRESH_SECONDS = 5
 
@@ -77,6 +85,31 @@ def load_metrics(endpoint: str) -> Dict[str, float]:
     return values
 
 
+def normalize_base_endpoint(endpoint: str) -> str:
+    if endpoint.endswith("/metrics"):
+        return endpoint[: -len("/metrics")]
+    return endpoint.rstrip("/")
+
+
+def load_wrappers(base_endpoint: str) -> dict:
+    if not base_endpoint:
+        return {}
+    request = Request(f"{base_endpoint}/wrappers", headers={"accept": "application/json"})
+    with urlopen(request, timeout=5) as response:
+        payload = response.read().decode("utf-8", "replace")
+    decoded = json.loads(payload)
+    if isinstance(decoded, dict):
+        return decoded
+    return {}
+
+
+def format_labels(labels: dict) -> str:
+    if not labels:
+        return "—"
+    parts = [f"{key}={value}" for key, value in sorted(labels.items())]
+    return ", ".join(parts)
+
+
 def build_section(title: str, metrics: Tuple[dict, ...], snapshot: Dict[str, float]) -> str:
     rows = []
     for metric in metrics:
@@ -94,11 +127,59 @@ def build_section(title: str, metrics: Tuple[dict, ...], snapshot: Dict[str, flo
     return f"<h2>{title}</h2>\n{body}"
 
 
+def build_wrapper_sections(
+    wrappers: dict, base_endpoint: str, error: str | None = None
+) -> str:
+    if error:
+        return (
+            "<h2>Wrappers</h2>\n"
+            f'<p class="error">Failed to fetch wrappers: {error}</p>'
+        )
+    nodes = []
+    for node, entry in sorted(wrappers.items()):
+        metrics = entry.get("metrics", [])
+        grouped: Dict[str, list[str]] = {title: [] for title in WRAPPER_GROUPS}
+        for metric in metrics:
+            name = metric.get("metric", "")
+            category = next(
+                (title for title, prefixes in WRAPPER_GROUPS.items() if name.startswith(prefix)),
+                None,
+            )
+            if category is None:
+                continue
+            labels = metric.get("labels") or {}
+            desc = format_labels(labels)
+            value = metric.get("value")
+            value_display = "<span class=\"error\">missing</span>"
+            if isinstance(value, (int, float)):
+                value_display = f"{value:g}"
+            grouped[category].append(
+                ROW_TEMPLATE.format(name=name, desc=desc, value=value_display)
+            )
+        sections = []
+        for title, rows in grouped.items():
+            if not rows:
+                continue
+            sections.append(
+                f"<h4>{title}</h4>\n"
+                + TABLE_TEMPLATE.format(rows="\n    ".join(rows))
+            )
+        if sections:
+            nodes.append(f"<h3>{node}</h3>\n" + "\n".join(sections))
+    if not nodes:
+        return "<h2>Wrappers</h2>\n<p>No wrapper metrics available.</p>"
+    header = f"<p class=\"status\">Wrappers source: {base_endpoint}/wrappers</p>"
+    return "<h2>Wrappers</h2>\n" + header + "\n" + "\n".join(nodes)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("usage: render_foundation_dashboard.py <telemetry-endpoint>", file=sys.stderr)
         return 2
     endpoint = argv[1]
+    base_endpoint = normalize_base_endpoint(endpoint)
+    wrappers: dict | None = None
+    wrappers_error: str | None = None
     try:
         snapshot = load_metrics(endpoint)
     except URLError as err:
@@ -106,6 +187,12 @@ def main(argv: list[str]) -> int:
     except Exception as err:  # pragma: no cover - defensive
         body = f'<p class="error">Unexpected error: {err}</p>'
     else:
+        try:
+            wrappers = load_wrappers(base_endpoint)
+        except URLError as err:
+            wrappers_error = str(err)
+        except Exception as err:  # pragma: no cover - defensive
+            wrappers_error = str(err)
         sections = {"DEX": [], "Compute": [], "Gossip": [], "Benchmarks": [], "Other": []}
         for metric in METRICS_SPEC["metrics"]:
             if metric.get("deprecated"):
@@ -126,6 +213,9 @@ def main(argv: list[str]) -> int:
             section = build_section(title, tuple(metrics), snapshot)
             if section:
                 rendered.append(section)
+        wrapper_section = build_wrapper_sections(wrappers or {}, base_endpoint, wrappers_error)
+        if wrapper_section:
+            rendered.append(wrapper_section)
         body = "\n".join(rendered) if rendered else "<p>No metrics available.</p>"
     index = OUTPUT_DIR / "index.html"
     index.write_text(

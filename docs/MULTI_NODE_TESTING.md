@@ -121,15 +121,13 @@ System Preferences → Network → Advanced → TCP/IP:
 #### PC (Ubuntu)
 
 ```bash
-# Allow The Block ports
+# Allow The Block ports (gossip + QUIC + RPC + telemetry)
 sudo ufw allow 9000:9010/tcp
 sudo ufw allow 9000:9010/udp
 
-# Allow Prometheus
-sudo ufw allow 9090/tcp
-
-# Allow Grafana
-sudo ufw allow 3000/tcp
+# Allow first-party telemetry + aggregator
+sudo ufw allow 9898:9900/tcp   # metrics endpoints (per node)
+sudo ufw allow 9000/tcp       # metrics-aggregator (observer role)
 
 # Enable firewall
 sudo ufw enable
@@ -139,8 +137,7 @@ sudo ufw enable
 
 System Preferences → Security & Privacy → Firewall → Firewall Options:
 - Allow incoming connections for "the-block"
-- Allow incoming connections for "prometheus"
-- Allow incoming connections for "grafana" (Mac #2 only)
+- Allow incoming connections for telemetry endpoint (`the-block` metrics) and metrics-aggregator (observer)
 
 ### Hosts File
 
@@ -157,6 +154,9 @@ Add to `/etc/hosts` on all nodes:
 ## Node Configuration
 
 ### Installation (All Nodes)
+
+- **Shortcut**: `scripts/multi-node/run-node.sh` (ROLE=primary|replica1|observer) bootstraps data dirs, RPC/metrics/QUIC ports, and enables range-boost discovery for LAN meshes. Run `scripts/multi-node/run-aggregator.sh` on the observer to expose the first-party telemetry feed.
+- **Cluster test**: Once the three nodes are up, set `TB_MULTI_NODE_RPC=192.168.1.10:3030,192.168.1.11:4030,192.168.1.12:5030` (or your ports) and run `scripts/multi-node/run-cluster-tests.sh` to exercise the multi-node RPC smoke test (`node/tests/multi_node_rpc.rs`).
 
 #### PC (Ubuntu)
 

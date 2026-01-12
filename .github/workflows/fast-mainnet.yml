@@ -150,7 +150,7 @@ jobs:
 
 check-compilation:
   name: Verify Compilation
-  runs-on: ubuntu-latest-m
+  runs-on: ubuntu-latest
   timeout-minutes: 15
   steps:
     - uses: actions/checkout@v4

@@ -86,15 +86,28 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             for _ in 0..rounds {
                 let consumer = rng.range_u64(0..=50) % 5;
                 let industrial = 0; // Single token via consumer lane only
-                let tx = build_signed_tx(&sk, "a", "b", consumer, industrial, 1000, expected_nonce + 1);
+                let tx = build_signed_tx(
+                    &sk,
+                    "a",
+                    "b",
+                    consumer,
+                    industrial,
+                    1000,
+                    expected_nonce + 1,
+                );
                 // Verify transaction signature before submitting
                 assert!(
                     the_block::transaction::verify_signed_tx(&tx),
                     "Transaction signature verification failed at nonce {}",
                     expected_nonce + 1
                 );
-                bc.submit_transaction(tx)
-                    .unwrap_or_else(|e| panic!("Failed to submit transaction at nonce {}: {:?}", expected_nonce + 1, e));
+                bc.submit_transaction(tx).unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to submit transaction at nonce {}: {:?}",
+                        expected_nonce + 1,
+                        e
+                    )
+                });
                 bc.mine_block("a").unwrap();
                 expected_nonce += 1;
                 assert_eq!(bc.accounts.get("a").unwrap().nonce, expected_nonce);

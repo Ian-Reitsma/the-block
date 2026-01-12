@@ -3,6 +3,8 @@
 use crate::net;
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry")]
+use crate::simple_db::names;
+#[cfg(feature = "telemetry")]
 use codec::{self, Codec, Direction};
 #[cfg(feature = "telemetry")]
 use concurrency::DashMap;
@@ -229,6 +231,28 @@ const KNOWN_RUNTIME_BACKENDS: [&str; 2] = ["inhouse", "stub"];
 const KNOWN_TRANSPORT_PROVIDERS: [&str; 2] = ["quinn", "s2n-quic"];
 #[cfg(feature = "telemetry")]
 const KNOWN_STORAGE_ENGINES: [&str; 4] = ["memory", "inhouse", "rocksdb", "rocksdb-compat"];
+#[cfg(feature = "telemetry")]
+const SIMPLEDB_NAMES: &[&str] = &[
+    names::DEFAULT,
+    names::BRIDGE,
+    names::COMPUTE_SETTLEMENT,
+    names::DEX_STORAGE,
+    names::GATEWAY_DNS,
+    names::GATEWAY_AD_READINESS,
+    names::GOSSIP_RELAY,
+    names::GOVERNOR,
+    names::IDENTITY_DID,
+    names::IDENTITY_HANDLES,
+    names::LIGHT_CLIENT_PROOFS,
+    names::LOCALNET_RECEIPTS,
+    names::NET_PEER_CHUNKS,
+    names::NET_BANS,
+    names::RPC_BRIDGE,
+    names::STORAGE_FS,
+    names::STORAGE_PIPELINE,
+    names::STORAGE_REPAIR,
+    names::ENERGY_MARKET,
+];
 #[cfg(feature = "telemetry")]
 const KNOWN_CODEC_PROFILES: &[(&str, &[&str])] = &[
     (
@@ -1034,6 +1058,36 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
                 &[("provider", provider)],
                 counter.get() as f64,
             );
+        }
+    }
+
+    for db in SIMPLEDB_NAMES {
+        for engine in KNOWN_STORAGE_ENGINES {
+            if let Ok(gauge) = STORAGE_ENGINE_INFO.handle_for_label_values(&[db, engine]) {
+                push_metric(
+                    &mut metrics,
+                    "storage_engine_info",
+                    &[("db", db), ("engine", engine)],
+                    gauge.get() as f64,
+                );
+            }
+            for (vec, metric) in [
+                (&*STORAGE_ENGINE_PENDING_COMPACTIONS, "storage_engine_pending_compactions"),
+                (&*STORAGE_ENGINE_RUNNING_COMPACTIONS, "storage_engine_running_compactions"),
+                (&*STORAGE_ENGINE_LEVEL0_FILES, "storage_engine_level0_files"),
+                (&*STORAGE_ENGINE_SST_BYTES, "storage_engine_sst_bytes"),
+                (&*STORAGE_ENGINE_MEMTABLE_BYTES, "storage_engine_memtable_bytes"),
+                (&*STORAGE_ENGINE_SIZE_BYTES, "storage_engine_size_bytes"),
+            ] {
+                if let Ok(gauge) = vec.handle_for_label_values(&[db, engine]) {
+                    push_metric(
+                        &mut metrics,
+                        metric,
+                        &[("db", db), ("engine", engine)],
+                        gauge.get() as f64,
+                    );
+                }
+            }
         }
     }
 
@@ -1913,6 +1967,13 @@ mod tests {
         TRANSPORT_PROVIDER_CONNECT_TOTAL.reset();
         CODING_ALGORITHM_INFO.reset();
         CODING_PREVIOUS.lock().unwrap().clear();
+        STORAGE_ENGINE_INFO.reset();
+        STORAGE_ENGINE_PENDING_COMPACTIONS.reset();
+        STORAGE_ENGINE_RUNNING_COMPACTIONS.reset();
+        STORAGE_ENGINE_LEVEL0_FILES.reset();
+        STORAGE_ENGINE_SST_BYTES.reset();
+        STORAGE_ENGINE_MEMTABLE_BYTES.reset();
+        STORAGE_ENGINE_SIZE_BYTES.reset();
     }
 
     fn metric_value(
@@ -2024,6 +2085,14 @@ mod tests {
             .expect(LABEL_REGISTRATION_ERR)
             .inc();
         record_coding_algorithms(&crate::storage::settings::algorithms());
+        STORAGE_ENGINE_INFO
+            .ensure_handle_for_label_values(&[names::DEFAULT, "rocksdb"])
+            .expect(LABEL_REGISTRATION_ERR)
+            .set(1);
+        STORAGE_ENGINE_PENDING_COMPACTIONS
+            .ensure_handle_for_label_values(&[names::DEFAULT, "rocksdb"])
+            .expect(LABEL_REGISTRATION_ERR)
+            .set(2);
         codec_metrics_hook(
             Codec::Binary(BinaryProfile::Transaction),
             Direction::Serialize,
@@ -2068,6 +2137,22 @@ mod tests {
                 && sample.value == 1.0
         });
         assert!(coding_active);
+
+        let storage_backend = metric_value(
+            &summary,
+            "storage_engine_info",
+            &[("db", names::DEFAULT), ("engine", "rocksdb")],
+        )
+        .unwrap();
+        assert_eq!(storage_backend, 1.0);
+
+        let pending_compactions = metric_value(
+            &summary,
+            "storage_engine_pending_compactions",
+            &[("db", names::DEFAULT), ("engine", "rocksdb")],
+        )
+        .unwrap();
+        assert_eq!(pending_compactions, 2.0);
     }
 }
 

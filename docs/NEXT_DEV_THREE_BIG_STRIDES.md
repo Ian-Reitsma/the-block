@@ -3,7 +3,7 @@
 **Date**: 2025-12-19
 **Session Context**: Post-treasury dependency parser consolidation + circuit breaker + telemetry implementation
 **Target Audience**: Next developer (dev-to-dev, no BS)
-**Status**: Circuit breaker implemented but NOT integrated into executor loop
+**Status**: Circuit breaker integrated + telemetered; energy governance payload + tests landed; first-party dashboard is canonical (Grafana/Prometheus artifacts kept only for archival)
 
 ---
 
@@ -16,7 +16,7 @@
    - Comprehensive telemetry using first-party `diagnostics` crate
    - 10 passing unit tests covering all state transitions
    - **EXPORTED** from governance crate at `governance/src/lib.rs:40`
-   - **NOT YET INTEGRATED** into treasury executor loop
+   - **WIRED** into treasury executor loop with state metrics plumbed through telemetry
 
 2. **Dependency Parser** - `governance/src/treasury.rs:480-529`
    - Canonical implementation with DOS prevention (MAX_DEPENDENCIES=100, 8KB memo limit)
@@ -34,11 +34,10 @@
    - `treasury_extreme_stress_test.rs`: 6 scenarios, 10k+ TPS target
    - **NOT YET VALIDATED** (tests exist but not confirmed to pass at scale)
 
-5. **Monitoring Infrastructure** - `monitoring/` (3 files)
-   - `prometheus_recording_rules.yml`: 9 rule groups, 50+ pre-computed metrics
-   - `alert_rules.yml`: 15+ alerts with severity levels
-   - `alertmanager.yml`: 6 receivers (PagerDuty, Slack, Email, Webhook, Opsgenie, VictorOps)
-   - **CRITICAL GAP**: `treasury_circuit_breaker_state` metric referenced in `alert_rules.yml:17` but NOT IMPLEMENTED in telemetry module
+5. **Monitoring Infrastructure** - `monitoring/` (first-party dashboard is canonical)
+   - `metrics.json` + `render_foundation_dashboard.py` generate the supported dashboard (`monitoring/output/index.html`)
+   - `dashboard_overrides.json` merges site-specific tweaks; wrappers appear under the **Other** row as described in `monitoring/README.md`
+   - Legacy Grafana/Prometheus artifacts (`grafana_*.json`, `prometheus_recording_rules.yml`, `alert_rules.yml`, `alertmanager.yml`) are retained only for reproducibility; they are no longer the operational path
 
 6. **Operational Documentation** - `docs/` (2 files)
    - `DISASTER_RECOVERY.md`: 447 lines, backup/restore/failover procedures
@@ -46,23 +45,15 @@
 
 ### What is MISSING or INCOMPLETE ❌
 
-1. **Circuit Breaker Integration into Executor**
-   - Circuit breaker exists but is NOT instantiated in executor
-   - `governance/src/store.rs:175-322` (`run_executor_tick`) has NO circuit breaker logic
-   - Need to wrap execution attempts with `allow_request()` / `record_success()` / `record_failure()`
-   - Need to add circuit breaker to `TreasuryExecutorConfig` struct
+1. **First-Party Monitoring Verification**
+   - Keep Grafana/Prometheus artifacts marked legacy; do not extend them.
+   - Validate `monitoring/tools/render_foundation_dashboard.py` against live metrics endpoints per node (see multi-node setup) and ensure wrappers render.
 
-2. **Circuit Breaker Telemetry Metrics**
-   - `node/src/telemetry/treasury.rs` does NOT export `treasury_circuit_breaker_state` gauge
-   - Alert rule at `monitoring/alert_rules.yml:17` will FAIL (references non-existent metric)
-   - Need to add Prometheus gauge for circuit state (0=Closed, 1=Open, 2=HalfOpen)
-   - Need to export public function to update gauge from executor
-
-3. **Executor Loop Observability Gap**
-   - `run_executor_tick()` at `governance/src/store.rs:290-311` has submission error handling
-   - NO telemetry calls to increment error counters or record circuit breaker state changes
-   - Submission errors at line 300-310 should trigger `record_failure()` on circuit breaker
-   - Successful submissions at line 291-298 should trigger `record_success()` on circuit breaker
+2. **Stress Test Validation**
+   - Tests exist but have NOT been run to completion
+   - Need to verify 10k+ TPS capability under `treasury_extreme_stress_test.rs`
+   - Tests are marked `#[ignore]` - must use `--ignored` flag
+   - Background task `b9058b5` was still running when session ended
 
 4. **Documentation Token Terminology Inconsistency**
    - 30+ markdown files in `docs/` still reference legacy “consumer/industrial token” wording

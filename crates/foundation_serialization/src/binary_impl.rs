@@ -217,6 +217,10 @@ impl<'a, 'b> ser::Serializer for &'a mut Serializer<'b> {
     type SerializeStruct = StructSerializer<'a, 'b>;
     type SerializeStructVariant = StructVariantSerializer<'a, 'b>;
 
+    fn is_human_readable(&self) -> bool {
+        false
+    }
+
     fn serialize_bool(self, v: bool) -> Result<()> {
         self.write_bool(v);
         Ok(())
@@ -789,6 +793,10 @@ impl<'de> Deserializer<'de> {
 
 impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     type Error = Error;
+
+    fn is_human_readable(&self) -> bool {
+        false
+    }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value>
     where

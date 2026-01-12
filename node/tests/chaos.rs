@@ -1,7 +1,7 @@
 #![cfg(feature = "integration-tests")]
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use sys::tempfile::tempdir;
@@ -59,10 +59,11 @@ fn init_env() -> sys::tempfile::TempDir {
 }
 
 fn timeout_factor() -> u64 {
-    std::env::var("TB_TEST_TIMEOUT_MULT")
+    let mult = std::env::var("TB_TEST_TIMEOUT_MULT")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(4)
+        .unwrap_or(4);
+    mult.clamp(1, 8)
 }
 
 fn cleanup_env() {
@@ -262,7 +263,7 @@ fn kill_node_recovers() {
         if let Some(handle) = nodes[2].handle.take() {
             let _ = handle.join();
         }
-        
+
         // Wait for socket to be fully released
         the_block::sleep(Duration::from_millis(500)).await;
         for (i, n) in nodes.iter().enumerate() {
@@ -302,11 +303,7 @@ fn kill_node_recovers() {
             .filter(|(i, _)| *i != 2)
             .map(|(_, n)| n.addr)
             .collect();
-        let node3 = Node::new(
-            nodes[2].addr,
-            peer_addrs,
-            restart_bc,
-        );
+        let node3 = Node::new(nodes[2].addr, peer_addrs, restart_bc);
         restore_net_key_env(prev_env);
         let flag = ShutdownFlag::new();
         let handle = node3.start_with_flag(&flag).expect("start gossip node");
@@ -443,7 +440,9 @@ fn partition_heals_to_majority() {
                 nodes[iso].node.add_peer(n.addr);
             }
         }
-        nodes[iso].node.discover_peers();
+        for n in &nodes {
+            n.node.discover_peers();
+        }
 
         // Give time for handshakes to complete after re-connecting
         the_block::sleep(Duration::from_millis(800)).await;
@@ -462,11 +461,17 @@ fn partition_heals_to_majority() {
         for n in &nodes {
             n.node.broadcast_chain();
         }
+        // Explicitly request tips a few times to accelerate convergence
         // Actively pull the tip from the known leader to the isolated node
         let leader_addr = nodes[0].addr;
-        let iso_height = nodes[iso].node.blockchain().block_height;
-        nodes[iso].node.request_chain_from(leader_addr, iso_height);
-        the_block::sleep(Duration::from_millis(1200)).await;
+        for _ in 0..3 {
+            let iso_height = nodes[iso].node.blockchain().block_height;
+            nodes[iso].node.request_chain_from(leader_addr, iso_height);
+            the_block::sleep(Duration::from_millis(400)).await;
+            for n in &nodes {
+                n.node.broadcast_chain();
+            }
+        }
 
         let max = Duration::from_secs(30 * timeout_factor());
         assert!(
@@ -475,7 +480,10 @@ fn partition_heals_to_majority() {
         );
 
         let h = nodes[0].node.blockchain().block_height;
-        assert_eq!(h, 9, "Expected majority chain (9 blocks: 3 pre-partition + 6 during) to win");
+        assert_eq!(
+            h, 9,
+            "Expected majority chain (9 blocks: 3 pre-partition + 6 during) to win"
+        );
 
         #[cfg(feature = "telemetry")]
         {

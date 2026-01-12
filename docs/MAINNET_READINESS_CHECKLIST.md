@@ -211,10 +211,10 @@ cargo test -p the_block --test replay --release -- --nocapture
 
 ### 2.1 Governance Payloads
 
-- [ ] `governance/src/energy_params.rs` defines `EnergySettlementPayload`
-- [ ] Fields: `mode` (Batch | RealTime), `quorum_threshold_ppm`, `expiry_blocks`
-- [ ] Governance parameter updates flow through `governance/src/params.rs`
-- [ ] Changes activate via `node/src/energy.rs::set_governance_params()`
+- [x] `governance/src/energy_params.rs` defines `EnergySettlementPayload`
+- [x] Fields: `mode` (Batch | RealTime), `quorum_threshold_ppm`, `expiry_blocks`
+- [x] Governance parameter updates flow through `governance/src/params.rs`
+- [x] Changes activate via `node/src/energy.rs::set_governance_params()`
 
 **Verification**:
 ```bash
@@ -303,27 +303,20 @@ cargo test -p node energy_rpc::error_contract -- --nocapture
 
 **Verification**:
 ```bash
-prometheus_query 'energy_provider_total'
-prometheus_query 'oracle_inclusion_lag_seconds'
-prometheus_query 'energy_disputes_resolved_total{outcome="slashed"}'
+curl -s http://localhost:9898/metrics | rg "energy_provider_total"
+python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/metrics
 ```
 
-### 2.7 Grafana Dashboard
+### 2.7 First-Party Dashboard
 
-- [ ] `monitoring/grafana_energy_dashboard.json` exists
-- [ ] Panels:
-  - [ ] "Active Providers" (count trend)
-  - [ ] "Settlements (24h)" (rate per provider)
-  - [ ] "Oracle Latency" (p50, p95, p99)
-  - [ ] "Reputation Scores" (per provider)
-  - [ ] "Disputes" (active count and outcomes)
-  - [ ] "Slashing Events" (per provider, rate)
-  - [ ] "Pending Credits" (backlog)
-  - [ ] "Error Rates" (signature failures, timestamp skew)
+- [x] `monitoring/tools/render_foundation_dashboard.py` renders Energy + Treasury panels from `metrics.json` and live `/metrics` + `/wrappers`
+- [x] Wrapper panels (runtime/transport/storage/coding/codec/crypto) are visible under **Other** via `/wrappers`
+- [ ] Legacy Grafana JSONs retained only for reproducibility; not used operationally
 
 **Verification**:
 ```bash
-make monitor  # Check Energy dashboard for live data
+python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/metrics
+open monitoring/output/index.html
 ```
 
 ### 2.8 Rate Limiting
@@ -448,6 +441,11 @@ just lint && just fmt && just test-fast && \
 grep -c "^## " docs/operations.md  # Should show 4+ troubleshooting sections
 grep -c "\[\] " docs/operations.md | head  # Checklists for each runbook
 ```
+
+### 3.3a Launch Governor
+
+- [x] `tb-cli governor status` / `tb-cli governor intents` expose gate streaks, schema version, and persisted economics metrics (`economics_prev_market_metrics_*`, `economics_block_reward_per_block`)
+- [x] Economics gate reads persisted samples; no subsystem other than Launch Governor flips `launch_operational_flag` or `launch_economics_autopilot`
 
 ### 3.4 Metrics-Aggregator Endpoints
 

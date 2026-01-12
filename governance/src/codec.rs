@@ -324,6 +324,9 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::EnergyMinStake => 62,
         ParamKey::EnergyOracleTimeoutBlocks => 63,
         ParamKey::EnergySlashingRateBps => 64,
+        ParamKey::EnergySettlementMode => 104,
+        ParamKey::EnergySettlementQuorumPpm => 105,
+        ParamKey::EnergySettlementExpiryBlocks => 106,
 
         // Economic Control Laws (Layer 1: Inflation)
         ParamKey::InflationTargetBps => 65,
@@ -449,6 +452,9 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         62 => ParamKey::EnergyMinStake,
         63 => ParamKey::EnergyOracleTimeoutBlocks,
         64 => ParamKey::EnergySlashingRateBps,
+        104 => ParamKey::EnergySettlementMode,
+        105 => ParamKey::EnergySettlementQuorumPpm,
+        106 => ParamKey::EnergySettlementExpiryBlocks,
 
         // Economic Control Laws (Layer 1: Inflation)
         65 => ParamKey::InflationTargetBps,
@@ -1520,6 +1526,9 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::EnergyMinStake => "EnergyMinStake",
         ParamKey::EnergyOracleTimeoutBlocks => "EnergyOracleTimeoutBlocks",
         ParamKey::EnergySlashingRateBps => "EnergySlashingRateBps",
+        ParamKey::EnergySettlementMode => "EnergySettlementMode",
+        ParamKey::EnergySettlementQuorumPpm => "EnergySettlementQuorumPpm",
+        ParamKey::EnergySettlementExpiryBlocks => "EnergySettlementExpiryBlocks",
         ParamKey::TreasuryPercent => "TreasuryPercent",
         ParamKey::ProofRebateLimit => "ProofRebateLimit",
         ParamKey::RentRatePerByte => "RentRatePerByte",
@@ -1645,6 +1654,9 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "EnergyMinStake" => Ok(ParamKey::EnergyMinStake),
         "EnergyOracleTimeoutBlocks" => Ok(ParamKey::EnergyOracleTimeoutBlocks),
         "EnergySlashingRateBps" => Ok(ParamKey::EnergySlashingRateBps),
+        "EnergySettlementMode" => Ok(ParamKey::EnergySettlementMode),
+        "EnergySettlementQuorumPpm" => Ok(ParamKey::EnergySettlementQuorumPpm),
+        "EnergySettlementExpiryBlocks" => Ok(ParamKey::EnergySettlementExpiryBlocks),
         "TreasuryPercent" => Ok(ParamKey::TreasuryPercent),
         "ProofRebateLimit" => Ok(ParamKey::ProofRebateLimit),
         "RentRatePerByte" => Ok(ParamKey::RentRatePerByte),
