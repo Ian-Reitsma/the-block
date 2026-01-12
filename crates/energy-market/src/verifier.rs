@@ -121,12 +121,13 @@ impl SignatureVerifier for Ed25519Verifier {
             )));
         }
 
-        // Compute canonical message to sign: BLAKE3(provider_id || meter_address || total_kwh || timestamp)
+        // Compute canonical message to sign: BLAKE3(provider_id || meter_address || total_kwh || timestamp || nonce)
         let mut hasher = Blake3::new();
         hasher.update(reading.provider_id.as_bytes());
         hasher.update(reading.meter_address.as_bytes());
         hasher.update(&reading.total_kwh.to_le_bytes());
         hasher.update(&reading.timestamp.to_le_bytes());
+        hasher.update(&reading.nonce.to_le_bytes());
         let message = hasher.finalize();
 
         // Verify signature using crypto_suite
@@ -182,6 +183,7 @@ impl SignatureVerifier for DilithiumVerifier {
         hasher.update(reading.meter_address.as_bytes());
         hasher.update(&reading.total_kwh.to_le_bytes());
         hasher.update(&reading.timestamp.to_le_bytes());
+        hasher.update(&reading.nonce.to_le_bytes());
         let message = hasher.finalize();
 
         // Verify using pqcrypto-dilithium

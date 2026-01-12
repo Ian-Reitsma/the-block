@@ -182,7 +182,7 @@ impl EnergyMarketStore {
         Ok(())
     }
 
-    fn snapshot(&self) -> EnergySnapshot {
+    fn snapshot(&self, governance: GovernanceEnergyParams) -> EnergySnapshot {
         EnergySnapshot {
             providers: self.market.providers().cloned().collect(),
             receipts: self.market.receipts().to_vec(),
@@ -192,6 +192,7 @@ impl EnergyMarketStore {
                 .map(|(_, credit)| credit.clone())
                 .collect(),
             disputes: self.disputes.entries.clone(),
+            governance,
         }
     }
 
@@ -223,6 +224,7 @@ pub struct EnergySnapshot {
     pub receipts: Vec<EnergyReceipt>,
     pub credits: Vec<EnergyCredit>,
     pub disputes: Vec<EnergyDispute>,
+    pub governance: GovernanceEnergyParams,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -520,8 +522,9 @@ pub fn resolve_dispute(
 }
 
 pub fn market_snapshot() -> EnergySnapshot {
+    let governance = governance_params();
     let guard = store();
-    guard.snapshot()
+    guard.snapshot(governance)
 }
 
 pub fn governance_params() -> GovernanceEnergyParams {
@@ -675,7 +678,10 @@ fn record_energy_gauges(store: &EnergyMarketStore) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_suite::hashing::blake3::Hasher as Blake3;
+    use crypto_suite::signatures::ed25519::SigningKey;
     use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use sys::tempfile::tempdir;
 
     fn temp_store() -> (sys::tempfile::TempDir, EnergyMarketStore) {
@@ -689,6 +695,8 @@ mod tests {
 
     fn register_provider(store: &mut EnergyMarketStore) -> (ProviderId, MeterReading) {
         let min_stake = store.market.config().min_stake;
+        let signing = SigningKey::from_bytes(&[7u8; 32]);
+        let verifying = signing.verifying_key();
         let provider_id = store
             .market
             .register_energy_provider(
@@ -700,12 +708,31 @@ mod tests {
                 min_stake,
             )
             .expect("register provider");
+        store.market.register_provider_key(
+            provider_id.clone(),
+            verifying.to_bytes().to_vec(),
+            SignatureScheme::Ed25519,
+        );
+        let nonce = 1;
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut hasher = Blake3::new();
+        hasher.update(provider_id.as_bytes());
+        hasher.update("meter-1".as_bytes());
+        hasher.update(&100u64.to_le_bytes());
+        hasher.update(&timestamp.to_le_bytes());
+        hasher.update(&nonce.to_le_bytes());
+        let msg = hasher.finalize();
+        let signature = signing.sign(msg.as_bytes()).to_bytes().to_vec();
         let reading = MeterReading {
             provider_id: provider_id.clone(),
             meter_address: "meter-1".into(),
             total_kwh: 100,
-            timestamp: 1,
-            signature: Vec::new(),
+            timestamp,
+            nonce,
+            signature,
         };
         (provider_id, reading)
     }

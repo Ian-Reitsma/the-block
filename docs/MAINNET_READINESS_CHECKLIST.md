@@ -139,25 +139,17 @@ prometheus_query 'treasury_disbursement_backlog' # Should return data
 prometheus_query 'treasury_balance' # Should return data
 ```
 
-### 1.7 Grafana Dashboard
+### 1.7 Foundation Dashboard (first-party only)
 
-- [ ] `monitoring/grafana_treasury_dashboard.json` exists
-- [ ] Panels:
-  - [ ] "Disbursement Pipeline" (state transitions over time)
-  - [ ] "Queue Depth by Status" (current backlog)
-  - [ ] "Execution Errors" (error types and count)
-  - [ ] "Execution Lag" (queued-to-executed histogram)
-  - [ ] "Balance Trend" (BLOCK over time)
-  - [ ] "Executor Health" (tick duration, success rate)
-- [ ] All panels use correct metric names
-- [ ] Alert thresholds configured:
-  - [ ] CRITICAL: backlog > 100 for 3 epochs
-  - [ ] WARNING: lag_p95 > 600s
+- [ ] `monitoring/tools/render_foundation_dashboard.py` is the operational dashboard; Grafana JSON is deprecated for Treasury
+- [ ] Dashboard renders from `monitoring/metrics.json` + live `/metrics` + `/wrappers` (single source of truth)
+- [ ] Treasury panels show disbursement pipeline, backlog by status, execution errors/lag, balance trend, and executor health with live data
+- [ ] Alert thresholds reflected in metrics (`treasury_disbursement_backlog`, `treasury_execution_errors_total`) rather than Grafana JSON
 
 **Verification**:
 ```bash
-make monitor  # Opens Grafana
-# Navigate to Treasury dashboard and verify all panels show data
+python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/metrics
+open monitoring/output/index.html
 ```
 
 ### 1.8 Integration Tests
@@ -311,7 +303,7 @@ python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/met
 
 - [x] `monitoring/tools/render_foundation_dashboard.py` renders Energy + Treasury panels from `metrics.json` and live `/metrics` + `/wrappers`
 - [x] Wrapper panels (runtime/transport/storage/coding/codec/crypto) are visible under **Other** via `/wrappers`
-- [ ] Legacy Grafana JSONs retained only for reproducibility; not used operationally
+- [x] Legacy Grafana JSONs retained only for reproducibility; not used operationally
 
 **Verification**:
 ```bash
@@ -364,6 +356,18 @@ cargo test -p energy-market dispute_resolution -- --nocapture
 **Verification**:
 ```bash
 cargo test -p the_block --test energy_oracle -- --nocapture
+```
+
+### 2.11 Governance Surface & CLI/Explorer
+
+- [ ] `energy.market_state` response includes `governance` block exposing `mode`, `quorum_threshold_ppm`, and `expiry_blocks`
+- [ ] `contract-cli energy market --verbose` prints settlement mode/quorum/expiry
+- [ ] Explorer/CLI history surfaces settlement parameters alongside provider/credit/receipt pages
+
+**Verification**:
+```bash
+contract-cli energy market --verbose | rg "governance"
+contract-cli explorer blocks --tail 1 | rg "energy_settlement"
 ```
 
 ---
@@ -472,31 +476,16 @@ curl -s http://localhost:3001/wrappers | jq . | grep -i treasury
 
 ### 3.5 Dashboard Alignment Audit
 
-- [ ] All dashboards reviewed for:
-  - [ ] Correct metric names (match Prometheus output)
-  - [ ] No "No Data" panels
-  - [ ] Appropriate aggregations (rate, sum, max, histogram percentiles)
-  - [ ] Time ranges set to last 24h or 7d as appropriate
-  - [ ] Alert thresholds visible
-
-**Dashboards to Verify**:
-- [ ] `monitoring/grafana_treasury_dashboard.json`
-- [ ] `monitoring/grafana_energy_dashboard.json`
-- [ ] `monitoring/grafana_receipt_dashboard.json`
-- [ ] `monitoring/grafana_economics_dashboard.json`
+- [ ] `monitoring/tools/render_foundation_dashboard.py` + `monitoring/metrics.json` drive operator views (no Grafana/Prometheus JSON reliance)
+- [ ] `/wrappers` parity confirmed: runtime/transport/storage/coding/codec/crypto panels match `/wrappers` payloads
+- [ ] Ad/read-receipt panels consume the same `/wrappers` feed as gateway telemetry; no drift between dashboards and metrics
+- [ ] All metric names match live `/metrics` output (no missing/renamed series)
 
 **Verification**:
 ```bash
-grep -h '"target": ' monitoring/grafana_*.json | \
-  sed 's/.*expr": "\([^"]*\).*/\1/' | sort -u > /tmp/dashboard_metrics.txt
-
-# Compare to actual Prometheus metrics
-curl -s 'http://localhost:9090/api/v1/label/__name__/values' | \
-  jq -r '.data[]' | grep -E 'treasury|energy|receipt|economics' > /tmp/prom_metrics.txt
-
-# All dashboard metrics should be in Prometheus
-comm -23 <(sort /tmp/dashboard_metrics.txt) <(sort /tmp/prom_metrics.txt) | head
-# Should be empty
+python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/metrics
+rg -o \"name\": monitoring/metrics.json | wc -l  # spot-check metric coverage
+curl -s http://localhost:9898/wrappers | jq '.'
 ```
 
 ---
@@ -543,6 +532,17 @@ echo "=== Settlement Audit ==="
 cargo test -p the_block --test settlement_audit --release 2>&1 | tail -5
 # Must show: test result: ok
 ```
+
+---
+
+## Outstanding Focus Areas (from `AGENTS.md §0.2b`)
+
+- Treasury disbursement tooling and explorer timelines (external submissions)
+- Compute-market SLA slashing coverage and dashboards
+- BlockTorch milestones/spec publication for compute-market readiness
+- WAN-scale QUIC chaos drills + mitigation playbooks
+- Multisig wallet UX polish (batched signer discovery, prompts)
+- Bridge/DEX documentation and explorer telemetry ahead of next tag
 
 ---
 

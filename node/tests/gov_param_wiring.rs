@@ -454,4 +454,6 @@ fn energy_params_update_market_runtime() {
     let (_, status) = apply_param(ParamKey::EnergySettlementExpiryBlocks, 12, 0, 100_000);
     assert_eq!(status, ProposalStatus::Passed);
     assert_eq!(energy::governance_params().settlement.expiry_blocks, 12);
+    let snapshot = energy::market_snapshot();
+    assert_eq!(snapshot.governance.settlement.expiry_blocks, 12);
 }

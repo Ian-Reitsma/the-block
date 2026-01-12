@@ -103,8 +103,7 @@ impl SignatureVerifier for Ed25519SignatureVerifier {
     fn verify(&self, provider_id: &ProviderId, payload: &[u8], signature: &[u8]) -> bool {
         let keys = self.inner.keys.read().expect("verifier lock poisoned");
         let Some(key) = keys.get(provider_id) else {
-            // Shadow mode: if no key registered, skip verification.
-            return true;
+            return false;
         };
         if signature.len() != SIGNATURE_LENGTH {
             return false;
@@ -121,6 +120,7 @@ pub trait MeterReading {
     fn provider_id(&self) -> &ProviderId;
     fn meter_address(&self) -> &OracleAddress;
     fn kwh_reading(&self) -> u64;
+    fn nonce(&self) -> u64;
     fn signature(&self) -> &[u8];
     fn signing_bytes(&self) -> Vec<u8>;
 
@@ -136,6 +136,7 @@ pub struct MeterReadingPayload {
     pub meter_address: OracleAddress,
     pub kwh_reading: u64,
     pub timestamp: UnixTimestamp,
+    pub nonce: u64,
     pub signature: Signature,
 }
 
@@ -145,6 +146,7 @@ impl MeterReadingPayload {
         meter_address: OracleAddress,
         kwh_reading: u64,
         timestamp: UnixTimestamp,
+        nonce: u64,
         signature: Signature,
     ) -> Self {
         Self {
@@ -152,6 +154,7 @@ impl MeterReadingPayload {
             meter_address,
             kwh_reading,
             timestamp,
+            nonce,
             signature,
         }
     }
@@ -174,6 +177,10 @@ impl MeterReading for MeterReadingPayload {
         self.kwh_reading
     }
 
+    fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
     fn signature(&self) -> &[u8] {
         &self.signature
     }
@@ -184,6 +191,7 @@ impl MeterReading for MeterReadingPayload {
         hasher.update(self.meter_address.as_bytes());
         hasher.update(&self.kwh_reading.to_le_bytes());
         hasher.update(&self.timestamp.to_le_bytes());
+        hasher.update(&self.nonce.to_le_bytes());
         hasher.finalize().as_bytes().to_vec()
     }
 }
@@ -254,6 +262,7 @@ mod tests {
             "meter-1".into(),
             1_250,
             1_000_000,
+            42,
             Vec::new(),
         )
     }
@@ -272,6 +281,7 @@ mod tests {
         hasher.update(payload.meter_address.as_bytes());
         hasher.update(&payload.kwh_reading.to_le_bytes());
         hasher.update(&payload.timestamp.to_le_bytes());
+        hasher.update(&payload.nonce.to_le_bytes());
         let expected = hasher.finalize();
         assert_eq!(payload.signing_bytes(), expected.as_bytes());
     }
@@ -309,6 +319,6 @@ mod tests {
         let verifier = Ed25519SignatureVerifier::new();
         let mut payload = sample_payload();
         payload.signature = vec![0u8; SIGNATURE_LENGTH];
-        assert!(payload.verify(&verifier));
+        assert!(!payload.verify(&verifier));
     }
 }

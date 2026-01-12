@@ -85,17 +85,6 @@ pub async fn recv(conn: &ConnectionHandle) -> Option<Vec<u8>> {
     }
 }
 
-#[cfg(any(test, debug_assertions))]
-pub async fn connect_insecure(
-    addr: SocketAddr,
-) -> std::result::Result<ConnectionHandle, ConnectError> {
-    // Fallback to the backend’s insecure connector so tests work even when the
-    // adapter is compiled without debug assertions or pools.
-    transport::quinn_backend::connect_insecure(addr)
-        .await
-        .map(ConnectionHandle::Quinn)
-}
-
 pub fn certificate_from_der(cert: concurrency::Bytes) -> Result<CertificateHandle> {
     let adapter = quinn_adapter()?;
     Ok(adapter.certificate_from_der(cert))

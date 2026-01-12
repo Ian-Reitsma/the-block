@@ -740,6 +740,9 @@ pub struct RpcConfig {
     pub request_timeout_ms: u64,
     pub enable_debug: bool,
     pub admin_token_file: Option<String>,
+    pub energy_provider_token_file: Option<String>,
+    pub energy_oracle_token_file: Option<String>,
+    pub energy_admin_token_file: Option<String>,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub relay_only: bool,
 }
@@ -853,6 +856,9 @@ impl Default for RpcConfig {
             request_timeout_ms: 5_000,
             enable_debug: false,
             admin_token_file: Some("secrets/admin.token".into()),
+            energy_provider_token_file: Some("secrets/energy_provider.token".into()),
+            energy_oracle_token_file: Some("secrets/energy_oracle.token".into()),
+            energy_admin_token_file: Some("secrets/energy_admin.token".into()),
             relay_only: false,
         }
     }

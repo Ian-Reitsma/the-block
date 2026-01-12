@@ -6762,6 +6762,7 @@ mod market_metric_tests {
             receipts: vec![receipt],
             credits: Vec::new(),
             disputes: Vec::new(),
+            governance: crate::energy::GovernanceEnergyParams::default(),
         };
 
         let metrics = bc.build_market_metrics(

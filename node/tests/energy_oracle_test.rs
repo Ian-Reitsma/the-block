@@ -5,6 +5,7 @@ use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::SigningKey;
 use energy_market::{EnergyMarketError, MeterReading};
 use std::env;
+use std::time::{SystemTime, UNIX_EPOCH};
 use sys::tempfile::tempdir;
 use testkit::tb_serial;
 use the_block::energy::{
@@ -20,12 +21,14 @@ fn sign_meter_reading(
     meter_address: &str,
     total_kwh: u64,
     timestamp: u64,
+    nonce: u64,
 ) -> Vec<u8> {
     let mut hasher = Blake3::new();
     hasher.update(provider_id.as_bytes());
     hasher.update(meter_address.as_bytes());
     hasher.update(&total_kwh.to_le_bytes());
     hasher.update(&timestamp.to_le_bytes());
+    hasher.update(&nonce.to_le_bytes());
     let msg = hasher.finalize();
     sk.sign(msg.as_bytes()).to_bytes().to_vec()
 }
@@ -58,6 +61,17 @@ fn energy_oracle_enforcement_and_disputes() {
     };
     the_block::energy::set_governance_params(params);
 
+    let snapshot = the_block::energy::market_snapshot();
+    assert_eq!(
+        snapshot.governance.settlement.mode,
+        EnergySettlementMode::Batch
+    );
+    assert_eq!(
+        snapshot.governance.settlement.quorum_threshold_ppm,
+        500_000
+    );
+    assert_eq!(snapshot.governance.settlement.expiry_blocks, 5);
+
     let provider = register_provider(
         "owner-1".into(),
         1_000,
@@ -68,16 +82,28 @@ fn energy_oracle_enforcement_and_disputes() {
     )
     .expect("register provider");
 
-    let signature = sign_meter_reading(&signing, &provider.provider_id, &meter_address, 1_000, 10);
+    let base_ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let signature = sign_meter_reading(
+        &signing,
+        &provider.provider_id,
+        &meter_address,
+        1_000,
+        base_ts,
+        1,
+    );
     let credit = submit_meter_reading(
         MeterReading {
             provider_id: provider.provider_id.clone(),
             meter_address: meter_address.clone(),
             total_kwh: 1_000,
-            timestamp: 10,
+            timestamp: base_ts,
+            nonce: 1,
             signature,
         },
-        10,
+        base_ts,
     )
     .expect("valid reading accepted");
 
@@ -87,16 +113,18 @@ fn energy_oracle_enforcement_and_disputes() {
             provider_id: provider.provider_id.clone(),
             meter_address: meter_address.clone(),
             total_kwh: 1_200,
-            timestamp: 9,
+            timestamp: base_ts - 1,
+            nonce: 2,
             signature: sign_meter_reading(
                 &signing,
                 &provider.provider_id,
                 &meter_address,
                 1_200,
-                9,
+                base_ts - 1,
+                2,
             ),
         },
-        11,
+        base_ts + 1,
     )
     .expect_err("stale reading must be rejected");
     assert!(matches!(stale_err, EnergyMarketError::StaleReading { .. }));
@@ -107,10 +135,18 @@ fn energy_oracle_enforcement_and_disputes() {
             provider_id: provider.provider_id.clone(),
             meter_address: meter_address.clone(),
             total_kwh: 900,
-            timestamp: 12,
-            signature: sign_meter_reading(&signing, &provider.provider_id, &meter_address, 900, 12),
+            timestamp: base_ts + 2,
+            nonce: 3,
+            signature: sign_meter_reading(
+                &signing,
+                &provider.provider_id,
+                &meter_address,
+                900,
+                base_ts + 2,
+                3,
+            ),
         },
-        12,
+        base_ts + 2,
     )
     .expect_err("regression rejected");
     assert!(matches!(

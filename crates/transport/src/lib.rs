@@ -635,15 +635,6 @@ impl QuinnAdapter {
         }
     }
 
-    #[cfg(any(test, debug_assertions))]
-    pub async fn connect_insecure(
-        &self,
-        addr: SocketAddr,
-    ) -> Result<ConnectionHandle, quinn_impl::ConnectError> {
-        let conn = quinn_impl::connect_insecure(addr).await?;
-        Ok(ConnectionHandle::Quinn(conn))
-    }
-
     pub fn certificate_from_der(&self, cert: Bytes) -> CertificateHandle {
         CertificateHandle::Quinn(quinn_impl::Certificate::from_der(cert))
     }
@@ -725,11 +716,6 @@ impl InhouseAdapter {
             }
         };
         let (conn, _meta) = self.0.backend.connect(addr, cert).await?;
-        Ok(ConnectionHandle::Inhouse(conn))
-    }
-
-    pub async fn connect_insecure(&self, addr: SocketAddr) -> DiagResult<ConnectionHandle> {
-        let (conn, _meta) = self.0.backend.connect_insecure(addr).await?;
         Ok(ConnectionHandle::Inhouse(conn))
     }
 

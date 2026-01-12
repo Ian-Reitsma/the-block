@@ -191,21 +191,6 @@ impl Adapter {
         }
     }
 
-    pub async fn connect_insecure(
-        &self,
-        addr: SocketAddr,
-    ) -> DiagResult<(Arc<Connection>, ConnectOutcome)> {
-        let cert = {
-            let endpoints = self.inner.endpoints.lock().unwrap();
-            endpoints
-                .get(&addr)
-                .and_then(|endpoint| endpoint.upgrade())
-                .map(|endpoint| endpoint.certificate.clone())
-                .ok_or_else(|| anyhow!("no listener"))?
-        };
-        self.connect(addr, &cert).await
-    }
-
     pub fn drop_connection(&self, addr: &SocketAddr) {
         if let Some(conn) = self.inner.connections.lock().unwrap().remove(addr) {
             conn.close();

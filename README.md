@@ -65,6 +65,8 @@ The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a sing
 **Readiness autopilot:** The Launch Governor (`node/src/launch_governor`) consumes chain + DNS telemetry (and soon economics/market metrics) to drive testnet and mainnet gating. It records signed decisions, enforces streak-based enter/exit thresholds, and ties into governance runtime flags so feature transitions are reproducible and reviewable.
 Operators can now run `tb-cli governor status` to see the persisted `EconomicsPrevMetric` snapshot plus the telemetry gauges it mirrors (`economics_prev_market_metrics_{utilization,provider_margin}_ppm`), giving a single view that ties the JSON-RPC payload to the Prometheus series you use in Grafana.
 
+**Observability:** The wrapper-driven foundation dashboard (`monitoring/tools/render_foundation_dashboard.py`) is the operational source of truth; it renders straight from `monitoring/metrics.json`, `/metrics`, and `/wrappers`. Legacy Grafana/Prometheus JSON bundles remain for reproducibility but are not part of the readiness gate.
+
 ---
 
 ## Why it exists
@@ -179,7 +181,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 ## Common workflows
 - **Workspace test sweep:** `cargo nextest run --all-features` exercises node, CLI, crates, and the metrics aggregator. Replay determinism lives in `cargo test -p the_block --test replay`; settlement audits run via `cargo test -p the_block --test settlement_audit --release`.
 - **Fuzzing & coverage:** `scripts/fuzz_coverage.sh` installs LLVM tooling, runs fuzz targets, and exports `.profraw` coverage.
-- **Monitoring stack:** `npm ci --prefix monitoring && make monitor` builds Grafana/Prometheus bundles driven by the metrics aggregator.
+- **Monitoring stack:** `python monitoring/tools/render_foundation_dashboard.py http://localhost:9898/metrics` renders the first-party dashboard from `monitoring/metrics.json` + `/metrics` + `/wrappers` (Grafana/Prometheus JSON is deprecated operationally; kept only for reproducibility).
 - **Docs:** `mdbook build docs` renders everything under `docs/` with the configuration in `docs/book.toml`. Refer to [`docs/LEGACY_MAPPING.md`](docs/LEGACY_MAPPING.md) if you are trying to track where older specs moved.
 - **Dependency policy:** `cargo run -p dependency_registry -- --check config/dependency_policies.toml` refreshes `docs/dependency_inventory*.json`.
 
@@ -213,6 +215,14 @@ Everything is kept in sync with `mdbook`; CI blocks merges if documentation drif
 - **Licensing:** Apache 2.0 (`LICENSE`) governs the entire repo, including generated artifacts.
 
 When in doubt, update the docs first, then patch the code. Production readiness is assumed at every commit—tests, reproducible builds, and telemetry are not optional.
+
+## Outstanding focus areas before the next tag
+- Treasury disbursement tooling and explorer timelines for external submissions
+- Compute-market SLA slashing coverage and dashboards
+- BlockTorch milestones/spec publication for compute-market readiness
+- WAN-scale QUIC chaos drills plus mitigation playbooks
+- Multisig wallet UX polish (batched signer discovery, richer prompts)
+- Bridge/DEX documentation and explorer telemetry
 
 ---
 

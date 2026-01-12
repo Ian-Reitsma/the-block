@@ -5,12 +5,16 @@ use crypto_suite::hex;
 use energy_market::{EnergyCredit, EnergyMarketError, EnergyProvider, EnergyReceipt, MeterReading, H256};
 use foundation_rpc::{Params, RpcError};
 use foundation_serialization::json::{Map, Number, Value};
+use governance_spec::EnergySettlementMode;
 
 const ERR_SIGNATURE_INVALID: i32 = -33001;
 const ERR_METER_MISMATCH: i32 = -33003;
 const ERR_QUORUM_FAILED: i32 = -33004;
 const ERR_SETTLEMENT_CONFLICT: i32 = -33005;
 const ERR_PROVIDER_INACTIVE: i32 = -33006;
+const ERR_NONCE_REPLAY: i32 = -33007;
+const ERR_TIMESTAMP_SKEW: i32 = -33008;
+const ERR_UNAUTHORIZED: i32 = -33009;
 const ERR_INVALID_PARAMS: i32 = -32602;
 
 fn energy_rpc_error(code: i32, message: impl Into<String>) -> RpcError {
@@ -164,7 +168,15 @@ fn decode_hash(hex_value: &str) -> Result<H256, RpcError> {
 }
 
 fn decode_signature(hex_value: &str) -> Result<Vec<u8>, RpcError> {
-    hex::decode(hex_value).map_err(|_| invalid_params("signature must be hex encoded"))
+    let bytes =
+        hex::decode(hex_value).map_err(|_| invalid_params("signature must be hex encoded"))?;
+    // Energy RPC currently supports Ed25519-only signatures; enforcement here keeps the error
+    // contract explicit before verifier logic runs.
+    const ED25519_SIG_LEN: usize = 64;
+    if bytes.len() != ED25519_SIG_LEN {
+        return Err(invalid_params(format!("signature must be {ED25519_SIG_LEN} bytes")));
+    }
+    Ok(bytes)
 }
 
 fn dispute_status_from_str(label: &str) -> Option<DisputeStatus> {
@@ -179,6 +191,13 @@ fn dispute_status_label(status: DisputeStatus) -> &'static str {
     match status {
         DisputeStatus::Open => "open",
         DisputeStatus::Resolved => "resolved",
+    }
+}
+
+fn settlement_mode_label(mode: EnergySettlementMode) -> &'static str {
+    match mode {
+        EnergySettlementMode::Batch => "batch",
+        EnergySettlementMode::RealTime => "real_time",
     }
 }
 
@@ -246,6 +265,20 @@ fn map_energy_error(err: EnergyMarketError) -> RpcError {
             ERR_QUORUM_FAILED,
             format!("settlement below quorum: required {required_ppm} ppm, actual {actual_ppm} ppm"),
         ),
+        EnergyMarketError::NonceReplay { nonce, .. } => energy_rpc_error(
+            ERR_NONCE_REPLAY,
+            format!("nonce {nonce} already used for provider"),
+        ),
+        EnergyMarketError::TimestampSkew {
+            tolerance_secs,
+            observed_skew,
+            ..
+        } => energy_rpc_error(
+            ERR_TIMESTAMP_SKEW,
+            format!(
+                "timestamp skew {observed_skew}s exceeds tolerance {tolerance_secs}s"
+            ),
+        ),
     }
 }
 
@@ -291,6 +324,7 @@ pub fn market_state(filter_provider: Option<&str>) -> Result<Value, RpcError> {
         receipts,
         credits,
         disputes,
+        governance,
     } = snapshot;
     let providers: Vec<Value> = providers
         .into_iter()
@@ -328,12 +362,34 @@ pub fn market_state(filter_provider: Option<&str>) -> Result<Value, RpcError> {
         })
         .map(|dispute| dispute_value(&dispute))
         .collect();
+    let mut governance_map = Map::new();
+    governance_map.insert(
+        "mode".into(),
+        Value::String(settlement_mode_label(governance.settlement.mode).into()),
+    );
+    governance_map.insert(
+        "quorum_threshold_ppm".into(),
+        Value::Number(Number::from(governance.settlement.quorum_threshold_ppm)),
+    );
+    governance_map.insert(
+        "expiry_blocks".into(),
+        Value::Number(Number::from(governance.settlement.expiry_blocks)),
+    );
+    governance_map.insert(
+        "oracle_timeout_blocks".into(),
+        Value::Number(Number::from(governance.oracle_timeout_blocks)),
+    );
+    governance_map.insert(
+        "min_stake".into(),
+        Value::Number(Number::from(governance.min_stake)),
+    );
     let mut map = Map::new();
     map.insert("status".into(), Value::String("ok".into()));
     map.insert("providers".into(), Value::Array(providers));
     map.insert("credits".into(), Value::Array(credits));
     map.insert("receipts".into(), Value::Array(receipts));
     map.insert("disputes".into(), Value::Array(disputes));
+    map.insert("governance".into(), Value::Object(governance_map));
     Ok(Value::Object(map))
 }
 
@@ -466,6 +522,7 @@ pub fn submit_reading(params: &Params, block: u64) -> Result<Value, RpcError> {
     let meter_address = require_string(params, "meter_address")?;
     let kwh_reading = require_u64(params, "kwh_reading")?;
     let timestamp = require_u64(params, "timestamp")?;
+    let nonce = require_u64(params, "nonce")?;
     let signature =
         require_string(params, "signature").and_then(|sig| decode_signature(&sig))?;
     let reading = MeterReading {
@@ -473,6 +530,7 @@ pub fn submit_reading(params: &Params, block: u64) -> Result<Value, RpcError> {
         meter_address,
         total_kwh: kwh_reading,
         timestamp,
+        nonce,
         signature,
     };
     match energy::submit_meter_reading(reading, block) {
@@ -508,5 +566,12 @@ mod tests {
         assert!(rpc_err
             .message
             .contains("dispute 42 not found"));
+    }
+
+    #[test]
+    fn signature_length_enforced() {
+        let rpc_err = decode_signature("00").unwrap_err();
+        assert_eq!(rpc_err.code, ERR_INVALID_PARAMS);
+        assert!(rpc_err.message.contains("bytes"));
     }
 }

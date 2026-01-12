@@ -397,17 +397,6 @@ pub async fn recv(conn: &Connection) -> Option<Vec<u8>> {
     payload
 }
 
-pub async fn connect_insecure(addr: SocketAddr) -> std::result::Result<Connection, ConnectError> {
-    let adapter = adapter_clone();
-    match adapter.connect_insecure(addr).await {
-        Ok((conn, outcome)) => {
-            handle_outcome(addr, &outcome);
-            Ok(conn)
-        }
-        Err(err) => Err(handle_connect_error(addr, err)),
-    }
-}
-
 pub fn classify_err(err: &ConnectError) -> HandshakeError {
     match err {
         ConnectError::Handshake(kind) => *kind,

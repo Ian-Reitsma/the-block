@@ -377,9 +377,15 @@ mod tests {
             ad_readiness: None,
             governor: None,
             clients: Arc::new(Mutex::new(HashMap::new())),
-            energy_clients: Arc::new(Mutex::new(HashMap::new())),
+            energy_read_clients: Arc::new(Mutex::new(HashMap::new())),
+            energy_submit_clients: Arc::new(Mutex::new(HashMap::new())),
+            energy_settle_clients: Arc::new(Mutex::new(HashMap::new())),
+            energy_dispute_clients: Arc::new(Mutex::new(HashMap::new())),
             tokens_per_sec: 128.0,
-            energy_tokens_per_sec: 1.0,
+            energy_read_tokens_per_sec: 1.0,
+            energy_submit_tokens_per_sec: 1.0,
+            energy_settle_tokens_per_sec: 1.0,
+            energy_dispute_tokens_per_sec: 1.0,
             ban_secs: 1,
             client_timeout: 1,
             concurrent: Arc::new(Semaphore::new(4)),
@@ -432,9 +438,15 @@ struct RpcState {
     ad_readiness: Option<crate::ad_readiness::AdReadinessHandle>,
     governor: Option<Arc<launch_governor::GovernorHandle>>,
     clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
-    energy_clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    energy_read_clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    energy_submit_clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    energy_settle_clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
+    energy_dispute_clients: Arc<Mutex<HashMap<IpAddr, ClientState>>>,
     tokens_per_sec: f64,
-    energy_tokens_per_sec: f64,
+    energy_read_tokens_per_sec: f64,
+    energy_submit_tokens_per_sec: f64,
+    energy_settle_tokens_per_sec: f64,
+    energy_dispute_tokens_per_sec: f64,
     ban_secs: u64,
     client_timeout: u64,
     concurrent: Arc<Semaphore>,
@@ -473,11 +485,29 @@ impl RpcState {
         }
     }
 
-    fn check_energy_rate_limit(&self, ip: IpAddr) -> Option<RpcError> {
+    fn energy_limit_for(
+        &self,
+        method: &str,
+    ) -> Option<(&Arc<Mutex<HashMap<IpAddr, ClientState>>>, f64)> {
+        match method {
+            "energy.submit_reading" => Some((&self.energy_submit_clients, self.energy_submit_tokens_per_sec)),
+            "energy.settle" => Some((&self.energy_settle_clients, self.energy_settle_tokens_per_sec)),
+            "energy.flag_dispute" | "energy.resolve_dispute" | "energy.register_provider" => {
+                Some((&self.energy_dispute_clients, self.energy_dispute_tokens_per_sec))
+            }
+            _ if ENERGY_METHODS.contains(&method) => {
+                Some((&self.energy_read_clients, self.energy_read_tokens_per_sec))
+            }
+            _ => None,
+        }
+    }
+
+    fn check_energy_rate_limit(&self, method: &str, ip: IpAddr) -> Option<RpcError> {
+        let (clients, tokens_per_sec) = self.energy_limit_for(method)?;
         match limiter::check_client(
             &ip,
-            &self.energy_clients,
-            self.energy_tokens_per_sec,
+            clients,
+            tokens_per_sec,
             self.ban_secs,
             self.client_timeout,
         ) {
@@ -547,6 +577,16 @@ fn render_request_path(request: &Request<RpcState>) -> String {
     }
 }
 
+fn bearer_token(auth: Option<&str>) -> Option<&str> {
+    auth.and_then(|h| h.strip_prefix("Bearer ").map(str::trim))
+}
+
+fn tokens_equal(expected: &str, presented: &str) -> bool {
+    let a = expected.as_bytes();
+    let b = presented.as_bytes();
+    a.len() == b.len() && a.ct_eq(b).into()
+}
+
 pub struct RpcRuntimeConfig {
     allowed_hosts: Vec<String>,
     cors_allow_origins: Vec<String>,
@@ -555,6 +595,45 @@ pub struct RpcRuntimeConfig {
     enable_debug: bool,
     admin_token: Option<String>,
     relay_only: bool,
+    energy_auth: EnergyAuthConfig,
+}
+
+#[derive(Clone, Default)]
+struct EnergyAuthConfig {
+    provider_token: Option<String>,
+    oracle_token: Option<String>,
+    admin_token: Option<String>,
+}
+
+impl EnergyAuthConfig {
+    fn is_configured(&self) -> bool {
+        self.provider_token.is_some() || self.oracle_token.is_some() || self.admin_token.is_some()
+    }
+
+    fn matches(&self, auth: Option<&str>, required: EnergyRole) -> bool {
+        let Some(token) = bearer_token(auth) else {
+            return false;
+        };
+        match required {
+            EnergyRole::Provider => {
+                self.provider_token.as_deref() == Some(token)
+                    || self.oracle_token.as_deref() == Some(token)
+                    || self.admin_token.as_deref() == Some(token)
+            }
+            EnergyRole::Oracle => {
+                self.oracle_token.as_deref() == Some(token)
+                    || self.admin_token.as_deref() == Some(token)
+            }
+            EnergyRole::Admin => self.admin_token.as_deref() == Some(token),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum EnergyRole {
+    Provider,
+    Oracle,
+    Admin,
 }
 
 const ENERGY_METHODS: &[&str] = &[
@@ -568,6 +647,21 @@ const ENERGY_METHODS: &[&str] = &[
     "energy.flag_dispute",
     "energy.resolve_dispute",
 ];
+
+const ENERGY_UNAUTHORIZED_CODE: i32 = -33009;
+
+fn required_energy_role(method: &str) -> Option<EnergyRole> {
+    match method {
+        "energy.submit_reading" => Some(EnergyRole::Oracle),
+        "energy.settle" | "energy.flag_dispute" | "energy.resolve_dispute" | "energy.register_provider" => {
+            Some(EnergyRole::Admin)
+        }
+        "energy.market_state" | "energy.receipts" | "energy.credits" | "energy.disputes" => {
+            Some(EnergyRole::Provider)
+        }
+        _ => None,
+    }
+}
 
 const PUBLIC_METHODS: &[&str] = &[
     "balance",
@@ -853,8 +947,15 @@ fn execute_rpc(
 
     if ENERGY_METHODS.contains(&method_str) {
         if let Some(ip) = peer_ip {
-            if let Some(err) = state.check_energy_rate_limit(ip) {
+            if let Some(err) = state.check_energy_rate_limit(method_str, ip) {
                 return RpcResponse::error(err, id);
+            }
+        }
+        if let Some(required_role) = required_energy_role(method_str) {
+            if runtime_cfg.energy_auth.is_configured()
+                && !runtime_cfg.energy_auth.matches(auth, required_role)
+            {
+                return RpcResponse::error(rpc_error(ENERGY_UNAUTHORIZED_CODE, "unauthorized"), id);
             }
         }
     }
@@ -3259,15 +3360,30 @@ pub async fn run_rpc_server_with_market(
         });
     let dids = Arc::new(Mutex::new(DidRegistry::open(&did_path)));
     let clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
-    let energy_clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
+    let energy_read_clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
+    let energy_submit_clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
+    let energy_settle_clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
+    let energy_dispute_clients = Arc::new(Mutex::new(HashMap::<IpAddr, ClientState>::new()));
     let tokens_per_sec = std::env::var("TB_RPC_TOKENS_PER_SEC")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(100.0);
-    let energy_tokens_per_sec = std::env::var("TB_RPC_ENERGY_TOKENS_PER_SEC")
+    let energy_read_tokens_per_sec = std::env::var("TB_RPC_ENERGY_READ_TOKENS_PER_SEC")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(20.0);
+        .unwrap_or(1000.0 / 60.0);
+    let energy_submit_tokens_per_sec = std::env::var("TB_RPC_ENERGY_SUBMIT_TOKENS_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100.0 / 60.0);
+    let energy_settle_tokens_per_sec = std::env::var("TB_RPC_ENERGY_SETTLE_TOKENS_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50.0 / 60.0);
+    let energy_dispute_tokens_per_sec = std::env::var("TB_RPC_ENERGY_DISPUTE_TOKENS_PER_SEC")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20.0 / 60.0);
     let ban_secs = std::env::var("TB_RPC_BAN_SECS")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -3282,6 +3398,31 @@ pub async fn run_rpc_server_with_market(
         .as_ref()
         .and_then(|p| fs::read_to_string(p).ok())
         .map(|s| s.trim().to_string());
+    let energy_provider_token = std::env::var("TB_ENERGY_PROVIDER_TOKEN")
+        .ok()
+        .or_else(|| {
+            cfg.energy_provider_token_file
+                .as_ref()
+                .and_then(|p| fs::read_to_string(p).ok())
+        })
+        .map(|s| s.trim().to_string());
+    let energy_oracle_token = std::env::var("TB_ENERGY_ORACLE_TOKEN")
+        .ok()
+        .or_else(|| {
+            cfg.energy_oracle_token_file
+                .as_ref()
+                .and_then(|p| fs::read_to_string(p).ok())
+        })
+        .map(|s| s.trim().to_string());
+    let energy_admin_token = std::env::var("TB_ENERGY_ADMIN_TOKEN")
+        .ok()
+        .or_else(|| {
+            cfg.energy_admin_token_file
+                .as_ref()
+                .and_then(|p| fs::read_to_string(p).ok())
+        })
+        .or_else(|| admin_token.clone())
+        .map(|s| s.trim().to_string());
     let runtime_cfg = Arc::new(RpcRuntimeConfig {
         allowed_hosts: cfg.allowed_hosts,
         cors_allow_origins: cfg.cors_allow_origins,
@@ -3290,6 +3431,11 @@ pub async fn run_rpc_server_with_market(
         enable_debug: cfg.enable_debug,
         admin_token,
         relay_only: cfg.relay_only,
+        energy_auth: EnergyAuthConfig {
+            provider_token: energy_provider_token,
+            oracle_token: energy_oracle_token,
+            admin_token: energy_admin_token,
+        },
     });
 
     let state = RpcState {
@@ -3303,9 +3449,15 @@ pub async fn run_rpc_server_with_market(
         ad_readiness: readiness,
         governor,
         clients,
-        energy_clients,
+        energy_read_clients,
+        energy_submit_clients,
+        energy_settle_clients,
+        energy_dispute_clients,
         tokens_per_sec,
-        energy_tokens_per_sec,
+        energy_read_tokens_per_sec,
+        energy_submit_tokens_per_sec,
+        energy_settle_tokens_per_sec,
+        energy_dispute_tokens_per_sec,
         ban_secs,
         client_timeout,
         concurrent: Arc::new(Semaphore::new(1024)),
@@ -3360,6 +3512,7 @@ fn fuzz_runtime_config_with_overrides(
         enable_debug,
         admin_token,
         relay_only: false,
+        energy_auth: EnergyAuthConfig::default(),
     })
 }
 
@@ -3388,9 +3541,15 @@ pub fn fuzz_dispatch_request(
         ad_readiness: readiness,
         governor: None,
         clients: Arc::new(Mutex::new(HashMap::new())),
-        energy_clients: Arc::new(Mutex::new(HashMap::new())),
+        energy_read_clients: Arc::new(Mutex::new(HashMap::new())),
+        energy_submit_clients: Arc::new(Mutex::new(HashMap::new())),
+        energy_settle_clients: Arc::new(Mutex::new(HashMap::new())),
+        energy_dispute_clients: Arc::new(Mutex::new(HashMap::new())),
         tokens_per_sec: 128.0,
-        energy_tokens_per_sec: 64.0,
+        energy_read_tokens_per_sec: 64.0,
+        energy_submit_tokens_per_sec: 10.0,
+        energy_settle_tokens_per_sec: 5.0,
+        energy_dispute_tokens_per_sec: 3.0,
         ban_secs: 1,
         client_timeout: 1,
         concurrent: Arc::new(Semaphore::new(64)),

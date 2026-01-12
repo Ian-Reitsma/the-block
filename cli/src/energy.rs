@@ -499,13 +499,7 @@ pub fn handle(cmd: EnergyCmd) {
                 .unwrap_or_else(json_null);
             let payload = json_rpc_request("energy.market_state", params);
             dispatch(&client, &url, payload).map(|text| {
-                if verbose {
-                    println!("{text}");
-                } else if let Ok(value) = json_from_str::<JsonValue>(&text) {
-                    println!("energy_market => {:#}", value);
-                } else {
-                    println!("{text}");
-                }
+                print_market_response(&text, verbose);
             })
         }
         EnergyCmd::Settle {
@@ -616,6 +610,71 @@ pub fn handle(cmd: EnergyCmd) {
     };
     if let Err(err) = result {
         eprintln!("energy command failed: {err}");
+    }
+}
+
+fn print_market_response(body: &str, verbose: bool) {
+    if verbose {
+        println!("{body}");
+        return;
+    }
+    match json_from_str::<JsonValue>(body) {
+        Ok(value) => {
+            if value.get("error").is_some() {
+                println!("{body}");
+                return;
+            }
+            let providers = value
+                .get("providers")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+            let credits = value
+                .get("credits")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+            let receipts = value
+                .get("receipts")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+            let disputes = value
+                .get("disputes")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len())
+                .unwrap_or(0);
+            println!(
+                "energy market => providers={} credits={} receipts={} disputes={}",
+                providers, credits, receipts, disputes
+            );
+            if let Some(governance) = value.get("governance").and_then(|v| v.as_object()) {
+                let mode = governance
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("-");
+                let quorum = governance
+                    .get("quorum_threshold_ppm")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let expiry = governance
+                    .get("expiry_blocks")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let oracle_timeout = governance
+                    .get("oracle_timeout_blocks")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let min_stake = governance
+                    .get("min_stake")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                println!(
+                    "governance: mode={mode} quorum_ppm={quorum} expiry_blocks={expiry} oracle_timeout_blocks={oracle_timeout} min_stake={min_stake}"
+                );
+            }
+        }
+        Err(_) => println!("{body}"),
     }
 }
 
