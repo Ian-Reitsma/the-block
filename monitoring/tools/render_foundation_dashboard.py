@@ -5,7 +5,7 @@ import json
 import pathlib
 import sys
 import time
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -128,7 +128,7 @@ def build_section(title: str, metrics: Tuple[dict, ...], snapshot: Dict[str, flo
 
 
 def build_wrapper_sections(
-    wrappers: dict, base_endpoint: str, error: str | None = None
+    wrappers: dict, base_endpoint: str, error: Optional[str] = None
 ) -> str:
     if error:
         return (
@@ -172,14 +172,14 @@ def build_wrapper_sections(
     return "<h2>Wrappers</h2>\n" + header + "\n" + "\n".join(nodes)
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list) -> int:
     if len(argv) != 2:
         print("usage: render_foundation_dashboard.py <telemetry-endpoint>", file=sys.stderr)
         return 2
     endpoint = argv[1]
     base_endpoint = normalize_base_endpoint(endpoint)
-    wrappers: dict | None = None
-    wrappers_error: str | None = None
+    wrappers: Optional[dict] = None
+    wrappers_error: Optional[str] = None
     try:
         snapshot = load_metrics(endpoint)
     except URLError as err:

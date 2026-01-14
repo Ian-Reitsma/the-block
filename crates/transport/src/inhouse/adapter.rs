@@ -245,6 +245,11 @@ impl Endpoint {
     pub fn local_addr(&self) -> SocketAddr {
         self.inner.addr
     }
+
+    /// Returns the certificate this endpoint advertises; useful for telemetry and dashboard wiring.
+    pub fn certificate(&self) -> &Certificate {
+        &self.inner.certificate
+    }
 }
 
 impl Drop for EndpointInner {

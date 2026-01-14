@@ -4048,12 +4048,15 @@
       "id": 216,
       "options": {
         "legend": {
-          "showLegend": false
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         }
       },
       "targets": [
         {
-          "expr": "quic_handshake_fail_total"
+          "expr": "sum by (reason) (quic_handshake_fail_total)",
+          "legendFormat": "{{reason}}"
         }
       ],
       "title": "quic_handshake_fail_total",

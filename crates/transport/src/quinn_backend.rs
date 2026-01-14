@@ -487,6 +487,13 @@ fn handle_outcome(addr: SocketAddr, outcome: &InhouseOutcome) {
 
 fn handle_connect_error(addr: SocketAddr, err: TbError) -> ConnectError {
     let classification = classify_tb_error(&err);
+    // Surface handshake failures to callbacks so telemetry and tests can
+    // correlate connection attempts with remote addresses.
+    with_callbacks(|cbs| {
+        if let Some(cb) = cbs.handshake_failure.as_ref() {
+            cb(addr, classification);
+        }
+    });
     ConnectError::Handshake(classification)
 }
 
@@ -528,6 +535,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn classify_error_variants() {
@@ -535,5 +543,31 @@ mod tests {
         assert_eq!(classify_err(&timeout), HandshakeError::Timeout);
         let other = ConnectError::Other(anyhow!("other"));
         assert_eq!(classify_err(&other), HandshakeError::Other);
+    }
+
+    #[test]
+    fn handshake_failure_callback_invoked_on_error() {
+        let original = callbacks_clone();
+        let failures = Arc::new(Mutex::new(Vec::new()));
+        let mut callbacks = QuinnEventCallbacks::default();
+        {
+            let failures = Arc::clone(&failures);
+            callbacks.handshake_failure =
+                Some(Arc::new(move |addr: SocketAddr, err: HandshakeError| {
+                    failures.lock().unwrap().push((addr, err));
+                }));
+        }
+        set_event_callbacks(callbacks).expect("install callbacks");
+
+        let addr: SocketAddr = "127.0.0.1:4433".parse().unwrap();
+        let _ = handle_connect_error(addr, anyhow!("tls handshake failed"));
+
+        let captured = failures.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].0, addr);
+        assert_eq!(captured[0].1, HandshakeError::Tls);
+
+        // Restore the original callbacks so other tests retain defaults.
+        set_event_callbacks((*original).clone()).expect("restore callbacks");
     }
 }
