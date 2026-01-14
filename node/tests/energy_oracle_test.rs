@@ -66,10 +66,7 @@ fn energy_oracle_enforcement_and_disputes() {
         snapshot.governance.settlement.mode,
         EnergySettlementMode::Batch
     );
-    assert_eq!(
-        snapshot.governance.settlement.quorum_threshold_ppm,
-        500_000
-    );
+    assert_eq!(snapshot.governance.settlement.quorum_threshold_ppm, 500_000);
     assert_eq!(snapshot.governance.settlement.expiry_blocks, 5);
 
     let provider = register_provider(

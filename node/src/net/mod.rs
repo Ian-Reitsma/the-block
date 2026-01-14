@@ -99,7 +99,8 @@ use runtime::fs::watch::{
 use crate::telemetry::{
     sampled_observe, QUIC_BYTES_RECV_TOTAL, QUIC_BYTES_SENT_TOTAL, QUIC_CERT_ROTATION_TOTAL,
     QUIC_CONN_LATENCY_SECONDS, QUIC_DISCONNECT_TOTAL, QUIC_ENDPOINT_REUSE_TOTAL,
-    QUIC_HANDSHAKE_FAIL_TOTAL, QUIC_PROVIDER_CONNECT_TOTAL, QUIC_RETRANSMIT_TOTAL,
+    QUIC_HANDSHAKE_FAIL_TOTAL, QUIC_HANDSHAKE_SUCCESS_TOTAL, QUIC_PROVIDER_CONNECT_TOTAL,
+    QUIC_RETRANSMIT_TOTAL,
 };
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{OVERLAY_BACKEND_ACTIVE, OVERLAY_PEER_PERSISTED_TOTAL, OVERLAY_PEER_TOTAL};
@@ -496,6 +497,19 @@ fn build_transport_callbacks() -> TransportCallbacks {
     {
         let quinn = &mut callbacks.quinn;
         quinn.provider_connect = Some(provider_counter.clone());
+        quinn.handshake_success = Some(Arc::new(|addr: SocketAddr| {
+            #[cfg(feature = "telemetry")]
+            {
+                let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
+                with_metric_handle(
+                    "quic_handshake_success_total",
+                    [peer_label.as_str()],
+                    QUIC_HANDSHAKE_SUCCESS_TOTAL
+                        .ensure_handle_for_label_values(&[peer_label.as_str()]),
+                    |handle| handle.inc(),
+                );
+            }
+        }));
         quinn.handshake_latency = Some(Arc::new(|addr: SocketAddr, elapsed: Duration| {
             #[cfg(feature = "telemetry")]
             sampled_observe(&QUIC_CONN_LATENCY_SECONDS, elapsed.as_secs_f64());
@@ -615,6 +629,17 @@ fn build_transport_callbacks() -> TransportCallbacks {
         inhouse.handshake_success = Some(Arc::new(|addr: SocketAddr| {
             if let Some(pk) = pk_from_addr(&addr) {
                 quic_stats::record_address(&pk, addr);
+            }
+            #[cfg(feature = "telemetry")]
+            {
+                let peer_label = quic_stats::peer_label(pk_from_addr(&addr));
+                with_metric_handle(
+                    "quic_handshake_success_total",
+                    [peer_label.as_str()],
+                    QUIC_HANDSHAKE_SUCCESS_TOTAL
+                        .ensure_handle_for_label_values(&[peer_label.as_str()]),
+                    |handle| handle.inc(),
+                );
             }
         }));
         inhouse.handshake_failure = Some(Arc::new(|addr: SocketAddr, reason: &str| {

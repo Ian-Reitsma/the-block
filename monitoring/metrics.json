@@ -167,6 +167,62 @@
     },
     {
       "deprecated": false,
+      "description": "Ad impressions skipped due to readiness blockers",
+      "labels": [
+        "reason"
+      ],
+      "name": "ad_readiness_skipped_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Ready cohort counts per domain tier, interest tag, or presence bucket",
+      "labels": [
+        "domain_tier",
+        "presence_bucket",
+        "interest_tag"
+      ],
+      "name": "ad_segment_ready_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Observed cohort utilization in parts-per-million",
+      "labels": [
+        "domain",
+        "provider",
+        "badges"
+      ],
+      "name": "ad_market_utilization_observed_ppm"
+    },
+    {
+      "deprecated": false,
+      "description": "Target cohort utilization in parts-per-million",
+      "labels": [
+        "domain",
+        "provider",
+        "badges"
+      ],
+      "name": "ad_market_utilization_target_ppm"
+    },
+    {
+      "deprecated": false,
+      "description": "Observed minus target utilization in parts-per-million",
+      "labels": [
+        "domain",
+        "provider",
+        "badges"
+      ],
+      "name": "ad_market_utilization_delta_ppm"
+    },
+    {
+      "deprecated": false,
+      "description": "Remaining privacy budget per campaign in parts-per-million",
+      "labels": [
+        "campaign_id"
+      ],
+      "name": "ad_privacy_budget_remaining_ppm"
+    },
+    {
+      "deprecated": false,
       "description": "Total service badges revoked",
       "labels": [],
       "name": "badge_revoked_total"
@@ -781,6 +837,30 @@
       "description": "Industrial compute utilisation percentage",
       "labels": [],
       "name": "industrial_utilization"
+    },
+    {
+      "deprecated": false,
+      "description": "Jobs exceeding declared deadlines",
+      "labels": [],
+      "name": "compute_job_timeout_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Number of compute jobs with active SLA tracking",
+      "labels": [],
+      "name": "compute_sla_pending_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Unix timestamp of the next pending compute SLA deadline",
+      "labels": [],
+      "name": "compute_sla_next_deadline_ts"
+    },
+    {
+      "deprecated": false,
+      "description": "Count of SLA penalties applied automatically by the settlement engine",
+      "labels": [],
+      "name": "compute_sla_automated_slash_total"
     },
     {
       "deprecated": false,

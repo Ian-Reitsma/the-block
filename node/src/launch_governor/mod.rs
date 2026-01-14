@@ -2011,10 +2011,7 @@ mod tests {
         }
 
         fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {
-            self.economics_samples
-                .front()
-                .cloned()
-                .unwrap_or_default()
+            self.economics_samples.front().cloned().unwrap_or_default()
         }
     }
 

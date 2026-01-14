@@ -217,7 +217,7 @@ pub struct CircuitBreakerConfig {
 
 **Run Command**:
 ```bash
-cargo test --release treasury_stress --test treasury_stress_test -- --nocapture
+cargo test -p governance --release --test treasury_stress_test -- --nocapture --test-threads=1
 ```
 
 ---
@@ -260,8 +260,8 @@ cargo test --release treasury_stress --test treasury_stress_test -- --nocapture
 
 **Run Command**:
 ```bash
-cargo test --release treasury_extreme --ignored \
-  --test treasury_extreme_stress_test -- --nocapture
+cargo test -p governance --release --test treasury_extreme_stress_test \
+  -- --nocapture --test-threads=1
 ```
 
 **Hardware Recommendations**:
@@ -695,13 +695,13 @@ PC (Primary)              Mac M1 #1 (Replica)      Mac M1 #2 (Observer)
 
 **Standard Tests** (100+ TPS target):
 ```bash
-cargo test --release treasury_stress --test treasury_stress_test -- --nocapture
+cargo test -p governance --release --test treasury_stress_test -- --nocapture --test-threads=1
 ```
 
 **Extreme Tests** (10k+ TPS target):
 ```bash
-cargo test --release treasury_extreme --ignored \
-  --test treasury_extreme_stress_test -- --nocapture
+cargo test -p governance --release --test treasury_extreme_stress_test \
+  -- --nocapture --test-threads=1
 ```
 
 **All Integration Tests**:

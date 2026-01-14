@@ -237,8 +237,8 @@ fn status_value(status: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{
-        drop_counts_to_value, handshake_fail_counts_to_value, peer_metrics_to_value, DropReason,
-        execute_rpc, HandshakeError, RpcClientErrorCode, RpcResponse, RpcState,
+        drop_counts_to_value, execute_rpc, handshake_fail_counts_to_value, peer_metrics_to_value,
+        DropReason, HandshakeError, RpcClientErrorCode, RpcResponse, RpcState,
     };
     use crate::identity::{handle_registry::HandleRegistry, DidRegistry};
     use crate::net::peer::{PeerMetrics, PeerReputation};
@@ -249,10 +249,7 @@ mod tests {
     use runtime::sync::semaphore::Semaphore;
     use std::collections::{HashMap, HashSet};
     use std::net::IpAddr;
-    use std::sync::{
-        atomic::AtomicBool,
-        Arc, Mutex,
-    };
+    use std::sync::{atomic::AtomicBool, Arc, Mutex};
     use sys::tempfile::tempdir;
 
     #[test]
@@ -490,10 +487,19 @@ impl RpcState {
         method: &str,
     ) -> Option<(&Arc<Mutex<HashMap<IpAddr, ClientState>>>, f64)> {
         match method {
-            "energy.submit_reading" => Some((&self.energy_submit_clients, self.energy_submit_tokens_per_sec)),
-            "energy.settle" => Some((&self.energy_settle_clients, self.energy_settle_tokens_per_sec)),
+            "energy.submit_reading" => Some((
+                &self.energy_submit_clients,
+                self.energy_submit_tokens_per_sec,
+            )),
+            "energy.settle" => Some((
+                &self.energy_settle_clients,
+                self.energy_settle_tokens_per_sec,
+            )),
             "energy.flag_dispute" | "energy.resolve_dispute" | "energy.register_provider" => {
-                Some((&self.energy_dispute_clients, self.energy_dispute_tokens_per_sec))
+                Some((
+                    &self.energy_dispute_clients,
+                    self.energy_dispute_tokens_per_sec,
+                ))
             }
             _ if ENERGY_METHODS.contains(&method) => {
                 Some((&self.energy_read_clients, self.energy_read_tokens_per_sec))
@@ -616,15 +622,37 @@ impl EnergyAuthConfig {
         };
         match required {
             EnergyRole::Provider => {
-                self.provider_token.as_deref() == Some(token)
-                    || self.oracle_token.as_deref() == Some(token)
-                    || self.admin_token.as_deref() == Some(token)
+                self.provider_token
+                    .as_ref()
+                    .map(|t| tokens_equal(t, token))
+                    .unwrap_or(false)
+                    || self
+                        .oracle_token
+                        .as_ref()
+                        .map(|t| tokens_equal(t, token))
+                        .unwrap_or(false)
+                    || self
+                        .admin_token
+                        .as_ref()
+                        .map(|t| tokens_equal(t, token))
+                        .unwrap_or(false)
             }
             EnergyRole::Oracle => {
-                self.oracle_token.as_deref() == Some(token)
-                    || self.admin_token.as_deref() == Some(token)
+                self.oracle_token
+                    .as_ref()
+                    .map(|t| tokens_equal(t, token))
+                    .unwrap_or(false)
+                    || self
+                        .admin_token
+                        .as_ref()
+                        .map(|t| tokens_equal(t, token))
+                        .unwrap_or(false)
             }
-            EnergyRole::Admin => self.admin_token.as_deref() == Some(token),
+            EnergyRole::Admin => self
+                .admin_token
+                .as_ref()
+                .map(|t| tokens_equal(t, token))
+                .unwrap_or(false),
         }
     }
 }
@@ -653,9 +681,10 @@ const ENERGY_UNAUTHORIZED_CODE: i32 = -33009;
 fn required_energy_role(method: &str) -> Option<EnergyRole> {
     match method {
         "energy.submit_reading" => Some(EnergyRole::Oracle),
-        "energy.settle" | "energy.flag_dispute" | "energy.resolve_dispute" | "energy.register_provider" => {
-            Some(EnergyRole::Admin)
-        }
+        "energy.settle"
+        | "energy.flag_dispute"
+        | "energy.resolve_dispute"
+        | "energy.register_provider" => Some(EnergyRole::Admin),
         "energy.market_state" | "energy.receipts" | "energy.credits" | "energy.disputes" => {
             Some(EnergyRole::Provider)
         }

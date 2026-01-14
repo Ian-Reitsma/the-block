@@ -25,6 +25,7 @@ mod treasury_extreme_stress {
     use governance::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
     use governance::treasury::{parse_dependency_list, TreasuryDisbursement};
     use governance::treasury_deps::DependencyGraph;
+    use std::num::NonZeroUsize;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::thread;
@@ -40,8 +41,13 @@ mod treasury_extreme_stress {
         )
     }
 
+    fn core_count() -> usize {
+        thread::available_parallelism()
+            .unwrap_or_else(|_| NonZeroUsize::new(1).unwrap())
+            .get()
+    }
+
     #[test]
-    #[ignore] // Run explicitly with --ignored flag
     fn test_10k_tps_dependency_parsing() {
         println!("\n=== 10K TPS DEPENDENCY PARSING TEST ===");
 
@@ -53,7 +59,7 @@ mod treasury_extreme_stress {
             r#"{"depends_on": [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]}"#,
         ];
 
-        let num_threads = num_cpus::get();
+        let num_threads = core_count();
         let ops_per_thread = 100_000;
         let total_ops = num_threads * ops_per_thread;
 
@@ -101,7 +107,6 @@ mod treasury_extreme_stress {
     }
 
     #[test]
-    #[ignore]
     fn test_10k_tps_graph_operations() {
         println!("\n=== 10K TPS GRAPH OPERATIONS TEST ===");
 
@@ -123,7 +128,7 @@ mod treasury_extreme_stress {
 
         let graph = Arc::new(DependencyGraph::new(&disbursements).unwrap());
 
-        let num_threads = num_cpus::get();
+        let num_threads = core_count();
         let ops_per_thread = 100_000;
         let counter = Arc::new(AtomicU64::new(0));
         let start = Instant::now();
@@ -177,17 +182,12 @@ mod treasury_extreme_stress {
     }
 
     #[test]
-    #[ignore]
     fn test_sustained_10k_tps_over_60_seconds() {
         println!("\n=== SUSTAINED 10K TPS (60 seconds) ===");
 
-        let test_memos = vec![
-            r#"{"depends_on": [1, 2, 3]}"#,
-            "depends_on=10,20",
-            "",
-        ];
+        let test_memos = vec![r#"{"depends_on": [1, 2, 3]}"#, "depends_on=10,20", ""];
 
-        let num_threads = num_cpus::get().max(8); // Use at least 8 threads
+        let num_threads = core_count().max(8); // Use at least 8 threads
         let target_duration = Duration::from_secs(60);
         let counter = Arc::new(AtomicU64::new(0));
         let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -242,7 +242,6 @@ mod treasury_extreme_stress {
     }
 
     #[test]
-    #[ignore]
     fn test_memory_stability_under_extreme_load() {
         println!("\n=== MEMORY STABILITY UNDER EXTREME LOAD ===");
 
@@ -291,7 +290,6 @@ mod treasury_extreme_stress {
     }
 
     #[test]
-    #[ignore]
     fn test_circuit_breaker_under_load() {
         println!("\n=== CIRCUIT BREAKER UNDER LOAD TEST ===");
 
@@ -303,11 +301,14 @@ mod treasury_extreme_stress {
         };
 
         let breaker = Arc::new(CircuitBreaker::new(config));
-        let num_threads = num_cpus::get();
+        let num_threads = core_count();
         let ops_per_thread = 10_000;
 
-        println!("Simulating {} operations across {} threads",
-                 num_threads * ops_per_thread, num_threads);
+        println!(
+            "Simulating {} operations across {} threads",
+            num_threads * ops_per_thread,
+            num_threads
+        );
 
         let start = Instant::now();
         let allowed_count = Arc::new(AtomicU64::new(0));
@@ -349,8 +350,16 @@ mod treasury_extreme_stress {
         let tps = total as f64 / duration.as_secs_f64();
 
         println!("Duration: {:?}", duration);
-        println!("Allowed: {} ({:.1}%)", allowed, allowed as f64 / total as f64 * 100.0);
-        println!("Rejected: {} ({:.1}%)", rejected, rejected as f64 / total as f64 * 100.0);
+        println!(
+            "Allowed: {} ({:.1}%)",
+            allowed,
+            allowed as f64 / total as f64 * 100.0
+        );
+        println!(
+            "Rejected: {} ({:.1}%)",
+            rejected,
+            rejected as f64 / total as f64 * 100.0
+        );
         println!("Throughput: {:.0} TPS", tps);
         println!("Final state: {:?}", breaker.state());
 
@@ -359,7 +368,6 @@ mod treasury_extreme_stress {
     }
 
     #[test]
-    #[ignore]
     fn test_mixed_workload_10k_tps() {
         println!("\n=== MIXED WORKLOAD 10K TPS TEST ===");
 
@@ -381,12 +389,15 @@ mod treasury_extreme_stress {
             "depends_on=10,20".to_string(),
         ]);
 
-        let num_threads = num_cpus::get();
+        let num_threads = core_count();
         let ops_per_thread = 50_000;
         let counter = Arc::new(AtomicU64::new(0));
 
         println!("Mixed workload: parsing + graph queries");
-        println!("Threads: {}, Ops per thread: {}", num_threads, ops_per_thread);
+        println!(
+            "Threads: {}, Ops per thread: {}",
+            num_threads, ops_per_thread
+        );
 
         let start = Instant::now();
 
@@ -445,7 +456,7 @@ mod treasury_extreme_stress {
         println!("║                                            ║");
         println!("║  Target Performance: 10,000+ TPS          ║");
         println!("║                                            ║");
-        println!("║  Tests Available (run with --ignored):    ║");
+        println!("║  Tests Available:                         ║");
         println!("║  • 10K TPS dependency parsing             ║");
         println!("║  • 10K TPS graph operations               ║");
         println!("║  • Sustained 10K TPS (60 seconds)         ║");
@@ -453,8 +464,8 @@ mod treasury_extreme_stress {
         println!("║  • Circuit breaker under load             ║");
         println!("║  • Mixed workload 10K TPS                 ║");
         println!("║                                            ║");
-        println!("║  Run all: cargo test --release            ║");
-        println!("║           treasury_extreme --ignored      ║");
+        println!("║  Run all: cargo test -p governance        ║");
+        println!("║           --release --test treasury_extreme_stress_test ║");
         println!("║                                            ║");
         println!("║  Multi-Node Setup: See docs/              ║");
         println!("║  MULTI_NODE_TESTING.md                    ║");

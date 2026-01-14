@@ -1575,6 +1575,147 @@ impl AppState {
             .unwrap_or_default()
     }
 
+    fn latest_peer_metrics(&self) -> Vec<(String, Value)> {
+        self.data
+            .lock()
+            .map(|map| {
+                map.iter()
+                    .filter_map(|(peer, deque)| {
+                        deque.back().map(|(_, v)| (peer.clone(), v.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn treasury_summary_snapshot(&self) -> TreasurySummarySnapshot {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut snapshot = TreasurySummarySnapshot {
+            refreshed_at: now,
+            source: "none".into(),
+            status: "unavailable".into(),
+            ..Default::default()
+        };
+
+        let Some(source) = &self.treasury_source else {
+            return snapshot;
+        };
+
+        snapshot.source = match source {
+            TreasurySource::Json(_) => "json".into(),
+            TreasurySource::Store(_) => "store".into(),
+        };
+
+        let result: Result<_, String> = match source {
+            TreasurySource::Json(path) => {
+                let records = load_treasury_records(path);
+                let history = load_treasury_balance_history(path);
+                match (records, history) {
+                    (Ok(records), Ok(history)) => Ok((records, history, None, None)),
+                    (Err(err), _) => Err(err.to_string()),
+                    (_, Err(err)) => Err(err.to_string()),
+                }
+            }
+            TreasurySource::Store(store) => {
+                let records = store.disbursements();
+                let history = store.treasury_balance_history();
+                let balances = store.treasury_balances();
+                let executor = store.executor_snapshot();
+                match (records, history, balances, executor) {
+                    (Ok(records), Ok(history), Ok(balances), Ok(executor)) => {
+                        Ok((records, history, Some(balances), executor))
+                    }
+                    (Err(err), _, _, _) => Err(err.to_string()),
+                    (_, Err(err), _, _) => Err(err.to_string()),
+                    (_, _, Err(err), _) => Err(err.to_string()),
+                    (_, _, _, Err(err)) => Err(err.to_string()),
+                }
+            }
+        };
+
+        match result {
+            Ok((records, history, balances, executor)) => {
+                let summary = TreasurySummary::from_records(&records);
+                snapshot.status = "ok".into();
+                snapshot.disbursement_counts = TREASURY_STATUS_LABELS
+                    .iter()
+                    .map(|status| (status.to_string(), summary.metrics_for_status(status).0))
+                    .collect();
+                snapshot.disbursement_amounts = TREASURY_STATUS_LABELS
+                    .iter()
+                    .map(|status| (status.to_string(), summary.metrics_for_status(status).1))
+                    .collect();
+                snapshot.snapshot_age_seconds = summary.snapshot_age(now);
+                snapshot.scheduled_oldest_age_seconds = summary.scheduled_oldest_age(now);
+                snapshot.next_epoch = summary.next_epoch_value();
+
+                let current_balance = match balances {
+                    Some(balances) => balances.balance,
+                    None => history.last().map(|snap| snap.balance).unwrap_or(0),
+                };
+                snapshot.balance_current = current_balance;
+                snapshot.balance_last_delta = history.last().map(|snap| snap.delta).unwrap_or(0);
+                snapshot.balance_snapshot_count = history.len() as u64;
+                snapshot.balance_last_event_age_seconds = history
+                    .last()
+                    .map(|snap| now.saturating_sub(snap.recorded_at))
+                    .unwrap_or(0);
+                snapshot.executor_lease_released =
+                    executor.as_ref().map(|snap| snap.lease_released);
+            }
+            Err(err) => {
+                snapshot.status = "error".into();
+                snapshot.error = Some(err.to_string());
+            }
+        }
+
+        snapshot
+    }
+
+    fn energy_summary_snapshot(&self) -> EnergySummarySnapshot {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut summary = EnergySummarySnapshot {
+            refreshed_at: now,
+            ..Default::default()
+        };
+        let metrics = self.latest_peer_metrics();
+        for (peer, value) in &metrics {
+            summary.sources.push(peer.clone());
+            if let Some(obj) = value.as_object() {
+                if let Some(v) = number_from_value(obj.get("energy_provider_total")) {
+                    summary.merge_provider_total(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_pending_credits_total")) {
+                    summary.merge_pending_credits(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_active_disputes_total")) {
+                    summary.merge_active_disputes(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_settlement_total")) {
+                    summary.merge_settlement_total(v);
+                }
+                if let Some(v) =
+                    number_from_value(obj.get("energy_signature_verification_failures_total"))
+                {
+                    summary.merge_signature_failures(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_treasury_fee_total")) {
+                    summary.merge_treasury_fee(v);
+                }
+            }
+        }
+        if !summary.sources.is_empty() {
+            summary.status = "ok".into();
+        }
+        summary
+    }
+
     pub(crate) fn store_handle(&self) -> Arc<InhouseEngine> {
         Arc::clone(&self.store)
     }
@@ -1993,6 +2134,17 @@ fn wrappers_map_to_value(map: &HashMap<String, WrapperSummaryEntry>) -> Value {
         }
     }
     Value::Object(object)
+}
+
+fn number_from_value(value: Option<&Value>) -> Option<u64> {
+    match value {
+        Some(Value::Number(n)) => n.as_u64(),
+        Some(Value::String(s)) => s.parse().ok(),
+        Some(Value::Bool(b)) => Some(if *b { 1 } else { 0 }),
+        Some(Value::Array(arr)) => arr.last().and_then(|v| number_from_value(Some(v))),
+        Some(Value::Object(obj)) => obj.get("value").and_then(|v| number_from_value(Some(v))),
+        _ => None,
+    }
 }
 
 fn readiness_summary_to_value(summary: &AdReadinessUtilizationSummary) -> Value {
@@ -8079,7 +8231,31 @@ async fn chaos_status(request: Request<AppState>) -> Result<Response, HttpError>
 async fn wrappers(request: Request<AppState>) -> Result<Response, HttpError> {
     let state = Arc::clone(request.state());
     let payload = state.wrappers_latest();
-    json_ok(wrappers_map_to_value(&payload))
+    let mut value = wrappers_map_to_value(&payload);
+    if let Value::Object(mut map) = value {
+        map.insert(
+            "treasury".to_string(),
+            state.treasury_summary_snapshot().to_value(),
+        );
+        map.insert(
+            "energy".to_string(),
+            state.energy_summary_snapshot().to_value(),
+        );
+        value = Value::Object(map);
+    }
+    json_ok(value)
+}
+
+async fn treasury_summary(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let snapshot = state.treasury_summary_snapshot();
+    json_ok(snapshot.to_value())
+}
+
+async fn energy_summary(request: Request<AppState>) -> Result<Response, HttpError> {
+    let state = Arc::clone(request.state());
+    let snapshot = state.energy_summary_snapshot();
+    json_ok(snapshot.to_value())
 }
 
 async fn metrics(_request: Request<AppState>) -> Result<Response, HttpError> {
@@ -8144,6 +8320,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .get("/telemetry", telemetry_index)
         .get("/telemetry/:node", telemetry_node)
         .get("/wrappers", wrappers)
+        .get("/treasury/summary", treasury_summary)
+        .get("/energy/summary", energy_summary)
         .get("/export/all", export_all)
         .get("/healthz", health)
         .get("/metrics", metrics)
@@ -8484,6 +8662,160 @@ impl TreasurySummary {
 
     fn next_epoch_value(&self) -> u64 {
         self.next_epoch.unwrap_or(0)
+    }
+}
+
+#[derive(Default)]
+struct TreasurySummarySnapshot {
+    status: String,
+    source: String,
+    refreshed_at: u64,
+    disbursement_counts: HashMap<String, u64>,
+    disbursement_amounts: HashMap<String, u64>,
+    snapshot_age_seconds: u64,
+    scheduled_oldest_age_seconds: u64,
+    next_epoch: u64,
+    balance_current: u64,
+    balance_last_delta: i64,
+    balance_snapshot_count: u64,
+    balance_last_event_age_seconds: u64,
+    executor_lease_released: Option<bool>,
+    error: Option<String>,
+}
+
+impl TreasurySummarySnapshot {
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("status".into(), Value::String(self.status.clone()));
+        map.insert("source".into(), Value::String(self.source.clone()));
+        map.insert("refreshed_at".into(), Value::from(self.refreshed_at));
+        map.insert(
+            "snapshot_age_seconds".into(),
+            Value::from(self.snapshot_age_seconds),
+        );
+        map.insert(
+            "scheduled_oldest_age_seconds".into(),
+            Value::from(self.scheduled_oldest_age_seconds),
+        );
+        map.insert("next_epoch".into(), Value::from(self.next_epoch));
+        map.insert("balance_current".into(), Value::from(self.balance_current));
+        map.insert(
+            "balance_last_delta".into(),
+            Value::from(self.balance_last_delta),
+        );
+        map.insert(
+            "balance_snapshot_count".into(),
+            Value::from(self.balance_snapshot_count),
+        );
+        map.insert(
+            "balance_last_event_age_seconds".into(),
+            Value::from(self.balance_last_event_age_seconds),
+        );
+        if let Some(released) = self.executor_lease_released {
+            map.insert("executor_lease_released".into(), Value::Bool(released));
+        }
+        let mut counts = Map::new();
+        let mut count_keys: Vec<_> = self.disbursement_counts.keys().cloned().collect();
+        count_keys.sort();
+        for key in count_keys {
+            counts.insert(
+                key.clone(),
+                Value::from(*self.disbursement_counts.get(&key).unwrap_or(&0)),
+            );
+        }
+        map.insert("disbursement_counts".into(), Value::Object(counts));
+
+        let mut amounts = Map::new();
+        let mut amount_keys: Vec<_> = self.disbursement_amounts.keys().cloned().collect();
+        amount_keys.sort();
+        for key in amount_keys {
+            amounts.insert(
+                key.clone(),
+                Value::from(*self.disbursement_amounts.get(&key).unwrap_or(&0)),
+            );
+        }
+        map.insert("disbursement_amounts".into(), Value::Object(amounts));
+        if let Some(err) = &self.error {
+            map.insert("error".into(), Value::String(err.clone()));
+        }
+        Value::Object(map)
+    }
+}
+
+#[derive(Default)]
+struct EnergySummarySnapshot {
+    status: String,
+    refreshed_at: u64,
+    sources: Vec<String>,
+    provider_total: Option<u64>,
+    pending_credits: Option<u64>,
+    active_disputes: Option<u64>,
+    settlement_total: Option<u64>,
+    signature_failures: Option<u64>,
+    treasury_fee_total: Option<u64>,
+}
+
+impl EnergySummarySnapshot {
+    fn merge_provider_total(&mut self, value: u64) {
+        self.provider_total = Some(self.provider_total.map_or(value, |v| v.max(value)));
+    }
+    fn merge_pending_credits(&mut self, value: u64) {
+        self.pending_credits = Some(self.pending_credits.map_or(value, |v| v.max(value)));
+    }
+    fn merge_active_disputes(&mut self, value: u64) {
+        self.active_disputes = Some(self.active_disputes.map_or(value, |v| v.max(value)));
+    }
+    fn merge_settlement_total(&mut self, value: u64) {
+        self.settlement_total = Some(self.settlement_total.map_or(value, |v| v.max(value)));
+    }
+    fn merge_signature_failures(&mut self, value: u64) {
+        self.signature_failures = Some(self.signature_failures.map_or(value, |v| v.max(value)));
+    }
+    fn merge_treasury_fee(&mut self, value: u64) {
+        self.treasury_fee_total = Some(self.treasury_fee_total.map_or(value, |v| v.max(value)));
+    }
+
+    fn to_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("status".into(), Value::String(self.status.clone()));
+        map.insert("refreshed_at".into(), Value::from(self.refreshed_at));
+        let mut sources = self.sources.clone();
+        sources.sort();
+        map.insert(
+            "sources".into(),
+            Value::Array(sources.into_iter().map(Value::String).collect()),
+        );
+        map.insert(
+            "provider_total".into(),
+            self.provider_total.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "pending_credits_total".into(),
+            self.pending_credits.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "active_disputes_total".into(),
+            self.active_disputes.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "settlement_total".into(),
+            self.settlement_total
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "signature_failures_total".into(),
+            self.signature_failures
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "treasury_fee_total".into(),
+            self.treasury_fee_total
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        Value::Object(map)
     }
 }
 

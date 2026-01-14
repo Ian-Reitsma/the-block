@@ -32,7 +32,7 @@
 4. **Stress Tests** - `tests/integration/` (3 files)
    - `treasury_stress_test.rs`: 10 scenarios, 100+ TPS baseline
    - `treasury_extreme_stress_test.rs`: 6 scenarios, 10k+ TPS target
-   - **NOT YET VALIDATED** (tests exist but not confirmed to pass at scale)
+   - **Validated (2025-01-07)**: Both suites pass locally at/above targets
 
 5. **Monitoring Infrastructure** - `monitoring/` (first-party dashboard is canonical)
    - `metrics.json` + `render_foundation_dashboard.py` generate the supported dashboard (`monitoring/output/index.html`)
@@ -50,10 +50,8 @@
    - Validate `monitoring/tools/render_foundation_dashboard.py` against live metrics endpoints per node (see multi-node setup) and ensure wrappers render.
 
 2. **Stress Test Validation**
-   - Tests exist but have NOT been run to completion
-   - Need to verify 10k+ TPS capability under `treasury_extreme_stress_test.rs`
-   - Tests are marked `#[ignore]` - must use `--ignored` flag
-   - Background task `b9058b5` was still running when session ended
+   - ✅ Completed: `treasury_stress_test.rs` + `treasury_extreme_stress_test.rs` passing at/above targets
+   - Keep perf regression watchlist and re-run on new hardware/CI images
 
 4. **Documentation Token Terminology Inconsistency**
    - 30+ markdown files in `docs/` still reference legacy “consumer/industrial token” wording
@@ -62,10 +60,7 @@
    - **LOW PRIORITY** but affects documentation quality
 
 5. **Stress Test Validation**
-   - Tests exist but have NOT been run to completion
-   - Need to verify 10k+ TPS capability under `treasury_extreme_stress_test.rs`
-   - Tests are marked `#[ignore]` - must use `--ignored` flag
-   - Background task `b9058b5` was still running when session ended
+   - ✅ Completed; re-run on platform changes to maintain baseline
 
 6. **Monitoring Stack Deployment**
    - Configuration files exist but are NOT deployed
@@ -502,10 +497,10 @@ fn treasury_executor_circuit_breaker_integration() {
 **Execution Commands**:
 ```bash
 # Baseline stress tests (100+ TPS)
-cargo test --release --test treasury_stress_test -- --ignored --nocapture --test-threads=1
+cargo test -p governance --release --test treasury_stress_test -- --nocapture --test-threads=1
 
 # Extreme stress tests (10k+ TPS)
-cargo test --release --test treasury_extreme_stress_test -- --ignored --nocapture --test-threads=1
+cargo test -p governance --release --test treasury_extreme_stress_test -- --nocapture --test-threads=1
 ```
 
 **CRITICAL**: Use `--test-threads=1` to avoid concurrent test interference

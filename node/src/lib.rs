@@ -6746,6 +6746,7 @@ mod market_metric_tests {
             last_meter_value: None,
             last_meter_timestamp: None,
             bayesian_reputation: Default::default(),
+            last_nonce: None,
         };
         let receipt = EnergyReceipt {
             buyer: "buyer".into(),

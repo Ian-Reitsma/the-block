@@ -24,3 +24,11 @@ diagnostics = { path = "../crates/diagnostics" }
 
 [dev-dependencies]
 sys = { path = "../crates/sys" }
+
+[[test]]
+name = "treasury_stress_test"
+path = "../tests/integration/treasury_stress_test.rs"
+
+[[test]]
+name = "treasury_extreme_stress_test"
+path = "../tests/integration/treasury_extreme_stress_test.rs"

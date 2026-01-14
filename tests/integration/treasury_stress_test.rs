@@ -10,13 +10,12 @@
 
 #[cfg(test)]
 mod treasury_stress {
-    use governance::treasury::{TreasuryDisbursement, DisbursementStatus};
-    use governance::treasury_deps::DependencyGraph;
     use governance::parse_dependency_list;
-    use std::collections::HashMap;
+    use governance::treasury::TreasuryDisbursement;
+    use governance::treasury_deps::DependencyGraph;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
-    use std::time::{Duration, Instant};
+    use std::sync::Arc;
+    use std::time::Instant;
 
     /// Helper to create test disbursement
     fn create_disbursement(id: u64, amount_tb: u64, memo: &str) -> TreasuryDisbursement {
@@ -76,7 +75,7 @@ mod treasury_stress {
                 } else {
                     // Complex dependencies for later ones
                     format!(r#"{{"depends_on": [{}, {}]}}"#, i - 1, i - 5)
-                }
+                };
                 create_disbursement(i, 1000 + i, &deps)
             })
             .collect();
@@ -204,11 +203,7 @@ mod treasury_stress {
 
         // 10 mid nodes depend on root
         for i in 1..=10 {
-            disbursements.push(create_disbursement(
-                i,
-                50000,
-                r#"{"depends_on": [0]}"#,
-            ));
+            disbursements.push(create_disbursement(i, 50000, r#"{"depends_on": [0]}"#));
         }
 
         // 100 leaves depend on various mid nodes
@@ -310,7 +305,10 @@ mod treasury_stress {
         // 1. Max dependencies limit (100)
         let huge_deps = format!(
             r#"{{"depends_on": [{}]}}"#,
-            (0..200).map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+            (0..200)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
         );
         let deps = parse_dependency_list(&huge_deps);
         assert!(deps.len() <= 100, "Should limit to 100 dependencies");

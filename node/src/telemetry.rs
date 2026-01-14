@@ -1072,11 +1072,20 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
                 );
             }
             for (vec, metric) in [
-                (&*STORAGE_ENGINE_PENDING_COMPACTIONS, "storage_engine_pending_compactions"),
-                (&*STORAGE_ENGINE_RUNNING_COMPACTIONS, "storage_engine_running_compactions"),
+                (
+                    &*STORAGE_ENGINE_PENDING_COMPACTIONS,
+                    "storage_engine_pending_compactions",
+                ),
+                (
+                    &*STORAGE_ENGINE_RUNNING_COMPACTIONS,
+                    "storage_engine_running_compactions",
+                ),
                 (&*STORAGE_ENGINE_LEVEL0_FILES, "storage_engine_level0_files"),
                 (&*STORAGE_ENGINE_SST_BYTES, "storage_engine_sst_bytes"),
-                (&*STORAGE_ENGINE_MEMTABLE_BYTES, "storage_engine_memtable_bytes"),
+                (
+                    &*STORAGE_ENGINE_MEMTABLE_BYTES,
+                    "storage_engine_memtable_bytes",
+                ),
                 (&*STORAGE_ENGINE_SIZE_BYTES, "storage_engine_size_bytes"),
             ] {
                 if let Ok(gauge) = vec.handle_for_label_values(&[db, engine]) {
@@ -6688,6 +6697,21 @@ pub static QUIC_HANDSHAKE_FAIL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     REGISTRY
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry quic handshake fail: {e}"));
+    c
+});
+
+pub static QUIC_HANDSHAKE_SUCCESS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "quic_handshake_success_total",
+            "Total QUIC handshake successes by peer",
+        ),
+        &["peer"],
+    )
+    .unwrap_or_else(|e| panic!("counter vec quic handshake success: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry quic handshake success: {e}"));
     c
 });
 

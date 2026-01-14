@@ -377,7 +377,14 @@ fn convert_event(raw: KEvent) -> Event {
     Event::new(
         token,
         Some(raw.ident),
-        EventFlags::new(readable, writable, error, read_closed, write_closed, priority),
+        EventFlags::new(
+            readable,
+            writable,
+            error,
+            read_closed,
+            write_closed,
+            priority,
+        ),
     )
 }
 

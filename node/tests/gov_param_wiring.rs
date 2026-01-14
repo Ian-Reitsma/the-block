@@ -8,8 +8,7 @@ use the_block::{
     generate_keypair,
     governance::{
         EnergySettlementMode, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote,
-        VoteChoice,
-        ACTIVATION_DELAY,
+        VoteChoice, ACTIVATION_DELAY,
     },
     scheduler::{self, current_default_weights, ServiceClass},
     sign_tx, Blockchain, FeeLane, RawTxPayload, TxAdmissionError,

@@ -50,14 +50,67 @@ impl VerificationError {
 }
 
 /// Signature scheme identifier
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SignatureScheme {
     Ed25519,
     #[cfg(feature = "pq-crypto")]
     Dilithium3,
     #[cfg(feature = "pq-crypto")]
     Dilithium5,
+}
+
+impl Serialize for SignatureScheme {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: foundation_serialization::serde::Serializer,
+    {
+        let disc: u8 = match self {
+            SignatureScheme::Ed25519 => 0,
+            #[cfg(feature = "pq-crypto")]
+            SignatureScheme::Dilithium3 => 1,
+            #[cfg(feature = "pq-crypto")]
+            SignatureScheme::Dilithium5 => 2,
+        };
+        serializer.serialize_u8(disc)
+    }
+}
+
+impl<'de> Deserialize<'de> for SignatureScheme {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: foundation_serialization::serde::Deserializer<'de>,
+    {
+        // Accept either numeric discriminants or string labels for backward compatibility.
+        struct VisitorImpl;
+        impl<'de> foundation_serialization::serde::de::Visitor<'de> for VisitorImpl {
+            type Value = SignatureScheme;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(f, "signature scheme as u8 or string")
+            }
+            fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+            where
+                E: foundation_serialization::serde::de::Error,
+            {
+                match v {
+                    0 => Ok(SignatureScheme::Ed25519),
+                    #[cfg(feature = "pq-crypto")]
+                    1 => Ok(SignatureScheme::Dilithium3),
+                    #[cfg(feature = "pq-crypto")]
+                    2 => Ok(SignatureScheme::Dilithium5),
+                    other => Err(E::custom(format!(
+                        "invalid signature scheme discriminant: {other}"
+                    ))),
+                }
+            }
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: foundation_serialization::serde::de::Error,
+            {
+                SignatureScheme::parse(v).map_err(E::custom)
+            }
+        }
+        deserializer.deserialize_any(VisitorImpl)
+    }
 }
 
 impl SignatureScheme {

@@ -24,6 +24,7 @@ pub type Endpoint = inhouse_impl::Endpoint;
 
 #[derive(Clone, Default)]
 pub struct QuinnEventCallbacks {
+    pub handshake_success: Option<Arc<dyn Fn(SocketAddr) + Send + Sync + 'static>>,
     pub handshake_latency: Option<Arc<dyn Fn(SocketAddr, Duration) + Send + Sync + 'static>>,
     pub handshake_failure: Option<Arc<dyn Fn(SocketAddr, HandshakeError) + Send + Sync + 'static>>,
     pub endpoint_reuse: Option<Arc<dyn Fn(SocketAddr) + Send + Sync + 'static>>,
@@ -188,8 +189,21 @@ fn build_adapter(
 ) -> Result<inhouse_impl::Adapter> {
     let mut backend_callbacks = InhouseEventCallbacks::default();
     backend_callbacks.provider_connect = callbacks.provider_connect.clone();
-    backend_callbacks.handshake_success = None;
-    backend_callbacks.handshake_failure = None;
+    backend_callbacks.handshake_success = Some(Arc::new(|addr: SocketAddr| {
+        with_callbacks(|cbs| {
+            if let Some(cb) = cbs.handshake_success.as_ref() {
+                cb(addr);
+            }
+        });
+    }));
+    backend_callbacks.handshake_failure = Some(Arc::new(|addr: SocketAddr, reason: &str| {
+        let classification = classify_reason(reason);
+        with_callbacks(|cbs| {
+            if let Some(cb) = cbs.handshake_failure.as_ref() {
+                cb(addr, classification);
+            }
+        });
+    }));
     inhouse_impl::Adapter::new(retry.clone(), handshake_timeout, &backend_callbacks)
 }
 
@@ -473,16 +487,15 @@ fn handle_outcome(addr: SocketAddr, outcome: &InhouseOutcome) {
 
 fn handle_connect_error(addr: SocketAddr, err: TbError) -> ConnectError {
     let classification = classify_tb_error(&err);
-    with_callbacks(|cbs| {
-        if let Some(cb) = cbs.handshake_failure.as_ref() {
-            cb(addr, classification);
-        }
-    });
     ConnectError::Handshake(classification)
 }
 
 fn classify_tb_error(err: &TbError) -> HandshakeError {
-    let msg = err.to_string().to_lowercase();
+    classify_reason(&err.to_string())
+}
+
+fn classify_reason(reason: &str) -> HandshakeError {
+    let msg = reason.to_lowercase();
     if msg.contains("timeout") {
         HandshakeError::Timeout
     } else if msg.contains("certificate") {

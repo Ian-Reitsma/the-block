@@ -228,6 +228,7 @@ use crate::s2n_backend as s2n_impl;
 #[cfg(feature = "quinn")]
 #[derive(Clone, Default)]
 pub struct QuinnCallbacks {
+    pub handshake_success: Option<Arc<dyn Fn(SocketAddr) + Send + Sync + 'static>>,
     pub handshake_latency: Option<Arc<dyn Fn(SocketAddr, Duration) + Send + Sync + 'static>>,
     pub handshake_failure:
         Option<Arc<dyn Fn(SocketAddr, quinn_impl::HandshakeError) + Send + Sync + 'static>>,
@@ -522,6 +523,7 @@ struct QuinnAdapterInner {
 impl QuinnAdapter {
     fn new(cfg: &Config, callbacks: &QuinnCallbacks) -> DiagResult<Self> {
         let mut backend_callbacks = quinn_impl::QuinnEventCallbacks::default();
+        backend_callbacks.handshake_success = callbacks.handshake_success.clone();
         backend_callbacks.handshake_latency = callbacks.handshake_latency.clone();
         backend_callbacks.handshake_failure = callbacks.handshake_failure.clone();
         backend_callbacks.endpoint_reuse = callbacks.endpoint_reuse.clone();

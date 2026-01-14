@@ -250,7 +250,14 @@ fn convert_event(raw: EpollEvent) -> Event {
     Event::new(
         token,
         None,
-        EventFlags::new(readable, writable, error, read_closed, write_closed, priority),
+        EventFlags::new(
+            readable,
+            writable,
+            error,
+            read_closed,
+            write_closed,
+            priority,
+        ),
     )
 }
 

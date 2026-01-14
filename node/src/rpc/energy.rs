@@ -2,7 +2,9 @@
 
 use crate::energy::{self, DisputeError, DisputeFilter, DisputeStatus};
 use crypto_suite::hex;
-use energy_market::{EnergyCredit, EnergyMarketError, EnergyProvider, EnergyReceipt, MeterReading, H256};
+use energy_market::{
+    EnergyCredit, EnergyMarketError, EnergyProvider, EnergyReceipt, MeterReading, H256,
+};
 use foundation_rpc::{Params, RpcError};
 use foundation_serialization::json::{Map, Number, Value};
 use governance_spec::EnergySettlementMode;
@@ -14,7 +16,6 @@ const ERR_SETTLEMENT_CONFLICT: i32 = -33005;
 const ERR_PROVIDER_INACTIVE: i32 = -33006;
 const ERR_NONCE_REPLAY: i32 = -33007;
 const ERR_TIMESTAMP_SKEW: i32 = -33008;
-const ERR_UNAUTHORIZED: i32 = -33009;
 const ERR_INVALID_PARAMS: i32 = -32602;
 
 fn energy_rpc_error(code: i32, message: impl Into<String>) -> RpcError {
@@ -174,7 +175,9 @@ fn decode_signature(hex_value: &str) -> Result<Vec<u8>, RpcError> {
     // contract explicit before verifier logic runs.
     const ED25519_SIG_LEN: usize = 64;
     if bytes.len() != ED25519_SIG_LEN {
-        return Err(invalid_params(format!("signature must be {ED25519_SIG_LEN} bytes")));
+        return Err(invalid_params(format!(
+            "signature must be {ED25519_SIG_LEN} bytes"
+        )));
     }
     Ok(bytes)
 }
@@ -523,8 +526,7 @@ pub fn submit_reading(params: &Params, block: u64) -> Result<Value, RpcError> {
     let kwh_reading = require_u64(params, "kwh_reading")?;
     let timestamp = require_u64(params, "timestamp")?;
     let nonce = require_u64(params, "nonce")?;
-    let signature =
-        require_string(params, "signature").and_then(|sig| decode_signature(&sig))?;
+    let signature = require_string(params, "signature").and_then(|sig| decode_signature(&sig))?;
     let reading = MeterReading {
         provider_id,
         meter_address,
@@ -560,12 +562,9 @@ mod tests {
 
     #[test]
     fn dispute_error_mapping_preserves_context() {
-        let rpc_err =
-            map_dispute_error(DisputeError::UnknownDispute { dispute_id: 42 });
+        let rpc_err = map_dispute_error(DisputeError::UnknownDispute { dispute_id: 42 });
         assert_eq!(rpc_err.code, ERR_SETTLEMENT_CONFLICT);
-        assert!(rpc_err
-            .message
-            .contains("dispute 42 not found"));
+        assert!(rpc_err.message.contains("dispute 42 not found"));
     }
 
     #[test]

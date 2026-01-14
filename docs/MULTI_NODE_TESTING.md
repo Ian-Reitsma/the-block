@@ -532,7 +532,7 @@ Run:
 
 ```bash
 # On PC
-cargo test --release treasury_extreme --ignored --test treasury_extreme_stress_test
+cargo test -p governance --release --test treasury_extreme_stress_test -- --nocapture --test-threads=1
 ```
 
 Expected: 10k+ TPS on modern hardware

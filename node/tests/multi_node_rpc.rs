@@ -42,10 +42,8 @@ fn multi_node_overlay_converges() {
                         .unwrap_or(0);
                     if active < target_peers {
                         ok = false;
-                        last_error = format!(
-                            "{} active_peers={} (want >= {})",
-                            url, active, target_peers
-                        );
+                        last_error =
+                            format!("{} active_peers={} (want >= {})", url, active, target_peers);
                         break;
                     }
                 }
@@ -71,8 +69,7 @@ fn overlay_status(client: &RpcClient, url: &str) -> Result<Map, String> {
         .call(url, &request_to_value(&req))
         .map_err(|e| format!("rpc call failed: {e}"))?;
     let body = response.into_body();
-    let value: Value =
-        json::value_from_slice(&body).map_err(|e| format!("decode failed: {e}"))?;
+    let value: Value = json::value_from_slice(&body).map_err(|e| format!("decode failed: {e}"))?;
     let result = value
         .get("result")
         .and_then(Value::as_object)

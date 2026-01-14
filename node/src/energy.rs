@@ -3,6 +3,8 @@
 use crate::governance::NODE_GOV_STORE;
 use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
+use crate::telemetry::energy as energy_metrics;
+#[cfg(feature = "telemetry")]
 use crate::telemetry::{
     ENERGY_ACTIVE_DISPUTES, ENERGY_DISPUTE_OPEN_TOTAL, ENERGY_DISPUTE_RESOLVE_TOTAL,
     ENERGY_METER_READING_TOTAL, ENERGY_PENDING_CREDITS, ENERGY_PROVIDER_REGISTER_TOTAL,
@@ -367,7 +369,38 @@ pub fn submit_meter_reading(
     block: u64,
 ) -> Result<EnergyCredit, EnergyMarketError> {
     let mut guard = store();
-    let credit = guard.market.record_meter_reading(reading, block)?;
+    let credit = match guard.market.record_meter_reading(reading, block) {
+        Ok(credit) => {
+            #[cfg(feature = "telemetry")]
+            energy_metrics::increment_energy_readings();
+            credit
+        }
+        Err(err) => {
+            #[cfg(feature = "telemetry")]
+            {
+                let label = match &err {
+                    EnergyMarketError::StaleReading { .. } => {
+                        energy_metrics::error_reason::STALE_TIMESTAMP
+                    }
+                    EnergyMarketError::InvalidMeterValue { .. } => {
+                        energy_metrics::error_reason::INVALID_READING
+                    }
+                    EnergyMarketError::SignatureVerificationFailed(_) => {
+                        energy_metrics::error_reason::BAD_SIGNATURE
+                    }
+                    EnergyMarketError::TimestampSkew { .. } => {
+                        energy_metrics::error_reason::STALE_TIMESTAMP
+                    }
+                    EnergyMarketError::NonceReplay { .. } => {
+                        energy_metrics::error_reason::INVALID_READING
+                    }
+                    _ => "other",
+                };
+                energy_metrics::increment_oracle_submission_error(label);
+            }
+            return Err(err);
+        }
+    };
     #[cfg(feature = "telemetry")]
     ENERGY_METER_READING_TOTAL
         .with_label_values(&[credit.provider.as_str()])
@@ -713,7 +746,7 @@ mod tests {
             verifying.to_bytes().to_vec(),
             SignatureScheme::Ed25519,
         );
-        let nonce = 1;
+        let nonce: u64 = 1;
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

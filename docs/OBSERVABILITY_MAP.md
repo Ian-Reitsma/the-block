@@ -490,6 +490,325 @@ contract-cli ledger dump --range 1000-2000 > ledger_dump.json
 
 ---
 
+## Extended Domain Maps (Spec Expansion)
+
+The sections below enumerate each subsystem with the same Question → Metrics → Dashboard → Probe → Runbook pattern. Every metric listed exists in `node/src/telemetry/**` or `metrics-aggregator`, dashboards live under `monitoring/grafana_*.json`, and runbooks anchor in `docs/operations.md` unless stated.
+
+### Receipts System
+
+**Key Questions**
+- Are receipts emitted and drained every block across all markets?
+- Are validation/encoding/decoding errors spiking?
+- Is settlement depth staying below alert thresholds?
+
+**Canonical Metrics**
+```promql
+receipt_bytes_per_block
+receipts_storage_per_block
+receipt_settlement_storage
+receipt_settlement_compute
+receipt_settlement_energy
+receipt_settlement_ad
+receipt_validation_failures_total
+receipt_encoding_failures_total
+receipt_decoding_failures_total
+receipt_drain_operations_total
+receipt_persist_fail_total
+receipt_corrupt_total
+```
+
+**Dashboards**
+- `monitoring/grafana_receipt_dashboard.json`
+  - Panels: "Receipts per Block", "Settlement by Market", "Validation/Encoding Errors", "Drain Depth"
+
+**Probes / CLI**
+```bash
+contract-cli receipts stats
+contract-cli receipts search --limit 5
+curl -s http://localhost:9000/metrics | grep '^receipt_'
+```
+
+**Runbooks**
+- `docs/operations.md#receipts-flatlining`
+- `docs/archive/PHASES_2-4_COMPLETE.md` (rollout + validation checklist)
+
+### Economics & Governance
+
+**Key Questions**
+- Are economics gauges aligned with Launch Governor and autopilot?
+- Are block rewards, multipliers, and tariffs within allowed bands?
+- Are epoch samples flowing (tx count/volume, treasury inflow)?
+
+**Canonical Metrics**
+```promql
+economics_block_reward_per_block
+economics_prev_market_metrics_utilization_ppm
+economics_prev_market_metrics_provider_margin_ppm
+economics_epoch_tx_count
+economics_epoch_tx_volume_block
+economics_epoch_treasury_inflow_block
+economics_multiplier
+economics_subsidy_share_bps
+economics_control_law_update_total
+economics_tariff_bps
+economics_tariff_treasury_contribution_bps
+```
+
+**Dashboards**
+- Economics row in `monitoring/grafana_treasury_dashboard.json`
+- Aggregator `/wrappers` plus `/treasury/summary` and `/energy/summary` overlays
+
+**Probes / CLI**
+```bash
+tb-cli governor status --rpc <endpoint>
+tb-cli governor intents --gate economics --limit 5
+contract-cli gov params show | grep economics_
+```
+
+**Runbooks**
+- `docs/operations.md#telemetry-wiring`
+- `docs/architecture.md#energy-governance-and-rpc-next-tasks`
+
+### Networking & QUIC
+
+**Key Questions**
+- Are QUIC handshakes succeeding during chaos/TLS rotation?
+- Are bytes/retransmits within expected bounds and endpoints being reused?
+- Are TLS env warnings surfacing during drills?
+
+**Canonical Metrics**
+```promql
+quic_handshake_success_total
+quic_handshake_fail_total
+quic_conn_latency_seconds_bucket
+quic_bytes_sent_total
+quic_bytes_recv_total
+quic_endpoint_reuse_total
+transport_provider_connect_total
+tls_env_warning_total
+tls_env_warning_events_total
+```
+
+**Dashboards**
+- Network/QUIC row in ops Grafana (shared dashboard)
+- TLS warning panels sourced from metrics-aggregator snapshots
+
+**Probes / CLI**
+```bash
+tb-cli net peer stats --limit 20
+tb-cli net tls warnings
+./scripts/wan_chaos_drill.sh  # emits chaos + TLS telemetry
+```
+
+**Runbooks**
+- `docs/MULTI_NODE_CLUSTER_RUNBOOK.md` (chaos/TLS rotation)
+- `docs/operations.md#tls-handshake-timeouts`
+- `docs/operations.md#p2p-rate-limiting-and-chain-sync`
+
+### Storage & State
+
+**Key Questions**
+- Are WAL/snapshot/compaction pipelines healthy?
+- Are storage proofs validating without timeouts?
+- Are importer/pruner tasks progressing?
+
+**Canonical Metrics**
+```promql
+storage_engine_pending_compactions
+storage_engine_running_compactions
+storage_engine_level0_files
+storage_engine_sst_bytes
+storage_engine_memtable_bytes
+storage_engine_size_bytes
+storage_proof_validation_seconds
+storage_proof_validation_failures_total
+simpledb_snapshot_rewrite_total
+storage_import_total
+storage_prune_total
+```
+
+**Dashboards**
+- Storage row in `monitoring/grafana_treasury_dashboard.json`
+- Import/compaction panels (override JSON if enabled)
+
+**Probes / CLI**
+```bash
+contract-cli storage stats
+contract-cli storage importer status
+tb-cli snapshot status
+```
+
+**Runbooks**
+- `docs/operations.md#storage-and-state`
+- `docs/operations.md#snapshots-and-state-pruning`
+
+### Compute Marketplace
+
+**Key Questions**
+- Are SLAs meeting deadlines and not piling up?
+- Are job timeouts or violations spiking?
+- Is lane-aware matching rotating fairly?
+
+**Canonical Metrics**
+```promql
+compute_job_timeout_total
+compute_sla_violations_total
+compute_sla_pending_total
+compute_sla_next_deadline_ts
+compute_sla_automated_slash_total
+match_loop_latency_seconds_bucket
+receipt_settlement_compute
+```
+
+**Dashboards**
+- Compute row in generated dashboards:
+  - `monitoring/grafana/dashboard.json`
+  - `monitoring/grafana/operator.json`
+  - `monitoring/grafana/dev.json`
+  - `monitoring/grafana/telemetry.json`
+
+**Probes / CLI**
+```bash
+contract-cli compute jobs list --limit 20
+contract-cli compute sla history --limit 20
+curl -s http://localhost:9000/metrics | grep '^compute_'
+```
+
+**Runbooks**
+- `docs/operations.md#compute-marketplace`
+- `docs/architecture.md#compute-marketplace`
+
+### Ad Marketplace & Targeting
+
+**Key Questions**
+- Are readiness cohorts healthy?
+- Are verifier committee rejections increasing?
+- Are ad payout receipts flowing?
+
+**Canonical Metrics**
+```promql
+ad_verifier_committee_rejection_total
+ad_readiness_skipped_total
+ad_segment_ready_total
+ad_market_utilization_observed_ppm
+ad_market_utilization_target_ppm
+ad_market_utilization_delta_ppm
+ad_privacy_budget_remaining_ppm
+explorer_block_payout_ad_total
+explorer_block_payout_ad_settlement_count
+explorer_block_payout_ad_price_usd_micros
+```
+
+**Dashboards**
+- Ad row in ops Grafana (readiness + payouts)
+- Aggregator `/wrappers` readiness snapshots
+
+**Probes / CLI**
+```bash
+contract-cli ad readiness --cohort all
+contract-cli ad payouts --limit 20
+```
+
+**Runbooks**
+- `docs/architecture.md#ad--targeting-readiness-checklist`
+- `docs/operations.md#ad-market` (if present)
+
+### DEX & Bridges
+
+**Key Questions**
+- Are trust-line routes and AMM pools liquid?
+- Are bridge settlements succeeding without anomaly flags?
+
+**Canonical Metrics**
+```promql
+dex_liquidity_locked_total
+dex_escrow_locked
+dex_escrow_pending
+dex_orders_total
+dex_trade_volume
+bridge_settlement_results_total
+bridge_liquidity_locked_total
+bridge_liquidity_unlocked_total
+bridge_liquidity_minted_total
+bridge_liquidity_burned_total
+bridge_reward_claims_total
+bridge_reward_approvals_consumed_total
+```
+
+**Dashboards**
+- Bridge anomaly/remediation panels in ops Grafana
+- DEX liquidity/utilization panels
+
+**Probes / CLI**
+```bash
+contract-cli dex pools list
+contract-cli bridge settlements --limit 20
+curl -s http://localhost:9000/metrics | grep 'bridge_'
+metrics-aggregator: /anomalies/bridge, /remediation/bridge
+```
+
+**Runbooks**
+- `docs/operations.md#bridge-and-cross-chain-security`
+- `docs/architecture.md#dex-and-trust-lines`
+
+### Metrics Aggregator & Telemetry Stack
+
+**Key Questions**
+- Are telemetry ingests and replications healthy?
+- Are wrapper snapshots (including /treasury/summary and /energy/summary) exposed?
+- Are TLS warnings and chaos attestations flowing?
+
+**Canonical Metrics**
+```promql
+aggregator_ingest_total
+aggregator_telemetry_ingest_total
+bulk_export_total
+cluster_peer_active_total
+aggregator_replication_lag_seconds
+tls_env_warning_total
+tls_env_warning_events_total
+```
+
+**Dashboards**
+- Aggregator/TLS rows in ops Grafana
+- Chaos status panels
+
+**Probes / HTTP**
+```bash
+curl -s http://<aggregator>/wrappers | jq .
+curl -s http://<aggregator>/treasury/summary | jq .
+curl -s http://<aggregator>/energy/summary | jq .
+curl -s http://<aggregator>/chaos/status | jq .
+curl -s http://<aggregator>/tls/warnings/status | jq .
+```
+
+**Runbooks**
+- `docs/operations.md#telemetry-wiring`
+- `docs/MULTI_NODE_TESTING.md` (multi-node aggregator)
+
+### Alert Pivots & Playbooks
+
+For each alert, capture:
+- **Panel link** (Grafana JSON + panel title)
+- **PromQL query** (copy/pasteable)
+- **CLI/HTTP probe** (tb-cli/contract-cli/aggregator)
+- **Runbook anchor** (section in `docs/operations.md`)
+
+Examples:
+- Treasury backlog: `treasury_disbursement_backlog` → Grafana "Queue Depth" → `contract-cli gov treasury list --status queued` → `docs/operations.md#treasury-stuck`
+- QUIC handshake: `quic_handshake_fail_total` → Grafana "QUIC failures" → `tb-cli net peer stats` → `docs/operations.md#tls-handshake-timeouts`
+- Receipts drain: `receipt_drain_operations_total` → Grafana "Receipt drain depth" → `contract-cli receipts stats` → `docs/operations.md#receipts-flatlining`
+
+### Validation Checklist (per deploy)
+
+- [ ] All metrics above return non-empty series in Prometheus
+- [ ] Grafana panels show live data post-deploy
+- [ ] CLI/HTTP probes succeed (non-5xx)
+- [ ] Runbook anchors exist and are current
+- [ ] Aggregator `/wrappers`, `/treasury/summary`, `/energy/summary` respond 200 with expected fields
+
+---
+
 ## Metric Coverage Verification
 
 Script to verify all AGENTS.md metrics are emitted:
