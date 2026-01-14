@@ -7,6 +7,7 @@ use concurrency::cache::LruCache;
 use crypto_suite::hashing::blake3::Hasher;
 use crypto_suite::hex::{self, encode as hex_encode};
 use diagnostics::anyhow::{self, Result as AnyhowResult};
+use energy_market::H256;
 use foundation_serialization::{binary, de::DeserializeOwned, json, Deserialize, Serialize};
 use foundation_sqlite::{
     params, Connection, Error as SqlError, OptionalExtension, Value as SqlValue,
@@ -26,6 +27,7 @@ use the_block::governance::treasury::parse_dependency_list;
 use the_block::{
     compute_market::{receipt::Receipt, Job},
     dex::order_book::OrderBook,
+    energy::{self, DisputeStatus},
     governance::{
         self, DisbursementStatus, GovStore, Params, SignedExecutionIntent, TreasuryDisbursement,
         TreasuryExecutorSnapshot,
@@ -108,7 +110,10 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
         .get("/mempool/fee_floor_policy", fee_floor_policy_history)
         .get("/governance/dependency_policy", dependency_policy_history)
         .get("/governance/treasury/disbursements", treasury_disbursements)
+        .get("/governance/treasury/timeline", treasury_timeline)
         .get("/governance/treasury/executor", treasury_executor_status)
+        .get("/energy/providers", energy_providers)
+        .get("/energy/disputes", energy_disputes)
         .get("/network/certs", network_certs)
         .get("/network/overlay", network_overlay)
         .get("/blocks/:hash/proof", block_proof)
@@ -752,6 +757,156 @@ async fn treasury_disbursements(
             Ok(Response::new(StatusCode::INTERNAL_SERVER_ERROR))
         }
     }
+}
+
+async fn treasury_timeline(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let page = request
+        .query_param("page")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page' query parameter".into()))?
+        .unwrap_or(0);
+    let page_size = request
+        .query_param("page_size")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page_size' query parameter".into()))?
+        .unwrap_or(25);
+    let disbursement_id = request
+        .query_param("disbursement_id")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'disbursement_id' query parameter".into()))?;
+    let destination = request
+        .query_param("destination")
+        .map(|value| value.to_string());
+    let min_executed_at = request
+        .query_param("min_executed_at")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'min_executed_at' query parameter".into()))?;
+    let max_executed_at = request
+        .query_param("max_executed_at")
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'max_executed_at' query parameter".into()))?;
+
+    let filter = TreasuryTimelineFilter {
+        disbursement_id,
+        destination,
+        min_executed_at,
+        max_executed_at,
+    };
+
+    match explorer.treasury_timeline(page, page_size, filter) {
+        Ok(records) => Ok(Response::new(StatusCode::OK).json(&records)?),
+        Err(err) => {
+            log_error("treasury timeline failed", &err);
+            Err(HttpError::Handler("treasury timeline failed".into()))
+        }
+    }
+}
+
+fn parse_meter_hash_param(value: Option<&str>) -> Result<Option<H256>, HttpError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let bytes = hex::decode(raw).map_err(|_| HttpError::Handler("invalid meter_hash".into()))?;
+    if bytes.len() != 32 {
+        return Err(HttpError::Handler("meter_hash must be 32 bytes".into()));
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(Some(out))
+}
+
+async fn energy_providers(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let provider_filter = request.query_param("provider_id").map(str::to_string);
+    let snapshot = energy::market_snapshot();
+    let providers = snapshot
+        .providers
+        .into_iter()
+        .filter(|p| {
+            provider_filter
+                .as_ref()
+                .map(|id| &p.provider_id == id)
+                .unwrap_or(true)
+        })
+        .filter_map(|p| json::to_value(p).ok())
+        .collect::<Vec<_>>();
+    let mut map = json::Map::new();
+    map.insert("status".into(), json::Value::String("ok".into()));
+    map.insert(
+        "refreshed_at".into(),
+        json::Value::Number(json::Number::from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        )),
+    );
+    map.insert("providers".into(), json::Value::Array(providers));
+    Ok(Response::new(StatusCode::OK).json(&json::Value::Object(map))?)
+}
+
+async fn energy_disputes(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let provider_id = request.query_param("provider_id").map(str::to_string);
+    let status = match request.query_param("status") {
+        Some(value) => match value.to_ascii_lowercase().as_str() {
+            "open" => Some(DisputeStatus::Open),
+            "resolved" => Some(DisputeStatus::Resolved),
+            _ => {
+                return Err(HttpError::Handler(
+                    "invalid status (expected open|resolved)".into(),
+                ))
+            }
+        },
+        None => None,
+    };
+    let meter_hash = parse_meter_hash_param(request.query_param("meter_hash"))?;
+    let page = request
+        .query_param("page")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page' query parameter".into()))?
+        .unwrap_or(0);
+    let page_size = request
+        .query_param("page_size")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page_size' query parameter".into()))?
+        .unwrap_or(25);
+    let page = energy::disputes_page(
+        energy::DisputeFilter {
+            provider_id: provider_id.as_deref(),
+            status,
+            meter_hash,
+        },
+        page,
+        page_size,
+    );
+    let disputes = page
+        .items
+        .into_iter()
+        .filter_map(|d| json::to_value(d).ok())
+        .collect::<Vec<_>>();
+    let mut map = json::Map::new();
+    map.insert("status".into(), json::Value::String("ok".into()));
+    map.insert(
+        "page".into(),
+        json::Value::Number(json::Number::from(page.page as u64)),
+    );
+    map.insert(
+        "page_size".into(),
+        json::Value::Number(json::Number::from(page.page_size as u64)),
+    );
+    map.insert(
+        "total".into(),
+        json::Value::Number(json::Number::from(page.total as u64)),
+    );
+    map.insert("disputes".into(), json::Value::Array(disputes));
+    Ok(Response::new(StatusCode::OK).json(&json::Value::Object(map))?)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1720,6 +1875,61 @@ pub struct TreasuryDisbursementPage {
     pub disbursements: Vec<TreasuryDisbursementRow>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryTimelineEntry {
+    pub disbursement_id: u64,
+    pub destination: String,
+    pub amount: u64,
+    pub memo: String,
+    pub scheduled_epoch: u64,
+    pub tx_hash: String,
+    pub executed_at: u64,
+    pub block_hash: String,
+    pub block_height: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TreasuryTimelinePage {
+    pub total: usize,
+    pub page: usize,
+    pub page_size: usize,
+    pub events: Vec<TreasuryTimelineEntry>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TreasuryTimelineFilter {
+    pub disbursement_id: Option<u64>,
+    pub destination: Option<String>,
+    pub min_executed_at: Option<u64>,
+    pub max_executed_at: Option<u64>,
+}
+
+impl TreasuryTimelineFilter {
+    fn matches(&self, entry: &TreasuryTimelineEntry) -> bool {
+        if let Some(id) = self.disbursement_id {
+            if entry.disbursement_id != id {
+                return false;
+            }
+        }
+        if let Some(dest) = &self.destination {
+            if entry.destination != *dest {
+                return false;
+            }
+        }
+        if let Some(min_ts) = self.min_executed_at {
+            if entry.executed_at < min_ts {
+                return false;
+            }
+        }
+        if let Some(max_ts) = self.max_executed_at {
+            if entry.executed_at > max_ts {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 impl TreasuryDisbursementRow {
     fn number(value: u64) -> json::Value {
         json::Value::Number(json::Number::from(value))
@@ -2168,6 +2378,26 @@ impl Explorer {
             }
         }
         conn.execute(
+            "CREATE TABLE IF NOT EXISTS treasury_timeline (id INTEGER PRIMARY KEY AUTOINCREMENT, disbursement_id INTEGER NOT NULL, destination TEXT NOT NULL, amount INTEGER NOT NULL, memo TEXT NOT NULL, scheduled_epoch INTEGER NOT NULL, tx_hash TEXT NOT NULL, executed_at INTEGER NOT NULL, block_hash TEXT NOT NULL, block_height INTEGER NOT NULL)",
+            params![],
+        )?;
+        if let Err(err) = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_treasury_timeline_executed ON treasury_timeline(executed_at DESC)",
+            params![],
+        ) {
+            if !matches!(err, SqlError::Parse(_)) {
+                return Err(err);
+            }
+        }
+        if let Err(err) = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_treasury_timeline_disbursement ON treasury_timeline(disbursement_id)",
+            params![],
+        ) {
+            if !matches!(err, SqlError::Parse(_)) {
+                return Err(err);
+            }
+        }
+        conn.execute(
             "CREATE TABLE IF NOT EXISTS did_records (address TEXT NOT NULL, hash TEXT NOT NULL, anchored_at INTEGER NOT NULL, PRIMARY KEY(address, anchored_at))",
             params![],
         )?;
@@ -2311,7 +2541,7 @@ impl Explorer {
     }
 
     pub fn index_block(&self, block: &Block) -> DbResult<()> {
-        let conn = self.conn()?;
+        let mut conn = self.conn()?;
         let data = encode_json(block).unwrap();
         conn.execute(
             "INSERT OR REPLACE INTO blocks (hash, height, data) VALUES (?1, ?2, ?3)",
@@ -2326,6 +2556,27 @@ impl Explorer {
                 "INSERT OR REPLACE INTO txs (hash, block_hash, memo, contract, data) VALUES (?1, ?2, ?3, ?4, ?5)",
                 params![hash, &block.hash, memo, contract, data],
             )?;
+        }
+        if !block.treasury_events.is_empty() {
+            let tx = conn.transaction()?;
+            for event in &block.treasury_events {
+                let timeline = TreasuryTimelineEvent::from_event(event);
+                tx.execute(
+                    "INSERT OR REPLACE INTO treasury_timeline (disbursement_id, destination, amount, memo, scheduled_epoch, tx_hash, executed_at, block_hash, block_height) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        timeline.disbursement_id as i64,
+                        &timeline.destination,
+                        timeline.amount as i64,
+                        &timeline.memo,
+                        timeline.scheduled_epoch as i64,
+                        &timeline.tx_hash,
+                        timeline.executed_at as i64,
+                        &block.hash,
+                        block.index as i64,
+                    ],
+                )?;
+            }
+            tx.commit()?;
         }
         Ok(())
     }
@@ -3134,6 +3385,35 @@ impl Explorer {
         Ok(())
     }
 
+    pub fn index_treasury_timeline_entries(
+        &self,
+        events: &[TreasuryTimelineEntry],
+    ) -> DbResult<()> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        for entry in events {
+            tx.execute(
+                "INSERT OR REPLACE INTO treasury_timeline (disbursement_id, destination, amount, memo, scheduled_epoch, tx_hash, executed_at, block_hash, block_height) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    entry.disbursement_id as i64,
+                    &entry.destination,
+                    entry.amount as i64,
+                    &entry.memo,
+                    entry.scheduled_epoch as i64,
+                    &entry.tx_hash,
+                    entry.executed_at as i64,
+                    &entry.block_hash,
+                    entry.block_height as i64,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn treasury_disbursements(
         &self,
         page: usize,
@@ -3216,6 +3496,57 @@ impl Explorer {
             page,
             page_size: size,
             disbursements,
+        })
+    }
+
+    pub fn treasury_timeline(
+        &self,
+        page: usize,
+        page_size: usize,
+        filter: TreasuryTimelineFilter,
+    ) -> DbResult<TreasuryTimelinePage> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare("SELECT disbursement_id, destination, amount, memo, scheduled_epoch, tx_hash, executed_at, block_hash, block_height FROM treasury_timeline ORDER BY executed_at DESC, disbursement_id DESC")?;
+        let rows = stmt.query_map(params![], |row| {
+            Ok(TreasuryTimelineEntry {
+                disbursement_id: row.get::<_, i64>(0)? as u64,
+                destination: row.get(1)?,
+                amount: row.get::<_, i64>(2)? as u64,
+                memo: row.get(3)?,
+                scheduled_epoch: row.get::<_, i64>(4)? as u64,
+                tx_hash: row.get(5)?,
+                executed_at: row.get::<_, i64>(6)? as u64,
+                block_hash: row.get(7)?,
+                block_height: row.get::<_, i64>(8)? as u64,
+            })
+        })?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(row?);
+        }
+        let mut filtered: Vec<TreasuryTimelineEntry> = events
+            .into_iter()
+            .filter(|entry| filter.matches(entry))
+            .collect();
+        filtered.sort_by(|a, b| {
+            b.executed_at
+                .cmp(&a.executed_at)
+                .then_with(|| b.disbursement_id.cmp(&a.disbursement_id))
+        });
+        let total = filtered.len();
+        let size = page_size.max(1);
+        let start = page.saturating_mul(size);
+        let end = (start + size).min(total);
+        let events = if start >= total {
+            Vec::new()
+        } else {
+            filtered[start..end].to_vec()
+        };
+        Ok(TreasuryTimelinePage {
+            total,
+            page,
+            page_size: size,
+            events,
         })
     }
 

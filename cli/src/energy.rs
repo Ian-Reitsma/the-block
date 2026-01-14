@@ -21,6 +21,13 @@ pub enum EnergyCmd {
         owner: String,
         url: String,
     },
+    UpdateProvider {
+        provider_id: String,
+        capacity_kwh: Option<u64>,
+        price_per_kwh: Option<u64>,
+        jurisdiction: Option<String>,
+        url: String,
+    },
     Market {
         provider_id: Option<String>,
         verbose: bool,
@@ -115,6 +122,36 @@ impl EnergyCmd {
                 .arg(ArgSpec::Option(
                     OptionSpec::new("stake", "stake", "Stake/bond amount in BLOCK").default("1000"),
                 ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("energy.update_provider"),
+                    "update-provider",
+                    "Update provider terms (capacity, price, jurisdiction)",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "provider_id",
+                    "Provider identifier",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "capacity_kwh",
+                    "capacity-kwh",
+                    "Updated capacity in kWh",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "price_per_kwh",
+                    "price-per-kwh",
+                    "Updated price per kWh (BLOCK microunits)",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "jurisdiction",
+                    "jurisdiction",
+                    "Updated jurisdiction pack (e.g. US_CA)",
+                )))
                 .arg(ArgSpec::Option(
                     OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
                 ))
@@ -355,6 +392,32 @@ impl EnergyCmd {
                     url,
                 })
             }
+            "update-provider" => {
+                let provider_id = require_positional(sub_matches, "provider_id")?.to_string();
+                let capacity_kwh = take_string(sub_matches, "capacity_kwh")
+                    .map(|value| value.parse::<u64>())
+                    .transpose()
+                    .map_err(|_| "capacity_kwh must be an integer".to_string())?;
+                let price_per_kwh = take_string(sub_matches, "price_per_kwh")
+                    .map(|value| value.parse::<u64>())
+                    .transpose()
+                    .map_err(|_| "price_per_kwh must be an integer".to_string())?;
+                let jurisdiction = take_string(sub_matches, "jurisdiction");
+                if capacity_kwh.is_none() && price_per_kwh.is_none() && jurisdiction.is_none() {
+                    return Err(
+                        "provide at least one of --capacity-kwh, --price-per-kwh, or --jurisdiction"
+                            .into(),
+                    );
+                }
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                Ok(EnergyCmd::UpdateProvider {
+                    provider_id,
+                    capacity_kwh,
+                    price_per_kwh,
+                    jurisdiction,
+                    url,
+                })
+            }
             "market" => Ok(EnergyCmd::Market {
                 provider_id: take_string(sub_matches, "provider_id"),
                 verbose: sub_matches.get_flag("verbose"),
@@ -487,6 +550,26 @@ pub fn handle(cmd: EnergyCmd) {
                 ("owner", json_string(owner)),
             ]);
             let payload = json_rpc_request("energy.register_provider", params);
+            dispatch(&client, &url, payload).map(|text| println!("{text}"))
+        }
+        EnergyCmd::UpdateProvider {
+            provider_id,
+            capacity_kwh,
+            price_per_kwh,
+            jurisdiction,
+            url,
+        } => {
+            let mut pairs = vec![("provider_id", json_string(provider_id))];
+            if let Some(capacity) = capacity_kwh {
+                pairs.push(("capacity_kwh", json_u64(capacity)));
+            }
+            if let Some(price) = price_per_kwh {
+                pairs.push(("price_per_kwh", json_u64(price)));
+            }
+            if let Some(jurisdiction) = jurisdiction {
+                pairs.push(("jurisdiction", json_string(jurisdiction)));
+            }
+            let payload = json_rpc_request("energy.update_provider", json_object_from(pairs));
             dispatch(&client, &url, payload).map(|text| println!("{text}"))
         }
         EnergyCmd::Market {

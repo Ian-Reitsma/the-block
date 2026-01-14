@@ -255,6 +255,7 @@ dependencies = [
  "concurrency",
  "crypto_suite",
  "diagnostics",
+ "energy-market",
  "foundation_serde",
  "foundation_serialization",
  "foundation_sqlite",

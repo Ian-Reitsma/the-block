@@ -82,7 +82,7 @@ impl<'de> Deserialize<'de> for SignatureScheme {
     {
         // Accept either numeric discriminants or string labels for backward compatibility.
         struct VisitorImpl;
-        impl<'de> foundation_serialization::serde::de::Visitor<'de> for VisitorImpl {
+        impl foundation_serialization::serde::de::Visitor<'_> for VisitorImpl {
             type Value = SignatureScheme;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(f, "signature scheme as u8 or string")

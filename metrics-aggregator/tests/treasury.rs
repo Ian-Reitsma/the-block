@@ -65,9 +65,13 @@ fn treasury_metrics_exposed_via_prometheus() {
         assert!(body.contains("treasury_disbursement_count{status=\"draft\"} 1"));
         assert!(body.contains("treasury_disbursement_count{status=\"executed\"} 1"));
         assert!(body.contains("treasury_disbursement_count{status=\"rolled_back\"} 1"));
+        assert!(body.contains("treasury_disbursement_pipeline_total{status=\"draft\"} 1"));
+        assert!(body.contains("treasury_disbursement_pipeline_total{status=\"executed\"} 1"));
         assert!(body.contains("treasury_disbursement_amount{status=\"executed\"} 200"));
         assert!(body.contains("treasury_disbursement_amount{status=\"rolled_back\"} 150"));
         assert!(body.contains("treasury_disbursement_next_epoch 75"));
+        assert!(body.contains("treasury_disbursement_execution_lag_seconds{stat=\"avg\"}"));
+        assert!(body.contains("treasury_disbursement_execution_lag_seconds{stat=\"max\"}"));
         assert!(body.contains("treasury_balance_current 450"));
         assert!(body.contains("treasury_balance_snapshot_count 1"));
         assert!(body.contains("treasury_balance_last_delta 450"));

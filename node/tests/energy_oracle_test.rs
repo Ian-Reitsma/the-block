@@ -40,14 +40,7 @@ fn energy_oracle_enforcement_and_disputes() {
 
     let signing = SigningKey::from_bytes(&[7u8; 32]);
     let verifying = signing.verifying_key();
-    let provider_id = "energy-0001".to_string();
     let meter_address = "meter-1".to_string();
-
-    configure_provider_keys(&[ProviderKeyConfig {
-        provider_id: provider_id.clone(),
-        public_key_hex: hex::encode(verifying.to_bytes()),
-    }])
-    .expect("keys configured");
 
     let params = GovernanceEnergyParams {
         min_stake: 1_000,
@@ -79,7 +72,13 @@ fn energy_oracle_enforcement_and_disputes() {
     )
     .expect("register provider");
 
-    let base_ts = SystemTime::now()
+    configure_provider_keys(&[ProviderKeyConfig {
+        provider_id: provider.provider_id.clone(),
+        public_key_hex: hex::encode(verifying.to_bytes()),
+    }])
+    .expect("keys configured");
+
+    let base_ts: u64 = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
@@ -152,17 +151,20 @@ fn energy_oracle_enforcement_and_disputes() {
     ));
 
     // Batch mode blocks early settlement
+    let not_due_block = base_ts + 2;
     let not_due = settle_energy_delivery(
         "buyer-1".into(),
         &provider.provider_id,
         50,
-        12,
+        not_due_block,
         credit.meter_reading_hash,
     )
     .expect_err("early settlement blocked");
     assert!(matches!(
         not_due,
-        EnergyMarketError::SettlementNotDue { next_block: 15 }
+        EnergyMarketError::SettlementNotDue {
+            next_block
+        } if next_block == not_due_block + 3
     ));
 
     // Quorum gating blocks too-small settlements
@@ -170,7 +172,7 @@ fn energy_oracle_enforcement_and_disputes() {
         "buyer-1".into(),
         &provider.provider_id,
         50,
-        15,
+        not_due_block + 3,
         credit.meter_reading_hash,
     )
     .expect_err("quorum check");
@@ -189,6 +191,13 @@ fn energy_oracle_enforcement_and_disputes() {
     )
     .expect("settlement ok");
     assert_eq!(receipt.kwh_delivered, 600);
+    let anchored = the_block::energy::anchored_receipts();
+    assert!(
+        anchored
+            .iter()
+            .any(|r| r.meter_reading_hash == credit.meter_reading_hash),
+        "anchored receipts should persist settlement history"
+    );
 
     // Dispute open/resolve flow
     let dispute = flag_dispute(

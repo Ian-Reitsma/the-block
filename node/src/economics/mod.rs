@@ -27,7 +27,7 @@ pub use subsidy_allocator::SubsidyAllocator;
 use foundation_serialization::{Deserialize, Serialize};
 
 /// Complete economic state snapshot for an epoch
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct EconomicSnapshot {
     pub epoch: u64,
@@ -43,7 +43,7 @@ pub struct EconomicSnapshot {
 }
 
 /// Inflation state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct InflationSnapshot {
     pub circulating_block: u64,
@@ -54,7 +54,7 @@ pub struct InflationSnapshot {
 }
 
 /// Subsidy allocation state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct SubsidySnapshot {
     pub storage_share_bps: u16,
@@ -64,7 +64,7 @@ pub struct SubsidySnapshot {
 }
 
 /// Market multiplier state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct MultiplierSnapshot {
     pub storage_multiplier: f64,
@@ -74,7 +74,7 @@ pub struct MultiplierSnapshot {
 }
 
 /// Ad market split state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct AdMarketSnapshot {
     pub platform_take_bps: u16,
@@ -83,7 +83,7 @@ pub struct AdMarketSnapshot {
 }
 
 /// Tariff state
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TariffSnapshot {
     pub tariff_bps: u16,
@@ -113,7 +113,7 @@ impl Default for TariffSnapshot {
 }
 
 /// Market metrics for control loop input
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct MarketMetrics {
     pub storage: MarketMetric,
@@ -123,7 +123,7 @@ pub struct MarketMetrics {
 }
 
 /// Individual market metric
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct MarketMetric {
     /// Utilization ratio [0.0, 1.0]

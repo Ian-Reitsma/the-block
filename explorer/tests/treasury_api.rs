@@ -1,6 +1,6 @@
 use explorer::{
     build_executor_report, router, Explorer, ExplorerHttpState, TreasuryDisbursementFilter,
-    TreasuryDisbursementStatusFilter,
+    TreasuryDisbursementStatusFilter, TreasuryTimelineEntry, TreasuryTimelineFilter,
 };
 use foundation_serialization::json;
 use httpd::StatusCode;
@@ -93,4 +93,67 @@ fn treasury_executor_lease_released_flag_exposed() {
 
     let report = build_executor_report(&gov_state).expect("executor report");
     assert!(report.lease_released());
+}
+
+#[test]
+fn treasury_timeline_persistence_and_filters() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let db_path = dir.path().join("explorer.db");
+    let explorer = Arc::new(Explorer::open(&db_path).expect("open explorer"));
+
+    let events = vec![
+        TreasuryTimelineEntry {
+            disbursement_id: 42,
+            destination: "dest-42".into(),
+            amount: 10,
+            memo: "note".into(),
+            scheduled_epoch: 5,
+            tx_hash: "0xaaa".into(),
+            executed_at: 100,
+            block_hash: "block-a".into(),
+            block_height: 10,
+        },
+        TreasuryTimelineEntry {
+            disbursement_id: 43,
+            destination: "dest-43".into(),
+            amount: 20,
+            memo: "note2".into(),
+            scheduled_epoch: 6,
+            tx_hash: "0xbbb".into(),
+            executed_at: 120,
+            block_hash: "block-b".into(),
+            block_height: 11,
+        },
+    ];
+
+    explorer
+        .index_treasury_timeline_entries(&events)
+        .expect("index timeline");
+
+    let page = explorer
+        .treasury_timeline(0, 5, TreasuryTimelineFilter::default())
+        .expect("load timeline");
+    assert_eq!(page.total, 2);
+    assert_eq!(page.events[0].disbursement_id, 43);
+    assert_eq!(page.events[1].disbursement_id, 42);
+
+    // HTTP endpoint with filter
+    let app = router(ExplorerHttpState::new(explorer.clone()));
+    runtime::block_on(async {
+        let response = app
+            .handle(
+                app.request_builder()
+                    .path("/governance/treasury/timeline")
+                    .query_param("disbursement_id", "42")
+                    .build(),
+            )
+            .await
+            .expect("timeline response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: json::Value = json::from_slice(response.body()).expect("decode payload");
+        assert_eq!(payload["total"].as_u64(), Some(1));
+        let entries = payload["events"].as_array().expect("array");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["disbursement_id"].as_u64(), Some(42));
+    });
 }

@@ -558,6 +558,39 @@ impl EnergyMarket {
         Ok(provider_id)
     }
 
+    /// Update mutable provider terms without changing ownership.
+    pub fn update_provider_terms(
+        &mut self,
+        provider_id: &ProviderId,
+        price_per_kwh: Option<Balance>,
+        capacity_kwh: Option<u64>,
+        jurisdiction: Option<JurisdictionId>,
+    ) -> Result<EnergyProvider, EnergyMarketError> {
+        {
+            let provider = self
+                .providers
+                .get_mut(provider_id)
+                .ok_or_else(|| EnergyMarketError::UnknownProvider(provider_id.clone()))?;
+
+            if let Some(price) = price_per_kwh {
+                provider.price_per_kwh = price;
+            }
+            if let Some(capacity) = capacity_kwh {
+                provider.capacity_kwh = capacity;
+                provider.available_kwh = provider.available_kwh.min(capacity);
+            }
+            if let Some(jurisdiction) = jurisdiction {
+                provider.location = jurisdiction;
+            }
+        }
+
+        self.emit_provider_gauge();
+        self.providers
+            .get(provider_id)
+            .cloned()
+            .ok_or_else(|| EnergyMarketError::UnknownProvider(provider_id.clone()))
+    }
+
     pub fn record_meter_reading(
         &mut self,
         reading: MeterReading,

@@ -3310,6 +3310,38 @@ mod tests {
         (store, dir)
     }
 
+    fn ready_disbursement(id: u64) -> TreasuryDisbursement {
+        let mut record =
+            TreasuryDisbursement::new(id, format!("dest-{id}"), 1, format!("memo-{id}"), 0);
+        record.status = DisbursementStatus::Timelocked { ready_epoch: 0 };
+        record.created_at = 0;
+        record
+    }
+
+    fn executor_config() -> TreasuryExecutorConfig {
+        TreasuryExecutorConfig {
+            identity: "executor-test".into(),
+            poll_interval: Duration::from_millis(10),
+            lease_ttl: Duration::from_secs(1),
+            epoch_source: Arc::new(|| 0),
+            signer: Arc::new(|d: &TreasuryDisbursement| {
+                Ok(SignedExecutionIntent::new(
+                    d.id,
+                    Vec::new(),
+                    format!("tx-{}", d.id),
+                    d.id,
+                ))
+            }),
+            submitter: Arc::new(|intent: &SignedExecutionIntent| {
+                Ok(format!("submitted-{}", intent.disbursement_id))
+            }),
+            dependency_check: None,
+            nonce_floor: Arc::new(AtomicU64::new(0)),
+            circuit_breaker: Arc::new(CircuitBreaker::default()),
+            circuit_breaker_telemetry: None,
+        }
+    }
+
     #[test]
     fn reward_claim_roundtrip_persists_records() {
         let (store, dir) = open_store();
@@ -3380,5 +3412,64 @@ mod tests {
             .consume_reward_claim("claim-c", "relayer-c", 100)
             .expect_err("insufficient allowance should fail");
         assert!(err.to_string().contains("insufficient allowance"));
+    }
+
+    #[test]
+    fn treasury_executor_respects_batch_limit() {
+        let (store, _dir) = open_store();
+        let mut records = Vec::new();
+        for id in 1..=150u64 {
+            records.push(ready_disbursement(id));
+        }
+        store
+            .persist_disbursements(&records)
+            .expect("seed disbursements");
+        store
+            .record_treasury_accrual(10_000)
+            .expect("fund treasury before execution");
+
+        let mut snapshot = TreasuryExecutorSnapshot::default();
+        run_executor_tick(&store, &executor_config(), &mut snapshot).expect("executor tick");
+
+        let executed = store
+            .disbursements()
+            .expect("load disbursements")
+            .into_iter()
+            .filter(|d| matches!(d.status, DisbursementStatus::Executed { .. }))
+            .count();
+        assert_eq!(executed, 100, "batch should cap at MAX_BATCH_SIZE=100");
+    }
+
+    #[test]
+    fn treasury_executor_honors_scan_limit() {
+        let (store, _dir) = open_store();
+        let mut records = Vec::new();
+        for id in 1..=620u64 {
+            records.push(ready_disbursement(id));
+        }
+        store
+            .persist_disbursements(&records)
+            .expect("seed disbursements");
+        store
+            .record_treasury_accrual(10_000)
+            .expect("fund treasury before execution");
+
+        let mut snapshot = TreasuryExecutorSnapshot::default();
+        run_executor_tick(&store, &executor_config(), &mut snapshot).expect("executor tick");
+
+        let disbursements = store.disbursements().expect("load disbursements");
+        let executed = disbursements
+            .iter()
+            .filter(|d| matches!(d.status, DisbursementStatus::Executed { .. }))
+            .count();
+        assert_eq!(executed, 100, "batch should cap at MAX_BATCH_SIZE=100");
+        let tail = disbursements
+            .iter()
+            .find(|d| d.id == 620)
+            .expect("tail disbursement present");
+        assert!(
+            matches!(tail.status, DisbursementStatus::Timelocked { .. }),
+            "entries beyond MAX_SCAN_SIZE should remain untouched"
+        );
     }
 }

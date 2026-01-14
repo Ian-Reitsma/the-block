@@ -461,6 +461,25 @@ pub enum GovTreasuryCmd {
         reason: String,
         state: String,
     },
+    /// Advance a disbursement via RPC (governance state machine)
+    QueueRemote {
+        id: u64,
+        epoch: Option<u64>,
+        rpc: String,
+    },
+    /// Execute a disbursement via RPC and record receipts
+    ExecuteRemote {
+        id: u64,
+        tx_hash: String,
+        receipts_json: Option<String>,
+        rpc: String,
+    },
+    /// Rollback a disbursement via RPC
+    RollbackRemote {
+        id: u64,
+        reason: String,
+        rpc: String,
+    },
     List {
         state: String,
     },
@@ -470,6 +489,11 @@ pub enum GovTreasuryCmd {
         include_history: bool,
         history_after_id: Option<u64>,
         history_limit: Option<usize>,
+    },
+    /// Summarize the remote treasury pipeline and executor lease state
+    Pipeline {
+        rpc: String,
+        limit: Option<usize>,
     },
     Executor {
         state: String,
@@ -832,6 +856,71 @@ impl GovTreasuryCmd {
         )
         .subcommand(
             CommandBuilder::new(
+                CommandId("gov.treasury.queue-remote"),
+                "queue-remote",
+                "Advance a treasury disbursement via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("epoch", "epoch", "Current epoch for state advancement")
+                    .default("0"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.treasury.execute-remote"),
+                "execute-remote",
+                "Execute a treasury disbursement via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "tx-hash",
+                "Transaction hash authorising the disbursement",
+            )))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "receipts-json",
+                "receipts-json",
+                "Path to JSON receipts array [{\"account\":\"...\",\"amount\":...}]",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("gov.treasury.rollback-remote"),
+                "rollback-remote",
+                "Rollback a treasury disbursement via RPC",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "id",
+                "Disbursement identifier",
+            )))
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "reason",
+                "Reason for rollback",
+            )))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
                 CommandId("gov.treasury.list"),
                 "list",
                 "List scheduled and completed disbursements",
@@ -931,6 +1020,23 @@ impl GovTreasuryCmd {
         )
         .subcommand(
             CommandBuilder::new(
+                CommandId("gov.treasury.pipeline"),
+                "pipeline",
+                "Summarize treasury pipeline state via RPC",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
+                    .default("http://127.0.0.1:26658"),
+            ))
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "limit",
+                "limit",
+                "Maximum number of disbursements to inspect",
+            )))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
                 CommandId("gov.treasury.executor"),
                 "executor",
                 "Show automated treasury executor status",
@@ -1009,6 +1115,33 @@ impl GovTreasuryCmd {
                     take_string(sub_matches, "state").unwrap_or_else(|| "gov.db".to_string());
                 Ok(GovTreasuryCmd::Cancel { id, reason, state })
             }
+            "queue-remote" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let epoch = parse_u64(take_string(sub_matches, "epoch"), "epoch")?;
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovTreasuryCmd::QueueRemote { id, epoch, rpc })
+            }
+            "execute-remote" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let tx_hash = require_positional(sub_matches, "tx-hash")?;
+                let receipts_json = take_string(sub_matches, "receipts-json");
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovTreasuryCmd::ExecuteRemote {
+                    id,
+                    tx_hash,
+                    receipts_json,
+                    rpc,
+                })
+            }
+            "rollback-remote" => {
+                let id = parse_positional_u64(sub_matches, "id")?;
+                let reason = require_positional(sub_matches, "reason")?;
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                Ok(GovTreasuryCmd::RollbackRemote { id, reason, rpc })
+            }
             "list" => {
                 let state =
                     take_string(sub_matches, "state").unwrap_or_else(|| "gov.db".to_string());
@@ -1063,6 +1196,16 @@ impl GovTreasuryCmd {
                     history_after_id,
                     history_limit,
                 })
+            }
+            "pipeline" => {
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
+                let limit = parse_u64(take_string(sub_matches, "limit"), "limit")?
+                    .map(|v| {
+                        usize::try_from(v).map_err(|_| format!("limit {v} exceeds usize range"))
+                    })
+                    .transpose()?;
+                Ok(GovTreasuryCmd::Pipeline { rpc, limit })
             }
             "executor" => {
                 let state =
@@ -1622,6 +1765,133 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 Err(err) => eprintln!("execute failed: {err}"),
             }
         }
+        GovTreasuryCmd::QueueRemote { id, epoch, rpc } => {
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct QueueRequest {
+                id: u64,
+                current_epoch: u64,
+            }
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct QueueResponse {
+                ok: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                message: Option<String>,
+            }
+            let client = RpcClient::from_env();
+            let request = QueueRequest {
+                id,
+                current_epoch: epoch.unwrap_or(0),
+            };
+            let envelope: RpcEnvelope<QueueResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.queue_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            if response.ok {
+                writeln!(out, "Disbursement {id} advanced successfully")?;
+            } else {
+                writeln!(out, "Queue request failed for disbursement {id}")?;
+            }
+            if let Some(msg) = response.message {
+                writeln!(out, "Message: {msg}")?;
+            }
+        }
+        GovTreasuryCmd::ExecuteRemote {
+            id,
+            tx_hash,
+            receipts_json,
+            rpc,
+        } => {
+            #[derive(Serialize, Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct ReceiptInput {
+                account: String,
+                amount: u64,
+            }
+
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct ExecuteRequest {
+                id: u64,
+                tx_hash: String,
+                receipts: Vec<ReceiptInput>,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct ExecuteResponse {
+                ok: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                message: Option<String>,
+            }
+
+            let receipts = if let Some(path) = receipts_json {
+                let content = std::fs::read_to_string(&path).map_err(|err| {
+                    io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("failed to read {path}: {err}"),
+                    )
+                })?;
+                foundation_serialization::json::from_str::<Vec<ReceiptInput>>(&content).map_err(
+                    |err| {
+                        io::Error::new(
+                            io::ErrorKind::Other,
+                            format!("failed to parse receipts JSON: {err}"),
+                        )
+                    },
+                )?
+            } else {
+                vec![]
+            };
+
+            let client = RpcClient::from_env();
+            let request = ExecuteRequest {
+                id,
+                tx_hash,
+                receipts,
+            };
+            let envelope: RpcEnvelope<ExecuteResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.execute_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            if response.ok {
+                writeln!(out, "Disbursement executed successfully")?;
+            } else {
+                writeln!(out, "Execution failed")?;
+            }
+            if let Some(msg) = response.message {
+                writeln!(out, "Message: {msg}")?;
+            }
+        }
+        GovTreasuryCmd::RollbackRemote { id, reason, rpc } => {
+            #[derive(Serialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct RollbackRequest {
+                id: u64,
+                reason: String,
+            }
+
+            #[derive(Deserialize)]
+            #[serde(crate = "foundation_serialization::serde")]
+            struct RollbackResponse {
+                ok: bool,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                message: Option<String>,
+            }
+
+            let client = RpcClient::from_env();
+            let request = RollbackRequest { id, reason };
+            let envelope: RpcEnvelope<RollbackResponse> =
+                call_rpc_envelope(&client, &rpc, "gov.treasury.rollback_disbursement", request)?;
+            let response = unwrap_rpc_result(envelope)?;
+            if response.ok {
+                writeln!(out, "Disbursement rolled back successfully")?;
+            } else {
+                writeln!(out, "Rollback failed")?;
+            }
+            if let Some(msg) = response.message {
+                writeln!(out, "Message: {msg}")?;
+            }
+        }
         GovTreasuryCmd::Cancel { id, reason, state } => {
             let store = GovStore::open(state);
             match store.cancel_disbursement(id, &reason) {
@@ -1690,6 +1960,132 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             match json::to_string_pretty(&output) {
                 Ok(serialized) => writeln!(out, "{serialized}")?,
                 Err(err) => eprintln!("format failed: {err}"),
+            }
+        }
+        GovTreasuryCmd::Pipeline { rpc, limit } => {
+            #[derive(Default)]
+            struct PipelineCount {
+                draft: usize,
+                voting: usize,
+                queued: usize,
+                timelocked: usize,
+                executed: usize,
+                finalized: usize,
+                rolled_back: usize,
+            }
+
+            let client = RpcClient::from_env();
+            let mut query = TreasuryDisbursementQuery::default();
+            query.limit = limit;
+            let disb_params = treasury_disbursement_params(&query);
+            let disb_envelope: RpcEnvelope<RpcTreasuryDisbursementsResult> = call_rpc_envelope(
+                &client,
+                &rpc,
+                "gov.treasury.disbursements",
+                disb_params.clone(),
+            )?;
+            let disbursement_result = unwrap_rpc_result(disb_envelope)?;
+
+            let balance_envelope: RpcEnvelope<RpcTreasuryBalanceResult> = call_rpc_envelope(
+                &client,
+                &rpc,
+                "gov.treasury.balance",
+                Value::Object(json::Map::new()),
+            )?;
+            let balance_result = unwrap_rpc_result(balance_envelope)?;
+
+            let mut counts = PipelineCount::default();
+            let mut earliest_created: Option<u64> = None;
+            let mut latest_status_ts = None;
+            for d in &disbursement_result.disbursements {
+                match &d.status {
+                    DisbursementStatus::Draft { .. } => counts.draft += 1,
+                    DisbursementStatus::Voting { .. } => counts.voting += 1,
+                    DisbursementStatus::Queued { .. } => counts.queued += 1,
+                    DisbursementStatus::Timelocked { .. } => counts.timelocked += 1,
+                    DisbursementStatus::Executed { executed_at, .. } => {
+                        counts.executed += 1;
+                        latest_status_ts =
+                            latest_status_ts.into_iter().chain(Some(*executed_at)).max();
+                    }
+                    DisbursementStatus::Finalized { finalized_at, .. } => {
+                        counts.finalized += 1;
+                        latest_status_ts = latest_status_ts
+                            .into_iter()
+                            .chain(Some(*finalized_at))
+                            .max();
+                    }
+                    DisbursementStatus::RolledBack { rolled_back_at, .. } => {
+                        counts.rolled_back += 1;
+                        latest_status_ts = latest_status_ts
+                            .into_iter()
+                            .chain(Some(*rolled_back_at))
+                            .max();
+                    }
+                }
+                earliest_created = Some(match earliest_created {
+                    Some(ts) => ts.min(d.created_at),
+                    None => d.created_at,
+                });
+            }
+
+            writeln!(
+                out,
+                "Pipeline summary: total={}, draft={}, voting={}, queued={}, timelocked={}, executed={}, finalized={}, rolled_back={}",
+                disbursement_result.disbursements.len(),
+                counts.draft,
+                counts.voting,
+                counts.queued,
+                counts.timelocked,
+                counts.executed,
+                counts.finalized,
+                counts.rolled_back
+            )?;
+            if let Some(ts) = earliest_created {
+                writeln!(out, "Oldest created_at: {ts}")?;
+            }
+            if let Some(ts) = latest_status_ts {
+                writeln!(out, "Latest terminal status at: {ts}")?;
+            }
+            if let Some(next_cursor) = disbursement_result.next_cursor {
+                writeln!(out, "Next cursor: {next_cursor}")?;
+            }
+
+            if let Some(exec) = balance_result.executor {
+                writeln!(out, "\nExecutor snapshot:")?;
+                if let Some(holder) = exec.lease_holder {
+                    writeln!(out, "  Lease holder: {holder}")?;
+                }
+                if let Some(expires) = exec.lease_expires_at {
+                    writeln!(out, "  Lease expires at: {expires}")?;
+                }
+                if let Some(renewed) = exec.lease_renewed_at {
+                    writeln!(out, "  Lease renewed at: {renewed}")?;
+                }
+                writeln!(out, "  Last tick at: {}", exec.last_tick_at)?;
+                if let Some(success) = exec.last_success_at {
+                    writeln!(out, "  Last success at: {success}")?;
+                }
+                if let Some(err_ts) = exec.last_error_at {
+                    writeln!(out, "  Last error at: {err_ts}")?;
+                }
+                if let Some(err) = exec.last_error {
+                    writeln!(out, "  Last error message: {err}")?;
+                }
+                writeln!(out, "  Pending matured: {}", exec.pending_matured)?;
+                writeln!(out, "  Staged intents: {}", exec.staged_intents)?;
+                writeln!(out, "  Lease released: {}", exec.lease_released)?;
+                if let Some(last_nonce) = exec.last_submitted_nonce {
+                    writeln!(out, "  Last submitted nonce: {last_nonce}")?;
+                }
+                if let Some(watermark) = exec.lease_last_nonce {
+                    writeln!(out, "  Lease nonce watermark: {watermark}")?;
+                }
+            } else {
+                writeln!(
+                    out,
+                    "\nExecutor snapshot unavailable; automation not initialised"
+                )?;
             }
         }
         GovTreasuryCmd::Executor { state, json } => {

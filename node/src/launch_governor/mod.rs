@@ -32,6 +32,7 @@ pub struct GovernorConfig {
     pub db_path: PathBuf,
     pub base_path: PathBuf,
     pub window_secs: u64,
+    pub shadow_only: bool,
 }
 
 impl GovernorConfig {
@@ -52,11 +53,15 @@ impl GovernorConfig {
             .and_then(|raw| raw.parse::<u64>().ok())
             .map(|secs| secs.max(epoch_secs))
             .unwrap_or(epoch_secs * 2);
+        let shadow_only = std::env::var("TB_GOVERNOR_SHADOW_ONLY")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
         Self {
             enabled,
             db_path,
             base_path,
             window_secs,
+            shadow_only,
         }
     }
 }
@@ -134,6 +139,7 @@ impl IntentRecord {
             params_patch: self.params_patch.clone(),
             metrics: self.metrics.summary.clone(),
             reason: self.reason.clone(),
+            snapshot_hash_hex: self.snapshot_hash_hex.clone(),
         }
     }
 }
@@ -216,6 +222,10 @@ pub struct GovernorStatus {
     pub economics_prev_market_metrics: Vec<deterministic_metrics::EconomicsPrevMetric>,
     pub autopilot_enabled: bool,
     pub schema_version: u64,
+    #[serde(default)]
+    pub last_economics_snapshot_hash: Option<String>,
+    #[serde(default)]
+    pub shadow_only: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -229,6 +239,7 @@ pub struct IntentSummary {
     pub params_patch: JsonValue,
     pub metrics: JsonValue,
     pub reason: String,
+    pub snapshot_hash_hex: String,
 }
 
 pub trait SignalProvider: Send + Sync {
@@ -545,6 +556,7 @@ struct SharedState {
     base_path: String,
     window_secs: u64,
     store: GovernorStore,
+    shadow_only: bool,
     epoch: AtomicU64,
     pending: Mutex<Vec<IntentRecord>>,
     log: Mutex<VecDeque<IntentRecord>>,
@@ -553,6 +565,7 @@ struct SharedState {
     economics_prev_metrics: Mutex<Option<Vec<deterministic_metrics::EconomicsPrevMetric>>>,
     autopilot_enabled: AtomicBool,
     schema_version: AtomicU64,
+    last_snapshot_hash: Mutex<Option<String>>,
 }
 
 impl SharedState {
@@ -570,6 +583,7 @@ impl SharedState {
             base_path: config.base_path.to_string_lossy().into_owned(),
             window_secs: config.window_secs,
             store,
+            shadow_only: config.shadow_only,
             epoch: AtomicU64::new(0),
             pending: Mutex::new(Vec::new()),
             log: Mutex::new(VecDeque::with_capacity(LOG_LIMIT)),
@@ -578,6 +592,7 @@ impl SharedState {
             economics_prev_metrics: Mutex::new(None),
             autopilot_enabled: AtomicBool::new(false),
             schema_version: AtomicU64::new(0),
+            last_snapshot_hash: Mutex::new(None),
         }
     }
 
@@ -601,6 +616,8 @@ impl SharedState {
             economics_prev_market_metrics: self.economics_prev_market_metrics(),
             autopilot_enabled: self.autopilot_enabled(),
             schema_version: self.schema_version(),
+            last_economics_snapshot_hash: self.last_snapshot_hash(),
+            shadow_only: self.shadow_only,
         }
     }
 
@@ -640,9 +657,27 @@ impl SharedState {
         }
     }
 
+    fn set_last_snapshot_hash(&self, hash: String) {
+        if let Ok(mut guard) = self.last_snapshot_hash.lock() {
+            *guard = Some(hash);
+        }
+    }
+
+    fn last_snapshot_hash(&self) -> Option<String> {
+        if let Ok(guard) = self.last_snapshot_hash.lock() {
+            guard.clone()
+        } else {
+            None
+        }
+    }
+
     fn set_autopilot_enabled(&self, enabled: bool) {
         self.autopilot_enabled
             .store(enabled, AtomicOrdering::Relaxed);
+    }
+
+    fn shadow_only(&self) -> bool {
+        self.shadow_only
     }
 
     fn autopilot_enabled(&self) -> bool {
@@ -925,6 +960,12 @@ fn process_intent(intent: IntentRecord, chain: &Arc<Mutex<Blockchain>>, shared: 
         pending.push(intent.clone());
     }
     shared.record(intent.clone());
+    if intent.gate == "economics" {
+        shared.set_last_snapshot_hash(intent.snapshot_hash_hex.clone());
+    }
+    if shared.shadow_only() {
+        return;
+    }
     apply_intent(chain, shared, intent);
 }
 
@@ -2038,6 +2079,7 @@ mod tests {
             db_path: dir.path().join("governor_db"),
             base_path: dir.path().to_path_buf(),
             window_secs: 30,
+            shadow_only: true,
         };
         let store = GovernorStore::open(&config.db_path);
         let shared = SharedState::new(&config, store);

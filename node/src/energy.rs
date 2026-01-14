@@ -26,6 +26,7 @@ use thiserror::Error;
 
 const KEY_STATE: &str = "state";
 const KEY_DISPUTES: &str = "disputes";
+const KEY_RECEIPTS: &str = "receipts";
 
 #[derive(Clone, Copy, Debug)]
 pub struct GovernanceEnergyParams {
@@ -142,6 +143,7 @@ struct EnergyMarketStore {
     db: SimpleDb,
     market: EnergyMarket,
     disputes: DisputeLog,
+    receipts: Vec<EnergyReceipt>,
 }
 
 impl EnergyMarketStore {
@@ -155,16 +157,22 @@ impl EnergyMarketStore {
             .get(KEY_DISPUTES)
             .and_then(|bytes| binary::decode::<DisputeLog>(&bytes).ok())
             .unwrap_or_default();
+        let receipts = db
+            .get(KEY_RECEIPTS)
+            .and_then(|bytes| binary::decode::<Vec<EnergyReceipt>>(&bytes).ok())
+            .unwrap_or_default();
         Self {
             db,
             market,
             disputes,
+            receipts,
         }
     }
 
     fn persist(&mut self) -> io::Result<()> {
         self.persist_market()?;
         self.persist_disputes()?;
+        self.persist_receipts()?;
         Ok(())
     }
 
@@ -184,10 +192,18 @@ impl EnergyMarketStore {
         Ok(())
     }
 
+    fn persist_receipts(&mut self) -> io::Result<()> {
+        let bytes = binary::encode(&self.receipts)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        self.db.insert(KEY_RECEIPTS, bytes);
+        Ok(())
+    }
+
     fn snapshot(&self, governance: GovernanceEnergyParams) -> EnergySnapshot {
         EnergySnapshot {
             providers: self.market.providers().cloned().collect(),
             receipts: self.market.receipts().to_vec(),
+            anchored_receipts: self.receipts.clone(),
             credits: self
                 .market
                 .credits()
@@ -224,6 +240,7 @@ impl EnergyMarketStore {
 pub struct EnergySnapshot {
     pub providers: Vec<EnergyProvider>,
     pub receipts: Vec<EnergyReceipt>,
+    pub anchored_receipts: Vec<EnergyReceipt>,
     pub credits: Vec<EnergyCredit>,
     pub disputes: Vec<EnergyDispute>,
     pub governance: GovernanceEnergyParams,
@@ -364,10 +381,40 @@ pub fn register_provider(
     Ok(provider)
 }
 
+pub fn update_provider(
+    provider_id: &str,
+    price_per_kwh: Option<u64>,
+    capacity_kwh: Option<u64>,
+    jurisdiction: Option<String>,
+) -> Result<EnergyProvider, EnergyMarketError> {
+    let mut guard = store();
+    let jurisdiction = jurisdiction.map(|j| j.into());
+    let provider = guard.market.update_provider_terms(
+        &provider_id.to_string(),
+        price_per_kwh,
+        capacity_kwh,
+        jurisdiction,
+    )?;
+    persist_or_warn(&mut guard);
+    Ok(provider.clone())
+}
+
 pub fn submit_meter_reading(
     reading: MeterReading,
     block: u64,
 ) -> Result<EnergyCredit, EnergyMarketError> {
+    // Governance-level expiry: reject meter readings older than the configured window.
+    let params = governance_params();
+    if params.oracle_timeout_blocks > 0 {
+        let age = block.saturating_sub(reading.timestamp);
+        if age > params.oracle_timeout_blocks {
+            return Err(EnergyMarketError::TimestampSkew {
+                provider_id: reading.provider_id.clone(),
+                tolerance_secs: params.oracle_timeout_blocks,
+                observed_skew: age,
+            });
+        }
+    }
     let mut guard = store();
     let credit = match guard.market.record_meter_reading(reading, block) {
         Ok(credit) => {
@@ -421,6 +468,7 @@ pub fn settle_energy_delivery(
         guard
             .market
             .settle_energy_delivery(buyer, provider_id, kwh_consumed, block, meter_hash)?;
+    guard.receipts.push(receipt.clone());
     #[cfg(feature = "telemetry")]
     ENERGY_SETTLEMENT_TOTAL
         .with_label_values(&[provider_id.as_str()])
@@ -508,6 +556,12 @@ pub fn receipts_page(
     }
     receipts.sort_by(|a, b| b.block_settled.cmp(&a.block_settled));
     paginate_from_vec(receipts, page, page_size)
+}
+
+/// Return anchored receipts (append-only log) for audit/replay.
+pub fn anchored_receipts() -> Vec<EnergyReceipt> {
+    let guard = store();
+    guard.receipts.clone()
 }
 
 pub fn credits_page(
@@ -822,5 +876,32 @@ mod tests {
         )
         .expect_err("unknown meter hash rejected");
         assert!(matches!(err, DisputeError::UnknownMeterReading { .. }));
+    }
+
+    #[test]
+    fn provider_updates_apply() {
+        let (_dir, mut store) = temp_store();
+        let provider = store
+            .market
+            .register_energy_provider(
+                "owner-2".into(),
+                1_000,
+                2,
+                "meter-2".into(),
+                "US_CA".into(),
+                store.market.config().min_stake,
+            )
+            .expect("register provider");
+        store.persist().expect("persist initial");
+        let mut guard = ENERGY_STORE.lock().unwrap();
+        let previous = std::mem::replace(&mut *guard, store);
+        drop(guard);
+        let updated = update_provider(&provider, Some(5), Some(2_000), Some("US_WA".into()))
+            .expect("update provider");
+        assert_eq!(updated.price_per_kwh, 5);
+        assert_eq!(updated.capacity_kwh, 2_000);
+        assert_eq!(updated.location, "US_WA");
+        let mut guard = ENERGY_STORE.lock().unwrap();
+        *guard = previous;
     }
 }

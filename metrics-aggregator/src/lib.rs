@@ -246,11 +246,13 @@ const METRIC_EXPLORER_COMPUTE_SLA_POLL_ERROR_TOTAL: &str = "explorer_compute_sla
 const METRIC_RUNTIME_SPAWN_LATENCY: &str = "runtime_spawn_latency_seconds";
 const METRIC_RUNTIME_PENDING_TASKS: &str = "runtime_pending_tasks";
 const METRIC_TREASURY_COUNT: &str = "treasury_disbursement_count";
+const METRIC_TREASURY_PIPELINE: &str = "treasury_disbursement_pipeline_total";
 const METRIC_TREASURY_AMOUNT: &str = "treasury_disbursement_amount";
 const METRIC_TREASURY_SNAPSHOT_AGE: &str = "treasury_disbursement_snapshot_age_seconds";
 const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
     "treasury_disbursement_scheduled_oldest_age_seconds";
 const METRIC_TREASURY_NEXT_EPOCH: &str = "treasury_disbursement_next_epoch";
+const METRIC_TREASURY_EXECUTION_LAG: &str = "treasury_disbursement_execution_lag_seconds";
 const METRIC_TREASURY_LEASE_RELEASED: &str = "treasury_executor_lease_released";
 const METRIC_TREASURY_BALANCE_CURRENT: &str = "treasury_balance_current";
 const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta";
@@ -684,6 +686,14 @@ impl AppState {
         }
     }
 
+    fn energy_rpc_rate_limit_rps() -> u64 {
+        std::env::var("TB_ENERGY_RPC_RPS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(50)
+    }
+
     fn apply_disbursement_metrics(
         metrics: &AggregatorMetrics,
         summary: &TreasurySummary,
@@ -693,6 +703,10 @@ impl AppState {
             let (count, amount) = summary.metrics_for_status(status);
             metrics
                 .treasury_disbursement_count
+                .with_label_values(&[status])
+                .set(count as f64);
+            metrics
+                .treasury_disbursement_pipeline
                 .with_label_values(&[status])
                 .set(count as f64);
             metrics
@@ -709,6 +723,14 @@ impl AppState {
         metrics
             .treasury_disbursement_next_epoch
             .set(summary.next_epoch_value() as f64);
+        metrics
+            .treasury_disbursement_execution_lag
+            .with_label_values(&["avg"])
+            .set(summary.execution_lag_avg());
+        metrics
+            .treasury_disbursement_execution_lag
+            .with_label_values(&["max"])
+            .set(summary.execution_lag_max() as f64);
     }
 
     fn apply_balance_metrics(
@@ -741,6 +763,10 @@ impl AppState {
                 .with_label_values(&[status])
                 .set(0.0);
             metrics
+                .treasury_disbursement_pipeline
+                .with_label_values(&[status])
+                .set(0.0);
+            metrics
                 .treasury_disbursement_amount
                 .with_label_values(&[status])
                 .set(0.0);
@@ -748,6 +774,14 @@ impl AppState {
         metrics.treasury_disbursement_snapshot_age.set(0.0);
         metrics.treasury_disbursement_scheduled_oldest_age.set(0.0);
         metrics.treasury_disbursement_next_epoch.set(0.0);
+        metrics
+            .treasury_disbursement_execution_lag
+            .with_label_values(&["avg"])
+            .set(0.0);
+        metrics
+            .treasury_disbursement_execution_lag
+            .with_label_values(&["max"])
+            .set(0.0);
     }
 
     fn zero_balance_metrics(metrics: &AggregatorMetrics) {
@@ -1651,6 +1685,8 @@ impl AppState {
                 snapshot.snapshot_age_seconds = summary.snapshot_age(now);
                 snapshot.scheduled_oldest_age_seconds = summary.scheduled_oldest_age(now);
                 snapshot.next_epoch = summary.next_epoch_value();
+                snapshot.execution_lag_seconds_avg = summary.execution_lag_avg();
+                snapshot.execution_lag_seconds_max = summary.execution_lag_max();
 
                 let current_balance = match balances {
                     Some(balances) => balances.balance,
@@ -1684,6 +1720,7 @@ impl AppState {
             refreshed_at: now,
             ..Default::default()
         };
+        summary.rate_limit_rps = Self::energy_rpc_rate_limit_rps();
         let metrics = self.latest_peer_metrics();
         for (peer, value) in &metrics {
             summary.sources.push(peer.clone());
@@ -1924,10 +1961,12 @@ struct AggregatorMetrics {
     tls_env_warning_detail_unique_fingerprints: IntGaugeVec,
     tls_env_warning_variables_unique_fingerprints: IntGaugeVec,
     treasury_disbursement_count: GaugeVec,
+    treasury_disbursement_pipeline: GaugeVec,
     treasury_disbursement_amount: GaugeVec,
     treasury_disbursement_snapshot_age: Gauge,
     treasury_disbursement_scheduled_oldest_age: Gauge,
     treasury_disbursement_next_epoch: Gauge,
+    treasury_disbursement_execution_lag: GaugeVec,
     treasury_executor_lease_released: Gauge,
     treasury_balance_current: Gauge,
     treasury_balance_last_delta: Gauge,
@@ -3424,6 +3463,16 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_disbursement_count.clone()))
         .expect("register treasury_disbursement_count");
+    let treasury_disbursement_pipeline = GaugeVec::new(
+        Opts::new(
+            METRIC_TREASURY_PIPELINE,
+            "Treasury disbursement pipeline depth grouped by status",
+        ),
+        &["status"],
+    );
+    registry
+        .register(Box::new(treasury_disbursement_pipeline.clone()))
+        .expect("register treasury_disbursement_pipeline_total");
     let treasury_disbursement_amount = GaugeVec::new(
         Opts::new(
             METRIC_TREASURY_AMOUNT,
@@ -3434,6 +3483,16 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_disbursement_amount.clone()))
         .expect("register treasury_disbursement_amount");
+    let treasury_disbursement_execution_lag = GaugeVec::new(
+        Opts::new(
+            METRIC_TREASURY_EXECUTION_LAG,
+            "Treasury disbursement execution lag in seconds (avg/max)",
+        ),
+        &["stat"],
+    );
+    registry
+        .register(Box::new(treasury_disbursement_execution_lag.clone()))
+        .expect("register treasury_disbursement_execution_lag");
     let treasury_disbursement_snapshot_age = Gauge::new(
         METRIC_TREASURY_SNAPSHOT_AGE,
         "Seconds since the most recent treasury disbursement snapshot",
@@ -3856,9 +3915,11 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         tls_env_warning_variables_unique_fingerprints,
         treasury_disbursement_count,
         treasury_disbursement_amount,
+        treasury_disbursement_pipeline,
         treasury_disbursement_snapshot_age,
         treasury_disbursement_scheduled_oldest_age,
         treasury_disbursement_next_epoch,
+        treasury_disbursement_execution_lag,
         treasury_executor_lease_released,
         treasury_balance_current,
         treasury_balance_last_delta,
@@ -8571,6 +8632,9 @@ struct TreasurySummary {
     latest_timestamp: Option<u64>,
     oldest_pending_created: Option<u64>,
     next_epoch: Option<u64>,
+    execution_lag_sum: u128,
+    execution_lag_count: u64,
+    execution_lag_max: u64,
 }
 
 impl TreasurySummary {
@@ -8599,10 +8663,12 @@ impl TreasurySummary {
                 }
                 DisbursementStatus::Executed { executed_at, .. } => {
                     summary.executed.record(record);
+                    summary.record_execution_lag(*executed_at, record.created_at);
                     summary.update_latest(*executed_at);
                 }
                 DisbursementStatus::Finalized { finalized_at, .. } => {
                     summary.finalized.record(record);
+                    summary.record_execution_lag(*finalized_at, record.created_at);
                     summary.update_latest(*finalized_at);
                 }
                 DisbursementStatus::RolledBack { rolled_back_at, .. } => {
@@ -8648,6 +8714,25 @@ impl TreasurySummary {
         }
     }
 
+    fn record_execution_lag(&mut self, finish_ts: u64, start_ts: u64) {
+        let lag = finish_ts.saturating_sub(start_ts);
+        self.execution_lag_sum = self.execution_lag_sum.saturating_add(lag as u128);
+        self.execution_lag_count = self.execution_lag_count.saturating_add(1);
+        self.execution_lag_max = self.execution_lag_max.max(lag);
+    }
+
+    fn execution_lag_avg(&self) -> f64 {
+        if self.execution_lag_count == 0 {
+            0.0
+        } else {
+            self.execution_lag_sum as f64 / self.execution_lag_count as f64
+        }
+    }
+
+    fn execution_lag_max(&self) -> u64 {
+        self.execution_lag_max
+    }
+
     fn snapshot_age(&self, now: u64) -> u64 {
         self.latest_timestamp
             .map(|ts| now.saturating_sub(ts))
@@ -8675,6 +8760,8 @@ struct TreasurySummarySnapshot {
     snapshot_age_seconds: u64,
     scheduled_oldest_age_seconds: u64,
     next_epoch: u64,
+    execution_lag_seconds_avg: f64,
+    execution_lag_seconds_max: u64,
     balance_current: u64,
     balance_last_delta: i64,
     balance_snapshot_count: u64,
@@ -8698,6 +8785,14 @@ impl TreasurySummarySnapshot {
             Value::from(self.scheduled_oldest_age_seconds),
         );
         map.insert("next_epoch".into(), Value::from(self.next_epoch));
+        map.insert(
+            "execution_lag_seconds_avg".into(),
+            Value::from(self.execution_lag_seconds_avg),
+        );
+        map.insert(
+            "execution_lag_seconds_max".into(),
+            Value::from(self.execution_lag_seconds_max),
+        );
         map.insert("balance_current".into(), Value::from(self.balance_current));
         map.insert(
             "balance_last_delta".into(),
@@ -8747,6 +8842,7 @@ struct EnergySummarySnapshot {
     status: String,
     refreshed_at: u64,
     sources: Vec<String>,
+    rate_limit_rps: u64,
     provider_total: Option<u64>,
     pending_credits: Option<u64>,
     active_disputes: Option<u64>,
@@ -8793,6 +8889,7 @@ impl EnergySummarySnapshot {
             "pending_credits_total".into(),
             self.pending_credits.map(Value::from).unwrap_or(Value::Null),
         );
+        map.insert("rate_limit_rps".into(), Value::from(self.rate_limit_rps));
         map.insert(
             "active_disputes_total".into(),
             self.active_disputes.map(Value::from).unwrap_or(Value::Null),

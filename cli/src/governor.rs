@@ -176,6 +176,9 @@ fn handle_intents(
             entry.id, entry.gate, entry.action, entry.epoch_apply, entry.state
         );
         println!("  reason: {}", entry.reason);
+        if !entry.snapshot_hash_hex.is_empty() {
+            println!("  snapshot_hash={}", entry.snapshot_hash_hex);
+        }
         if !entry.metrics.is_null() {
             let metrics = json_to_string_pretty(&entry.metrics).unwrap_or_else(|_| {
                 json_to_string(&entry.metrics).unwrap_or_else(|_| "<invalid metrics>".into())
@@ -202,8 +205,13 @@ fn print_json(value: &Value) -> Result<(), String> {
 
 fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
     println!(
-        "enabled={} epoch={} window={} schema={} autopilot={}",
-        view.enabled, view.epoch, view.window_secs, view.schema_version, view.autopilot_enabled
+        "enabled={} epoch={} window={} schema={} autopilot={} shadow_only={}",
+        view.enabled,
+        view.epoch,
+        view.window_secs,
+        view.schema_version,
+        view.autopilot_enabled,
+        view.shadow_only
     );
     println!("gates:");
     for gate in &view.gates {
@@ -216,6 +224,9 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
             gate.streak_required,
             gate.last_reason
         );
+    }
+    if let Some(hash) = &view.last_economics_snapshot_hash {
+        println!("  economics sample hash: {}", hash);
     }
     if !view.economics_sample.is_null() {
         println!("economics sample:");
@@ -263,6 +274,10 @@ struct GovernorStatusView {
     economics_prev_market_metrics: Vec<EconomicsPrevMetricView>,
     autopilot_enabled: bool,
     schema_version: u64,
+    #[serde(default)]
+    last_economics_snapshot_hash: Option<String>,
+    #[serde(default)]
+    shadow_only: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -324,4 +339,6 @@ struct IntentSummaryView {
     params_patch: Value,
     metrics: Value,
     reason: String,
+    #[serde(default)]
+    snapshot_hash_hex: String,
 }

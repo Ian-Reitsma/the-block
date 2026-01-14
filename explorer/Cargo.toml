@@ -17,6 +17,7 @@ crypto_suite = { path = "../crates/crypto_suite" }
 storage = { path = "../storage" }
 concurrency = { path = "../crates/concurrency" }
 sys = { path = "../crates/sys" }
+energy-market = { path = "../crates/energy-market" }
 
 [dev-dependencies]
 rand = { path = "../crates/rand" }

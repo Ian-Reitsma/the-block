@@ -8,6 +8,8 @@ use energy_market::{
 use foundation_rpc::{Params, RpcError};
 use foundation_serialization::json::{Map, Number, Value};
 use governance_spec::EnergySettlementMode;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const ERR_SIGNATURE_INVALID: i32 = -33001;
 const ERR_METER_MISMATCH: i32 = -33003;
@@ -16,7 +18,59 @@ const ERR_SETTLEMENT_CONFLICT: i32 = -33005;
 const ERR_PROVIDER_INACTIVE: i32 = -33006;
 const ERR_NONCE_REPLAY: i32 = -33007;
 const ERR_TIMESTAMP_SKEW: i32 = -33008;
+const ERR_AUTH_REQUIRED: i32 = -33009;
+const ERR_RATE_LIMIT: i32 = -33010;
 const ERR_INVALID_PARAMS: i32 = -32602;
+
+static RATE_WINDOW_START: AtomicU64 = AtomicU64::new(0);
+static RATE_WINDOW_COUNT: AtomicU64 = AtomicU64::new(0);
+
+fn rate_limit_limit() -> u64 {
+    std::env::var("TB_ENERGY_RPC_RPS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(50)
+}
+
+fn enforce_rate_limit() -> Result<(), RpcError> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let window = RATE_WINDOW_START.load(Ordering::Relaxed);
+    let limit = rate_limit_limit();
+    if window == now {
+        let count = RATE_WINDOW_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+        if count > limit {
+            return Err(energy_rpc_error(
+                ERR_RATE_LIMIT,
+                format!("rate limit exceeded ({count}/{limit} rps)"),
+            ));
+        }
+    } else {
+        RATE_WINDOW_START.store(now, Ordering::Relaxed);
+        RATE_WINDOW_COUNT.store(1, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+fn enforce_auth(params: &Map) -> Result<(), RpcError> {
+    let Some(token) = std::env::var("TB_ENERGY_RPC_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
+    else {
+        return Ok(()); // Auth not configured
+    };
+    let provided = params.get("auth_token").and_then(|v| v.as_str());
+    if provided != Some(token.as_str()) {
+        return Err(energy_rpc_error(
+            ERR_AUTH_REQUIRED,
+            "energy RPC authentication failed",
+        ));
+    }
+    Ok(())
+}
 
 fn energy_rpc_error(code: i32, message: impl Into<String>) -> RpcError {
     RpcError::new(code, message)
@@ -130,9 +184,12 @@ fn dispute_value(dispute: &energy::EnergyDispute) -> Value {
 }
 
 fn params_object(params: &Params) -> Result<&Map, RpcError> {
-    params
+    let map = params
         .as_map()
-        .ok_or_else(|| invalid_params("parameters must be an object"))
+        .ok_or_else(|| invalid_params("parameters must be an object"))?;
+    enforce_rate_limit()?;
+    enforce_auth(map)?;
+    Ok(map)
 }
 
 fn require_string(params: &Map, key: &str) -> Result<String, RpcError> {
@@ -148,6 +205,10 @@ fn require_u64(params: &Map, key: &str) -> Result<u64, RpcError> {
         .get(key)
         .and_then(|value| value.as_u64())
         .ok_or_else(|| invalid_params(format!("missing or invalid '{key}'")))
+}
+
+fn optional_u64(params: &Map, key: &str) -> Option<u64> {
+    params.get(key).and_then(|value| value.as_u64())
 }
 
 fn optional_string(params: &Map, key: &str) -> Option<String> {
@@ -320,6 +381,23 @@ pub fn register(params: &Params) -> Result<Value, RpcError> {
     }
 }
 
+pub fn update_provider(params: &Params) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let provider_id = require_string(params, "provider_id")?;
+    let capacity = optional_u64(params, "capacity_kwh");
+    let price = optional_u64(params, "price_per_kwh");
+    let jurisdiction = optional_string(params, "jurisdiction");
+    if capacity.is_none() && price.is_none() && jurisdiction.is_none() {
+        return Err(invalid_params(
+            "provide at least one of capacity_kwh, price_per_kwh, or jurisdiction",
+        ));
+    }
+    match energy::update_provider(&provider_id, price, capacity, jurisdiction) {
+        Ok(provider) => Ok(provider_value(&provider)),
+        Err(err) => Err(map_energy_error(err)),
+    }
+}
+
 pub fn market_state(filter_provider: Option<&str>) -> Result<Value, RpcError> {
     let snapshot = energy::market_snapshot();
     let energy::EnergySnapshot {
@@ -328,6 +406,7 @@ pub fn market_state(filter_provider: Option<&str>) -> Result<Value, RpcError> {
         credits,
         disputes,
         governance,
+        ..
     } = snapshot;
     let providers: Vec<Value> = providers
         .into_iter()

@@ -20,11 +20,11 @@
 //! 5. Governance params versioned at epoch boundaries
 
 use super::{
-    derive_market_metrics_from_chain, execute_epoch_economics, GovernanceEconomicParams,
-    NetworkActivity, SubsidySnapshot, TariffSnapshot,
+    derive_market_metrics_from_chain, execute_epoch_economics, EconomicSnapshot,
+    GovernanceEconomicParams, MarketMetrics, NetworkActivity, SubsidySnapshot, TariffSnapshot,
 };
 use crate::governance::Params;
-use crate::{Block, EPOCH_BLOCKS};
+use crate::{Block, TokenAmount, EPOCH_BLOCKS};
 use std::collections::{HashMap, HashSet};
 
 /// Governance param snapshot at an epoch boundary.
@@ -69,6 +69,12 @@ pub struct ReplayedEconomicsState {
     pub cumulative_ad_spend_usd_micros: u64,
     /// Cumulative non-KYC transaction volume (for compliance tracking)
     pub cumulative_non_kyc_volume: u64,
+    /// Snapshots generated for every epoch processed during replay
+    pub snapshots: Vec<EconomicSnapshot>,
+    /// Market metrics derived from receipts for the previous epoch window
+    pub prev_market_metrics: MarketMetrics,
+    /// Historical market metrics per epoch (aligned with `snapshots`)
+    pub market_metrics_history: Vec<MarketMetrics>,
 }
 
 impl Default for ReplayedEconomicsState {
@@ -87,6 +93,9 @@ impl Default for ReplayedEconomicsState {
             cumulative_treasury_inflow: 0,
             cumulative_ad_spend_usd_micros: 0,
             cumulative_non_kyc_volume: 0,
+            snapshots: Vec::new(),
+            prev_market_metrics: MarketMetrics::default(),
+            market_metrics_history: Vec::new(),
         }
     }
 }
@@ -275,13 +284,16 @@ pub fn replay_economics_to_height(
             // Update state for next epoch
             state.block_height = block_height;
             state.block_reward_per_block = snapshot.inflation.block_reward_per_block;
-            state.prev_subsidy = snapshot.subsidies;
-            state.prev_tariff = snapshot.tariff;
+            state.prev_subsidy = snapshot.subsidies.clone();
+            state.prev_tariff = snapshot.tariff.clone();
             state.prev_annual_issuance = snapshot.inflation.annual_issuance_block;
+            state.prev_market_metrics = metrics.clone();
             // CRITICAL: Carry forward adaptive baselines across epochs
             state.baseline_tx_count = snapshot.updated_baseline_tx_count;
             state.baseline_tx_volume = snapshot.updated_baseline_tx_volume;
             state.baseline_miners = snapshot.updated_baseline_miners;
+            state.snapshots.push(snapshot.clone());
+            state.market_metrics_history.push(metrics);
 
             // Update cumulative tracking (not reset at epoch boundary)
             state.cumulative_treasury_inflow = state
@@ -374,6 +386,7 @@ pub fn get_epoch_governance(state: &ReplayedEconomicsState, epoch: u64) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipts::{AdReceipt, EnergyReceipt, Receipt, StorageReceipt};
 
     #[test]
     fn test_replay_empty_chain() {
@@ -442,5 +455,110 @@ mod tests {
             state1.cumulative_non_kyc_volume,
             state2.cumulative_non_kyc_volume
         );
+        assert_eq!(state1.snapshots, state2.snapshots);
+    }
+
+    #[test]
+    fn replay_records_epoch_snapshots() {
+        let mut chain = Vec::new();
+        let mut previous_hash = "genesis".to_string();
+        for index in 0..=EPOCH_BLOCKS {
+            let block = stub_block(index, &previous_hash);
+            previous_hash = block.hash.clone();
+            chain.push(block);
+        }
+        let params = Params::default();
+        let state = replay_economics_to_height(&chain, EPOCH_BLOCKS, &params);
+        assert_eq!(state.snapshots.len(), 1);
+        assert_eq!(state.snapshots[0].epoch, 1);
+        let repeat = replay_economics_to_height(&chain, EPOCH_BLOCKS, &params);
+        assert_eq!(state.snapshots, repeat.snapshots);
+    }
+
+    #[test]
+    fn replay_persists_market_metrics_and_treasury_deltas() {
+        let mut chain = Vec::new();
+        let mut previous_hash = "genesis".to_string();
+        for index in 0..=EPOCH_BLOCKS {
+            let mut block = stub_block(index, &previous_hash);
+            // Ensure deterministic treasury inflow math
+            block.coinbase_block = TokenAmount::new(10);
+            block.coinbase_industrial = TokenAmount::new(0);
+            if index == 1 {
+                block.receipts.push(Receipt::Storage(StorageReceipt {
+                    contract_id: "c-1".into(),
+                    provider: "provider-1".into(),
+                    bytes: 1_000,
+                    price: 500,
+                    block_height: index,
+                    provider_escrow: 2_000,
+                    provider_signature: vec![],
+                    signature_nonce: 0,
+                }));
+                block.receipts.push(Receipt::Energy(EnergyReceipt {
+                    contract_id: "e-1".into(),
+                    provider: "provider-2".into(),
+                    energy_units: 250,
+                    price: 125,
+                    block_height: index,
+                    proof_hash: [1u8; 32],
+                    provider_signature: vec![],
+                    signature_nonce: 0,
+                }));
+                block.receipts.push(Receipt::Ad(AdReceipt {
+                    campaign_id: "ad-1".into(),
+                    publisher: "pub-1".into(),
+                    impressions: 10_000,
+                    spend: 2_000,
+                    block_height: index,
+                    conversions: 50,
+                    publisher_signature: vec![],
+                    signature_nonce: 0,
+                }));
+            }
+            previous_hash = block.hash.clone();
+            chain.push(block);
+        }
+        let mut params = Params::default();
+        params.treasury_percent = 10;
+
+        let replay_a = replay_economics_to_height(&chain, EPOCH_BLOCKS, &params);
+        let replay_b = replay_economics_to_height(&chain, EPOCH_BLOCKS, &params);
+
+        assert_eq!(replay_a.snapshots.len(), 1);
+        assert_eq!(replay_a.snapshots, replay_b.snapshots);
+        assert_eq!(replay_a.prev_subsidy, replay_b.prev_subsidy);
+        assert_eq!(replay_a.prev_tariff, replay_b.prev_tariff);
+        assert_eq!(
+            replay_a.snapshots[0].inflation.block_reward_per_block,
+            replay_b.snapshots[0].inflation.block_reward_per_block
+        );
+
+        let blocks_in_epoch = EPOCH_BLOCKS.saturating_add(1);
+        let expected_treasury = blocks_in_epoch * 10 * params.treasury_percent as u64 / 100;
+        assert_eq!(replay_a.cumulative_treasury_inflow, expected_treasury);
+        assert_eq!(
+            replay_a.cumulative_treasury_inflow,
+            replay_b.cumulative_treasury_inflow
+        );
+
+        assert_eq!(
+            replay_a.market_metrics_history.len(),
+            replay_a.snapshots.len()
+        );
+        assert!(replay_a.prev_market_metrics.storage.utilization > 0.0);
+        assert!(replay_a.prev_market_metrics.energy.utilization > 0.0);
+        assert!(replay_a.prev_market_metrics.ad.utilization > 0.0);
+    }
+
+    fn stub_block(index: u64, previous_hash: &str) -> Block {
+        let mut block = Block::default();
+        block.index = index;
+        block.previous_hash = previous_hash.to_string();
+        block.hash = format!("hash-{index}");
+        block.timestamp_millis = index * 1_000;
+        block.coinbase_block = TokenAmount::new(1);
+        block.coinbase_industrial = TokenAmount::new(1);
+        block
     }
 }

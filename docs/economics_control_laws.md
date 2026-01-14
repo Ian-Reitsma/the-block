@@ -363,20 +363,24 @@ let econ_params = economics::GovernanceEconomicParams::from_governance_params(
 );
 
 // 2. Build market metrics from epoch data
-let metrics = economics::MarketMetrics {
-    storage: economics::MarketMetric {
-        utilization: (self.epoch_storage_bytes as f64) / (stats.epoch_secs * 1_000_000.0),
-        provider_margin: 0.0, // TODO: compute from settlement data
-        ..Default::default()
-    },
-    compute: economics::MarketMetric {
-        utilization: (self.epoch_cpu_ms as f64) / (stats.epoch_secs * 1000.0),
-        provider_margin: 0.0,
-        ..Default::default()
-    },
-    energy: economics::MarketMetric::default(),
-    ad: economics::MarketMetric::default(),
-};
+// `build_market_metrics` combines payouts, pricing, energy snapshots, and the deterministic
+// receipts-derived margins from `node/src/economics/deterministic_metrics.rs` so every
+// metric the controller sees (utilization + provider margin) matches the sample persisted for
+// the Launch Governor economics gate.
+let metrics = self.build_market_metrics(
+    self.economics_epoch_storage_payout_block,
+    self.economics_epoch_compute_payout_block,
+    self.economics_epoch_ad_payout_block,
+    ad_total_usd_micros,
+    ad_settlement_count,
+    ad_last_price_usd_micros,
+    util,
+    &energy_snapshot,
+    self.block_height,
+);
+// Persist the snapshot for governor sampling so `tb-cli governor status` can prove the same
+// `economics_prev_market_metrics_*_ppm` gauges steer the gate.
+self.economics_prev_market_metrics = metrics.clone();
 
 // 3. Compute total ad spend from settlements
 let total_ad_spend = self.pending_ad_settlements.iter()
@@ -387,10 +391,11 @@ let total_ad_spend = self.pending_ad_settlements.iter()
 let econ_snapshot = economics::execute_epoch_economics(
     epoch,
     &metrics,
-    self.emission_consumer,          // Circulating BLOCK
-    self.economics_epoch_tx_volume,  // Non-KYC volume
+    self.emission,                        // Circulating BLOCK
+    self.emission,                        // Total issuance (same for now)
+    self.economics_epoch_tx_volume_block, // Non-KYC volume
     total_ad_spend,
-    0,                              // Treasury inflow (TODO: wire up)
+    self.economics_epoch_treasury_inflow_block, // Treasury inflow from accrued coinbase share
     &econ_params,
 );
 
@@ -404,11 +409,23 @@ self.economics_prev_tariff = econ_snapshot.tariff.clone();
 {
     crate::telemetry::update_economics_telemetry(&econ_snapshot);
     crate::telemetry::update_economics_market_metrics(&metrics);
+    crate::telemetry::update_economics_epoch_metrics(
+        self.economics_epoch_tx_count,
+        self.economics_epoch_tx_volume_block,
+        self.economics_epoch_treasury_inflow_block,
+        &self.economics_prev_market_metrics,
+    );
 }
 
 // 7. Reset epoch counter
 self.economics_epoch_tx_volume = 0;
 ```
+
+Telemetry: the same `metrics` object that seeds `execute_epoch_economics` also feeds `update_economics_epoch_metrics`,
+so the `economics_prev_market_metrics_{utilization,provider_margin}_ppm` gauges match the `telemetry gauges
+(ppm)` section printed by `tb-cli governor status`. Every economics intent persists the sample JSON and a
+Blake3 hash under `governor/decisions/epoch-*.json`, which lets auditors prove the gate flipped on the same
+deterministic data before any state-changing intent is applied.
 
 ### State Tracking in Blockchain
 

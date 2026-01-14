@@ -495,12 +495,13 @@ impl RpcState {
                 &self.energy_settle_clients,
                 self.energy_settle_tokens_per_sec,
             )),
-            "energy.flag_dispute" | "energy.resolve_dispute" | "energy.register_provider" => {
-                Some((
-                    &self.energy_dispute_clients,
-                    self.energy_dispute_tokens_per_sec,
-                ))
-            }
+            "energy.flag_dispute"
+            | "energy.resolve_dispute"
+            | "energy.register_provider"
+            | "energy.update_provider" => Some((
+                &self.energy_dispute_clients,
+                self.energy_dispute_tokens_per_sec,
+            )),
             _ if ENERGY_METHODS.contains(&method) => {
                 Some((&self.energy_read_clients, self.energy_read_tokens_per_sec))
             }
@@ -666,6 +667,7 @@ enum EnergyRole {
 
 const ENERGY_METHODS: &[&str] = &[
     "energy.register_provider",
+    "energy.update_provider",
     "energy.market_state",
     "energy.receipts",
     "energy.credits",
@@ -684,7 +686,8 @@ fn required_energy_role(method: &str) -> Option<EnergyRole> {
         "energy.settle"
         | "energy.flag_dispute"
         | "energy.resolve_dispute"
-        | "energy.register_provider" => Some(EnergyRole::Admin),
+        | "energy.register_provider"
+        | "energy.update_provider" => Some(EnergyRole::Admin),
         "energy.market_state" | "energy.receipts" | "energy.credits" | "energy.disputes" => {
             Some(EnergyRole::Provider)
         }
@@ -2896,6 +2899,7 @@ fn dispatch(
             serialize_response(htlc::refund(id, now))?
         }
         "energy.register_provider" => energy::register(&req.params)?,
+        "energy.update_provider" => energy::update_provider(&req.params)?,
         "energy.market_state" => {
             let provider = req
                 .params

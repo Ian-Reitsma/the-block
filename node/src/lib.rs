@@ -1270,7 +1270,40 @@ impl Blockchain {
         ad_last_price_usd_micros: u64,
         compute_util_percent: u64,
         energy_snapshot: &crate::energy::EnergySnapshot,
+        epoch_end: u64,
     ) -> economics::MarketMetrics {
+        let epoch_start = epoch_end.saturating_sub(EPOCH_BLOCKS);
+        let chain_len = self.chain.len() as u64;
+        let window_start = epoch_start.min(chain_len) as usize;
+        let window_end = epoch_end.min(chain_len) as usize;
+        let mut has_storage_receipts = false;
+        let mut has_compute_receipts = false;
+        let mut has_energy_receipts = false;
+        let mut has_ad_receipts = false;
+        if window_start < window_end {
+            'blocks: for block in &self.chain[window_start..window_end] {
+                for receipt in &block.receipts {
+                    match receipt {
+                        Receipt::Storage(_) => has_storage_receipts = true,
+                        Receipt::Compute(_) => has_compute_receipts = true,
+                        Receipt::Energy(_) => has_energy_receipts = true,
+                        Receipt::Ad(_) => has_ad_receipts = true,
+                    }
+                    if has_storage_receipts
+                        && has_compute_receipts
+                        && has_energy_receipts
+                        && has_ad_receipts
+                    {
+                        break 'blocks;
+                    }
+                }
+            }
+        }
+        let derived_metrics = economics::deterministic_metrics::derive_market_metrics_from_chain(
+            &self.chain,
+            epoch_start,
+            epoch_end,
+        );
         let storage_capacity = crate::storage::pipeline::l2_cap_bytes_per_epoch();
         let storage_utilization = ratio_u64(self.epoch_storage_bytes, storage_capacity);
         let rent_rate = self.params.rent_rate_per_byte.max(0) as u64;
@@ -1364,10 +1397,26 @@ impl Blockchain {
         };
 
         economics::MarketMetrics {
-            storage: storage_metric,
-            compute: compute_metric,
-            energy: energy_metric,
-            ad: ad_metric,
+            storage: if has_storage_receipts {
+                derived_metrics.storage
+            } else {
+                storage_metric
+            },
+            compute: if has_compute_receipts {
+                derived_metrics.compute
+            } else {
+                compute_metric
+            },
+            energy: if has_energy_receipts {
+                derived_metrics.energy
+            } else {
+                energy_metric
+            },
+            ad: if has_ad_receipts {
+                derived_metrics.ad
+            } else {
+                ad_metric
+            },
         }
     }
     /// Return the latest state root for a shard if available.
@@ -5185,6 +5234,7 @@ impl Blockchain {
                         ad_last_price_usd_micros,
                         util,
                         &energy_snapshot,
+                        self.block_height,
                     );
 
                     // Persist market metrics for Launch Governor economics gate sampling
@@ -6761,6 +6811,7 @@ mod market_metric_tests {
         let energy_snapshot = crate::energy::EnergySnapshot {
             providers: vec![provider],
             receipts: vec![receipt],
+            anchored_receipts: Vec::new(),
             credits: Vec::new(),
             disputes: Vec::new(),
             governance: crate::energy::GovernanceEnergyParams::default(),
@@ -6775,6 +6826,7 @@ mod market_metric_tests {
             100_000,
             50,
             &energy_snapshot,
+            EPOCH_BLOCKS,
         );
 
         assert!(metrics.storage.utilization > 0.0);

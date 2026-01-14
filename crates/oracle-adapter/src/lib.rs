@@ -9,6 +9,7 @@ use energy_market::{OracleAddress, ProviderId, UnixTimestamp};
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 pub type Signature = Vec<u8>;
@@ -202,8 +203,29 @@ pub enum OracleError {
     Transport(String),
     #[error("invalid signature for provider {0}")]
     InvalidSignature(ProviderId),
+    #[error("stale meter reading for provider {provider_id}: age_secs={age_secs}, max_age_secs={max_age_secs}")]
+    StaleReading {
+        provider_id: ProviderId,
+        age_secs: u64,
+        max_age_secs: u64,
+    },
+    #[error("meter reading timestamp skewed into the future for provider {provider_id}: skew_secs={skew_secs}, max_future_skew_secs={max_future_skew_secs}")]
+    FutureSkew {
+        provider_id: ProviderId,
+        skew_secs: u64,
+        max_future_skew_secs: u64,
+    },
     #[error("submit error: {0}")]
     Submit(String),
+}
+
+/// Policy applied to fetched meter readings before they are accepted.
+#[derive(Clone, Copy, Debug)]
+pub struct OraclePolicy {
+    /// Maximum allowed age in seconds relative to the local clock.
+    pub max_age_secs: u64,
+    /// Maximum allowed positive skew in seconds (reading timestamp ahead of local clock).
+    pub max_future_skew_secs: u64,
 }
 
 pub struct OracleAdapter<F, S, V>
@@ -215,6 +237,7 @@ where
     fetcher: Arc<F>,
     submitter: Arc<S>,
     verifier: Arc<V>,
+    policy: Option<OraclePolicy>,
 }
 
 impl<F, S, V> OracleAdapter<F, S, V>
@@ -228,7 +251,43 @@ where
             fetcher: Arc::new(fetcher),
             submitter: Arc::new(submitter),
             verifier: Arc::new(verifier),
+            policy: None,
         }
+    }
+
+    pub fn with_policy(mut self, policy: OraclePolicy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    fn enforce_policy(&self, reading: &MeterReadingPayload) -> Result<(), OracleError> {
+        let Some(policy) = self.policy else {
+            return Ok(());
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if reading.timestamp > now {
+            let skew = reading.timestamp.saturating_sub(now);
+            if skew > policy.max_future_skew_secs {
+                return Err(OracleError::FutureSkew {
+                    provider_id: reading.provider_id.clone(),
+                    skew_secs: skew,
+                    max_future_skew_secs: policy.max_future_skew_secs,
+                });
+            }
+        } else {
+            let age = now.saturating_sub(reading.timestamp);
+            if age > policy.max_age_secs {
+                return Err(OracleError::StaleReading {
+                    provider_id: reading.provider_id.clone(),
+                    age_secs: age,
+                    max_age_secs: policy.max_age_secs,
+                });
+            }
+        }
+        Ok(())
     }
 
     pub async fn fetch_meter_reading(
@@ -239,6 +298,7 @@ where
         if !reading.verify(self.verifier.as_ref()) {
             return Err(OracleError::InvalidSignature(reading.provider_id.clone()));
         }
+        self.enforce_policy(&reading)?;
         Ok(reading)
     }
 
@@ -251,6 +311,8 @@ where
 mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::{Signature, SigningKey, SECRET_KEY_LENGTH};
+    use std::thread;
+    use std::time::Duration;
 
     fn fixed_signing_key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; SECRET_KEY_LENGTH])
@@ -320,5 +382,48 @@ mod tests {
         let mut payload = sample_payload();
         payload.signature = vec![0u8; SIGNATURE_LENGTH];
         assert!(!payload.verify(&verifier));
+    }
+
+    #[test]
+    fn policy_enforces_age_and_skew() {
+        let policy = OraclePolicy {
+            max_age_secs: 1,
+            max_future_skew_secs: 1,
+        };
+        let adapter = OracleAdapter::new(
+            |_addr| Ok(sample_payload()),
+            |_reading| Ok(()),
+            Ed25519SignatureVerifier::new(),
+        )
+        .with_policy(policy);
+
+        // Fresh reading passes
+        let mut fresh = sample_payload();
+        fresh.timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        adapter.enforce_policy(&fresh).expect("fresh reading ok");
+
+        // Stale reading fails
+        let mut stale = sample_payload();
+        stale.timestamp = fresh.timestamp.saturating_sub(5);
+        let err = adapter.enforce_policy(&stale).expect_err("stale rejected");
+        assert!(matches!(err, OracleError::StaleReading { .. }));
+
+        // Future skew fails
+        let mut future = sample_payload();
+        future.timestamp = fresh.timestamp.saturating_add(5);
+        let err = adapter
+            .enforce_policy(&future)
+            .expect_err("future skew rejected");
+        assert!(matches!(err, OracleError::FutureSkew { .. }));
+
+        // Ensure policy still allows slight skew
+        let mut slight_skew = sample_payload();
+        slight_skew.timestamp = fresh.timestamp.saturating_add(1);
+        adapter
+            .enforce_policy(&slight_skew)
+            .expect("within skew tolerance");
     }
 }

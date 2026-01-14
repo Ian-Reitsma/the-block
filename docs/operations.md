@@ -44,6 +44,33 @@
 - HTTP clients use `ClientConfig.tls_handshake_timeout` or `TlsConnectorBuilder::handshake_timeout`.
 - Environment override: `TB_TLS_HANDSHAKE_TIMEOUT_MS` (milliseconds).
 
+### Economics Autopilot Gate
+
+- **Telemetry sources**
+  - `economics_block_reward_per_block` shows the current base reward that Launch Governor was replaying when it evaluated economics.
+  - `economics_prev_market_metrics_{utilization,provider_margin}_ppm` mirror the deterministic metrics derived from settlement receipts; these are the same samples that are held alongside the executor intent (`governor/decisions/epoch-*.json`) for audit.
+  - `economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, and `economics_epoch_treasury_inflow_block` capture the network activity, volume, and treasury inflow that feed the control loop.
+  - `tb-cli governor status --rpc <endpoint>` prints the `telemetry gauges (ppm)` section plus the `last_economics_snapshot_hash` so you can prove the Prometheus series comes from the same sample the governor evaluated.
+  - Shadow mode is the default: set `TB_GOVERNOR_SHADOW_ONLY=1` to keep intents and snapshot hashes flowing without mutating runtime params, then flip it to `0` once the telemetry streak looks healthy to allow apply.
+
+- **Auditing workflow**
+  1. After collecting the metrics you expect (via Grafana or Prometheus), copy the hash from `tb-cli governor status`. Compare it against the Blake3 hash stored inside `governor/decisions/epoch-*.json` to ensure the governor replayed the same deterministic sample that the telemetry gauges exposed.
+  2. Use `tb-cli governor intents --gate economics` to see pending intents and their `snapshot_hash` lines. Each hash should match the corresponding decision file in `governor/decisions/`.
+  3. If you need to inspect the actual sample JSON, cat the decision file; it contains the metrics (`market_metrics`, `epoch_treasury_inflow`, etc.) that triggered the gate.
+
+- **Rollback play**
+  1. Pause the governor by disabling it (`TB_GOVERNOR_ENABLED=0`) or shutting down the governor process; this prevents new intents from applying while you troubleshoot.
+  2. If you were running in apply mode (`TB_GOVERNOR_SHADOW_ONLY=0`), flip back to shadow (`TB_GOVERNOR_SHADOW_ONLY=1`) so intents keep flowing for audit without mutating runtime parameters.
+  3. To revert an applied gate, plan an exit intent (`GateAction::Exit`) by letting `tb-cli governor status` build up the required streak or by manually submitting the exit via the governor decision API. Confirm `economics_autopilot=false` in `tb-cli governor status`.
+  4. Once the anomaly is addressed, re-enable the governor (`TB_GOVERNOR_ENABLED=1`) and replay the same metrics so the economics gate can re-enter from the known-good sample. Turn apply mode back on when you are ready to let the gate mutate runtime params again.
+
+### Energy RPC Guardrails
+
+- RPC calls enforce optional auth (`TB_ENERGY_RPC_TOKEN`) and a sliding-window rate limit (`TB_ENERGY_RPC_RPS`, default 50rps). Missing/incorrect tokens return `-33009`, while limits return `-33010`.
+- Auth and rate checks happen before parsing business parameters, so rate spikes on unauthenticated traffic show up as `energy_signature_verification_failures_total` and the aggregator summary’s energy section.
+- Aggregator `/wrappers` now includes `energy.rate_limit_rps` so dashboards can display the configured limit alongside dispute/settlement health.
+- Keep these values in sync with downstream dashboards: the aggregator exposes `energy_*` counters in `/wrappers` and the Grafana energy board charts dispute counts, settlement backlog (`energy_pending_credits_total`), and signature failures.
+
 ## Treasury Stuck
 
 ### Symptoms
