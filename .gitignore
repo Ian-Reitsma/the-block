@@ -295,6 +295,7 @@ local.properties
 # The Block Runtime Artifacts (never commit these - they're node-local state)
 # Rust build artifacts
 target/
+target_tmp/
 
 # Node runtime databases
 node/*_db/

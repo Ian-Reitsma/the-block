@@ -3,6 +3,15 @@ set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
 default:
     @echo "Available recipes: demo docs test-peer-stats"
 
+fmt:
+    cargo fmt --all
+
+test-fast:
+    cargo test --workspace --all-features -- --test-threads=1
+
+test-full:
+    cargo test --workspace --all-features --all-targets -- --test-threads=1
+
 demo:
     @if [ ! -x .venv/bin/python ]; then \
         echo "virtualenv missing; run ./scripts/bootstrap.sh" >&2; exit 1; \

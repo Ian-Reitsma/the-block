@@ -24,6 +24,7 @@ static START_TS: Lazy<UnixTimestamp> = Lazy::new(|| {
 struct MeterState {
     total_kwh: u64,
     last_timestamp: UnixTimestamp,
+    nonce: u64,
 }
 
 #[derive(Default)]
@@ -37,12 +38,14 @@ impl AppState {
         let meter = guard.entry(meter_id.to_string()).or_default();
         meter.total_kwh = meter.total_kwh.saturating_add(250);
         meter.last_timestamp = current_timestamp();
+        meter.nonce = meter.nonce.saturating_add(1);
         MeterReadingPayload::new(
             format!("provider-{meter_id}"),
             meter_id.to_string(),
             meter.total_kwh,
             meter.last_timestamp,
-            mock_signature(meter_id, meter.total_kwh),
+            meter.nonce,
+            mock_signature(meter_id, meter.total_kwh, meter.nonce),
         )
     }
 
@@ -51,6 +54,7 @@ impl AppState {
         let entry = guard.entry(meter_id.to_string()).or_default();
         entry.total_kwh = entry.total_kwh.max(reading.kwh_reading);
         entry.last_timestamp = reading.timestamp.max(entry.last_timestamp);
+        entry.nonce = entry.nonce.max(reading.nonce);
     }
 }
 
@@ -67,10 +71,11 @@ fn current_timestamp() -> UnixTimestamp {
         .unwrap_or(*START_TS)
 }
 
-fn mock_signature(id: &str, value: u64) -> Vec<u8> {
+fn mock_signature(id: &str, value: u64, nonce: u64) -> Vec<u8> {
     let mut bytes = Vec::new();
     bytes.extend_from_slice(id.as_bytes());
     bytes.extend_from_slice(&value.to_le_bytes());
+    bytes.extend_from_slice(&nonce.to_le_bytes());
     bytes
 }
 
