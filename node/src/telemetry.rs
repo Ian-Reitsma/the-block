@@ -4,6 +4,7 @@ use crate::net;
 use crate::py::{PyError, PyResult};
 #[cfg(feature = "telemetry")]
 use crate::simple_db::names;
+use ad_market;
 #[cfg(feature = "telemetry")]
 use codec::{self, Codec, Direction};
 #[cfg(feature = "telemetry")]
@@ -2966,6 +2967,81 @@ pub static AD_READINESS_SKIPPED: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static AD_TARGETING_GATE_STATE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_targeting_gate_state",
+            "Current launch governor state for ad targeting gates (0=inactive,1=rehearsal)",
+        ),
+        &["tier"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad targeting gate state: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad targeting gate state: {e}"));
+    g
+});
+
+pub static AD_TARGETING_GATE_ENTER_STREAK: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_targeting_gate_enter_streak",
+            "Enter streak windows for ad targeting gates",
+        ),
+        &["tier"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad targeting enter streak: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad targeting enter streak: {e}"));
+    g
+});
+
+pub static AD_TARGETING_GATE_EXIT_STREAK: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_targeting_gate_exit_streak",
+            "Exit streak windows for ad targeting gates",
+        ),
+        &["tier"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad targeting exit streak: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad targeting exit streak: {e}"));
+    g
+});
+
+pub static AD_TARGETING_GATE_REQUIRED_STREAK: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_targeting_gate_required_streak",
+            "Required streak windows for ad targeting gates",
+        ),
+        &["tier"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad targeting required streak: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad targeting required streak: {e}"));
+    g
+});
+
+pub static AD_TARGETING_GATE_READY: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_targeting_gate_ready",
+            "Readiness evaluation result for ad targeting gates (1=ready)",
+        ),
+        &["tier"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad targeting gate ready: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad targeting gate ready: {e}"));
+    g
+});
+
 pub static AD_CONVERSION_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
@@ -3188,6 +3264,68 @@ pub static AD_MARKET_UTILIZATION_DELTA: Lazy<IntGaugeVec> = Lazy::new(|| {
 #[cfg(feature = "telemetry")]
 static AD_MARKET_UTILIZATION_LABELS: Lazy<Mutex<HashSet<(String, String, String)>>> =
     Lazy::new(|| Mutex::new(HashSet::new()));
+
+#[cfg(feature = "telemetry")]
+pub static AD_QUALITY_MULTIPLIER_PPM: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_quality_multiplier_ppm",
+            "Quality multiplier components in ppm (freshness/readiness/privacy/overall)",
+        ),
+        &["component"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad_quality_multiplier_ppm: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad_quality_multiplier_ppm: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_QUALITY_READINESS_STREAK_WINDOWS: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "ad_quality_readiness_streak_windows",
+        "Readiness streak windows used in quality adjustments",
+    )
+    .unwrap_or_else(|e| panic!("gauge ad_quality_readiness_streak_windows: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad_quality_readiness_streak_windows: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+pub static AD_QUALITY_FRESHNESS_SCORE_PPM: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "ad_quality_freshness_score_ppm",
+            "Weighted freshness histogram scores per presence bucket (ppm)",
+        ),
+        &["presence_bucket"],
+    )
+    .unwrap_or_else(|e| panic!("gauge ad_quality_freshness_score_ppm: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad_quality_freshness_score_ppm: {e}"));
+    g
+});
+
+#[cfg(feature = "telemetry")]
+static AD_QUALITY_FRESHNESS_LABELS: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+
+#[cfg(feature = "telemetry")]
+pub static AD_QUALITY_PRIVACY_SCORE_PPM: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "ad_quality_privacy_score_ppm",
+        "Privacy budget headroom after denials/cooldowns (ppm)",
+    )
+    .unwrap_or_else(|e| panic!("gauge ad_quality_privacy_score_ppm: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry ad_quality_privacy_score_ppm: {e}"));
+    g
+});
 
 #[cfg(feature = "telemetry")]
 pub static AD_BUDGET_CONFIG_VALUES: Lazy<GaugeVec> = Lazy::new(|| {
@@ -4791,6 +4929,170 @@ pub fn update_ad_market_utilization_metrics(
     #[cfg(not(feature = "telemetry"))]
     {
         let _ = cohorts;
+    }
+}
+
+pub fn update_ad_quality_metrics(signals: &[ad_market::QualitySignal]) {
+    #[cfg(feature = "telemetry")]
+    {
+        let count = signals.len() as u64;
+        if count == 0 {
+            let neutral = ad_market::QualitySignalComponents {
+                freshness_multiplier_ppm: 1_000_000,
+                readiness_multiplier_ppm: 1_000_000,
+                privacy_multiplier_ppm: 1_000_000,
+            };
+            update_ad_quality_components(&neutral, 1_000_000);
+            return;
+        }
+        let mut sum_freshness = 0u64;
+        let mut sum_readiness = 0u64;
+        let mut sum_privacy = 0u64;
+        let mut sum_overall = 0u64;
+        for signal in signals {
+            sum_freshness =
+                sum_freshness.saturating_add(signal.components.freshness_multiplier_ppm as u64);
+            sum_readiness =
+                sum_readiness.saturating_add(signal.components.readiness_multiplier_ppm as u64);
+            sum_privacy =
+                sum_privacy.saturating_add(signal.components.privacy_multiplier_ppm as u64);
+            sum_overall = sum_overall.saturating_add(signal.multiplier_ppm as u64);
+        }
+        let avg = |sum: u64| (sum / count).min(u64::from(u32::MAX)) as u32;
+        let components = ad_market::QualitySignalComponents {
+            freshness_multiplier_ppm: avg(sum_freshness),
+            readiness_multiplier_ppm: avg(sum_readiness),
+            privacy_multiplier_ppm: avg(sum_privacy),
+        };
+        let overall_ppm = avg(sum_overall);
+        update_ad_quality_components(&components, overall_ppm);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = signals;
+    }
+}
+
+pub fn update_ad_quality_components(
+    components: &ad_market::QualitySignalComponents,
+    overall_ppm: u32,
+) {
+    #[cfg(feature = "telemetry")]
+    {
+        let items = [
+            ("freshness", components.freshness_multiplier_ppm),
+            ("readiness", components.readiness_multiplier_ppm),
+            ("privacy", components.privacy_multiplier_ppm),
+            ("overall", overall_ppm),
+        ];
+        for (component, ppm) in items {
+            AD_QUALITY_MULTIPLIER_PPM
+                .ensure_handle_for_label_values(&[component])
+                .unwrap_or_else(|e| panic!("ad quality multiplier labels: {e}"))
+                .set(i64::from(ppm));
+        }
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (components, overall_ppm);
+    }
+}
+
+pub fn update_ad_quality_readiness_streak_windows(streak: u64) {
+    #[cfg(feature = "telemetry")]
+    {
+        AD_QUALITY_READINESS_STREAK_WINDOWS.set(streak as i64);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = streak;
+    }
+}
+
+pub fn update_ad_quality_freshness_scores(scores: &[(String, u32)]) {
+    #[cfg(feature = "telemetry")]
+    {
+        let mut next_labels: HashSet<String> = HashSet::new();
+        for (bucket, ppm) in scores {
+            AD_QUALITY_FRESHNESS_SCORE_PPM
+                .ensure_handle_for_label_values(&[bucket.as_str()])
+                .unwrap_or_else(|e| panic!("ad quality freshness labels: {e}"))
+                .set(i64::from(*ppm));
+            next_labels.insert(bucket.clone());
+        }
+        let mut active = AD_QUALITY_FRESHNESS_LABELS
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous: Vec<String> = active.iter().cloned().collect();
+        for label in previous {
+            if !next_labels.contains(&label) {
+                let _ = AD_QUALITY_FRESHNESS_SCORE_PPM.remove_label_values(&[label.as_str()]);
+            }
+        }
+        active.clear();
+        active.extend(next_labels);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = scores;
+    }
+}
+
+pub fn update_ad_quality_privacy_score_ppm(ppm: u32) {
+    #[cfg(feature = "telemetry")]
+    {
+        AD_QUALITY_PRIVACY_SCORE_PPM.set(i64::from(ppm));
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = ppm;
+    }
+}
+
+pub fn update_ad_targeting_gate_metrics(
+    tier: &str,
+    active: bool,
+    enter_streak: u64,
+    exit_streak: u64,
+    required_streak: u64,
+    enter_ok: bool,
+) {
+    #[cfg(feature = "telemetry")]
+    {
+        let labels = [tier];
+        let state = if active { 1 } else { 0 };
+        let ready = if enter_ok { 1 } else { 0 };
+        AD_TARGETING_GATE_STATE
+            .ensure_handle_for_label_values(&labels)
+            .unwrap_or_else(|e| panic!("ad targeting gate state labels: {e}"))
+            .set(state);
+        AD_TARGETING_GATE_ENTER_STREAK
+            .ensure_handle_for_label_values(&labels)
+            .unwrap_or_else(|e| panic!("ad targeting gate enter labels: {e}"))
+            .set(enter_streak as i64);
+        AD_TARGETING_GATE_EXIT_STREAK
+            .ensure_handle_for_label_values(&labels)
+            .unwrap_or_else(|e| panic!("ad targeting gate exit labels: {e}"))
+            .set(exit_streak as i64);
+        AD_TARGETING_GATE_REQUIRED_STREAK
+            .ensure_handle_for_label_values(&labels)
+            .unwrap_or_else(|e| panic!("ad targeting gate required labels: {e}"))
+            .set(required_streak as i64);
+        AD_TARGETING_GATE_READY
+            .ensure_handle_for_label_values(&labels)
+            .unwrap_or_else(|e| panic!("ad targeting gate ready labels: {e}"))
+            .set(ready);
+    }
+    #[cfg(not(feature = "telemetry"))]
+    {
+        let _ = (
+            tier,
+            active,
+            enter_streak,
+            exit_streak,
+            required_streak,
+            enter_ok,
+        );
     }
 }
 

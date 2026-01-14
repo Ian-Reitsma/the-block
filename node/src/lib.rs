@@ -66,6 +66,7 @@ use std::time::Instant;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use wallet::{remote_signer::RemoteSigner as WalletRemoteSigner, WalletSigner};
 pub mod ad_policy_snapshot;
+pub mod ad_quality;
 pub mod ad_readiness;
 pub mod config;
 pub mod dkg;
@@ -1860,7 +1861,9 @@ impl Blockchain {
             clearing_price_usd_micros: settlement.clearing_price_usd_micros,
             mesh_payload_digest: settlement.mesh_payload_digest.clone(),
             mesh_payload_bytes: mesh_bytes as u64,
-            conversions: 0,
+            conversions: settlement.conversions,
+            claim_routes: settlement.claim_routes.clone(),
+            device_links: settlement.device_links.clone(),
         };
         self.pending_ad_settlements.push(record);
 
@@ -1892,6 +1895,31 @@ fn liquidity_address() -> &'static str {
     "0004:liquidity:pool"
 }
 
+fn resolved_claim_address(
+    routes: &HashMap<String, String>,
+    primary: &str,
+    fallbacks: &[&str],
+    default: String,
+) -> String {
+    for key in std::iter::once(primary).chain(fallbacks.iter().copied()) {
+        if let Some(addr) = routes.get(key) {
+            if let Some(valid) = normalized_claim_address(addr) {
+                return valid;
+            }
+        }
+    }
+    default
+}
+
+fn normalized_claim_address(address: &str) -> Option<String> {
+    let trimmed = address.trim();
+    if trimmed.is_empty() || trimmed.len() > 256 {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AdSettlementRecord {
     pub campaign_id: String,
@@ -1916,6 +1944,8 @@ pub struct AdSettlementRecord {
     pub mesh_payload_digest: Option<String>,
     pub mesh_payload_bytes: u64,
     pub conversions: u32,
+    pub claim_routes: HashMap<String, String>,
+    pub device_links: Vec<ad_market::DeviceLinkOptIn>,
 }
 
 fn distribute_scalar(total: u64, weights: &[(usize, u64)]) -> Vec<u64> {
@@ -4639,20 +4669,47 @@ impl Blockchain {
         let mut ad_last_price_usd_micros = 0u64;
         let mut ad_settlement_count = 0u64;
         for record in &ad_settlements {
+            let claim_routes: HashMap<String, String> = record
+                .claim_routes
+                .iter()
+                .filter_map(|(role, addr)| {
+                    normalized_claim_address(addr).map(|normalized| (role.clone(), normalized))
+                })
+                .collect();
+            let viewer_addr =
+                resolved_claim_address(&claim_routes, "viewer", &[], record.viewer_addr.clone());
+            let host_addr = resolved_claim_address(
+                &claim_routes,
+                "host",
+                &["publisher"],
+                record.host_addr.clone(),
+            );
+            let hardware_addr = resolved_claim_address(
+                &claim_routes,
+                "hardware",
+                &[],
+                record.hardware_addr.clone(),
+            );
+            let verifier_addr = resolved_claim_address(
+                &claim_routes,
+                "verifier",
+                &[],
+                record.verifier_addr.clone(),
+            );
             if record.viewer > 0 {
-                viewer_payouts.push((record.viewer_addr.clone(), record.viewer));
+                viewer_payouts.push((viewer_addr.clone(), record.viewer));
                 ad_viewer_total = ad_viewer_total.saturating_add(record.viewer);
             }
             if record.host > 0 {
-                host_payouts.push((record.host_addr.clone(), record.host));
+                host_payouts.push((host_addr.clone(), record.host));
                 ad_host_total = ad_host_total.saturating_add(record.host);
             }
             if record.hardware > 0 {
-                hardware_payouts.push((record.hardware_addr.clone(), record.hardware));
+                hardware_payouts.push((hardware_addr.clone(), record.hardware));
                 ad_hardware_total = ad_hardware_total.saturating_add(record.hardware);
             }
             if record.verifier > 0 {
-                verifier_payouts.push((record.verifier_addr.clone(), record.verifier));
+                verifier_payouts.push((verifier_addr.clone(), record.verifier));
                 ad_verifier_total = ad_verifier_total.saturating_add(record.verifier);
             }
             ad_liquidity_total = ad_liquidity_total.saturating_add(record.liquidity);
@@ -4662,11 +4719,24 @@ impl Blockchain {
             ad_settlement_count = ad_settlement_count.saturating_add(1);
             block_receipts.push(Receipt::Ad(AdReceipt {
                 campaign_id: record.campaign_id.clone(),
-                publisher: record.host_addr.clone(),
+                creative_id: record.creative_id.clone(),
+                publisher: host_addr,
                 impressions: record.impressions,
                 spend: record.total,
                 block_height: index,
                 conversions: record.conversions,
+                claim_routes,
+                role_breakdown: Some(crate::receipts::AdRoleBreakdown {
+                    viewer: record.viewer,
+                    host: record.host,
+                    hardware: record.hardware,
+                    verifier: record.verifier,
+                    liquidity: record.liquidity,
+                    miner: record.miner,
+                    price_usd_micros: record.price_usd_micros,
+                    clearing_price_usd_micros: record.clearing_price_usd_micros,
+                }),
+                device_links: record.device_links.clone(),
                 publisher_signature: vec![],
                 signature_nonce: index,
             }));

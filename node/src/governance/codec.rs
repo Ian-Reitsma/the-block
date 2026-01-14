@@ -81,6 +81,10 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::AdPercentileBuckets => 59,
         ParamKey::AdRehearsalEnabled => 60,
         ParamKey::AdRehearsalStabilityWindows => 61,
+        ParamKey::AdRehearsalContextualEnabled => 107,
+        ParamKey::AdRehearsalContextualStabilityWindows => 108,
+        ParamKey::AdRehearsalPresenceEnabled => 109,
+        ParamKey::AdRehearsalPresenceStabilityWindows => 110,
         ParamKey::EnergyMinStake => 62,
         ParamKey::EnergyOracleTimeoutBlocks => 63,
         ParamKey::EnergySlashingRateBps => 64,
@@ -165,6 +169,10 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         59 => ParamKey::AdPercentileBuckets,
         60 => ParamKey::AdRehearsalEnabled,
         61 => ParamKey::AdRehearsalStabilityWindows,
+        107 => ParamKey::AdRehearsalContextualEnabled,
+        108 => ParamKey::AdRehearsalContextualStabilityWindows,
+        109 => ParamKey::AdRehearsalPresenceEnabled,
+        110 => ParamKey::AdRehearsalPresenceStabilityWindows,
         62 => ParamKey::EnergyMinStake,
         63 => ParamKey::EnergyOracleTimeoutBlocks,
         64 => ParamKey::EnergySlashingRateBps,
@@ -866,6 +874,10 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::AdPercentileBuckets => "AdPercentileBuckets",
         ParamKey::AdRehearsalEnabled => "AdRehearsalEnabled",
         ParamKey::AdRehearsalStabilityWindows => "AdRehearsalStabilityWindows",
+        ParamKey::AdRehearsalContextualEnabled => "AdRehearsalContextualEnabled",
+        ParamKey::AdRehearsalContextualStabilityWindows => "AdRehearsalContextualStabilityWindows",
+        ParamKey::AdRehearsalPresenceEnabled => "AdRehearsalPresenceEnabled",
+        ParamKey::AdRehearsalPresenceStabilityWindows => "AdRehearsalPresenceStabilityWindows",
         ParamKey::EnergyMinStake => "EnergyMinStake",
         ParamKey::EnergyOracleTimeoutBlocks => "EnergyOracleTimeoutBlocks",
         ParamKey::EnergySlashingRateBps => "EnergySlashingRateBps",
@@ -950,6 +962,12 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "AdPercentileBuckets" => Ok(ParamKey::AdPercentileBuckets),
         "AdRehearsalEnabled" => Ok(ParamKey::AdRehearsalEnabled),
         "AdRehearsalStabilityWindows" => Ok(ParamKey::AdRehearsalStabilityWindows),
+        "AdRehearsalContextualEnabled" => Ok(ParamKey::AdRehearsalContextualEnabled),
+        "AdRehearsalContextualStabilityWindows" => {
+            Ok(ParamKey::AdRehearsalContextualStabilityWindows)
+        }
+        "AdRehearsalPresenceEnabled" => Ok(ParamKey::AdRehearsalPresenceEnabled),
+        "AdRehearsalPresenceStabilityWindows" => Ok(ParamKey::AdRehearsalPresenceStabilityWindows),
         "EnergyMinStake" => Ok(ParamKey::EnergyMinStake),
         "EnergyOracleTimeoutBlocks" => Ok(ParamKey::EnergyOracleTimeoutBlocks),
         "EnergySlashingRateBps" => Ok(ParamKey::EnergySlashingRateBps),
@@ -985,6 +1003,10 @@ mod tests {
         let keys = [
             ParamKey::AdRehearsalEnabled,
             ParamKey::AdRehearsalStabilityWindows,
+            ParamKey::AdRehearsalContextualEnabled,
+            ParamKey::AdRehearsalContextualStabilityWindows,
+            ParamKey::AdRehearsalPresenceEnabled,
+            ParamKey::AdRehearsalPresenceStabilityWindows,
         ];
         for key in keys {
             let tag = param_key_to_tag(key);

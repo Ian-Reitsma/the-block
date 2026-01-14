@@ -19,14 +19,14 @@ use std::{
     collections::HashMap,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex, RwLock},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use sys::signals::{Signals, SIGHUP};
 
 use crate::web::rate_limit::RateLimitFilter;
 use crate::{
-    ad_readiness::AdReadinessHandle, net, range_boost, range_boost::RangeBoost, service_badge,
-    storage::pipeline, vm::wasm, ReadAck,
+    ad_quality, ad_readiness::AdReadinessHandle, net, range_boost, range_boost::RangeBoost,
+    service_badge, storage::pipeline, vm::wasm, ReadAck,
 };
 use foundation_serialization::{binary, json};
 use httpd::{
@@ -644,6 +644,39 @@ fn build_read_ack(
     }
 }
 
+fn cohort_snapshot_from_context(ctx: &ImpressionContext) -> ad_market::CohortKeySnapshot {
+    ad_market::CohortKeySnapshot {
+        domain: ctx.domain.clone(),
+        provider: ctx.provider.clone(),
+        badges: ctx.badges.clone(),
+        domain_tier: ctx.domain_tier,
+        domain_owner: ctx.domain_owner.clone(),
+        interest_tags: ctx.interest_tags.clone(),
+        presence_bucket: ctx.presence_bucket.clone(),
+        selectors_version: ctx.selectors_version,
+    }
+}
+
+fn refresh_readiness_utilization(handle: &AdReadinessHandle, market: &MarketplaceHandle) {
+    const UTILIZATION_REFRESH_SECS: u64 = 60;
+    let snapshot = handle.snapshot();
+    let last_updated = snapshot
+        .utilization_summary
+        .as_ref()
+        .map(|summary| summary.last_updated)
+        .unwrap_or(0);
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if last_updated == 0 || now_secs.saturating_sub(last_updated) >= UTILIZATION_REFRESH_SECS {
+        let oracle = market.oracle();
+        let cohorts = market.cohort_prices();
+        handle.record_utilization(&cohorts, oracle.price_usd_micros);
+        market.recompute_distribution_from_utilization();
+    }
+}
+
 fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
     let market = match &state.market {
         Some(handle) => handle,
@@ -721,6 +754,34 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         mesh: mesh_context,
         ..ImpressionContext::default()
     };
+    let readiness_snapshot = state.readiness.as_ref().map(|handle| {
+        refresh_readiness_utilization(handle, market);
+        handle.snapshot()
+    });
+    let privacy_snapshot = market.privacy_budget_snapshot();
+    let quality_config = market.quality_signal_config();
+    let cohort_snapshot = cohort_snapshot_from_context(&ctx);
+    let report = ad_quality::quality_signal_for_cohort(
+        &quality_config,
+        readiness_snapshot.as_ref(),
+        Some(&privacy_snapshot),
+        &cohort_snapshot,
+    );
+    market.update_quality_signals(vec![report.signal.clone()]);
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::update_ad_quality_components(
+            &report.signal.components,
+            report.signal.multiplier_ppm,
+        );
+        crate::telemetry::update_ad_quality_readiness_streak_windows(
+            report.readiness_streak_windows,
+        );
+        crate::telemetry::update_ad_quality_privacy_score_ppm(report.privacy_score_ppm);
+        if let Some((bucket, ppm)) = report.freshness_score_ppm {
+            crate::telemetry::update_ad_quality_freshness_scores(&[(bucket, ppm)]);
+        }
+    }
     let key = ReservationKey {
         manifest: ack.manifest,
         path_hash: ack.path_hash,
@@ -1141,6 +1202,64 @@ mod tests {
         fn cost_medians_usd_micros(&self) -> (u64, u64, u64) {
             // Stub implementation - return default values for tests
             (0, 0, 0)
+        }
+
+        fn badge_guard_decision(
+            &self,
+            _badges: &[String],
+            _soft_intent: Option<&ad_market::BadgeSoftIntentContext>,
+        ) -> ad_market::BadgeDecision {
+            ad_market::BadgeDecision::Allowed {
+                required: Vec::new(),
+                proof: None,
+            }
+        }
+
+        fn update_quality_signals(&self, _signals: Vec<ad_market::QualitySignal>) {}
+
+        fn quality_signal_config(&self) -> ad_market::QualitySignalConfig {
+            ad_market::MarketplaceConfig::default().quality_signal_config()
+        }
+
+        fn privacy_budget_snapshot(&self) -> ad_market::PrivacyBudgetSnapshot {
+            ad_market::PrivacyBudgetSnapshot::default()
+        }
+
+        fn preview_privacy_budget(
+            &self,
+            _badges: &[String],
+            _population_hint: Option<u64>,
+        ) -> ad_market::PrivacyBudgetPreview {
+            ad_market::PrivacyBudgetPreview {
+                decision: ad_market::PrivacyBudgetDecision::Allowed,
+                remaining_ppm: 1_000_000,
+                denied_ppm: 0,
+                cooldown_remaining: 0,
+            }
+        }
+
+        fn authorize_privacy_budget(
+            &self,
+            _badges: &[String],
+            _population_hint: Option<u64>,
+        ) -> ad_market::PrivacyBudgetDecision {
+            ad_market::PrivacyBudgetDecision::Allowed
+        }
+
+        fn register_claim_route(
+            &self,
+            _domain: &str,
+            _role: &str,
+            _address: &str,
+        ) -> Result<(), ad_market::MarketplaceError> {
+            Ok(())
+        }
+
+        fn claim_routes(
+            &self,
+            _cohort: &ad_market::CohortKeySnapshot,
+        ) -> std::collections::HashMap<String, String> {
+            std::collections::HashMap::new()
         }
     }
 

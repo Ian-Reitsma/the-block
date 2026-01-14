@@ -1,10 +1,12 @@
 #![forbid(unsafe_code)]
 
+use crate::ad_quality;
 use crate::ad_readiness::AdReadinessHandle;
 use ad_market::{
-    BudgetBrokerConfig, BudgetBrokerSnapshot, Campaign, CampaignBudgetSnapshot,
+    BadgeDecision, BudgetBrokerConfig, BudgetBrokerSnapshot, Campaign, CampaignBudgetSnapshot,
     CohortBudgetSnapshot, CohortPriceSnapshot, ConversionEvent, DistributionPolicy, DomainTier,
-    MarketplaceHandle, PresenceBucketRef, PresenceKind, UpliftHoldoutAssignment,
+    MarketplaceHandle, PresenceBucketRef, PresenceKind, PrivacyBudgetDecision,
+    PrivacyBudgetSnapshot, QualitySignal, QualitySignalConfig, UpliftHoldoutAssignment,
 };
 use concurrency::Lazy;
 use crypto_suite::{encoding::hex, hashing::blake3, ConstantTimeEq};
@@ -69,6 +71,22 @@ fn parse_assignment(value: &Value) -> Result<UpliftHoldoutAssignment, RpcError> 
     })
 }
 
+fn parse_device_link(value: &Value) -> Result<ad_market::DeviceLinkOptIn, RpcError> {
+    let obj = value
+        .as_object()
+        .ok_or_else(|| invalid_params("device_link"))?;
+    let device_hash = obj
+        .get("device_hash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("device_link.device_hash"))?
+        .to_string();
+    let opt_in = obj.get("opt_in").and_then(Value::as_bool).unwrap_or(true);
+    Ok(ad_market::DeviceLinkOptIn {
+        device_hash,
+        opt_in,
+    })
+}
+
 fn parse_conversion_params(params: &Value) -> Result<(ConversionEvent, String), RpcError> {
     let obj = params
         .as_object()
@@ -92,12 +110,14 @@ fn parse_conversion_params(params: &Value) -> Result<(ConversionEvent, String), 
     let value_usd_micros = parse_optional_u64(obj.get("value_usd_micros"), "value_usd_micros")?;
     let occurred_at_micros =
         parse_optional_u64(obj.get("occurred_at_micros"), "occurred_at_micros")?;
+    let device_link = obj.get("device_link").map(parse_device_link).transpose()?;
     let event = ConversionEvent {
         campaign_id,
         creative_id,
         assignment,
         value_usd_micros,
         occurred_at_micros,
+        device_link,
     };
     Ok((event, advertiser_account))
 }
@@ -786,11 +806,45 @@ pub fn readiness(
         let empty: Vec<CohortPriceSnapshot> = Vec::new();
         handle.record_utilization(&empty, 0);
     }
-    let snapshot = handle.snapshot();
+    let mut snapshot = handle.snapshot();
+    let mut privacy_snapshot = None;
+    let mut quality_config = None;
+    if let Some(market_handle) = market {
+        privacy_snapshot = Some(market_handle.privacy_budget_snapshot());
+        quality_config = Some(market_handle.quality_signal_config());
+        if let Some(segment) = snapshot.segment_readiness.as_mut() {
+            if let Some(ref privacy) = privacy_snapshot {
+                segment.privacy_budget = Some(privacy_status_from_snapshot(privacy));
+            }
+        }
+        let cohorts = market_handle.cohort_prices();
+        if let Some(ref config) = quality_config {
+            let signals = quality_signals_from_readiness(
+                config,
+                &cohorts,
+                &snapshot,
+                privacy_snapshot.as_ref(),
+            );
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::update_ad_quality_metrics(&signals);
+            market_handle.update_quality_signals(signals);
+        }
+    }
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::update_ad_market_utilization_metrics(&snapshot.cohort_utilization);
         crate::telemetry::update_ad_segment_ready_metrics(snapshot.segment_readiness.as_ref());
+        if let Some(ref config) = quality_config {
+            crate::telemetry::update_ad_quality_readiness_streak_windows(
+                snapshot.ready_streak_windows,
+            );
+            if let Some(ref privacy) = privacy_snapshot {
+                let privacy_ppm = ad_quality::privacy_score_ppm(Some(privacy));
+                crate::telemetry::update_ad_quality_privacy_score_ppm(privacy_ppm);
+            }
+            let freshness_scores = ad_quality::freshness_scores_for_snapshot(config, &snapshot);
+            crate::telemetry::update_ad_quality_freshness_scores(&freshness_scores);
+        }
     }
     let mut root = Map::new();
     root.insert("status".into(), Value::String("ok".into()));
@@ -886,17 +940,58 @@ pub fn readiness(
         Value::Number(Number::from(snapshot.ready_streak_windows)),
     );
     // Rehearsal fields from governance params snapshot
-    let (rehearsal_enabled, rehearsal_windows) = {
+    let (
+        rehearsal_enabled,
+        rehearsal_windows,
+        contextual_enabled,
+        contextual_windows,
+        presence_enabled,
+        presence_windows,
+    ) = {
         let guard = super::GOV_PARAMS.lock().unwrap_or_else(|e| e.into_inner());
+        let legacy_enabled = guard.ad_rehearsal_enabled > 0;
+        let legacy_windows = guard.ad_rehearsal_stability_windows.max(0) as u64;
+        let contextual_enabled = if guard.ad_rehearsal_contextual_enabled != 0 {
+            guard.ad_rehearsal_contextual_enabled > 0
+        } else {
+            legacy_enabled
+        };
+        let contextual_windows = if guard.ad_rehearsal_contextual_stability_windows > 0 {
+            guard.ad_rehearsal_contextual_stability_windows.max(0) as u64
+        } else {
+            legacy_windows
+        };
+        let presence_enabled = guard.ad_rehearsal_presence_enabled > 0;
+        let presence_windows = guard.ad_rehearsal_presence_stability_windows.max(0) as u64;
         (
-            guard.ad_rehearsal_enabled > 0,
-            guard.ad_rehearsal_stability_windows.max(0) as u64,
+            legacy_enabled,
+            legacy_windows,
+            contextual_enabled,
+            contextual_windows,
+            presence_enabled,
+            presence_windows,
         )
     };
     root.insert("rehearsal_enabled".into(), Value::Bool(rehearsal_enabled));
     root.insert(
         "rehearsal_required_windows".into(),
         Value::Number(Number::from(rehearsal_windows)),
+    );
+    root.insert(
+        "rehearsal_contextual_enabled".into(),
+        Value::Bool(contextual_enabled),
+    );
+    root.insert(
+        "rehearsal_contextual_required_windows".into(),
+        Value::Number(Number::from(contextual_windows)),
+    );
+    root.insert(
+        "rehearsal_presence_enabled".into(),
+        Value::Bool(presence_enabled),
+    );
+    root.insert(
+        "rehearsal_presence_required_windows".into(),
+        Value::Number(Number::from(presence_windows)),
     );
     root.insert(
         "total_usd_micros".into(),
@@ -1122,25 +1217,18 @@ fn distribution_to_value(policy: DistributionPolicy) -> Value {
 
 // Error codes for presence/privacy operations
 const ERR_INVALID_PRESENCE_BUCKET: i32 = -32034;
-const ERR_FORBIDDEN_SELECTOR_COMBO: i32 = -32035;
 const ERR_UNKNOWN_SELECTOR: i32 = -32036;
 const ERR_INSUFFICIENT_PRIVACY_BUDGET: i32 = -32037;
 #[allow(dead_code)]
 const ERR_HOLDOUT_OVERLAP: i32 = -32038;
 #[allow(dead_code)]
 const ERR_SELECTOR_WEIGHT_MISMATCH: i32 = -32039;
+const ERR_INVALID_ROLE: i32 = -32040;
 
 fn err_invalid_presence_bucket() -> RpcError {
     RpcError::new(
         ERR_INVALID_PRESENCE_BUCKET,
         "invalid or expired presence bucket",
-    )
-}
-
-fn err_forbidden_selector_combo() -> RpcError {
-    RpcError::new(
-        ERR_FORBIDDEN_SELECTOR_COMBO,
-        "selector combination violates privacy policy",
     )
 }
 
@@ -1154,6 +1242,10 @@ fn err_insufficient_privacy_budget() -> RpcError {
         ERR_INSUFFICIENT_PRIVACY_BUDGET,
         "insufficient privacy budget for request",
     )
+}
+
+fn err_invalid_role() -> RpcError {
+    RpcError::new(ERR_INVALID_ROLE, "invalid payout role")
 }
 
 /// Parse optional domain tier filter from request params.
@@ -1220,6 +1312,8 @@ fn presence_cohort_summary_to_value(
     bucket: &PresenceBucketRef,
     ready_slots: u64,
     privacy_guardrail: &str,
+    selector_prices: Vec<Value>,
+    histogram: Option<&crate::ad_readiness::FreshnessHistogramPpm>,
 ) -> Value {
     let mut map = Map::new();
     map.insert("bucket".into(), presence_bucket_to_value(bucket));
@@ -1231,15 +1325,141 @@ fn presence_cohort_summary_to_value(
         "privacy_guardrail".into(),
         Value::String(privacy_guardrail.into()),
     );
-    map.insert("selector_prices".into(), Value::Array(Vec::new()));
-    // Freshness histogram (placeholder)
+    map.insert("selector_prices".into(), Value::Array(selector_prices));
     let mut freshness = Map::new();
-    freshness.insert("under_1h_ppm".into(), Value::Number(Number::from(0)));
-    freshness.insert("1h_to_6h_ppm".into(), Value::Number(Number::from(0)));
-    freshness.insert("6h_to_24h_ppm".into(), Value::Number(Number::from(0)));
-    freshness.insert("over_24h_ppm".into(), Value::Number(Number::from(0)));
+    if let Some(h) = histogram {
+        freshness.insert(
+            "under_1h_ppm".into(),
+            Value::Number(Number::from(h.under_1h_ppm)),
+        );
+        freshness.insert(
+            "1h_to_6h_ppm".into(),
+            Value::Number(Number::from(h.hours_1_to_6_ppm)),
+        );
+        freshness.insert(
+            "6h_to_24h_ppm".into(),
+            Value::Number(Number::from(h.hours_6_to_24_ppm)),
+        );
+        freshness.insert(
+            "over_24h_ppm".into(),
+            Value::Number(Number::from(h.over_24h_ppm)),
+        );
+    } else {
+        freshness.insert("under_1h_ppm".into(), Value::Number(Number::from(0)));
+        freshness.insert("1h_to_6h_ppm".into(), Value::Number(Number::from(0)));
+        freshness.insert("6h_to_24h_ppm".into(), Value::Number(Number::from(0)));
+        freshness.insert("over_24h_ppm".into(), Value::Number(Number::from(0)));
+    }
     map.insert("freshness_histogram".into(), Value::Object(freshness));
     Value::Object(map)
+}
+
+fn selector_id_for_cohort(cohort: &CohortPriceSnapshot) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(cohort.domain.as_bytes());
+    hasher.update(cohort.domain_tier.as_str().as_bytes());
+    let mut tags = cohort.interest_tags.clone();
+    tags.sort();
+    for tag in tags {
+        hasher.update(tag.as_bytes());
+    }
+    if let Some(bucket) = &cohort.presence_bucket {
+        hasher.update(bucket.bucket_id.as_bytes());
+    }
+    hasher.update(&cohort.selectors_version.to_le_bytes());
+    hex::encode(hasher.finalize().as_bytes())
+}
+
+fn selector_bid_spec_value(
+    selector_id: String,
+    clearing_price_usd_micros: u64,
+    slot_cap: u64,
+) -> Value {
+    let mut map = Map::new();
+    map.insert("selector_id".into(), Value::String(selector_id));
+    map.insert(
+        "clearing_price_usd_micros".into(),
+        Value::Number(Number::from(clearing_price_usd_micros)),
+    );
+    map.insert(
+        "shading_factor_bps".into(),
+        Value::Number(Number::from(0u64)),
+    );
+    map.insert("slot_cap".into(), Value::Number(Number::from(slot_cap)));
+    map.insert(
+        "max_pacing_ppm".into(),
+        Value::Number(Number::from(1_000_000u64)),
+    );
+    Value::Object(map)
+}
+
+#[derive(Clone, Debug)]
+struct SelectorOverride {
+    clearing_price_usd_micros: u64,
+    slot_cap: Option<u64>,
+    shading_factor_bps: Option<u64>,
+    max_pacing_ppm: Option<u64>,
+}
+
+fn parse_selector_budget(
+    value: Option<&Value>,
+) -> Result<std::collections::HashMap<String, SelectorOverride>, RpcError> {
+    let mut overrides = std::collections::HashMap::new();
+    let Some(value) = value else {
+        return Ok(overrides);
+    };
+    let items = value
+        .as_array()
+        .ok_or_else(|| invalid_params("selector_budget"))?;
+    for item in items {
+        let obj = item
+            .as_object()
+            .ok_or_else(|| invalid_params("selector_budget"))?;
+        let selector_id = obj
+            .get("selector_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| invalid_params("selector_budget.selector_id"))?;
+        let clearing_price_usd_micros = obj
+            .get("clearing_price_usd_micros")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| invalid_params("selector_budget.clearing_price_usd_micros"))?;
+        let slot_cap = obj.get("slot_cap").and_then(Value::as_u64);
+        let shading_factor_bps = obj.get("shading_factor_bps").and_then(Value::as_u64);
+        let max_pacing_ppm = obj.get("max_pacing_ppm").and_then(Value::as_u64);
+        overrides.insert(
+            selector_id.to_string(),
+            SelectorOverride {
+                clearing_price_usd_micros,
+                slot_cap,
+                shading_factor_bps,
+                max_pacing_ppm,
+            },
+        );
+    }
+    Ok(overrides)
+}
+
+fn selector_bid_specs_for_cohorts(cohorts: &[&CohortPriceSnapshot], slot_cap: u64) -> Vec<Value> {
+    if cohorts.is_empty() {
+        return Vec::new();
+    }
+    let mut entries: Vec<(String, &CohortPriceSnapshot)> = cohorts
+        .iter()
+        .map(|cohort| (selector_id_for_cohort(cohort), *cohort))
+        .collect();
+    entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+    let selector_count = entries.len() as u64;
+    let base = slot_cap / selector_count;
+    let remainder = slot_cap % selector_count;
+
+    entries
+        .iter()
+        .enumerate()
+        .map(|(idx, (selector_id, cohort))| {
+            let cap = base + if (idx as u64) < remainder { 1 } else { 0 };
+            selector_bid_spec_value(selector_id.clone(), cohort.price_per_mib_usd_micros, cap)
+        })
+        .collect()
 }
 
 /// List presence cohorts available for targeting.
@@ -1250,8 +1470,9 @@ fn presence_cohort_summary_to_value(
 pub fn list_presence_cohorts(
     market: Option<&MarketplaceHandle>,
     params: &Value,
+    readiness: Option<&AdReadinessHandle>,
 ) -> Result<Value, RpcError> {
-    let Some(_handle) = market else {
+    let Some(handle) = market else {
         return Err(RpcError::new(-32603, "ad market disabled"));
     };
 
@@ -1268,7 +1489,10 @@ pub fn list_presence_cohorts(
         .get("min_confidence_bps")
         .and_then(Value::as_u64)
         .map(|v| v.min(10000) as u16);
-    let _interest_tag = obj.get("interest_tag").and_then(Value::as_str);
+    let interest_tag = obj
+        .get("interest_tag")
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
     let beacon_id = obj
         .get("beacon_id")
         .and_then(Value::as_str)
@@ -1291,71 +1515,148 @@ pub fn list_presence_cohorts(
         .map(|d| d.as_micros() as u64)
         .unwrap_or(0);
 
+    // Collect readiness snapshot for freshness/ready slots.
+    let readiness_snapshot = readiness.map(|h| h.snapshot());
+    let presence_readiness = readiness_snapshot
+        .as_ref()
+        .and_then(|snap| snap.segment_readiness.as_ref())
+        .map(|seg| &seg.presence_buckets);
     // Collect presence cohorts from the market
     // NOTE: In full implementation, this would query a dedicated presence store.
     // For now, we extract presence buckets from cohort prices.
-    let cohort_prices = _handle.cohort_prices();
-    let mut cohorts: Vec<Value> = Vec::new();
-    let mut seen_buckets: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let denied_count = 0u64;
+    let cohort_prices = handle.cohort_prices();
+    let privacy_snapshot = handle.privacy_budget_snapshot();
+    let mut filtered: Vec<&CohortPriceSnapshot> = Vec::new();
 
-    for cohort in cohort_prices {
+    for cohort in &cohort_prices {
+        let Some(ref bucket) = cohort.presence_bucket else {
+            continue;
+        };
+        if let Some(ref r) = region {
+            if bucket.region.as_ref() != Some(r) {
+                continue;
+            }
+        }
+        if let Some(ref dt) = domain_tier {
+            if &cohort.domain_tier != dt {
+                continue;
+            }
+        }
+        if let Some(ref tag) = interest_tag {
+            if !cohort.interest_tags.iter().any(|t| t == tag) {
+                continue;
+            }
+        }
+        if let Some(min_conf) = min_confidence_bps {
+            if bucket.confidence_bps < min_conf {
+                continue;
+            }
+        }
+        if let Some(ref b) = beacon_id {
+            // Beacon filtering not directly available on bucket ref
+            if !bucket.bucket_id.contains(b) {
+                continue;
+            }
+        }
+        if let Some(ref k) = kind {
+            if &bucket.kind != k {
+                continue;
+            }
+        }
+        if !include_expired {
+            if let Some(expires_at) = bucket.expires_at_micros {
+                if expires_at < now_micros {
+                    continue;
+                }
+            }
+        }
+        filtered.push(cohort);
+    }
+
+    let mut bucket_map: std::collections::HashMap<String, Vec<&CohortPriceSnapshot>> =
+        std::collections::HashMap::new();
+    for cohort in filtered {
+        if let Some(bucket) = cohort.presence_bucket.as_ref() {
+            bucket_map
+                .entry(bucket.bucket_id.clone())
+                .or_default()
+                .push(cohort);
+        }
+    }
+
+    let mut bucket_ids: Vec<String> = bucket_map.keys().cloned().collect();
+    bucket_ids.sort();
+    let mut cohorts: Vec<Value> = Vec::new();
+    let mut denied_count = 0u64;
+
+    for bucket_id in bucket_ids {
         if cohorts.len() >= limit {
             break;
         }
-        if let Some(ref bucket) = cohort.presence_bucket {
-            // Dedup by bucket_id
-            if seen_buckets.contains(&bucket.bucket_id) {
-                continue;
-            }
-            seen_buckets.insert(bucket.bucket_id.clone());
+        let bucket_cohorts = match bucket_map.get(&bucket_id) {
+            Some(values) if !values.is_empty() => values,
+            _ => continue,
+        };
+        let bucket = match bucket_cohorts[0].presence_bucket.as_ref() {
+            Some(bucket) => bucket,
+            None => continue,
+        };
+        let readiness_entry = presence_readiness.and_then(|map| map.get(&bucket_id));
+        let ready_slots_raw = readiness_entry
+            .map(|entry| entry.ready_slots)
+            .unwrap_or(0u64);
+        let hist = readiness_entry.map(|entry| &entry.freshness_histogram);
 
-            // Apply filters
-            if let Some(ref r) = region {
-                if bucket.region.as_ref() != Some(r) {
-                    continue;
-                }
+        let mut privacy_guardrail = "ok";
+        for cohort in bucket_cohorts {
+            if matches!(
+                handle.badge_guard_decision(&cohort.badges, None),
+                BadgeDecision::Blocked
+            ) {
+                privacy_guardrail = "k_anonymity_redacted";
+                denied_count = denied_count.saturating_add(1);
+                break;
             }
-            if let Some(ref _dt) = domain_tier {
-                // Domain tier filtering would require cohort key inspection
-                // Placeholder: skip if we can't verify
-            }
-            if let Some(min_conf) = min_confidence_bps {
-                if bucket.confidence_bps < min_conf {
-                    continue;
-                }
-            }
-            if let Some(ref b) = beacon_id {
-                // Beacon filtering not directly available on bucket ref
-                if !bucket.bucket_id.contains(b) {
-                    continue;
-                }
-            }
-            if let Some(ref k) = kind {
-                if &bucket.kind != k {
-                    continue;
-                }
-            }
-            // Check expiry
-            if !include_expired {
-                if let Some(expires_at) = bucket.expires_at_micros {
-                    if expires_at < now_micros {
-                        continue;
-                    }
-                }
-            }
-
-            // Privacy guardrail check (placeholder for k-anonymity)
-            // In full implementation, check against PrivacyBudgetManager
-            let privacy_guardrail = "ok";
-            let ready_slots = 0u64; // Would come from readiness snapshot
-
-            cohorts.push(presence_cohort_summary_to_value(
-                bucket,
-                ready_slots,
-                privacy_guardrail,
-            ));
         }
+
+        if privacy_guardrail == "ok" {
+            let mut privacy_badges: Vec<String> = bucket_cohorts
+                .iter()
+                .flat_map(|cohort| cohort.badges.clone())
+                .collect();
+            privacy_badges.push(format!("presence:{}", bucket.kind.as_str()));
+            privacy_badges.sort();
+            privacy_badges.dedup();
+            let preview = handle.preview_privacy_budget(
+                &privacy_badges,
+                if ready_slots_raw > 0 {
+                    Some(ready_slots_raw)
+                } else {
+                    None
+                },
+            );
+            privacy_guardrail = match preview.decision {
+                PrivacyBudgetDecision::Allowed => "ok",
+                PrivacyBudgetDecision::Cooling { .. } => "cooldown",
+                PrivacyBudgetDecision::Denied { .. } => "budget_exhausted",
+            };
+        }
+
+        let allow_details = privacy_guardrail == "ok";
+        let ready_slots = if allow_details { ready_slots_raw } else { 0 };
+        let selector_prices = if allow_details {
+            selector_bid_specs_for_cohorts(bucket_cohorts, ready_slots_raw)
+        } else {
+            Vec::new()
+        };
+
+        cohorts.push(presence_cohort_summary_to_value(
+            bucket,
+            ready_slots,
+            privacy_guardrail,
+            selector_prices,
+            if allow_details { hist } else { None },
+        ));
     }
 
     // Build response
@@ -1364,9 +1665,26 @@ pub fn list_presence_cohorts(
     result.insert("cohorts".into(), Value::Array(cohorts));
 
     let mut privacy_budget = Map::new();
+    let remaining_ppm = ad_quality::privacy_score_ppm(Some(&privacy_snapshot)) as u64;
+    let mut denied_ppm = 0u64;
+    let mut cooldown_remaining = 0u64;
+    for family in &privacy_snapshot.families {
+        let decisions = family.accepted_total + family.denied_total + family.cooling_total;
+        if decisions > 0 {
+            let denied_ratio =
+                (family.denied_total + family.cooling_total) as f64 / decisions as f64;
+            denied_ppm = denied_ppm.max((denied_ratio * 1_000_000f64).round() as u64);
+        }
+        cooldown_remaining = cooldown_remaining.max(family.cooldown_remaining);
+    }
     privacy_budget.insert(
         "remaining_ppm".into(),
-        Value::Number(Number::from(1_000_000u64)), // Placeholder
+        Value::Number(Number::from(remaining_ppm)),
+    );
+    privacy_budget.insert("denied_ppm".into(), Value::Number(Number::from(denied_ppm)));
+    privacy_budget.insert(
+        "cooldown_remaining".into(),
+        Value::Number(Number::from(cooldown_remaining)),
     );
     privacy_budget.insert(
         "denied_count".into(),
@@ -1385,6 +1703,7 @@ pub fn list_presence_cohorts(
 pub fn reserve_presence(
     market: Option<&MarketplaceHandle>,
     params: &Value,
+    readiness: Option<&AdReadinessHandle>,
 ) -> Result<Value, RpcError> {
     let Some(handle) = market else {
         return Err(RpcError::new(-32603, "ad market disabled"));
@@ -1408,7 +1727,8 @@ pub fn reserve_presence(
         .and_then(Value::as_u64)
         .ok_or_else(|| invalid_params("slot_count"))?;
     let expires_at_micros = obj.get("expires_at_micros").and_then(Value::as_u64);
-    let _max_bid_usd_micros = obj.get("max_bid_usd_micros").and_then(Value::as_u64);
+    let max_bid_usd_micros = obj.get("max_bid_usd_micros").and_then(Value::as_u64);
+    let selector_overrides = parse_selector_budget(obj.get("selector_budget"))?;
 
     // Verify campaign exists
     let _campaign = handle
@@ -1423,17 +1743,25 @@ pub fn reserve_presence(
 
     // Find the presence bucket in current cohorts
     let cohort_prices = handle.cohort_prices();
-    let mut found_bucket: Option<PresenceBucketRef> = None;
-    for cohort in &cohort_prices {
-        if let Some(ref bucket) = cohort.presence_bucket {
-            if bucket.bucket_id == presence_bucket_id {
-                found_bucket = Some(bucket.clone());
-                break;
-            }
-        }
-    }
-
-    let bucket = found_bucket.ok_or_else(err_invalid_presence_bucket)?;
+    let readiness_snapshot = readiness.map(|h| h.snapshot());
+    let presence_readiness = readiness_snapshot
+        .as_ref()
+        .and_then(|snap| snap.segment_readiness.as_ref())
+        .map(|seg| &seg.presence_buckets);
+    let bucket_cohorts: Vec<&CohortPriceSnapshot> = cohort_prices
+        .iter()
+        .filter(|cohort| {
+            cohort
+                .presence_bucket
+                .as_ref()
+                .map(|bucket| bucket.bucket_id == presence_bucket_id)
+                .unwrap_or(false)
+        })
+        .collect();
+    let bucket = bucket_cohorts
+        .first()
+        .and_then(|cohort| cohort.presence_bucket.as_ref())
+        .ok_or_else(err_invalid_presence_bucket)?;
 
     // Check bucket expiry
     if let Some(expires_at) = bucket.expires_at_micros {
@@ -1442,17 +1770,38 @@ pub fn reserve_presence(
         }
     }
 
-    // Privacy policy check (placeholder)
-    // In full implementation, check PrivacyBudgetManager for selector combo violations
-    let privacy_check_passed = true;
-    if !privacy_check_passed {
-        return Err(err_forbidden_selector_combo());
+    // Privacy + k-anonymity guardrails
+    for cohort in &bucket_cohorts {
+        if matches!(
+            handle.badge_guard_decision(&cohort.badges, None),
+            BadgeDecision::Blocked
+        ) {
+            return Err(err_insufficient_privacy_budget());
+        }
     }
-
-    // Privacy budget check (placeholder)
-    let budget_available = true;
-    if !budget_available {
-        return Err(err_insufficient_privacy_budget());
+    let mut privacy_badges: Vec<String> = bucket_cohorts
+        .iter()
+        .flat_map(|cohort| cohort.badges.clone())
+        .collect();
+    privacy_badges.push(format!("presence:{}", bucket.kind.as_str()));
+    privacy_badges.sort();
+    privacy_badges.dedup();
+    match handle.authorize_privacy_budget(&privacy_badges, Some(slot_count)) {
+        PrivacyBudgetDecision::Allowed => {}
+        PrivacyBudgetDecision::Cooling { .. } | PrivacyBudgetDecision::Denied { .. } => {
+            return Err(err_insufficient_privacy_budget());
+        }
+    }
+    // Guard against empty readiness buckets.
+    if let Some(readiness_map) = presence_readiness {
+        if let Some(entry) = readiness_map.get(&bucket.bucket_id) {
+            if entry.ready_slots == 0 {
+                return Err(err_insufficient_privacy_budget());
+            }
+            if slot_count > entry.ready_slots {
+                return Err(err_insufficient_privacy_budget());
+            }
+        }
     }
 
     // Generate reservation ID
@@ -1469,6 +1818,76 @@ pub fn reserve_presence(
         .or(bucket.expires_at_micros)
         .unwrap_or(now_micros + default_ttl_micros);
 
+    let mut selector_prices = selector_bid_specs_for_cohorts(&bucket_cohorts, slot_count);
+    if !selector_overrides.is_empty() || max_bid_usd_micros.is_some() {
+        for value in selector_prices.iter_mut() {
+            let Value::Object(map) = value else {
+                continue;
+            };
+            let selector_id = map.get("selector_id").and_then(Value::as_str).unwrap_or("");
+            if let Some(override_spec) = selector_overrides.get(selector_id) {
+                map.insert(
+                    "clearing_price_usd_micros".into(),
+                    Value::Number(Number::from(override_spec.clearing_price_usd_micros)),
+                );
+                if let Some(slot_cap) = override_spec.slot_cap {
+                    map.insert("slot_cap".into(), Value::Number(Number::from(slot_cap)));
+                }
+                if let Some(shading) = override_spec.shading_factor_bps {
+                    map.insert(
+                        "shading_factor_bps".into(),
+                        Value::Number(Number::from(shading)),
+                    );
+                }
+                if let Some(max_pacing) = override_spec.max_pacing_ppm {
+                    map.insert(
+                        "max_pacing_ppm".into(),
+                        Value::Number(Number::from(max_pacing)),
+                    );
+                }
+            }
+            if let Some(max_bid) = max_bid_usd_micros {
+                if let Some(price) = map.get("clearing_price_usd_micros").and_then(Value::as_u64) {
+                    let capped = price.min(max_bid);
+                    map.insert(
+                        "clearing_price_usd_micros".into(),
+                        Value::Number(Number::from(capped)),
+                    );
+                }
+            }
+        }
+    }
+    let mut total_slots = 0u64;
+    for value in &selector_prices {
+        if let Value::Object(map) = value {
+            total_slots = total_slots
+                .saturating_add(map.get("slot_cap").and_then(Value::as_u64).unwrap_or(0));
+        }
+    }
+    if total_slots != slot_count {
+        if let Some(Value::Object(first)) = selector_prices.first_mut() {
+            let current = first.get("slot_cap").and_then(Value::as_u64).unwrap_or(0);
+            let adjusted = if total_slots < slot_count {
+                current.saturating_add(slot_count - total_slots)
+            } else {
+                current.saturating_sub(total_slots - slot_count)
+            };
+            first.insert("slot_cap".into(), Value::Number(Number::from(adjusted)));
+        }
+    }
+    let mut reserved_budget_usd_micros = 0u64;
+    for value in &selector_prices {
+        if let Value::Object(map) = value {
+            let price = map
+                .get("clearing_price_usd_micros")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let slots = map.get("slot_cap").and_then(Value::as_u64).unwrap_or(0);
+            reserved_budget_usd_micros =
+                reserved_budget_usd_micros.saturating_add(price.saturating_mul(slots));
+        }
+    }
+
     // Build response
     let mut result = Map::new();
     result.insert("status".into(), Value::String("ok".into()));
@@ -1479,12 +1898,191 @@ pub fn reserve_presence(
     );
     result.insert(
         "reserved_budget_usd_micros".into(),
-        Value::Number(Number::from(0u64)), // Placeholder
+        Value::Number(Number::from(reserved_budget_usd_micros)),
     );
-    result.insert("effective_selectors".into(), Value::Array(Vec::new()));
+    result.insert(
+        "effective_selectors".into(),
+        Value::Array(selector_prices.clone()),
+    );
 
     #[cfg(feature = "telemetry")]
     crate::telemetry::sampled_inc_vec(&crate::telemetry::AD_PRESENCE_RESERVATION_TOTAL, &["ok"]);
 
     Ok(Value::Object(result))
+}
+
+/// Register payout claim routing for a domain and role.
+///
+/// Request: `{domain, role, address}`
+/// Response: `{status:"ok"}`
+pub fn register_claim_route(
+    market: Option<&MarketplaceHandle>,
+    params: &Value,
+) -> Result<Value, RpcError> {
+    let Some(handle) = market else {
+        return Err(RpcError::new(-32603, "ad market disabled"));
+    };
+    let obj = params
+        .as_object()
+        .ok_or_else(|| invalid_params("object required"))?;
+    let domain = obj
+        .get("domain")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("domain"))?;
+    let role = obj
+        .get("role")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("role"))?;
+    let address = obj
+        .get("address")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("address"))?;
+    let allowed = [
+        "publisher",
+        "host",
+        "hardware",
+        "verifier",
+        "liquidity",
+        "viewer",
+    ];
+    if !allowed.contains(&role) {
+        return Err(err_invalid_role());
+    }
+    handle
+        .register_claim_route(domain, role, address)
+        .map_err(|_| RpcError::new(-32603, "persistence failure"))?;
+    let mut map = Map::new();
+    map.insert("status".into(), Value::String("ok".into()));
+    Ok(Value::Object(map))
+}
+
+/// Fetch payout claim routes for a domain/cohort snapshot.
+///
+/// Request: `{domain, provider?, domain_tier?, presence_bucket_id?, interest_tags?}`
+/// Response: `{status:"ok", claim_routes:{role:address}}`
+pub fn claim_routes(market: Option<&MarketplaceHandle>, params: &Value) -> Result<Value, RpcError> {
+    let Some(handle) = market else {
+        return Err(RpcError::new(-32603, "ad market disabled"));
+    };
+    let obj = params
+        .as_object()
+        .ok_or_else(|| invalid_params("object required"))?;
+    let domain = obj
+        .get("domain")
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_params("domain"))?;
+    let provider = obj
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let domain_tier = parse_domain_tier(obj.get("domain_tier"))?.unwrap_or_default();
+    let interest_tags = obj
+        .get("interest_tags")
+        .and_then(Value::as_array)
+        .map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_str)
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    let presence_bucket_id = obj
+        .get("presence_bucket_id")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let mut presence_bucket = None;
+    let mut selectors_version = 0u16;
+    if let Some(bucket_id) = presence_bucket_id.as_ref() {
+        for cohort in handle.cohort_prices() {
+            if let Some(bucket) = cohort.presence_bucket {
+                if bucket.bucket_id == *bucket_id {
+                    selectors_version = cohort.selectors_version;
+                    presence_bucket = Some(bucket);
+                    break;
+                }
+            }
+        }
+    }
+    let snapshot = ad_market::CohortKeySnapshot {
+        domain: domain.to_string(),
+        provider,
+        badges: Vec::new(),
+        domain_tier,
+        domain_owner: None,
+        interest_tags,
+        presence_bucket,
+        selectors_version,
+    };
+    let routes = handle.claim_routes(&snapshot);
+    let mut map = Map::new();
+    map.insert("status".into(), Value::String("ok".into()));
+    map.insert(
+        "claim_routes".into(),
+        Value::Object(
+            routes
+                .into_iter()
+                .map(|(k, v)| (k, Value::String(v)))
+                .collect(),
+        ),
+    );
+    Ok(Value::Object(map))
+}
+
+fn cohort_key_snapshot_from_price(cohort: &CohortPriceSnapshot) -> ad_market::CohortKeySnapshot {
+    ad_market::CohortKeySnapshot {
+        domain: cohort.domain.clone(),
+        provider: cohort.provider.clone(),
+        badges: cohort.badges.clone(),
+        domain_tier: cohort.domain_tier,
+        domain_owner: cohort.domain_owner.clone(),
+        interest_tags: cohort.interest_tags.clone(),
+        presence_bucket: cohort.presence_bucket.clone(),
+        selectors_version: cohort.selectors_version,
+    }
+}
+
+fn quality_signals_from_readiness(
+    config: &QualitySignalConfig,
+    cohorts: &[CohortPriceSnapshot],
+    snapshot: &crate::ad_readiness::AdReadinessSnapshot,
+    privacy: Option<&PrivacyBudgetSnapshot>,
+) -> Vec<QualitySignal> {
+    let mut signals = Vec::with_capacity(cohorts.len());
+    for cohort in cohorts {
+        let cohort_snapshot = cohort_key_snapshot_from_price(cohort);
+        let report = ad_quality::quality_signal_for_cohort(
+            config,
+            Some(snapshot),
+            privacy,
+            &cohort_snapshot,
+        );
+        signals.push(report.signal);
+    }
+    signals
+}
+
+fn privacy_status_from_snapshot(
+    snapshot: &PrivacyBudgetSnapshot,
+) -> crate::ad_readiness::PrivacyBudgetStatus {
+    let remaining_ppm = ad_quality::privacy_score_ppm(Some(snapshot));
+    let denied_count = snapshot
+        .families
+        .iter()
+        .map(|family| family.denied_total + family.cooling_total)
+        .sum();
+    let mut last_denial_reason = None;
+    if snapshot
+        .families
+        .iter()
+        .any(|family| family.cooldown_remaining > 0)
+    {
+        last_denial_reason = Some("cooldown".to_string());
+    } else if denied_count > 0 {
+        last_denial_reason = Some("budget_exhausted".to_string());
+    }
+    crate::ad_readiness::PrivacyBudgetStatus {
+        remaining_ppm,
+        denied_count,
+        last_denial_reason,
+    }
 }

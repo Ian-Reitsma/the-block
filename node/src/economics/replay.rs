@@ -507,11 +507,15 @@ mod tests {
                 }));
                 block.receipts.push(Receipt::Ad(AdReceipt {
                     campaign_id: "ad-1".into(),
+                    creative_id: "creative-1".into(),
                     publisher: "pub-1".into(),
                     impressions: 10_000,
                     spend: 2_000,
                     block_height: index,
                     conversions: 50,
+                    claim_routes: std::collections::HashMap::new(),
+                    role_breakdown: None,
+                    device_links: Vec::new(),
                     publisher_signature: vec![],
                     signature_nonce: 0,
                 }));

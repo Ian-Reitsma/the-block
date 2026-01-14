@@ -369,6 +369,14 @@ pub struct Params {
     pub ad_rehearsal_enabled: i64,
     #[serde(default = "default_ad_rehearsal_stability_windows")]
     pub ad_rehearsal_stability_windows: i64,
+    #[serde(default)]
+    pub ad_rehearsal_contextual_enabled: i64,
+    #[serde(default = "default_ad_rehearsal_contextual_stability_windows")]
+    pub ad_rehearsal_contextual_stability_windows: i64,
+    #[serde(default)]
+    pub ad_rehearsal_presence_enabled: i64,
+    #[serde(default = "default_ad_rehearsal_presence_stability_windows")]
+    pub ad_rehearsal_presence_stability_windows: i64,
     #[serde(default = "default_presence_min_crowd_size")]
     pub presence_min_crowd_size: i64,
     #[serde(default = "default_presence_ttl_secs")]
@@ -593,6 +601,12 @@ impl Default for Params {
             badge_revoke_uptime_percent: 95,
             ad_rehearsal_enabled: 0,
             ad_rehearsal_stability_windows: 6,
+            ad_rehearsal_contextual_enabled: 0,
+            ad_rehearsal_contextual_stability_windows:
+                default_ad_rehearsal_contextual_stability_windows(),
+            ad_rehearsal_presence_enabled: 0,
+            ad_rehearsal_presence_stability_windows:
+                default_ad_rehearsal_presence_stability_windows(),
             presence_min_crowd_size: 5,
             presence_ttl_secs: 86400,          // 24 hours
             presence_radius_meters: 500,       // 500m default aggregation radius
@@ -855,6 +869,22 @@ impl Params {
             Value::Number(self.ad_rehearsal_stability_windows.into()),
         );
         map.insert(
+            "ad_rehearsal_contextual_enabled".into(),
+            Value::Number(self.ad_rehearsal_contextual_enabled.into()),
+        );
+        map.insert(
+            "ad_rehearsal_contextual_stability_windows".into(),
+            Value::Number(self.ad_rehearsal_contextual_stability_windows.into()),
+        );
+        map.insert(
+            "ad_rehearsal_presence_enabled".into(),
+            Value::Number(self.ad_rehearsal_presence_enabled.into()),
+        );
+        map.insert(
+            "ad_rehearsal_presence_stability_windows".into(),
+            Value::Number(self.ad_rehearsal_presence_stability_windows.into()),
+        );
+        map.insert(
             "presence_min_crowd_size".into(),
             Value::Number(self.presence_min_crowd_size.into()),
         );
@@ -1112,6 +1142,22 @@ impl Params {
                 .get("ad_rehearsal_stability_windows")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_ad_rehearsal_stability_windows),
+            ad_rehearsal_contextual_enabled: obj
+                .get("ad_rehearsal_contextual_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_rehearsal_contextual_stability_windows: obj
+                .get("ad_rehearsal_contextual_stability_windows")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_rehearsal_contextual_stability_windows),
+            ad_rehearsal_presence_enabled: obj
+                .get("ad_rehearsal_presence_enabled")
+                .and_then(Value::as_i64)
+                .unwrap_or(0),
+            ad_rehearsal_presence_stability_windows: obj
+                .get("ad_rehearsal_presence_stability_windows")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_ad_rehearsal_presence_stability_windows),
             presence_min_crowd_size: obj
                 .get("presence_min_crowd_size")
                 .and_then(Value::as_i64)
@@ -1471,6 +1517,14 @@ const fn default_ad_readiness_min_provider_count() -> i64 {
 
 const fn default_ad_rehearsal_stability_windows() -> i64 {
     6
+}
+
+const fn default_ad_rehearsal_contextual_stability_windows() -> i64 {
+    default_ad_rehearsal_stability_windows()
+}
+
+const fn default_ad_rehearsal_presence_stability_windows() -> i64 {
+    default_ad_rehearsal_stability_windows()
 }
 
 const fn default_presence_min_crowd_size() -> i64 {
@@ -1909,6 +1963,32 @@ fn apply_ad_rehearsal_stability_windows(v: i64, p: &mut Params) -> Result<(), ()
     Ok(())
 }
 
+fn apply_ad_rehearsal_contextual_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ad_rehearsal_contextual_enabled = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+
+fn apply_ad_rehearsal_contextual_stability_windows(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_rehearsal_contextual_stability_windows = v;
+    Ok(())
+}
+
+fn apply_ad_rehearsal_presence_enabled(v: i64, p: &mut Params) -> Result<(), ()> {
+    p.ad_rehearsal_presence_enabled = if v > 0 { 1 } else { 0 };
+    Ok(())
+}
+
+fn apply_ad_rehearsal_presence_stability_windows(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 {
+        return Err(());
+    }
+    p.ad_rehearsal_presence_stability_windows = v;
+    Ok(())
+}
+
 fn apply_kappa_cpu_sub(v: i64, p: &mut Params) -> Result<(), ()> {
     p.kappa_cpu_sub = v;
     Ok(())
@@ -2174,7 +2254,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 68] = [
+    static REGS: [ParamSpec; 72] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,
@@ -2450,6 +2530,58 @@ pub fn registry() -> &'static [ParamSpec] {
             apply: apply_ad_rehearsal_stability_windows,
             apply_runtime: |v, rt| {
                 rt.bc.params.ad_rehearsal_stability_windows = v;
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalContextualEnabled,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_contextual_enabled,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_rehearsal_contextual_enabled = v;
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalContextualStabilityWindows,
+            default: default_ad_rehearsal_contextual_stability_windows(),
+            min: 0,
+            max: 10_000,
+            unit: "windows",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_contextual_stability_windows,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_rehearsal_contextual_stability_windows = v;
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalPresenceEnabled,
+            default: 0,
+            min: 0,
+            max: 1,
+            unit: "bool",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_presence_enabled,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_rehearsal_presence_enabled = v;
+                Ok(())
+            },
+        },
+        ParamSpec {
+            key: ParamKey::AdRehearsalPresenceStabilityWindows,
+            default: default_ad_rehearsal_presence_stability_windows(),
+            min: 0,
+            max: 10_000,
+            unit: "windows",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_ad_rehearsal_presence_stability_windows,
+            apply_runtime: |v, rt| {
+                rt.bc.params.ad_rehearsal_presence_stability_windows = v;
                 Ok(())
             },
         },

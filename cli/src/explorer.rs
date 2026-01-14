@@ -420,6 +420,29 @@ fn write_payout_table(
         breakdown.total_usd_micros, breakdown.settlement_count, breakdown.price_usd_micros
     )
     .map_err(|err| format!("failed to write output: {err}"))?;
+    if breakdown.ad_conversions > 0 {
+        writeln!(
+            writer,
+            "    ad_conversions: {} (opt-in conversions counted)",
+            breakdown.ad_conversions
+        )
+        .map_err(|err| format!("failed to write output: {err}"))?;
+    }
+    if breakdown.ad_claim_routes.is_empty() {
+        writeln!(writer, "    claim_routes: none")
+            .map_err(|err| format!("failed to write output: {err}"))?;
+    } else {
+        writeln!(writer, "    claim_routes:")
+            .map_err(|err| format!("failed to write output: {err}"))?;
+        for route in &breakdown.ad_claim_routes {
+            writeln!(
+                writer,
+                "      {}/{}/{} -> {} ({} tokens)",
+                route.campaign_id, route.creative_id, route.role, route.address, route.amount
+            )
+            .map_err(|err| format!("failed to write output: {err}"))?;
+        }
+    }
     if breakdown.treasury_events.is_empty() {
         writeln!(writer, "treasury executions: none")
             .map_err(|err| format!("failed to write output: {err}"))?;

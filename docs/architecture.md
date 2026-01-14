@@ -134,14 +134,39 @@ pub struct EnergyReceipt {
 ```rust
 pub struct AdReceipt {
     pub campaign_id: String,       // Campaign identifier
+    pub creative_id: String,       // Creative identifier (per-campaign)
     pub publisher: String,         // Publisher address
     pub impressions: u64,          // Impressions delivered
-    pub spend: u64,             // BLOCK spent by advertiser
+    pub spend: u64,                // BLOCK spent by advertiser
     pub block_height: u64,         // Settlement block
     pub conversions: u32,          // Attributed conversions
+    pub claim_routes: HashMap<String, String>, // Optional payout overrides per role
+    pub role_breakdown: Option<AdRoleBreakdown>, // Optional role splits (viewer/host/etc.)
+    pub device_links: Vec<DeviceLinkOptIn>, // Optional opt-in device-link attestations
+    pub publisher_signature: Vec<u8>, // Publisher signature over receipt fields
+    pub signature_nonce: u64,      // Nonce to prevent replay
 }
 ```
-**Tracks:** Ad delivery, impressions, spend, attribution
+```rust
+pub struct AdRoleBreakdown {
+    pub viewer: u64,
+    pub host: u64,
+    pub hardware: u64,
+    pub verifier: u64,
+    pub liquidity: u64,
+    pub miner: u64,
+    pub price_usd_micros: u64,
+    pub clearing_price_usd_micros: u64,
+}
+
+pub struct DeviceLinkOptIn {
+    pub device_hash: String,
+    pub opt_in: bool,
+}
+```
+**Tracks:** Ad delivery, impressions, spend, attribution, claim routing, and optional device-link attestations
+
+Conversion events recorded via `ad_market.record_conversion` accumulate per `(campaign_id, creative_id)`; block assembly drains the counts into `AdReceipt.conversions` (with optional `device_links` for opt-in dedup/attribution) so replay/economics stay deterministic even if the market restarts. Device-link dedup is best-effort within the persisted marketplace window and ignores non-opt-in payloads.
 
 ### Receipt Lifecycle
 
@@ -781,8 +806,12 @@ The RPC output now also contains an `economics_prev_market_metrics` array derive
 - **Self-tuning PI controller** — Budget pacing now hinges on a PI controller that runs inside each `CampaignBudgetState`. The controller tracks the relative error between `epoch_spend` and `epoch_target`, integrates it, and applies a `dual_price` adjustment once per reservation; the error zero-crossings feed a Ziegler-Nichols inspired tuner that recalculates `Kp/Ki` so the spend stays within the configured robustness window. The tuning knobs live in `BudgetBrokerConfig.pi_tuner` (fields: `enabled`, `kp_min`, `kp_max`, `ki_min`, `ki_max`, `ki_ratio`, `tuning_sensitivity`, `zero_cross_min_interval_micros`, and `max_integral`) and are normalized alongside the existing step/dual steps. `CampaignBudgetSnapshot.pi_controller` persists the controller state so deterministic replays keep the same gain history, and the resulting `dual_price`/`kappa` traces continue to surface through the existing telemetry guards.
 - **Proof-of-presence targeting** — `node/src/localnet`, `node/src/range_boost`, and `node/src/service_badge.rs` mint `PresenceReceipt {beacon_id,device_key,mesh_node,location_bucket,radius_meters,confidence_bps,minted_at_micros,expires_at_micros}` entries that `crates/ad_market/src/attestation.rs` verifies. Receipts are cached in a privacy-safe sled store, gated by governance knobs `TB_PRESENCE_TTL_SECS`, `TB_PRESENCE_RADIUS_METERS`, and `TB_PRESENCE_PROOF_CACHE_SIZE`, and exposed through new RPCs (`ad_market.list_presence_cohorts`, `ad_market.reserve_presence`). Node `bin` logic already cancels reservations when `presence_badge` checks fail; this feature extends those hooks to the new attestation types and read-readiness rehearsal gate.
 - **Domain marketplace + interest ingestion** — `node/src/gateway/dns.rs` emits ownership tiers and auction/intent metadata that feed the ad-policy snapshot. A governance-owned registry maps `.block` categories and premium tiers to `interest_tags`, so advertisers can reserve or exclude those audiences. Synchronization happens alongside the ad policy snapshot pruning pipeline, and readiness snapshots surface `domain_tier_supply_ppm` and `interest_tag_supply_ppm` buckets for operators. Docs (`docs/system_reference.md`, `docs/apis_and_tooling.md`) enumerate RPC validation errors for misaligned tiers/tags.
-- **Analytics, conversions, and uplift** — `crates/ad_market/src/uplift.rs` now manages holdout cohorts per selector, exposing readiness/ROAS deltas via `ad_market.readiness`. `ad_market.record_conversion` accepts `value_usd_micros`, `value`, `currency_code`, `attribution_window_secs`, and `selector_weights[]` so advertisers can attribute conversions back to badges, interest tags, domains, and presence proofs. Readiness reports publish inventory depth, presence-proof freshness histograms, domain-tier utilization, and privacy budget status per selector, while CLI/explorer commands mirror the same aggregates.
-- **Privacy + governance guardrails** — `crates/ad_market/src/privacy.rs` clamps selector combinations (badge + premium domain + precise presence requires explicit opt-in) and guarantees k-anonymity before releasing supply or readiness data. Violations surface via RPC errors and telemetry (`ad_privacy_budget_utilization_ratio`, `ad_privacy_denial_total`). Governance proposals (via `cli/src/gov.rs`) own selector caps, privacy budgets, interest registries, and presence TTL/radius settings.
+- **Analytics, conversions, and uplift** — `crates/ad_market/src/uplift.rs` manages holdout cohorts per selector, exposing readiness/ROAS deltas via `ad_market.readiness`. `ad_market.record_conversion` accepts `value_usd_micros`, `currency_code`, `attribution_window_secs`, and `selector_weights[]` plus optional device-link attestations so advertisers can attribute conversions back to badges, interest tags, domains, and presence proofs without elevating device cohorts to first-class on-chain objects. Readiness reports publish inventory depth, presence-proof freshness histograms, domain-tier utilization, and privacy budget status per selector, while CLI/explorer commands mirror the same aggregates.
+- **Privacy + governance guardrails** — `crates/ad_market/src/privacy.rs` clamps selector combinations (badge + premium domain + precise presence requires explicit opt-in) and guarantees k-anonymity before releasing supply or readiness data. Presence listing/reservation RPCs call `badge_guard` + `PrivacyBudgetManager` previews so operators see `k_anonymity_redacted`/`budget_exhausted` guardrails instead of placeholders. Violations surface via RPC errors and telemetry (`ad_privacy_budget_utilization_ratio`, `ad_privacy_denial_total`). Governance proposals (via `cli/src/gov.rs`) own selector caps, privacy budgets, interest registries, and presence TTL/radius settings.
+- **Quality-adjusted pricing** — Each impression applies a cohort-quality multiplier derived from readiness streaks, presence freshness histograms, and privacy-budget headroom (see `docs/economics_and_governance.md#ad-quality-adjusted-pricing`). Multipliers are clamped by `quality_signal_{min,max}_multiplier_ppm` in `MarketplaceConfig` and exported as `ad_quality_multiplier_ppm{component}` plus readiness/freshness/privacy gauges so operators can trace why a cohort cleared high/low.
+- **Tiered readiness gates** — Launch Governor evaluates per-tier readiness (contextual domain/interest vs presence-correlated) and drives separate gates (`ad_targeting_contextual`, `ad_targeting_presence`) with rehearsal→exit semantics. Intents patch `ad_rehearsal_contextual_enabled`, `ad_rehearsal_presence_enabled`, and their streak windows so rollout is tied to observed readiness streaks rather than a monolithic switch; intents/snapshots are auditable via `tb-cli governor status` and `tb-cli governor intents --gate ad_targeting_*`.
+- **Resource-cost coupling** — Ad resource floors blend storage rent signals and compute-market spot prices (converted via the token oracle) with host/verifier medians, producing an explicit cost basis before clearing. Receipts persist the resulting floor breakdown for replay determinism; telemetry exposes `ad_compute_unit_price_usd_micros`, `ad_cost_basis_usd_micros{component}`, and clearing prices so operators can see compute scarcity coupling.
+- **Claims + attribution** — A claims registry in `crates/ad_market` maps domain/app identities to payout addresses per role (publisher/host/hardware/verifier/liquidity/viewer). Routes are registered via `ad_market.register_claim_route`, validated against DNS ownership and optional DID anchors, persisted in marketplace metadata, and surfaced in settlement breakdowns/receipts. Ad payouts prefer these routes per role, falling back to derived viewer/host/hardware/verifier/liquidity addresses when a route is absent or invalid, so explorers/CLIs can audit where each share flowed.
 - **Observability + gate cadence** — `metrics-aggregator/src/lib.rs` adds segment readiness counters (`ad_segment_ready_total{domain_tier,presence_bucket,interest_tag}`), competitiveness stats (`ad_auction_top_bid_usd_micros{selector}`, `ad_bid_shading_factor_bps{selector}`, `ad_auction_win_rate{selector}`), conversion values (`ad_conversion_value_total{selector}`), and privacy usage histograms. The aggregator exports them through `/wrappers`, Grafana panels live under `monitoring/ad_market_dashboard.json`, and `docs/operations.md#telemetry-wiring` now requires screenshots from `npm ci --prefix monitoring && make monitor` whenever these metrics change. Every touch to `crates/ad_market`, `node/src/rpc/ad_market.rs`, `node/src/localnet`, `node/src/range_boost`, `node/src/gateway/dns.rs`, `node/src/ad_policy_snapshot.rs`, `node/src/ad_readiness.rs`, `metrics-aggregator/`, `monitoring/`, or the associated CLI/explorer files must rerun the full gate list (`just lint`, `just fmt`, `just test-fast`, `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, `scripts/fuzz_coverage.sh`) with transcripts attached per `AGENTS.md §0.6`.
 
 ### Law-enforcement Portal and Jurisdiction Packs

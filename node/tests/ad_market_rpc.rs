@@ -157,6 +157,9 @@ fn seed_presence_bucket(
     bucket_id: &str,
     region: &str,
     kind: PresenceKind,
+    domain_tier: DomainTier,
+    badges: &[&str],
+    interest_tags: &[&str],
 ) -> PresenceBucketRef {
     let now_micros = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -173,9 +176,10 @@ fn seed_presence_bucket(
     };
     let ctx = ImpressionContext {
         domain: format!("{bucket_id}.example.block"),
-        domain_tier: DomainTier::Premium,
+        domain_tier,
         provider: Some("provider-a".into()),
-        badges: vec!["beta".into()],
+        badges: badges.iter().map(|badge| (*badge).to_string()).collect(),
+        interest_tags: interest_tags.iter().map(|tag| (*tag).to_string()).collect(),
         presence_bucket: Some(bucket.clone()),
         bytes: 1_048_576,
         population_estimate: Some(5_000),
@@ -2078,7 +2082,14 @@ fn rpc_record_conversion_rejects_malformed_payload() {
 
 #[testkit::tb_serial]
 fn presence_listing_and_reservation_flow() {
-    let (_dir, harness, _) = build_in_memory_harness("presence_flow", MarketplaceConfig::default());
+    let mut config = MarketplaceConfig::default();
+    config.target_utilization_ppm = 12;
+    config.privacy_budget.max_epsilon = 0.01;
+    config.privacy_budget.default_epsilon_cost = 0.01;
+    config.privacy_budget.max_delta = 1e-6;
+    config.privacy_budget.default_delta_cost = 1e-6;
+    config.privacy_budget.cool_off_impressions = 3;
+    let (_dir, harness, readiness) = build_in_memory_harness("presence_flow", config);
     let market_impl = harness.in_memory_market.as_ref().expect("in-memory market");
 
     let mut metadata = HashMap::new();
@@ -2095,8 +2106,25 @@ fn presence_listing_and_reservation_flow() {
         .register_campaign(campaign)
         .expect("campaign registered");
 
-    let bucket_us = seed_presence_bucket(market_impl, "bucket-us", "US", PresenceKind::LocalNet);
-    let _bucket_eu = seed_presence_bucket(market_impl, "bucket-eu", "NL", PresenceKind::RangeBoost);
+    let bucket_us = seed_presence_bucket(
+        market_impl,
+        "bucket-us",
+        "US",
+        PresenceKind::LocalNet,
+        DomainTier::Premium,
+        &[],
+        &["sports"],
+    );
+    let bucket_eu = seed_presence_bucket(
+        market_impl,
+        "bucket-eu",
+        "NL",
+        PresenceKind::RangeBoost,
+        DomainTier::Community,
+        &["beta"],
+        &["finance"],
+    );
+    readiness.record_utilization(&harness.market.cohort_prices(), MICROS_PER_DOLLAR);
 
     let list_all = expect_ok(harness.call("ad_market.list_presence_cohorts", parse_json("{}")));
     let cohorts = list_all["cohorts"]
@@ -2107,6 +2135,61 @@ fn presence_listing_and_reservation_flow() {
         cohorts.len() >= 2,
         "expected multiple presence cohorts in listing"
     );
+    let privacy_budget = list_all["privacy_budget"]
+        .as_object()
+        .expect("privacy budget");
+    assert!(privacy_budget["remaining_ppm"].as_u64().is_some());
+    assert!(privacy_budget["denied_ppm"].as_u64().is_some());
+    assert!(privacy_budget["cooldown_remaining"].as_u64().is_some());
+
+    let mut by_bucket: HashMap<String, Value> = HashMap::new();
+    for cohort in cohorts.iter().cloned() {
+        let bucket_id = cohort["bucket"]["bucket_id"]
+            .as_str()
+            .expect("bucket id")
+            .to_string();
+        by_bucket.insert(bucket_id, cohort);
+    }
+    let us_summary = by_bucket
+        .get(bucket_us.bucket_id.as_str())
+        .expect("us bucket summary");
+    assert_eq!(us_summary["privacy_guardrail"].as_str(), Some("ok"));
+    let us_ready_slots = us_summary["ready_slots"].as_u64().expect("ready slots");
+    assert!(us_ready_slots > 0);
+    let selectors = us_summary["selector_prices"]
+        .as_array()
+        .expect("selector prices");
+    assert!(!selectors.is_empty());
+    let selector_slots: u64 = selectors
+        .iter()
+        .map(|value| value["slot_cap"].as_u64().unwrap_or(0))
+        .sum();
+    assert_eq!(selector_slots, us_ready_slots);
+    let freshness = us_summary["freshness_histogram"]
+        .as_object()
+        .expect("freshness histogram");
+    let freshness_total: u64 = [
+        "under_1h_ppm",
+        "1h_to_6h_ppm",
+        "6h_to_24h_ppm",
+        "over_24h_ppm",
+    ]
+    .iter()
+    .map(|key| freshness[*key].as_u64().unwrap_or(0))
+    .sum();
+    assert_eq!(freshness_total, 1_000_000);
+    let eu_summary = by_bucket
+        .get(bucket_eu.bucket_id.as_str())
+        .expect("eu bucket summary");
+    assert_eq!(
+        eu_summary["privacy_guardrail"].as_str(),
+        Some("k_anonymity_redacted")
+    );
+    assert_eq!(eu_summary["ready_slots"].as_u64(), Some(0));
+    let eu_selectors = eu_summary["selector_prices"]
+        .as_array()
+        .expect("selector prices");
+    assert!(eu_selectors.is_empty());
 
     let list_us = expect_ok(harness.call(
         "ad_market.list_presence_cohorts",
@@ -2118,6 +2201,28 @@ fn presence_listing_and_reservation_flow() {
         us_cohorts[0]["bucket"]["bucket_id"].as_str(),
         Some(bucket_us.bucket_id.as_str())
     );
+    let list_interest = expect_ok(harness.call(
+        "ad_market.list_presence_cohorts",
+        parse_json("{\"interest_tag\":\"sports\"}"),
+    ));
+    let interest_cohorts = list_interest["cohorts"]
+        .as_array()
+        .expect("interest cohorts");
+    assert_eq!(interest_cohorts.len(), 1);
+    assert_eq!(
+        interest_cohorts[0]["bucket"]["bucket_id"].as_str(),
+        Some(bucket_us.bucket_id.as_str())
+    );
+    let list_tier = expect_ok(harness.call(
+        "ad_market.list_presence_cohorts",
+        parse_json("{\"domain_tier\":\"community\"}"),
+    ));
+    let tier_cohorts = list_tier["cohorts"].as_array().expect("tier cohorts");
+    assert_eq!(tier_cohorts.len(), 1);
+    assert_eq!(
+        tier_cohorts[0]["bucket"]["bucket_id"].as_str(),
+        Some(bucket_eu.bucket_id.as_str())
+    );
 
     let missing_bucket = parse_json(
         "{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"missing\",\"slot_count\":5}",
@@ -2125,11 +2230,19 @@ fn presence_listing_and_reservation_flow() {
     let err = expect_error(harness.call("ad_market.reserve_presence", missing_bucket));
     assert_eq!(err.code, -32034);
 
+    let too_many_params = parse_json(&format!(
+        "{{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"{}\",\"slot_count\":{}}}",
+        bucket_us.bucket_id,
+        us_ready_slots + 1
+    ));
+    let err = expect_error(harness.call("ad_market.reserve_presence", too_many_params));
+    assert_eq!(err.code, -32037);
+
     let ok_params = parse_json(&format!(
-        "{{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"{}\",\"slot_count\":12}}",
+        "{{\"campaign_id\":\"cmp-presence\",\"presence_bucket_id\":\"{}\",\"slot_count\":1}}",
         bucket_us.bucket_id
     ));
-    let reserve = expect_ok(harness.call("ad_market.reserve_presence", ok_params));
+    let reserve = expect_ok(harness.call("ad_market.reserve_presence", ok_params.clone()));
     assert_eq!(reserve["status"].as_str(), Some("ok"));
     assert!(
         reserve["reservation_id"]
@@ -2142,4 +2255,82 @@ fn presence_listing_and_reservation_flow() {
         reserve["expires_at_micros"].as_u64().is_some(),
         "reservation expiry returned"
     );
+    assert!(
+        reserve["reserved_budget_usd_micros"].as_u64().is_some(),
+        "reserved budget returned"
+    );
+    let selectors = reserve["effective_selectors"]
+        .as_array()
+        .expect("effective selectors");
+    assert!(!selectors.is_empty());
+
+    let list_after = expect_ok(harness.call("ad_market.list_presence_cohorts", parse_json("{}")));
+    let after_cohorts = list_after["cohorts"].as_array().expect("after cohorts");
+    let mut after_by_bucket: HashMap<String, Value> = HashMap::new();
+    for cohort in after_cohorts.iter().cloned() {
+        let bucket_id = cohort["bucket"]["bucket_id"]
+            .as_str()
+            .expect("bucket id")
+            .to_string();
+        after_by_bucket.insert(bucket_id, cohort);
+    }
+    let after_us = after_by_bucket
+        .get(bucket_us.bucket_id.as_str())
+        .expect("us bucket summary");
+    assert_eq!(
+        after_us["privacy_guardrail"].as_str(),
+        Some("budget_exhausted")
+    );
+    assert_eq!(after_us["ready_slots"].as_u64(), Some(0));
+    assert!(after_us["selector_prices"]
+        .as_array()
+        .expect("selector prices")
+        .is_empty());
+    let after_budget = list_after["privacy_budget"]
+        .as_object()
+        .expect("privacy budget");
+    assert_eq!(after_budget["remaining_ppm"].as_u64(), Some(0));
+
+    let err = expect_error(harness.call("ad_market.reserve_presence", ok_params));
+    assert_eq!(err.code, -32037);
+    let list_cooldown =
+        expect_ok(harness.call("ad_market.list_presence_cohorts", parse_json("{}")));
+    let cooldown_cohorts = list_cooldown["cohorts"]
+        .as_array()
+        .expect("cooldown cohorts");
+    let mut cooldown_by_bucket: HashMap<String, Value> = HashMap::new();
+    for cohort in cooldown_cohorts.iter().cloned() {
+        let bucket_id = cohort["bucket"]["bucket_id"]
+            .as_str()
+            .expect("bucket id")
+            .to_string();
+        cooldown_by_bucket.insert(bucket_id, cohort);
+    }
+    let cooldown_us = cooldown_by_bucket
+        .get(bucket_us.bucket_id.as_str())
+        .expect("us bucket summary");
+    assert_eq!(cooldown_us["privacy_guardrail"].as_str(), Some("cooldown"));
+    let cooldown_budget = list_cooldown["privacy_budget"]
+        .as_object()
+        .expect("privacy budget");
+    assert!(cooldown_budget["cooldown_remaining"].as_u64().unwrap_or(0) > 0);
+}
+
+#[testkit::tb_serial]
+fn claim_routes_round_trip_via_rpc() {
+    let config = MarketplaceConfig::default();
+    let (_dir, harness, _readiness) = build_in_memory_harness("claim_routes_rpc", config);
+
+    let params = parse_json(r#"{"domain":"example.test","role":"publisher","address":"addr1"}"#);
+    let resp = harness.call("ad_market.register_claim_route", params);
+    let ok = expect_ok(resp);
+    assert_eq!(ok["status"].as_str(), Some("ok"));
+
+    let query = parse_json(r#"{"domain":"example.test"}"#);
+    let routes = expect_ok(harness.call("ad_market.claim_routes", query));
+    let map = routes["claim_routes"]
+        .as_object()
+        .expect("claim routes map");
+    assert_eq!(routes["status"].as_str(), Some("ok"));
+    assert_eq!(map.get("publisher").and_then(Value::as_str), Some("addr1"));
 }

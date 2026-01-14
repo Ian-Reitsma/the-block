@@ -63,6 +63,49 @@ The pre-BLOCK codebase exposed knobs such as `inflation_target_bps`, `inflation_
 - **CLI/RPC visibility** — `contract-cli energy market --verbose` and `energy.market_state` expose provider capacity, price, stake, outstanding credits, and receipts so explorers can mirror the same tables. Upcoming explorer work adds energy provider tables, receipt timelines, and slash summaries (see `AGENTS.md` tasks).
 - **Dispute flow** — Until dedicated dispute RPCs land, governance proposals (e.g., temporarily raising `energy_slashing_rate_bps` for a provider, pausing settlement) act as the economic kill switch. Once the dispute endpoints ship they will create ledger anchors referencing disputed meter hashes while preserving BLOCK accounting invariants.
 
+## Ad Market Pricing and Claims
+
+> **Plain English:** Ads are priced from two signals at once: *creative quality* (how likely the ad converts) and *cohort quality* (how reliable/fresh/private the audience is). Cohort quality is penalized when readiness is unstable, presence proofs are stale, or privacy budgets are exhausted.
+
+### Quality-Adjusted Pricing
+
+Let `B` be the creative base bid (USD micros). Creative quality `Q_creative` is derived from action rate + lift (see `MarketplaceConfig.quality_*`). Cohort quality `Q_cohort` uses freshness, privacy, and readiness:
+
+```
+F = (w1 * under_1h_ppm + w2 * hours_1_to_6_ppm +
+     w3 * hours_6_to_24_ppm + w4 * over_24h_ppm) / 1_000_000
+R = clamp(ready_streak_windows / readiness_target_windows, readiness_floor, 1.0)
+P = clamp(min(privacy_remaining_ppm, 1_000_000 - privacy_denied_ppm) / 1_000_000,
+          privacy_floor, 1.0)
+Q_cohort = clamp((F * P * R)^(1/3), cohort_quality_floor, cohort_quality_ceiling)
+effective_bid = B * Q_creative * Q_cohort
+```
+
+Defaults (unless overridden in governance/config):
+- Freshness weights: `w1=1_000_000`, `w2=800_000`, `w3=500_000`, `w4=200_000`.
+- Floors: `readiness_floor=0.10`, `privacy_floor=0.10`, `cohort_quality_floor=0.10`.
+- Ceiling: `cohort_quality_ceiling=2.50`.
+- Readiness target: `readiness_target_windows=6`.
+
+Telemetry exports `ad_quality_multiplier_ppm{component}` along with readiness/freshness/privacy gauges so operators can audit which component drove a discount/premium.
+
+### Resource-Cost Coupling
+
+Ad resource floors blend shared resource signals with live scarcity:
+
+- Bandwidth cost uses storage rent signals (rent-per-byte converted to USD micros) plus the rolling storage median.
+- Verification cost uses the compute-market spot price per unit (industrial lane) converted via the token oracle, multiplied by `resource_floor.verifier_compute_units_per_proof` and clamped by the legacy verifier median when the spot signal is missing.
+- Host cost continues to use rolling medians, but the cost basis is recomputed each reservation so compute scarcity propagates into ad floors.
+- A utilization-sensitive scarcity multiplier (`[0.8, 2.0]`) scales the floor using both cost basis and PI-controller observed vs target utilization.
+
+The scaled breakdown is persisted in receipts to keep replays deterministic, and telemetry exposes `ad_compute_unit_price_usd_micros`, `ad_cost_basis_usd_micros{component}`, and clearing prices alongside medians.
+
+### Claims Registry + Attribution
+
+Ad payouts route through a claims registry keyed by `domain` + `role` with optional app/DID anchors. Claims bind payout addresses per role (publisher/host/hardware/verifier/liquidity/viewer) and are registered via `ad_market.register_claim_route`; they persist in marketplace metadata and flow into settlement breakdowns/receipts for explorer/CLI attribution. If no claim exists, the default role splits remain but have no address hints.
+
+Conversions can optionally include device-link attestations (explicit opt-in) to improve dedup/attribution without elevating cohorts to on-chain objects. ROI summaries are exposed via `ad_market.attribution` and combine selector spend, conversion value, and uplift snapshots.
+
 ## Multipliers and Emissions
 
 > **Plain English:** The network automatically adjusts how much BLOCK goes to different services based on usage. If storage usage is low, storage rewards increase to attract providers. If usage is high, rewards dampen to avoid overpaying.

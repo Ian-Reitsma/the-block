@@ -6,7 +6,8 @@ use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct BadgeGuardConfig {
     pub k_min: u64,
     pub forgetting: f64,

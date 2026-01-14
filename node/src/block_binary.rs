@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 
 use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
@@ -432,11 +433,62 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
             Receipt::Ad(r) => {
                 struct_writer.field_string("type", "ad");
                 struct_writer.field_string("campaign_id", &r.campaign_id);
+                struct_writer.field_string("creative_id", &r.creative_id);
                 struct_writer.field_string("publisher", &r.publisher);
                 struct_writer.field_u64("impressions", r.impressions);
                 struct_writer.field_u64("spend", r.spend);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("conversions", r.conversions as u64);
+                if !r.claim_routes.is_empty() {
+                    let mut routes: Vec<_> = r.claim_routes.iter().collect();
+                    routes.sort_by(|a, b| a.0.cmp(b.0));
+                    struct_writer.field_with("claim_routes", |field_writer| {
+                        write_vec(
+                            field_writer,
+                            &routes,
+                            "claim_routes",
+                            |writer, (role, addr)| {
+                                writer.write_struct(|route_writer| {
+                                    route_writer.field_string("role", role);
+                                    route_writer.field_string("address", addr);
+                                });
+                                Ok(())
+                            },
+                        )
+                        .expect("encode claim routes")
+                    });
+                }
+                if let Some(breakdown) = r.role_breakdown.as_ref() {
+                    struct_writer.field_with("role_breakdown", |field_writer| {
+                        field_writer.write_struct(|rb_writer| {
+                            rb_writer.field_u64("viewer", breakdown.viewer);
+                            rb_writer.field_u64("host", breakdown.host);
+                            rb_writer.field_u64("hardware", breakdown.hardware);
+                            rb_writer.field_u64("verifier", breakdown.verifier);
+                            rb_writer.field_u64("liquidity", breakdown.liquidity);
+                            rb_writer.field_u64("miner", breakdown.miner);
+                            rb_writer.field_u64("price_usd_micros", breakdown.price_usd_micros);
+                            rb_writer.field_u64(
+                                "clearing_price_usd_micros",
+                                breakdown.clearing_price_usd_micros,
+                            );
+                        });
+                    });
+                }
+                if !r.device_links.is_empty() {
+                    let mut links = r.device_links.clone();
+                    links.sort_by(|a, b| a.device_hash.cmp(&b.device_hash));
+                    struct_writer.field_with("device_links", |field_writer| {
+                        write_vec(field_writer, &links, "device_links", |writer, link| {
+                            writer.write_struct(|link_writer| {
+                                link_writer.field_string("device_hash", &link.device_hash);
+                                link_writer.field_u64("opt_in", if link.opt_in { 1 } else { 0 });
+                            });
+                            Ok(())
+                        })
+                        .expect("encode device links")
+                    });
+                }
                 struct_writer.field_with("publisher_signature", |field_writer| {
                     write_bytes(field_writer, &r.publisher_signature, "publisher_signature")
                         .expect("signature length fits");
@@ -454,6 +506,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut contract_id = None;
         let mut job_id = None;
         let mut campaign_id = None;
+        let mut creative_id = None;
         let mut provider = None;
         let mut publisher = None;
         let mut bytes = None;
@@ -468,6 +521,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut verified = None;
         let mut proof_hash = None;
         let mut conversions = None;
+        let mut claim_routes: Option<HashMap<String, String>> = None;
+        let mut role_breakdown: Option<crate::receipts::AdRoleBreakdown> = None;
+        let mut device_links: Option<Vec<ad_market::DeviceLinkOptIn>> = None;
         let mut provider_signature = None;
         let mut publisher_signature = None;
         let mut signature_nonce = None;
@@ -477,6 +533,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "contract_id" => assign_once(&mut contract_id, reader.read_string()?, "contract_id"),
             "job_id" => assign_once(&mut job_id, reader.read_string()?, "job_id"),
             "campaign_id" => assign_once(&mut campaign_id, reader.read_string()?, "campaign_id"),
+            "creative_id" => assign_once(&mut creative_id, reader.read_string()?, "creative_id"),
             "provider" => assign_once(&mut provider, reader.read_string()?, "provider"),
             "publisher" => assign_once(&mut publisher, reader.read_string()?, "publisher"),
             "bytes" => assign_once(&mut bytes, reader.read_u64()?, "bytes"),
@@ -493,6 +550,87 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "verified" => assign_once(&mut verified, reader.read_u64()?, "verified"),
             "proof_hash" => assign_once(&mut proof_hash, read_fixed(reader)?, "proof_hash"),
             "conversions" => assign_once(&mut conversions, reader.read_u64()?, "conversions"),
+            "claim_routes" => {
+                let routes = read_vec(reader, |reader| {
+                    let mut role = None;
+                    let mut address = None;
+                    decode_struct(reader, Some(2), |key, reader| match key {
+                        "role" => assign_once(&mut role, reader.read_string()?, "role"),
+                        "address" => assign_once(&mut address, reader.read_string()?, "address"),
+                        other => Err(DecodeError::UnknownField(other.to_string())),
+                    })?;
+                    Ok((
+                        role.ok_or(DecodeError::MissingField("role"))?,
+                        address.ok_or(DecodeError::MissingField("address"))?,
+                    ))
+                })?;
+                let mut map = HashMap::with_capacity(routes.len());
+                for (role, address) in routes {
+                    map.insert(role, address);
+                }
+                assign_once(&mut claim_routes, map, "claim_routes")
+            }
+            "role_breakdown" => {
+                let mut viewer = None;
+                let mut host = None;
+                let mut hardware = None;
+                let mut verifier = None;
+                let mut liquidity = None;
+                let mut miner = None;
+                let mut price_usd_micros = None;
+                let mut clearing_price_usd_micros = None;
+                decode_struct(reader, None, |key, reader| match key {
+                    "viewer" => assign_once(&mut viewer, reader.read_u64()?, "viewer"),
+                    "host" => assign_once(&mut host, reader.read_u64()?, "host"),
+                    "hardware" => assign_once(&mut hardware, reader.read_u64()?, "hardware"),
+                    "verifier" => assign_once(&mut verifier, reader.read_u64()?, "verifier"),
+                    "liquidity" => assign_once(&mut liquidity, reader.read_u64()?, "liquidity"),
+                    "miner" => assign_once(&mut miner, reader.read_u64()?, "miner"),
+                    "price_usd_micros" => assign_once(
+                        &mut price_usd_micros,
+                        reader.read_u64()?,
+                        "price_usd_micros",
+                    ),
+                    "clearing_price_usd_micros" => assign_once(
+                        &mut clearing_price_usd_micros,
+                        reader.read_u64()?,
+                        "clearing_price_usd_micros",
+                    ),
+                    other => Err(DecodeError::UnknownField(other.to_string())),
+                })?;
+                assign_once(
+                    &mut role_breakdown,
+                    crate::receipts::AdRoleBreakdown {
+                        viewer: viewer.unwrap_or_default(),
+                        host: host.unwrap_or_default(),
+                        hardware: hardware.unwrap_or_default(),
+                        verifier: verifier.unwrap_or_default(),
+                        liquidity: liquidity.unwrap_or_default(),
+                        miner: miner.unwrap_or_default(),
+                        price_usd_micros: price_usd_micros.unwrap_or_default(),
+                        clearing_price_usd_micros: clearing_price_usd_micros.unwrap_or_default(),
+                    },
+                    "role_breakdown",
+                )
+            }
+            "device_links" => {
+                let links = read_vec(reader, |reader| {
+                    let mut device_hash = None;
+                    let mut opt_in = None;
+                    decode_struct(reader, Some(2), |key, reader| match key {
+                        "device_hash" => {
+                            assign_once(&mut device_hash, reader.read_string()?, "device_hash")
+                        }
+                        "opt_in" => assign_once(&mut opt_in, reader.read_u64()?, "opt_in"),
+                        other => Err(DecodeError::UnknownField(other.to_string())),
+                    })?;
+                    Ok(ad_market::DeviceLinkOptIn {
+                        device_hash: device_hash.ok_or(DecodeError::MissingField("device_hash"))?,
+                        opt_in: opt_in.unwrap_or(0) != 0,
+                    })
+                })?;
+                assign_once(&mut device_links, links, "device_links")
+            }
             "provider_signature" => assign_once(
                 &mut provider_signature,
                 read_bytes_field(reader, "provider_signature")?,
@@ -550,11 +688,15 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             })),
             "ad" => Ok(Receipt::Ad(AdReceipt {
                 campaign_id: campaign_id.ok_or(DecodeError::MissingField("campaign_id"))?,
+                creative_id: creative_id.unwrap_or_default(),
                 publisher: publisher.ok_or(DecodeError::MissingField("publisher"))?,
                 impressions: impressions.ok_or(DecodeError::MissingField("impressions"))?,
                 spend: spend.ok_or(DecodeError::MissingField("spend"))?,
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 conversions: conversions.ok_or(DecodeError::MissingField("conversions"))? as u32,
+                claim_routes: claim_routes.unwrap_or_default(),
+                role_breakdown,
+                device_links: device_links.unwrap_or_default(),
                 publisher_signature: publisher_signature
                     .ok_or(DecodeError::MissingField("publisher_signature"))?,
                 signature_nonce: signature_nonce

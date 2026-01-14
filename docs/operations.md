@@ -64,6 +64,22 @@
   3. To revert an applied gate, plan an exit intent (`GateAction::Exit`) by letting `tb-cli governor status` build up the required streak or by manually submitting the exit via the governor decision API. Confirm `economics_autopilot=false` in `tb-cli governor status`.
   4. Once the anomaly is addressed, re-enable the governor (`TB_GOVERNOR_ENABLED=1`) and replay the same metrics so the economics gate can re-enter from the known-good sample. Turn apply mode back on when you are ready to let the gate mutate runtime params again.
 
+### Ad Market Quality + Cost Signals
+
+- **Quality-adjusted pricing**
+  - `ad_quality_multiplier_ppm{component}` reports freshness/privacy/readiness/overall multipliers (ppm).
+  - `ad_quality_readiness_streak_windows` surfaces the readiness streak used for cohort quality.
+  - `ad_quality_freshness_score_ppm` tracks the weighted freshness histogram score per presence bucket.
+  - `ad_quality_privacy_score_ppm` tracks privacy budget headroom after denials/cooldowns.
+- **Compute scarcity coupling**
+  - `ad_compute_unit_price_usd_micros` is the compute-market spot price converted to USD micros.
+  - `ad_cost_basis_usd_micros{component}` shows bandwidth/verifier/host/total floor components after scarcity coupling.
+- **Tiered ad gates**
+  - `ad_gate_ready_ppm{tier}` and `ad_gate_streak_windows{tier}` confirm contextual vs presence readiness streaks before apply.
+  - Use `tb-cli governor status` to confirm the matching `ad_contextual`/`ad_presence` gate streaks and snapshot hashes.
+- **Dashboards and wrappers**
+  - Update `monitoring/ad_market_dashboard.json` and `metrics-aggregator` `/wrappers` snapshots whenever these series change; include refreshed panel screenshots (`npm ci --prefix monitoring && make monitor`) in reviews.
+
 ### Energy RPC Guardrails
 
 - RPC calls enforce optional auth (`TB_ENERGY_RPC_TOKEN`) and a sliding-window rate limit (`TB_ENERGY_RPC_RPS`, default 50rps). Missing/incorrect tokens return `-33009`, while limits return `-33010`.

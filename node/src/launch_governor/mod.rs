@@ -1,3 +1,4 @@
+use crate::ad_readiness;
 use crate::blockchain::process::validate_and_apply;
 use crate::economics::deterministic_metrics;
 use crate::gateway::dns;
@@ -276,6 +277,16 @@ pub struct EconomicsSample {
     pub market_metrics: crate::economics::MarketMetrics,
 }
 
+#[derive(Clone, Default)]
+pub struct AdTierSample {
+    pub ready_streak_windows: u64,
+    pub domain_tier_scores: std::collections::HashMap<String, (u8, u64)>,
+    pub interest_tag_scores: std::collections::HashMap<String, (u8, u64)>,
+    pub presence_ready_slots: u64,
+    pub presence_bucket_count: u64,
+    pub privacy_remaining_ppm: u32,
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct RatioSample {
     pub numerator: u64,
@@ -448,7 +459,7 @@ struct GateRuntime {
     last_eval: GateEval,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GateState {
     Inactive,
     Active,
@@ -578,6 +589,14 @@ impl SharedState {
         );
         gates.insert("naming".into(), GateRuntime::new("naming", required));
         gates.insert("economics".into(), GateRuntime::new("economics", required));
+        gates.insert(
+            "ad_targeting_contextual".into(),
+            GateRuntime::new("ad_targeting_contextual", required),
+        );
+        gates.insert(
+            "ad_targeting_presence".into(),
+            GateRuntime::new("ad_targeting_presence", required),
+        );
         Self {
             enabled: config.enabled,
             base_path: config.base_path.to_string_lossy().into_owned(),
@@ -795,6 +814,8 @@ async fn run_service(
     let mut operational_ctrl = OperationalController::new(window_secs);
     let mut naming_ctrl = NamingController::new(window_secs);
     let mut economics_ctrl = EconomicsController::new(window_secs);
+    let mut ad_contextual_ctrl = AdTierController::new(AdTargetingTier::Contextual, window_secs);
+    let mut ad_presence_ctrl = AdTierController::new(AdTargetingTier::Presence, window_secs);
     loop {
         if cancel.is_cancelled() {
             break;
@@ -879,6 +900,68 @@ async fn run_service(
             economics_ctrl.required(),
             economics_ctrl.eval(),
         );
+        if let Some(ad_sample) = ad_tier_sample() {
+            if let Some(eval) = ad_contextual_ctrl.evaluate(epoch, &ad_sample) {
+                if let Some(intent) = plan_intent(
+                    &base_path,
+                    &mut intent_seq,
+                    "ad_targeting_contextual",
+                    eval.action,
+                    epoch,
+                    eval.metrics.clone(),
+                    eval.reason.clone(),
+                ) {
+                    process_intent(intent, &chain, &shared);
+                }
+            }
+            shared.update_gate(
+                "ad_targeting_contextual",
+                ad_contextual_ctrl.gate_state(),
+                ad_contextual_ctrl.enter(),
+                ad_contextual_ctrl.exit(),
+                ad_contextual_ctrl.required(),
+                ad_contextual_ctrl.eval(),
+            );
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::update_ad_targeting_gate_metrics(
+                "contextual",
+                matches!(ad_contextual_ctrl.gate_state(), GateState::Rehearsal),
+                ad_contextual_ctrl.enter(),
+                ad_contextual_ctrl.exit(),
+                ad_contextual_ctrl.required(),
+                ad_contextual_ctrl.eval().enter_ok,
+            );
+            if let Some(eval) = ad_presence_ctrl.evaluate(epoch, &ad_sample) {
+                if let Some(intent) = plan_intent(
+                    &base_path,
+                    &mut intent_seq,
+                    "ad_targeting_presence",
+                    eval.action,
+                    epoch,
+                    eval.metrics.clone(),
+                    eval.reason.clone(),
+                ) {
+                    process_intent(intent, &chain, &shared);
+                }
+            }
+            shared.update_gate(
+                "ad_targeting_presence",
+                ad_presence_ctrl.gate_state(),
+                ad_presence_ctrl.enter(),
+                ad_presence_ctrl.exit(),
+                ad_presence_ctrl.required(),
+                ad_presence_ctrl.eval(),
+            );
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::update_ad_targeting_gate_metrics(
+                "presence",
+                matches!(ad_presence_ctrl.gate_state(), GateState::Rehearsal),
+                ad_presence_ctrl.enter(),
+                ad_presence_ctrl.exit(),
+                ad_presence_ctrl.required(),
+                ad_presence_ctrl.eval().enter_ok,
+            );
+        }
         sleep(Duration::from_secs(window_secs.max(1))).await;
     }
 }
@@ -919,6 +1002,35 @@ fn plan_intent(
         ("naming", GateAction::Trade) => {
             json_map(vec![("naming_mode", JsonValue::String("trade".into()))])
         }
+        ("ad_targeting_contextual", GateAction::Rehearsal)
+        | ("ad_targeting_contextual", GateAction::Trade) => json_map(vec![
+            ("ad_rehearsal_enabled", JsonValue::Bool(true)),
+            (
+                "ad_rehearsal_stability_windows",
+                JsonValue::Number(JsonNumber::from(3)),
+            ),
+            ("ad_rehearsal_contextual_enabled", JsonValue::Bool(true)),
+            (
+                "ad_rehearsal_contextual_stability_windows",
+                JsonValue::Number(JsonNumber::from(3)),
+            ),
+        ]),
+        ("ad_targeting_contextual", GateAction::Exit) => json_map(vec![
+            ("ad_rehearsal_enabled", JsonValue::Bool(false)),
+            ("ad_rehearsal_contextual_enabled", JsonValue::Bool(false)),
+        ]),
+        ("ad_targeting_presence", GateAction::Rehearsal)
+        | ("ad_targeting_presence", GateAction::Trade) => json_map(vec![
+            ("ad_rehearsal_presence_enabled", JsonValue::Bool(true)),
+            (
+                "ad_rehearsal_presence_stability_windows",
+                JsonValue::Number(JsonNumber::from(3)),
+            ),
+        ]),
+        ("ad_targeting_presence", GateAction::Exit) => json_map(vec![(
+            "ad_rehearsal_presence_enabled",
+            JsonValue::Bool(false),
+        )]),
         _ => json_map(vec![]), // Fallback for unknown gate/action combinations
     };
     let epoch_apply = epoch + 1;
@@ -1088,6 +1200,38 @@ fn economics_sample_snapshot(sample: &EconomicsSample) -> JsonValue {
             JsonValue::Array(markets.into_iter().collect()),
         ),
     ])
+}
+
+fn ad_tier_sample() -> Option<AdTierSample> {
+    let snapshot = ad_readiness::global_snapshot()?;
+    let mut domain_tier_scores = std::collections::HashMap::new();
+    let mut interest_tag_scores = std::collections::HashMap::new();
+    let mut presence_ready_slots = 0u64;
+    let mut presence_bucket_count = 0u64;
+    let mut privacy_remaining_ppm = 1_000_000u32;
+    if let Some(seg) = snapshot.segment_readiness.as_ref() {
+        for (tier, stats) in seg.domain_tiers.iter() {
+            domain_tier_scores.insert(tier.clone(), (stats.readiness_score, stats.cohort_count));
+        }
+        for (tag, stats) in seg.interest_tags.iter() {
+            interest_tag_scores.insert(tag.clone(), (stats.readiness_score, stats.cohort_count));
+        }
+        presence_bucket_count = seg.presence_buckets.len() as u64;
+        for (_id, presence) in seg.presence_buckets.iter() {
+            presence_ready_slots = presence_ready_slots.saturating_add(presence.ready_slots);
+        }
+        if let Some(privacy) = seg.privacy_budget.as_ref() {
+            privacy_remaining_ppm = privacy.remaining_ppm;
+        }
+    }
+    Some(AdTierSample {
+        ready_streak_windows: snapshot.ready_streak_windows,
+        domain_tier_scores,
+        interest_tag_scores,
+        presence_ready_slots,
+        presence_bucket_count,
+        privacy_remaining_ppm,
+    })
 }
 
 fn replay_success_ratio(chain: &Blockchain, window_blocks: usize) -> Option<RatioSample> {
@@ -1674,6 +1818,30 @@ pub struct EconomicsController {
     ad_margin_history: VecDeque<f64>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AdTargetingTier {
+    Contextual,
+    Presence,
+}
+
+impl AdTargetingTier {
+    fn as_str(&self) -> &'static str {
+        match self {
+            AdTargetingTier::Contextual => "contextual",
+            AdTargetingTier::Presence => "presence",
+        }
+    }
+}
+
+pub struct AdTierController {
+    tier: AdTargetingTier,
+    required_streak: u64,
+    enter_streak: u64,
+    exit_streak: u64,
+    active: bool,
+    last_eval: GateEval,
+}
+
 impl EconomicsController {
     pub fn new(window_secs: u64) -> Self {
         let epoch_secs = crate::EPOCH_BLOCKS.max(1);
@@ -2006,6 +2174,181 @@ impl EconomicsController {
     }
 }
 
+impl AdTierController {
+    fn new(tier: AdTargetingTier, window_secs: u64) -> Self {
+        let required_streak = (crate::EPOCH_BLOCKS / window_secs.max(1)).max(1);
+        Self {
+            tier,
+            required_streak,
+            enter_streak: 0,
+            exit_streak: 0,
+            active: false,
+            last_eval: GateEval::default(),
+        }
+    }
+
+    pub fn evaluate(&mut self, epoch: u64, sample: &AdTierSample) -> Option<PlannedEval> {
+        const CONTEXTUAL_SCORE_MIN: u8 = 60;
+        const PRIVACY_READY_MIN_PPM: u32 = 50_000;
+        let contextual_scores_present =
+            !sample.domain_tier_scores.is_empty() || !sample.interest_tag_scores.is_empty();
+        let presence_scores_present = sample.presence_bucket_count > 0;
+        if matches!(self.tier, AdTargetingTier::Contextual) && !contextual_scores_present {
+            return None;
+        }
+        if matches!(self.tier, AdTargetingTier::Presence) && !presence_scores_present {
+            return None;
+        }
+
+        let contextual_ready = sample
+            .domain_tier_scores
+            .values()
+            .any(|(score, count)| *count > 0 && *score >= CONTEXTUAL_SCORE_MIN)
+            || sample
+                .interest_tag_scores
+                .values()
+                .any(|(score, count)| *count > 0 && *score >= CONTEXTUAL_SCORE_MIN);
+        let presence_ready = sample.presence_bucket_count > 0 && sample.presence_ready_slots > 0;
+        let privacy_ready = sample.privacy_remaining_ppm > PRIVACY_READY_MIN_PPM;
+        let streak_ready = sample.ready_streak_windows >= self.required_streak;
+        let enter_ready = match self.tier {
+            AdTargetingTier::Contextual => contextual_ready && privacy_ready && streak_ready,
+            AdTargetingTier::Presence => presence_ready && privacy_ready && streak_ready,
+        };
+
+        if enter_ready {
+            self.enter_streak = self.enter_streak.saturating_add(1);
+            self.exit_streak = 0;
+        } else {
+            self.exit_streak = self.exit_streak.saturating_add(1);
+            self.enter_streak = 0;
+        }
+
+        let mut metrics = JsonMap::new();
+        metrics.insert(
+            "tier".into(),
+            JsonValue::String(self.tier.as_str().to_string()),
+        );
+        metrics.insert("contextual_ready".into(), JsonValue::Bool(contextual_ready));
+        metrics.insert("presence_ready".into(), JsonValue::Bool(presence_ready));
+        metrics.insert("privacy_ready".into(), JsonValue::Bool(privacy_ready));
+        metrics.insert(
+            "ready_streak_windows".into(),
+            JsonValue::Number(JsonNumber::from(sample.ready_streak_windows)),
+        );
+        metrics.insert(
+            "enter_streak".into(),
+            JsonValue::Number(JsonNumber::from(self.enter_streak)),
+        );
+        metrics.insert(
+            "exit_streak".into(),
+            JsonValue::Number(JsonNumber::from(self.exit_streak)),
+        );
+        metrics.insert(
+            "required_streak".into(),
+            JsonValue::Number(JsonNumber::from(self.required_streak)),
+        );
+        metrics.insert(
+            "privacy_remaining_ppm".into(),
+            JsonValue::Number(JsonNumber::from(sample.privacy_remaining_ppm)),
+        );
+        metrics.insert(
+            "presence_ready_slots".into(),
+            JsonValue::Number(JsonNumber::from(sample.presence_ready_slots)),
+        );
+        metrics.insert(
+            "presence_bucket_count".into(),
+            JsonValue::Number(JsonNumber::from(sample.presence_bucket_count)),
+        );
+        let tier_entries: Vec<JsonValue> = sample
+            .domain_tier_scores
+            .iter()
+            .map(|(tier, (score, count))| {
+                json_map(vec![
+                    ("segment", JsonValue::String("domain_tier".into())),
+                    ("label", JsonValue::String(tier.clone())),
+                    (
+                        "readiness_score",
+                        JsonValue::Number(JsonNumber::from(*score)),
+                    ),
+                    ("cohort_count", JsonValue::Number(JsonNumber::from(*count))),
+                ])
+            })
+            .chain(
+                sample
+                    .interest_tag_scores
+                    .iter()
+                    .map(|(tag, (score, count))| {
+                        json_map(vec![
+                            ("segment", JsonValue::String("interest_tag".into())),
+                            ("label", JsonValue::String(tag.clone())),
+                            (
+                                "readiness_score",
+                                JsonValue::Number(JsonNumber::from(*score)),
+                            ),
+                            ("cohort_count", JsonValue::Number(JsonNumber::from(*count))),
+                        ])
+                    }),
+            )
+            .collect();
+        metrics.insert("segments".into(), JsonValue::Array(tier_entries));
+
+        let metrics_val = JsonValue::Object(metrics);
+        self.last_eval = GateEval {
+            enter_ok: enter_ready,
+            exit_ok: !enter_ready,
+            reason: if enter_ready {
+                format!("ad {} tiers ready", self.tier.as_str())
+            } else {
+                format!("ad {} tiers not ready", self.tier.as_str())
+            },
+            metrics: metrics_val.clone(),
+        };
+
+        if !self.active && self.enter_streak >= self.required_streak {
+            self.active = true;
+            Some(PlannedEval {
+                action: GateAction::Rehearsal,
+                reason: format!("epoch {epoch}: ad {} tiers ready", self.tier.as_str()),
+                metrics: metrics_val,
+            })
+        } else if self.active && self.exit_streak >= self.required_streak {
+            self.active = false;
+            Some(PlannedEval {
+                action: GateAction::Exit,
+                reason: format!("epoch {epoch}: ad {} tiers not ready", self.tier.as_str()),
+                metrics: metrics_val,
+            })
+        } else {
+            None
+        }
+    }
+
+    fn gate_state(&self) -> GateState {
+        if self.active {
+            GateState::Rehearsal
+        } else {
+            GateState::Inactive
+        }
+    }
+
+    fn enter(&self) -> u64 {
+        self.enter_streak
+    }
+
+    fn exit(&self) -> u64 {
+        self.exit_streak
+    }
+
+    fn required(&self) -> u64 {
+        self.required_streak
+    }
+
+    fn eval(&self) -> &GateEval {
+        &self.last_eval
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2233,6 +2576,31 @@ mod tests {
         let eval = ctrl.evaluate(2, &dead_chain);
         assert!(eval.is_none() || !eval.unwrap().action.as_str().contains("enter"));
         assert!(!ctrl.last_eval.enter_ok);
+    }
+
+    #[test]
+    fn ad_tier_controller_enters_on_contextual_ready_segments() {
+        let mut ctrl = AdTierController::new(AdTargetingTier::Contextual, crate::EPOCH_BLOCKS * 2);
+        let mut sample = AdTierSample::default();
+        sample.ready_streak_windows = ctrl.required();
+        sample.privacy_remaining_ppm = 900_000;
+        sample.domain_tier_scores.insert("premium".into(), (80, 2));
+        let eval = ctrl.evaluate(2, &sample).expect("enter");
+        assert_eq!(eval.action, GateAction::Rehearsal);
+        assert_eq!(ctrl.gate_state(), GateState::Rehearsal);
+    }
+
+    #[test]
+    fn ad_tier_controller_enters_on_presence_ready_segments() {
+        let mut ctrl = AdTierController::new(AdTargetingTier::Presence, crate::EPOCH_BLOCKS * 2);
+        let mut sample = AdTierSample::default();
+        sample.ready_streak_windows = ctrl.required();
+        sample.privacy_remaining_ppm = 900_000;
+        sample.presence_ready_slots = 10;
+        sample.presence_bucket_count = 1;
+        let eval = ctrl.evaluate(2, &sample).expect("enter");
+        assert_eq!(eval.action, GateAction::Rehearsal);
+        assert_eq!(ctrl.gate_state(), GateState::Rehearsal);
     }
 
     #[test]

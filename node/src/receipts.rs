@@ -109,6 +109,9 @@ pub struct EnergyReceipt {
 pub struct AdReceipt {
     /// Campaign ID
     pub campaign_id: String,
+    /// Creative ID
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub creative_id: String,
     /// Publisher address
     pub publisher: String,
     /// Impressions delivered
@@ -119,11 +122,33 @@ pub struct AdReceipt {
     pub block_height: u64,
     /// Conversion events recorded
     pub conversions: u32,
+    #[serde(default)]
+    pub claim_routes: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub role_breakdown: Option<AdRoleBreakdown>,
+    #[serde(default)]
+    pub device_links: Vec<ad_market::DeviceLinkOptIn>,
     /// Publisher Ed25519 signature over receipt fields (prevents forgery)
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub publisher_signature: Vec<u8>,
     /// Nonce to prevent replay attacks
     pub signature_nonce: u64,
+}
+
+/// Optional role-level breakdown for ad receipts.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct AdRoleBreakdown {
+    pub viewer: u64,
+    pub host: u64,
+    pub hardware: u64,
+    pub verifier: u64,
+    pub liquidity: u64,
+    pub miner: u64,
+    #[serde(default)]
+    pub price_usd_micros: u64,
+    #[serde(default)]
+    pub clearing_price_usd_micros: u64,
 }
 
 impl Receipt {
@@ -220,11 +245,15 @@ mod tests {
     fn ad_receipt_serializes() {
         let receipt = Receipt::Ad(AdReceipt {
             campaign_id: "camp_101".into(),
+            creative_id: "creative_101".into(),
             publisher: "pub_1".into(),
             impressions: 10000,
             spend: 100,
             block_height: 103,
             conversions: 50,
+            claim_routes: std::collections::HashMap::new(),
+            role_breakdown: None,
+            device_links: Vec::new(),
             publisher_signature: vec![0u8; 64],
             signature_nonce: 0,
         });

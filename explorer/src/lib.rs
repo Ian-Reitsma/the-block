@@ -25,7 +25,7 @@ use the_block::compute_market::settlement::{SlaResolution, SlaResolutionKind};
 use the_block::compute_market::snark::{CircuitArtifact, ProofBundle, SnarkBackend};
 use the_block::governance::treasury::parse_dependency_list;
 use the_block::{
-    compute_market::{receipt::Receipt, Job},
+    compute_market::{receipt::Receipt as ComputeReceipt, Job},
     dex::order_book::OrderBook,
     energy::{self, DisputeStatus},
     governance::{
@@ -1408,6 +1408,15 @@ pub struct RolePayoutBreakdown {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdClaimRouteBreakdown {
+    pub campaign_id: String,
+    pub creative_id: String,
+    pub role: String,
+    pub address: String,
+    pub amount: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreasuryTimelineEvent {
     pub disbursement_id: u64,
     pub destination: String,
@@ -1514,6 +1523,8 @@ pub struct BlockPayoutBreakdown {
     pub total_usd_micros: u64,
     pub settlement_count: u64,
     pub price_usd_micros: u64,
+    pub ad_claim_routes: Vec<AdClaimRouteBreakdown>,
+    pub ad_conversions: u64,
     pub treasury_events: Vec<TreasuryTimelineEvent>,
 }
 
@@ -1553,6 +1564,38 @@ impl BlockPayoutBreakdown {
             .saturating_add(ad_verifier)
             .saturating_add(ad_liquidity)
             .saturating_add(ad_miner);
+
+        let mut ad_claim_routes = Vec::new();
+        let mut ad_conversions = 0u64;
+        for receipt in &block.receipts {
+            if let the_block::Receipt::Ad(ad) = receipt {
+                ad_conversions = ad_conversions.saturating_add(ad.conversions as u64);
+                if let Some(breakdown) = ad.role_breakdown.as_ref() {
+                    let roles = [
+                        ("viewer", breakdown.viewer),
+                        ("host", breakdown.host),
+                        ("hardware", breakdown.hardware),
+                        ("verifier", breakdown.verifier),
+                        ("liquidity", breakdown.liquidity),
+                        ("miner", breakdown.miner),
+                    ];
+                    for (role, amount) in roles {
+                        if amount == 0 {
+                            continue;
+                        }
+                        if let Some(address) = ad.claim_routes.get(role) {
+                            ad_claim_routes.push(AdClaimRouteBreakdown {
+                                campaign_id: ad.campaign_id.clone(),
+                                creative_id: ad.creative_id.clone(),
+                                role: role.to_string(),
+                                address: address.clone(),
+                                amount,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         let ad_breakdown = RolePayoutBreakdown {
             total: ad_total,
             viewer: ad_viewer,
@@ -1577,6 +1620,8 @@ impl BlockPayoutBreakdown {
             total_usd_micros: block.ad_total_usd_micros,
             settlement_count: block.ad_settlement_count,
             price_usd_micros: block.ad_oracle_price_usd_micros,
+            ad_claim_routes,
+            ad_conversions,
             treasury_events,
         }
     }
@@ -1644,6 +1689,42 @@ impl BlockPayoutBreakdown {
             liquidity: ad_liquidity,
             miner: ad_miner,
         };
+        let ad_claim_routes = map
+            .get("ad_claim_routes")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|entry| entry.as_object())
+                    .map(|obj| AdClaimRouteBreakdown {
+                        campaign_id: obj
+                            .get("campaign_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        creative_id: obj
+                            .get("creative_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        role: obj
+                            .get("role")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        address: obj
+                            .get("address")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        amount: obj.get("amount").and_then(|v| v.as_u64()).unwrap_or(0),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let ad_conversions = map
+            .get("ad_conversions")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
 
         let total_usd = Self::field_u64(map, "total_usd_micros")
             .max(Self::field_u64(map, "ad_total_usd_micros"));
@@ -1660,6 +1741,8 @@ impl BlockPayoutBreakdown {
             total_usd_micros: total_usd,
             settlement_count,
             price_usd_micros: price,
+            ad_claim_routes,
+            ad_conversions,
             treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
         })
     }
@@ -1685,6 +1768,42 @@ impl BlockPayoutBreakdown {
                 total_usd_micros: Self::field_u64(map, "total_usd_micros"),
                 settlement_count: Self::field_u64(map, "settlement_count"),
                 price_usd_micros: Self::field_u64(map, "price_usd_micros"),
+                ad_claim_routes: map
+                    .get("ad_claim_routes")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|entry| entry.as_object())
+                            .map(|obj| AdClaimRouteBreakdown {
+                                campaign_id: obj
+                                    .get("campaign_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                creative_id: obj
+                                    .get("creative_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                role: obj
+                                    .get("role")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                address: obj
+                                    .get("address")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or_default()
+                                    .to_string(),
+                                amount: obj.get("amount").and_then(|v| v.as_u64()).unwrap_or(0),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                ad_conversions: map
+                    .get("ad_conversions")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
                 treasury_events: TreasuryTimelineEvent::from_json_array(map.get("treasury_events")),
             });
         }
@@ -1710,6 +1829,34 @@ impl BlockPayoutBreakdown {
             "price_usd_micros".into(),
             Self::number(self.price_usd_micros),
         );
+        if !self.ad_claim_routes.is_empty() {
+            let routes = self
+                .ad_claim_routes
+                .iter()
+                .map(|route| {
+                    let mut obj = json::Map::new();
+                    obj.insert(
+                        "campaign_id".into(),
+                        json::Value::String(route.campaign_id.clone()),
+                    );
+                    obj.insert(
+                        "creative_id".into(),
+                        json::Value::String(route.creative_id.clone()),
+                    );
+                    obj.insert("role".into(), json::Value::String(route.role.clone()));
+                    obj.insert("address".into(), json::Value::String(route.address.clone()));
+                    obj.insert("amount".into(), Self::number(route.amount));
+                    json::Value::Object(obj)
+                })
+                .collect();
+            map.insert("ad_claim_routes".into(), json::Value::Array(routes));
+        }
+        if self.ad_conversions > 0 {
+            map.insert(
+                "ad_conversions".into(),
+                json::Value::Number(json::Number::from(self.ad_conversions)),
+            );
+        }
         let events = self
             .treasury_events
             .iter()
@@ -1752,6 +1899,73 @@ impl RolePayoutBreakdown {
             liquidity: BlockPayoutBreakdown::field_u64(map, "liquidity"),
             miner: BlockPayoutBreakdown::field_u64(map, "miner"),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ad_claim_routes_and_conversions_round_trip() {
+        let mut block = the_block::Block::default();
+        block.hash = "abc".into();
+        block.index = 7;
+        block.ad_viewer = the_block::TokenAmount::new(10);
+        block.ad_host = the_block::TokenAmount::new(20);
+        block.ad_hardware = the_block::TokenAmount::new(0);
+        block.ad_verifier = the_block::TokenAmount::new(0);
+        block.ad_liquidity = the_block::TokenAmount::new(0);
+        block.ad_miner = the_block::TokenAmount::new(0);
+        block.ad_total_usd_micros = 1_000;
+        block.ad_oracle_price_usd_micros = 50;
+        block.ad_settlement_count = 1;
+        block.receipts = vec![the_block::Receipt::Ad(the_block::AdReceipt {
+            campaign_id: "cmp".into(),
+            creative_id: "cr".into(),
+            publisher: "addr-host".into(),
+            impressions: 1,
+            spend: 30,
+            block_height: block.index,
+            conversions: 3,
+            claim_routes: [
+                ("viewer".to_string(), "addr-viewer".to_string()),
+                ("host".to_string(), "addr-host".to_string()),
+            ]
+            .into_iter()
+            .collect(),
+            role_breakdown: Some(the_block::receipts::AdRoleBreakdown {
+                viewer: 10,
+                host: 20,
+                hardware: 0,
+                verifier: 0,
+                liquidity: 0,
+                miner: 0,
+                price_usd_micros: 0,
+                clearing_price_usd_micros: 0,
+            }),
+            device_links: Vec::new(),
+            publisher_signature: Vec::new(),
+            signature_nonce: 0,
+        })];
+
+        let breakdown = BlockPayoutBreakdown::from_block(&block);
+        assert_eq!(breakdown.ad_conversions, 3);
+        assert_eq!(breakdown.ad_claim_routes.len(), 2);
+        assert!(breakdown
+            .ad_claim_routes
+            .iter()
+            .any(|r| r.role == "viewer" && r.address == "addr-viewer" && r.amount == 10));
+        assert!(breakdown
+            .ad_claim_routes
+            .iter()
+            .any(|r| r.role == "host" && r.address == "addr-host" && r.amount == 20));
+
+        let json = breakdown.to_json_value();
+        let parsed = BlockPayoutBreakdown::from_json_with_hint(&breakdown.hash, &json)
+            .expect("parsed from json");
+        assert_eq!(parsed.ad_conversions, breakdown.ad_conversions);
+        assert_eq!(parsed.ad_claim_routes, breakdown.ad_claim_routes);
     }
 }
 

@@ -235,8 +235,9 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - Ad market RPC/CLI: campaigns now target multi-signal cohorts (domain tiers, badge mixes, interest tags, and proof-of-presence buckets). Key endpoints:
   - `ad_market.inventory`, `ad_market.list_campaigns`, `ad_market.distribution`, `ad_market.budget`, `ad_market.broker_state`, `ad_market.readiness` return selector-aware snapshots. Every `CohortPriceSnapshot`/`ReadinessSnapshot` carries `selectors_version`, `domain_tier`, `interest_tags`, optional `presence_bucket`, and privacy-budget gauges so downstream tooling can render per-segment pricing/utilization/freshness.
   - `ad_market.register_campaign` accepts selector maps (per-selector bid shading, pacing caps, presence/domain filters, conversion-value rules). CLI: `contract-cli ad-market register --file campaign.json` enforces the same schema and exposes `--selector` helpers for quick edits.
-  - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply estimates and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts. CLI: `contract-cli ad-market presence list|reserve`.
+  - Presence APIs: `ad_market.list_presence_cohorts` enumerates privacy-safe presence buckets operators can bid on (with supply/freshness and guardrail reasons), and `ad_market.reserve_presence` lets campaigns reserve slots for high-value cohorts while consuming privacy budget. CLI: `contract-cli ad-market presence list|reserve`.
   - Conversion/value APIs: `ad_market.record_conversion` now supports `value`, `currency_code`, `selector_weights[]`, and `attribution_window_secs` so advertisers can compute ROAS per selector. CLI supports `contract-cli ad-market record-conversion --file conversion.json`.
+  - Claims + attribution: `ad_market.register_claim_route` sets payout routing per domain/role (publisher/host/hardware/verifier/liquidity/viewer) and `ad_market.claim_routes` returns the resolved map for a cohort snapshot; settlement/readiness surfaces the routes so explorers can render attribution. CLI: `contract-cli ad-market claim-routes --domain example.test` and `... register-claim-route` cover both directions.
 
 ### Presence Cohort JSON Schemas
 
@@ -320,11 +321,21 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
           "type": "integer",
           "minimum": 0,
           "maximum": 1000000,
-          "description": "Remaining privacy budget in parts per million"
+          "description": "Remaining privacy budget in parts per million (min across relevant families)"
+        },
+        "denied_ppm": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "Largest observed denial ratio in ppm across relevant families"
+        },
+        "cooldown_remaining": {
+          "type": "integer",
+          "description": "Max cooldown windows remaining across relevant families"
         },
         "denied_count": {
           "type": "integer",
-          "description": "Number of cohorts redacted due to k-anonymity"
+          "description": "Number of cohorts redacted due to k-anonymity guardrails"
         }
       }
     },
@@ -346,8 +357,8 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
         },
         "privacy_guardrail": {
           "type": "string",
-          "enum": ["ok", "k_anonymity_redacted", "budget_exhausted", "opt_in_required"],
-          "description": "Reason code if data is limited"
+          "enum": ["ok", "k_anonymity_redacted", "budget_exhausted", "cooldown"],
+          "description": "Reason code if privacy guardrails limit readiness data"
         },
         "selector_prices": {
           "type": "array",
@@ -372,18 +383,15 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
     },
     "PresenceBucket": {
       "type": "object",
-      "required": ["bucket_id", "kind", "beacon_id", "radius_meters", "minted_at_micros", "expires_at_micros", "confidence_bps"],
+      "required": ["bucket_id", "kind", "radius_meters", "confidence_bps"],
       "properties": {
         "bucket_id": { "type": "string", "description": "Deterministic hash of bucket parameters" },
         "kind": { "type": "string", "enum": ["localnet", "range_boost"] },
-        "beacon_id": { "type": "string", "description": "Venue/beacon identifier" },
+        "region": { "type": "string", "description": "Optional region hint for the bucket" },
         "radius_meters": { "type": "integer", "minimum": 0, "maximum": 65535 },
-        "minted_at_micros": { "type": "integer", "description": "Unix timestamp in microseconds" },
-        "expires_at_micros": { "type": "integer", "description": "Expiry per TB_PRESENCE_TTL_SECS" },
         "confidence_bps": { "type": "integer", "minimum": 0, "maximum": 10000 },
-        "venue_id": { "type": "string" },
-        "crowd_size_hint": { "type": "integer", "minimum": 0 },
-        "presence_badge": { "type": "string", "description": "Badge token for venue-grade attestations" }
+        "minted_at_micros": { "type": "integer", "description": "Unix timestamp in microseconds" },
+        "expires_at_micros": { "type": "integer", "description": "Expiry per TB_PRESENCE_TTL_SECS" }
       }
     },
     "SelectorBidSpec": {
@@ -391,7 +399,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
       "required": ["selector_id", "clearing_price_usd_micros"],
       "properties": {
         "selector_id": { "type": "string", "description": "blake3(domain||domain_tier||interest_tags||presence_bucket||version)" },
-        "clearing_price_usd_micros": { "type": "integer", "minimum": 0 },
+        "clearing_price_usd_micros": { "type": "integer", "minimum": 0, "description": "Baseline price per MiB for this selector" },
         "shading_factor_bps": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 0 },
         "slot_cap": { "type": "integer", "minimum": 0 },
         "max_pacing_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 }
@@ -477,7 +485,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
     },
     "reserved_budget_usd_micros": {
       "type": "integer",
-      "description": "Budget committed to this reservation"
+      "description": "Budget committed to this reservation (slot_count × clearing price)"
     },
     "effective_selectors": {
       "type": "array",
@@ -495,9 +503,119 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 | `-32034` | `INVALID_PRESENCE_BUCKET` | Presence bucket is expired, malformed, or not found | Check `expires_at_micros` against `TB_PRESENCE_TTL_SECS`; refresh bucket via `ad_market.list_presence_cohorts` |
 | `-32035` | `FORBIDDEN_SELECTOR_COMBO` | Selector combination violates privacy policy (e.g., premium domain + tight presence without opt-in) | Review `presence_filters` and `domain_filters` in campaign; may require explicit opt-in in metadata |
 | `-32036` | `UNKNOWN_SELECTOR` | Interest tag or domain tier not in governance registry | Query `governance.interest_tags` or DNS tier registry |
-| `-32037` | `INSUFFICIENT_PRIVACY_BUDGET` | Request would exceed per-selector or per-family epsilon/delta limits | Wait for budget decay (per `PrivacyBudgetManager` cooldown), reduce request scope, or aggregate selectors |
+| `-32037` | `INSUFFICIENT_PRIVACY_BUDGET` | Request would exceed per-selector or per-family epsilon/delta limits, or `slot_count` exceeds available `ready_slots` | Wait for budget decay (per `PrivacyBudgetManager` cooldown), reduce request scope, or lower `slot_count` |
 | `-32038` | `HOLDOUT_OVERLAP` | Reservation conflicts with active holdout assignment | Cancel conflicting reservation or wait for holdout window to close |
 | `-32039` | `SELECTOR_WEIGHT_MISMATCH` | `selector_weights[]` in conversion record don't sum to 1,000,000 ppm | Adjust weights; total must equal exactly 1,000,000 ppm |
+
+### Ad Claim Routing
+
+#### `ad_market.register_claim_route` — Request Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RegisterClaimRouteRequest",
+  "type": "object",
+  "required": ["domain", "role", "address"],
+  "properties": {
+    "domain": { "type": "string" },
+    "role": {
+      "type": "string",
+      "enum": ["publisher", "host", "hardware", "verifier", "liquidity", "viewer"]
+    },
+    "address": { "type": "string" },
+    "owner_account": {
+      "type": "string",
+      "description": "DNS owner account (must match current ownership record if present)"
+    },
+    "app_id": {
+      "type": "string",
+      "description": "Optional DID/app identity anchor for attribution"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+#### `ad_market.register_claim_route` — Response Schema
+```json
+{
+  "status": "ok"
+}
+```
+
+Notes:
+- Claim routes are keyed by domain + role and persist in the marketplace metadata.
+- Settlement breakdowns include the registered routes; ad payouts use the route when present and fall back to the derived viewer/host/hardware/verifier/liquidity defaults when missing or malformed.
+
+#### `ad_market.claim_routes` — Request Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ClaimRoutesRequest",
+  "type": "object",
+  "required": ["domain"],
+  "properties": {
+    "domain": { "type": "string" },
+    "provider": { "type": "string" },
+    "domain_tier": {
+      "type": "string",
+      "enum": ["premium", "reserved", "community", "unverified"]
+    },
+    "presence_bucket_id": { "type": "string" },
+    "interest_tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+#### `ad_market.claim_routes` — Response Schema
+```json
+{
+  "status": "ok",
+  "claim_routes": {
+    "publisher": "addr1",
+    "host": "addr2"
+  }
+}
+```
+
+### Ad Attribution API
+
+#### `ad_market.attribution` — Request Schema
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AdAttributionRequest",
+  "type": "object",
+  "properties": {
+    "selector_id": { "type": "string" },
+    "domain": { "type": "string" },
+    "app_id": { "type": "string" },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 }
+  },
+  "additionalProperties": false
+}
+```
+
+#### `ad_market.attribution` — Response Schema
+```json
+{
+  "status": "ok",
+  "items": [
+    {
+    "selector_id": "blake3(domain||domain_tier||interest_tags||presence_bucket||version)",
+      "app_id": "did:tb:abcd...",
+      "spend_usd_micros": 1200000,
+      "conversion_value_usd_micros": 3500000,
+      "conversion_count": 42,
+      "roi_ppm": 2916666
+    }
+  ]
+}
+```
 
 ### Governance Knobs for Presence
 

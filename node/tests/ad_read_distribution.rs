@@ -151,6 +151,14 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
     let ack = build_signed_ack(450, "example.com", "edge-1");
     bc.submit_read_ack(ack.clone()).expect("ack accepted");
 
+    let mut claim_routes = std::collections::HashMap::new();
+    claim_routes.insert("publisher".into(), "addr-publisher".into());
+    claim_routes.insert("host".into(), "addr-host".into());
+    claim_routes.insert("hardware".into(), "addr-hardware".into());
+    claim_routes.insert("verifier".into(), "addr-verifier".into());
+    claim_routes.insert("liquidity".into(), "addr-liquidity".into());
+    claim_routes.insert("viewer".into(), "addr-viewer".into());
+
     let settlement = SettlementBreakdown {
         campaign_id: "cmp-1".into(),
         creative_id: "creative-1".into(),
@@ -179,6 +187,9 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
         twap_window_id: 0,
         selection_receipt: dummy_receipt("cmp-1", "creative-1", 80, 80, 0, 80),
         uplift: UpliftEstimate::default(),
+        claim_routes: claim_routes.clone(),
+        conversions: 0,
+        device_links: Vec::new(),
     };
     bc.record_ad_settlement(&ack, settlement);
 
@@ -207,32 +218,40 @@ fn mixed_subsidy_and_ad_flows_persist_in_block_and_accounts() {
     let viewer_balance = bc
         .get_account_balance(&viewer_addr)
         .expect("viewer balance");
-    assert_eq!(
-        viewer_balance.amount,
-        block.read_sub_viewer.value() + block.ad_viewer.value()
-    );
+    assert_eq!(viewer_balance.amount, block.read_sub_viewer.value());
+    let routed_viewer = bc
+        .get_account_balance(
+            claim_routes
+                .get("viewer")
+                .expect("viewer claim route present"),
+        )
+        .expect("viewer claim route balance");
+    assert_eq!(routed_viewer.amount, block.ad_viewer.value());
 
     let host_balance = bc.get_account_balance(&host_addr).expect("host balance");
-    assert_eq!(
-        host_balance.amount,
-        block.read_sub_host.value() + block.ad_host.value()
-    );
+    assert_eq!(host_balance.amount, block.read_sub_host.value());
+    let routed_host = bc
+        .get_account_balance(claim_routes.get("host").expect("host claim route"))
+        .expect("host claim route balance");
+    assert_eq!(routed_host.amount, block.ad_host.value());
 
     let hardware_balance = bc
         .get_account_balance(&hardware_addr)
         .expect("hardware balance");
-    assert_eq!(
-        hardware_balance.amount,
-        block.read_sub_hardware.value() + block.ad_hardware.value()
-    );
+    assert_eq!(hardware_balance.amount, block.read_sub_hardware.value());
+    let routed_hardware = bc
+        .get_account_balance(claim_routes.get("hardware").expect("hardware route"))
+        .expect("hardware claim route balance");
+    assert_eq!(routed_hardware.amount, block.ad_hardware.value());
 
     let verifier_balance = bc
         .get_account_balance(&verifier_addr)
         .expect("verifier balance");
-    assert_eq!(
-        verifier_balance.amount,
-        block.read_sub_verifier.value() + block.ad_verifier.value()
-    );
+    assert_eq!(verifier_balance.amount, block.read_sub_verifier.value());
+    let routed_verifier = bc
+        .get_account_balance(claim_routes.get("verifier").expect("verifier route"))
+        .expect("verifier claim route balance");
+    assert_eq!(routed_verifier.amount, block.ad_verifier.value());
 
     let liquidity_balance = bc
         .get_account_balance(liquidity_addr)

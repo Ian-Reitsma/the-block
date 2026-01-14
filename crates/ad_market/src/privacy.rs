@@ -42,6 +42,8 @@ impl Default for PrivacyBudgetConfig {
 pub struct PrivacyBudgetSnapshot {
     pub generated_at_micros: u64,
     pub families: Vec<PrivacyBudgetFamilySnapshot>,
+    pub max_epsilon: f64,
+    pub max_delta: f64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -51,6 +53,12 @@ pub struct PrivacyBudgetFamilySnapshot {
     pub delta_spent: f64,
     pub impressions_tracked: u64,
     pub cooldown_remaining: u64,
+    #[serde(default)]
+    pub accepted_total: u64,
+    #[serde(default)]
+    pub denied_total: u64,
+    #[serde(default)]
+    pub cooling_total: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +73,9 @@ struct PrivacyBudgetState {
     delta_spent: f64,
     impressions_tracked: u64,
     cooldown_remaining: u64,
+    accepted_total: u64,
+    denied_total: u64,
+    cooling_total: u64,
 }
 
 impl PrivacyBudgetState {
@@ -74,6 +85,9 @@ impl PrivacyBudgetState {
             delta_spent: 0.0,
             impressions_tracked: 0,
             cooldown_remaining: 0,
+            accepted_total: 0,
+            denied_total: 0,
+            cooling_total: 0,
         }
     }
 
@@ -93,6 +107,14 @@ pub enum PrivacyBudgetDecision {
     Denied { family: String },
 }
 
+#[derive(Clone, Debug)]
+pub struct PrivacyBudgetPreview {
+    pub decision: PrivacyBudgetDecision,
+    pub remaining_ppm: u32,
+    pub denied_ppm: u32,
+    pub cooldown_remaining: u64,
+}
+
 impl PrivacyBudgetManager {
     pub fn new(config: PrivacyBudgetConfig) -> Self {
         Self {
@@ -103,6 +125,80 @@ impl PrivacyBudgetManager {
 
     pub fn config(&self) -> &PrivacyBudgetConfig {
         &self.config
+    }
+
+    pub fn preview(&self, badges: &[String], population_hint: Option<u64>) -> PrivacyBudgetPreview {
+        if badges.is_empty() {
+            return PrivacyBudgetPreview {
+                decision: PrivacyBudgetDecision::Allowed,
+                remaining_ppm: 1_000_000,
+                denied_ppm: 0,
+                cooldown_remaining: 0,
+            };
+        }
+        let families: HashSet<String> = badges.iter().map(|badge| family_for(badge)).collect();
+        if families.is_empty() {
+            return PrivacyBudgetPreview {
+                decision: PrivacyBudgetDecision::Allowed,
+                remaining_ppm: 1_000_000,
+                denied_ppm: 0,
+                cooldown_remaining: 0,
+            };
+        }
+        let (epsilon_cost, delta_cost) = self.estimate_cost(population_hint);
+        let mut remaining_ppm = 1_000_000u32;
+        let mut denied_ppm = 0u32;
+        let mut decision = PrivacyBudgetDecision::Allowed;
+        let mut cooldown_remaining = 0u64;
+
+        for family in families {
+            let state = self
+                .families
+                .get(&family)
+                .cloned()
+                .unwrap_or_else(PrivacyBudgetState::new);
+            let epsilon_remaining = if self.config.max_epsilon <= f64::EPSILON {
+                0.0
+            } else {
+                (self.config.max_epsilon - state.epsilon_spent) / self.config.max_epsilon
+            };
+            let delta_remaining = if self.config.max_delta <= f64::EPSILON {
+                0.0
+            } else {
+                (self.config.max_delta - state.delta_spent) / self.config.max_delta
+            };
+            let remaining_ratio = epsilon_remaining.min(delta_remaining).clamp(0.0, 1.0);
+            remaining_ppm = remaining_ppm.min((remaining_ratio * 1_000_000f64).round() as u32);
+
+            let decisions = state.accepted_total + state.denied_total + state.cooling_total;
+            if decisions > 0 {
+                let denied_ratio =
+                    (state.denied_total + state.cooling_total) as f64 / decisions as f64;
+                denied_ppm = denied_ppm.max((denied_ratio * 1_000_000f64).round() as u32);
+            }
+
+            if state.cooldown_remaining > 0 {
+                decision = PrivacyBudgetDecision::Cooling {
+                    family: family.clone(),
+                };
+                cooldown_remaining = cooldown_remaining.max(state.cooldown_remaining);
+                continue;
+            }
+            let epsilon_next = state.epsilon_spent + epsilon_cost;
+            let delta_next = state.delta_spent + delta_cost;
+            if epsilon_next > self.config.max_epsilon || delta_next > self.config.max_delta {
+                decision = PrivacyBudgetDecision::Denied {
+                    family: family.clone(),
+                };
+            }
+        }
+
+        PrivacyBudgetPreview {
+            decision,
+            remaining_ppm,
+            denied_ppm,
+            cooldown_remaining,
+        }
     }
 
     pub fn authorize(
@@ -126,6 +222,7 @@ impl PrivacyBudgetManager {
                 .or_insert_with(PrivacyBudgetState::new);
             if state.cooldown_remaining > 0 {
                 state.cooldown_remaining = state.cooldown_remaining.saturating_sub(1);
+                state.cooling_total = state.cooling_total.saturating_add(1);
                 increment_counter!(
                     "ad_privacy_budget_total",
                     "family" => family.as_str(),
@@ -142,6 +239,7 @@ impl PrivacyBudgetManager {
                 state.epsilon_spent = 0.0;
                 state.delta_spent = 0.0;
                 state.impressions_tracked = 0;
+                state.denied_total = state.denied_total.saturating_add(1);
                 increment_counter!(
                     "ad_privacy_budget_total",
                     "family" => family.as_str(),
@@ -162,6 +260,7 @@ impl PrivacyBudgetManager {
             state.epsilon_spent += epsilon_cost;
             state.delta_spent += delta_cost;
             state.impressions_tracked = state.impressions_tracked.saturating_add(1);
+            state.accepted_total = state.accepted_total.saturating_add(1);
             gauge!(
                 "ad_privacy_budget_remaining",
                 (self.config.max_epsilon - state.epsilon_spent).max(0.0),
@@ -193,11 +292,16 @@ impl PrivacyBudgetManager {
                 delta_spent: state.delta_spent,
                 impressions_tracked: state.impressions_tracked,
                 cooldown_remaining: state.cooldown_remaining,
+                accepted_total: state.accepted_total,
+                denied_total: state.denied_total,
+                cooling_total: state.cooling_total,
             })
             .collect();
         PrivacyBudgetSnapshot {
             generated_at_micros: now_micros(),
             families,
+            max_epsilon: self.config.max_epsilon,
+            max_delta: self.config.max_delta,
         }
     }
 
@@ -215,6 +319,10 @@ fn family_for(badge: &str) -> String {
         .next()
         .map(str::to_lowercase)
         .unwrap_or_else(|| "global".to_string())
+}
+
+pub fn badge_family(badge: &str) -> String {
+    family_for(badge)
 }
 
 fn now_micros() -> u64 {

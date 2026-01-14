@@ -1292,6 +1292,12 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::AdPercentileBuckets => "ad_percentile_buckets",
         ParamKey::AdRehearsalEnabled => "ad_rehearsal_enabled",
         ParamKey::AdRehearsalStabilityWindows => "ad_rehearsal_stability_windows",
+        ParamKey::AdRehearsalContextualEnabled => "ad_rehearsal_contextual_enabled",
+        ParamKey::AdRehearsalContextualStabilityWindows => {
+            "ad_rehearsal_contextual_stability_windows"
+        }
+        ParamKey::AdRehearsalPresenceEnabled => "ad_rehearsal_presence_enabled",
+        ParamKey::AdRehearsalPresenceStabilityWindows => "ad_rehearsal_presence_stability_windows",
         ParamKey::LaneConsumerCapacity => "lane_consumer_capacity",
         ParamKey::LaneIndustrialCapacity => "lane_industrial_capacity",
         ParamKey::LaneConsumerCongestionSensitivity => "lane_consumer_congestion_sensitivity",
@@ -2977,6 +2983,18 @@ impl GovStore {
                                 ParamKey::AdRehearsalStabilityWindows => {
                                     params.ad_rehearsal_stability_windows
                                 }
+                                ParamKey::AdRehearsalContextualEnabled => {
+                                    params.ad_rehearsal_contextual_enabled
+                                }
+                                ParamKey::AdRehearsalContextualStabilityWindows => {
+                                    params.ad_rehearsal_contextual_stability_windows
+                                }
+                                ParamKey::AdRehearsalPresenceEnabled => {
+                                    params.ad_rehearsal_presence_enabled
+                                }
+                                ParamKey::AdRehearsalPresenceStabilityWindows => {
+                                    params.ad_rehearsal_presence_stability_windows
+                                }
                                 ParamKey::EnergyMinStake => params.energy_min_stake,
                                 ParamKey::EnergyOracleTimeoutBlocks => {
                                     params.energy_oracle_timeout_blocks
@@ -3257,6 +3275,14 @@ impl GovStore {
                 ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
                 ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
                 ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
+                ParamKey::AdRehearsalContextualEnabled => params.ad_rehearsal_contextual_enabled,
+                ParamKey::AdRehearsalContextualStabilityWindows => {
+                    params.ad_rehearsal_contextual_stability_windows
+                }
+                ParamKey::AdRehearsalPresenceEnabled => params.ad_rehearsal_presence_enabled,
+                ParamKey::AdRehearsalPresenceStabilityWindows => {
+                    params.ad_rehearsal_presence_stability_windows
+                }
                 ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
                 ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
                 ParamKey::LaneConsumerCongestionSensitivity => {
@@ -3352,6 +3378,14 @@ impl GovStore {
             ParamKey::AdPercentileBuckets => params.ad_percentile_buckets,
             ParamKey::AdRehearsalEnabled => params.ad_rehearsal_enabled,
             ParamKey::AdRehearsalStabilityWindows => params.ad_rehearsal_stability_windows,
+            ParamKey::AdRehearsalContextualEnabled => params.ad_rehearsal_contextual_enabled,
+            ParamKey::AdRehearsalContextualStabilityWindows => {
+                params.ad_rehearsal_contextual_stability_windows
+            }
+            ParamKey::AdRehearsalPresenceEnabled => params.ad_rehearsal_presence_enabled,
+            ParamKey::AdRehearsalPresenceStabilityWindows => {
+                params.ad_rehearsal_presence_stability_windows
+            }
             ParamKey::LaneConsumerCapacity => params.lane_consumer_capacity,
             ParamKey::LaneIndustrialCapacity => params.lane_industrial_capacity,
             ParamKey::LaneConsumerCongestionSensitivity => {

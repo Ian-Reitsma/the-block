@@ -1198,7 +1198,10 @@ fn spawn_read_ack_worker(
 ) -> mpsc::Sender<ReadAck> {
     use concurrency::Lazy;
     use std::sync::Mutex as StdMutex;
-    static REHEARSAL_STATE: Lazy<StdMutex<(u64, u64)>> = Lazy::new(|| StdMutex::new((0, 0)));
+    static REHEARSAL_STATE_CONTEXTUAL: Lazy<StdMutex<(u64, u64)>> =
+        Lazy::new(|| StdMutex::new((0, 0)));
+    static REHEARSAL_STATE_PRESENCE: Lazy<StdMutex<(u64, u64)>> =
+        Lazy::new(|| StdMutex::new((0, 0)));
     let (tx, mut rx) = mpsc::channel::<ReadAck>(1024);
     runtime::spawn(async move {
         let market = market.clone();
@@ -1232,12 +1235,54 @@ fn spawn_read_ack_worker(
                         }
                     }
                     // Rehearsal gating: optionally suppress real settlements until stability windows satisfied.
-                    let (rehearsal_enabled, required_stable_windows) = {
+                    let (
+                        rehearsal_enabled,
+                        required_stable_windows,
+                        rehearsal_label,
+                        rehearsal_state,
+                    ) = {
                         let guard = bc.lock().unwrap();
-                        (
-                            guard.params.ad_rehearsal_enabled > 0,
-                            guard.params.ad_rehearsal_stability_windows.max(0) as u64,
-                        )
+                        let legacy_enabled = guard.params.ad_rehearsal_enabled > 0;
+                        let legacy_windows =
+                            guard.params.ad_rehearsal_stability_windows.max(0) as u64;
+                        let contextual_enabled =
+                            if guard.params.ad_rehearsal_contextual_enabled != 0 {
+                                guard.params.ad_rehearsal_contextual_enabled > 0
+                            } else {
+                                legacy_enabled
+                            };
+                        let contextual_windows =
+                            if guard.params.ad_rehearsal_contextual_stability_windows > 0 {
+                                guard
+                                    .params
+                                    .ad_rehearsal_contextual_stability_windows
+                                    .max(0) as u64
+                            } else {
+                                legacy_windows
+                            };
+                        let presence_enabled = guard.params.ad_rehearsal_presence_enabled > 0;
+                        let presence_windows =
+                            guard.params.ad_rehearsal_presence_stability_windows.max(0) as u64;
+                        let is_presence = ack
+                            .selection_receipt
+                            .as_ref()
+                            .and_then(|receipt| receipt.cohort.presence_bucket.as_ref())
+                            .is_some();
+                        if is_presence {
+                            (
+                                presence_enabled,
+                                presence_windows,
+                                "rehearsal_presence",
+                                &REHEARSAL_STATE_PRESENCE,
+                            )
+                        } else {
+                            (
+                                contextual_enabled,
+                                contextual_windows,
+                                "rehearsal_contextual",
+                                &REHEARSAL_STATE_CONTEXTUAL,
+                            )
+                        }
                     };
                     let mut allow_settlement = true;
                     if rehearsal_enabled {
@@ -1245,7 +1290,7 @@ fn spawn_read_ack_worker(
                             let snapshot = handle.snapshot();
                             if snapshot.window_secs > 0 && snapshot.last_updated > 0 {
                                 let window_id = snapshot.last_updated / snapshot.window_secs;
-                                let mut st = REHEARSAL_STATE.lock().unwrap();
+                                let mut st = rehearsal_state.lock().unwrap();
                                 if st.0 != window_id {
                                     // new window boundary
                                     st.0 = window_id;
@@ -1317,7 +1362,7 @@ fn spawn_read_ack_worker(
                                 #[cfg(feature = "telemetry")]
                                 {
                                     if let Ok(h) = the_block::telemetry::AD_READINESS_SKIPPED
-                                        .ensure_handle_for_label_values(&["rehearsal"])
+                                        .ensure_handle_for_label_values(&[rehearsal_label])
                                     {
                                         h.inc();
                                     }

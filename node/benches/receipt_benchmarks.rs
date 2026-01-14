@@ -56,11 +56,15 @@ fn create_energy_receipt(id: u64) -> Receipt {
 fn create_ad_receipt(id: u64) -> Receipt {
     Receipt::Ad(AdReceipt {
         campaign_id: format!("campaign_{}", id),
+        creative_id: format!("creative_{}", id),
         publisher: format!("publisher_{}", id),
         impressions: 10_000,
         spend: 200,
         block_height: id,
         conversions: 100,
+        claim_routes: std::collections::HashMap::new(),
+        role_breakdown: None,
+        device_links: Vec::new(),
         publisher_signature: vec![0u8; 64],
         signature_nonce: id,
     })

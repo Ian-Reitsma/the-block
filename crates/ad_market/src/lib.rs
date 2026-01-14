@@ -34,7 +34,8 @@ pub use budget::{
     CohortBudgetSnapshot, CohortKeySnapshot,
 };
 pub use privacy::{
-    PrivacyBudgetConfig, PrivacyBudgetDecision, PrivacyBudgetManager, PrivacyBudgetSnapshot,
+    badge_family, PrivacyBudgetConfig, PrivacyBudgetDecision, PrivacyBudgetFamilySnapshot,
+    PrivacyBudgetManager, PrivacyBudgetPreview, PrivacyBudgetSnapshot,
 };
 pub use uplift::{
     UpliftEstimate, UpliftEstimator, UpliftEstimatorConfig, UpliftHoldoutAssignment, UpliftSnapshot,
@@ -49,6 +50,9 @@ const KEY_BUDGET: &[u8] = b"budget";
 const KEY_TOKEN_REMAINDERS: &[u8] = b"token_remainders";
 const KEY_UPLIFT: &[u8] = b"uplift";
 const KEY_MEDIANS: &[u8] = b"cost_medians";
+const KEY_CLAIMS: &[u8] = b"claims";
+const KEY_CONVERSIONS: &[u8] = b"conversions";
+const KEY_DEVICE_SEEN: &[u8] = b"device_seen";
 
 pub const MICROS_PER_DOLLAR: u64 = 1_000_000;
 const PPM_SCALE: u64 = 1_000_000;
@@ -167,6 +171,26 @@ impl PresenceBucketRef {
     #[allow(dead_code)]
     fn bucket_label(&self) -> &str {
         self.bucket_id.as_str()
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct FreshnessHistogramPpm {
+    pub under_1h_ppm: u32,
+    pub hours_1_to_6_ppm: u32,
+    pub hours_6_to_24_ppm: u32,
+    pub over_24h_ppm: u32,
+}
+
+impl FreshnessHistogramPpm {
+    fn normalized_weights(mut self) -> Self {
+        let clamp = |value: u32| value.min(2_500_000);
+        self.under_1h_ppm = clamp(self.under_1h_ppm);
+        self.hours_1_to_6_ppm = clamp(self.hours_1_to_6_ppm);
+        self.hours_6_to_24_ppm = clamp(self.hours_6_to_24_ppm);
+        self.over_24h_ppm = clamp(self.over_24h_ppm);
+        self
     }
 }
 
@@ -561,9 +585,28 @@ impl ResourceFloorBreakdown {
             .saturating_add(self.verifier_usd_micros)
             .saturating_add(self.host_usd_micros)
     }
+
+    pub fn scale(&self, multiplier: f64) -> Self {
+        if multiplier <= f64::EPSILON {
+            return self.clone();
+        }
+        let scale = |value: u64| -> u64 {
+            ((value as f64)
+                .mul_add(multiplier, 0.0)
+                .round()
+                .min(u64::MAX as f64)) as u64
+        };
+        Self {
+            bandwidth_usd_micros: scale(self.bandwidth_usd_micros),
+            verifier_usd_micros: scale(self.verifier_usd_micros),
+            host_usd_micros: scale(self.host_usd_micros),
+            qualified_impressions_per_proof: self.qualified_impressions_per_proof,
+        }
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct MarketplaceConfig {
     pub distribution: DistributionPolicy,
     pub default_price_per_mib_usd_micros: u64,
@@ -581,12 +624,71 @@ pub struct MarketplaceConfig {
     pub quality_floor_ppm: u32,
     pub attestation: SelectionAttestationConfig,
     pub budget_broker: BudgetBrokerConfig,
+    #[serde(default)]
     pub badge_guard: BadgeGuardConfig,
     pub privacy_budget: PrivacyBudgetConfig,
     pub uplift: UpliftEstimatorConfig,
+    /// Weights (ppm) applied to freshness histogram buckets.
+    pub quality_freshness_weights_ppm: FreshnessHistogramPpm,
+    /// Target readiness streak windows for neutral quality.
+    pub quality_readiness_target_windows: u64,
+    /// Floor for readiness multiplier (ppm).
+    pub quality_readiness_floor_ppm: u32,
+    /// Floor for privacy multiplier (ppm).
+    pub quality_privacy_floor_ppm: u32,
+    /// Quality adjustment lower bound when converting readiness/privacy/freshness signals.
+    #[serde(default = "default_quality_signal_min_multiplier_ppm")]
+    pub quality_signal_min_multiplier_ppm: u32,
+    /// Quality adjustment upper bound when converting readiness/privacy/freshness signals.
+    #[serde(default = "default_quality_signal_max_multiplier_ppm")]
+    pub quality_signal_max_multiplier_ppm: u32,
+}
+
+#[derive(Clone, Debug)]
+pub struct QualitySignalConfig {
+    pub freshness_weights_ppm: FreshnessHistogramPpm,
+    pub readiness_target_windows: u64,
+    pub readiness_floor_ppm: u32,
+    pub privacy_floor_ppm: u32,
+    pub cohort_floor_ppm: u32,
+    pub cohort_ceiling_ppm: u32,
+}
+
+impl QualitySignalConfig {
+    fn normalized(mut self) -> Self {
+        self.freshness_weights_ppm = self.freshness_weights_ppm.normalized_weights();
+        self.readiness_target_windows = self.readiness_target_windows.max(1);
+        self.readiness_floor_ppm = self.readiness_floor_ppm.clamp(1, PPM_SCALE as u32);
+        self.privacy_floor_ppm = self.privacy_floor_ppm.clamp(1, PPM_SCALE as u32);
+        self.cohort_floor_ppm = self.cohort_floor_ppm.clamp(1, PPM_SCALE as u32);
+        self.cohort_ceiling_ppm = self
+            .cohort_ceiling_ppm
+            .clamp(self.cohort_floor_ppm.max(PPM_SCALE as u32), 2_500_000);
+        self
+    }
+}
+
+fn default_quality_signal_min_multiplier_ppm() -> u32 {
+    100_000
+}
+
+fn default_quality_signal_max_multiplier_ppm() -> u32 {
+    2_500_000
 }
 
 impl MarketplaceConfig {
+    pub fn quality_signal_config(&self) -> QualitySignalConfig {
+        QualitySignalConfig {
+            freshness_weights_ppm: self.quality_freshness_weights_ppm.clone(),
+            readiness_target_windows: self.quality_readiness_target_windows,
+            readiness_floor_ppm: self.quality_readiness_floor_ppm,
+            privacy_floor_ppm: self.quality_privacy_floor_ppm,
+            cohort_floor_ppm: self.quality_signal_min_multiplier_ppm,
+            cohort_ceiling_ppm: self.quality_signal_max_multiplier_ppm,
+        }
+        .normalized()
+    }
+
     pub fn normalized(self) -> Self {
         let mut normalized = self;
         normalized.default_price_per_mib_usd_micros =
@@ -611,6 +713,27 @@ impl MarketplaceConfig {
         normalized.badge_guard = normalized.badge_guard.normalized();
         normalized.privacy_budget = normalized.privacy_budget.normalized();
         normalized.uplift = normalized.uplift.normalized();
+        normalized.quality_freshness_weights_ppm = normalized
+            .quality_freshness_weights_ppm
+            .normalized_weights();
+        normalized.quality_readiness_target_windows =
+            normalized.quality_readiness_target_windows.max(1);
+        normalized.quality_readiness_floor_ppm = normalized
+            .quality_readiness_floor_ppm
+            .clamp(1, PPM_SCALE as u32);
+        normalized.quality_privacy_floor_ppm = normalized
+            .quality_privacy_floor_ppm
+            .clamp(1, PPM_SCALE as u32);
+        normalized.quality_signal_min_multiplier_ppm = normalized
+            .quality_signal_min_multiplier_ppm
+            .clamp(100_000, PPM_SCALE as u32);
+        normalized.quality_signal_max_multiplier_ppm =
+            normalized.quality_signal_max_multiplier_ppm.clamp(
+                normalized
+                    .quality_signal_min_multiplier_ppm
+                    .max(PPM_SCALE as u32),
+                2_500_000,
+            );
         normalized
     }
 
@@ -634,6 +757,16 @@ impl MarketplaceConfig {
         let phi = response.powf(self.quality_alpha.into());
         let psi = lift.powf(self.quality_beta.into());
         (phi * psi).max(1.0)
+    }
+
+    fn clamp_quality_signal_multiplier(&self, multiplier_ppm: u32) -> f64 {
+        let clamped = multiplier_ppm
+            .clamp(
+                self.quality_signal_min_multiplier_ppm,
+                self.quality_signal_max_multiplier_ppm,
+            )
+            .max(1);
+        (clamped as f64) / (PPM_SCALE as f64)
     }
 }
 
@@ -659,13 +792,24 @@ impl Default for MarketplaceConfig {
             badge_guard: BadgeGuardConfig::default(),
             privacy_budget: PrivacyBudgetConfig::default(),
             uplift: UpliftEstimatorConfig::default(),
+            quality_freshness_weights_ppm: FreshnessHistogramPpm {
+                under_1h_ppm: 1_000_000,
+                hours_1_to_6_ppm: 800_000,
+                hours_6_to_24_ppm: 500_000,
+                over_24h_ppm: 200_000,
+            },
+            quality_readiness_target_windows: 6,
+            quality_readiness_floor_ppm: 100_000,
+            quality_privacy_floor_ppm: 100_000,
+            quality_signal_min_multiplier_ppm: 100_000,
+            quality_signal_max_multiplier_ppm: 2_500_000,
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
-struct CohortKey {
+pub struct CohortKey {
     domain: String,
     domain_tier: DomainTier,
     domain_owner: Option<String>,
@@ -1397,6 +1541,19 @@ impl QualityBid {
         }
     }
 
+    fn apply_signal_multiplier(mut self, signal_multiplier: f64) -> Self {
+        if signal_multiplier <= f64::EPSILON {
+            return self;
+        }
+        let adjusted = (self.quality_adjusted_usd_micros as f64)
+            .mul_add(signal_multiplier, 0.0)
+            .round()
+            .min(u64::MAX as f64) as u64;
+        self.quality_adjusted_usd_micros = adjusted;
+        self.quality_multiplier *= signal_multiplier;
+        self
+    }
+
     fn shade(
         self,
         guidance: BudgetBidShadingGuidance,
@@ -1579,6 +1736,12 @@ pub struct SettlementBreakdown {
     pub selection_receipt: SelectionReceipt,
     #[serde(default)]
     pub uplift: UpliftEstimate,
+    #[serde(default)]
+    pub claim_routes: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub conversions: u32,
+    #[serde(default)]
+    pub device_links: Vec<DeviceLinkOptIn>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1590,6 +1753,25 @@ pub struct ConversionEvent {
     pub value_usd_micros: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurred_at_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_link: Option<DeviceLinkOptIn>,
+}
+
+/// Optional device-link attestation for conversion dedup/attribution.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeviceLinkOptIn {
+    pub device_hash: String,
+    #[serde(default)]
+    pub opt_in: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct ConversionAccumulator {
+    #[serde(default)]
+    count: u32,
+    #[serde(default)]
+    device_links: Vec<DeviceLinkOptIn>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2498,6 +2680,66 @@ pub struct CohortPriceSnapshot {
     pub observed_utilization_ppm: u32,
 }
 
+/// Component breakdown for quality signals (all ppm scaled).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct QualitySignalComponents {
+    /// Freshness-derived multiplier; 1_000_000 is neutral.
+    pub freshness_multiplier_ppm: u32,
+    /// Readiness streak multiplier; 1_000_000 is neutral.
+    pub readiness_multiplier_ppm: u32,
+    /// Privacy-derived multiplier; 1_000_000 is neutral (penalties drop below).
+    pub privacy_multiplier_ppm: u32,
+}
+
+/// Quality signal per cohort mapping readiness/freshness/privacy into a composite multiplier.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct QualitySignal {
+    pub cohort: CohortKeySnapshot,
+    /// Composite multiplier in ppm (1_000_000 == neutral).
+    pub multiplier_ppm: u32,
+    /// Optional component breakdown for diagnostics.
+    #[serde(default)]
+    pub components: QualitySignalComponents,
+}
+
+#[derive(Clone, Debug)]
+struct QualitySignalState {
+    multiplier: f64,
+    components: QualitySignalComponents,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+struct ClaimRegistry {
+    routes: HashMap<String, String>,
+}
+
+impl ClaimRegistry {
+    fn register(&mut self, domain: &str, role: &str, address: &str) {
+        let key = format!("{domain}|{role}");
+        self.routes.insert(key, address.to_string());
+    }
+
+    fn for_domain(&self, domain: &str) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for (key, addr) in self.routes.iter() {
+            if let Some((d, role)) = key.split_once('|') {
+                if d == domain {
+                    map.insert(role.to_string(), addr.clone());
+                }
+            }
+        }
+        map
+    }
+}
+
+fn claim_registry_from_metadata(metadata: &SledTree) -> Result<ClaimRegistry, PersistenceError> {
+    if let Some(bytes) = metadata.get(KEY_CLAIMS)? {
+        deserialize_claim_registry(&bytes)
+    } else {
+        Ok(ClaimRegistry::default())
+    }
+}
+
 pub trait Marketplace: Send + Sync {
     fn register_campaign(&self, campaign: Campaign) -> Result<(), MarketplaceError>;
     fn list_campaigns(&self) -> Vec<CampaignSummary>;
@@ -2522,6 +2764,48 @@ pub trait Marketplace: Send + Sync {
     /// Return the rolling median snapshot for cost indices in USD micros.
     /// Order: (storage_price_per_mib, verifier_cost, host_fee)
     fn cost_medians_usd_micros(&self) -> (u64, u64, u64);
+
+    /// Evaluate badge k-anonymity guardrails for a badge set.
+    fn badge_guard_decision(
+        &self,
+        badges: &[String],
+        soft_intent: Option<&BadgeSoftIntentContext>,
+    ) -> BadgeDecision;
+
+    /// Push quality signals derived from readiness/privacy/freshness so bids can be adjusted.
+    fn update_quality_signals(&self, signals: Vec<QualitySignal>);
+
+    /// Return the configuration used to compute quality signal components.
+    fn quality_signal_config(&self) -> QualitySignalConfig;
+
+    /// Snapshot current privacy budget state without mutating it.
+    fn privacy_budget_snapshot(&self) -> PrivacyBudgetSnapshot;
+
+    /// Preview a privacy budget decision without consuming budget.
+    fn preview_privacy_budget(
+        &self,
+        badges: &[String],
+        population_hint: Option<u64>,
+    ) -> PrivacyBudgetPreview;
+
+    /// Perform a privacy budget decision (consumes budget when accepted or cooling).
+    fn authorize_privacy_budget(
+        &self,
+        badges: &[String],
+        population_hint: Option<u64>,
+    ) -> PrivacyBudgetDecision;
+
+    /// Register payout claim routing for a domain/app role.
+    fn register_claim_route(
+        &self,
+        domain: &str,
+        role: &str,
+        address: &str,
+    ) -> Result<(), MarketplaceError>;
+
+    /// Lookup payout claim routes for a cohort (domain-level for now).
+    fn claim_routes(&self, cohort: &CohortKeySnapshot)
+        -> std::collections::HashMap<String, String>;
 
     fn budget_broker_config(&self) -> BudgetBrokerConfig {
         self.budget_broker().read().unwrap().config().clone()
@@ -2558,6 +2842,7 @@ struct ReservationState {
     assignment: UpliftHoldoutAssignment,
     delivery_channel: DeliveryChannel,
     mesh_payload: Option<Vec<u8>>,
+    claim_routes: HashMap<String, String>,
 }
 
 pub struct InMemoryMarketplace {
@@ -2575,6 +2860,10 @@ pub struct InMemoryMarketplace {
     uplift: RwLock<UpliftEstimator>,
     token_remainders: RwLock<TokenRemainderLedger>,
     medians: RwLock<CostMedians>,
+    quality_signals: RwLock<HashMap<CohortKey, QualitySignalState>>,
+    claim_registry: RwLock<ClaimRegistry>,
+    conversions: RwLock<HashMap<String, ConversionAccumulator>>,
+    device_seen: RwLock<HashMap<String, HashSet<String>>>,
 }
 
 pub struct SledMarketplace {
@@ -2595,6 +2884,10 @@ pub struct SledMarketplace {
     uplift: RwLock<UpliftEstimator>,
     token_remainders: RwLock<TokenRemainderLedger>,
     medians: RwLock<CostMedians>,
+    quality_signals: RwLock<HashMap<CohortKey, QualitySignalState>>,
+    claim_registry: RwLock<ClaimRegistry>,
+    conversions: RwLock<HashMap<String, ConversionAccumulator>>,
+    device_seen: RwLock<HashMap<String, HashSet<String>>>,
 }
 
 #[derive(Debug)]
@@ -3186,6 +3479,44 @@ fn deserialize_budget_snapshot(bytes: &[u8]) -> Result<BudgetBrokerSnapshot, Per
     budget_snapshot_from_value(&value)
 }
 
+fn serialize_claim_registry(registry: &ClaimRegistry) -> Result<Vec<u8>, PersistenceError> {
+    foundation_serialization::json::to_vec(registry)
+        .map_err(|err| PersistenceError::Invalid(err.to_string()))
+}
+
+fn deserialize_claim_registry(bytes: &[u8]) -> Result<ClaimRegistry, PersistenceError> {
+    foundation_serialization::json::from_slice(bytes)
+        .map_err(|err| PersistenceError::Invalid(err.to_string()))
+}
+
+fn serialize_conversions(
+    conversions: &HashMap<String, ConversionAccumulator>,
+) -> Result<Vec<u8>, PersistenceError> {
+    foundation_serialization::json::to_vec(conversions)
+        .map_err(|err| PersistenceError::Invalid(err.to_string()))
+}
+
+fn deserialize_conversions(
+    bytes: &[u8],
+) -> Result<HashMap<String, ConversionAccumulator>, PersistenceError> {
+    foundation_serialization::json::from_slice(bytes)
+        .map_err(|err| PersistenceError::Invalid(err.to_string()))
+}
+
+fn serialize_device_seen(
+    seen: &HashMap<String, HashSet<String>>,
+) -> Result<Vec<u8>, PersistenceError> {
+    foundation_serialization::json::to_vec(seen)
+        .map_err(|err| PersistenceError::Invalid(err.to_string()))
+}
+
+fn deserialize_device_seen(
+    bytes: &[u8],
+) -> Result<HashMap<String, HashSet<String>>, PersistenceError> {
+    foundation_serialization::json::from_slice(bytes)
+        .map_err(|err| PersistenceError::Invalid(err.to_string()))
+}
+
 fn uplift_fold_snapshot_to_value(fold: &uplift::UpliftFoldSnapshot) -> JsonValue {
     let mut map = JsonMap::new();
     map.insert(
@@ -3597,6 +3928,66 @@ fn cohort_key_snapshot_from_value(
         presence_bucket,
         selectors_version,
     })
+}
+
+fn cohort_key_from_snapshot(snapshot: &CohortKeySnapshot) -> CohortKey {
+    CohortKey {
+        domain: snapshot.domain.clone(),
+        domain_tier: snapshot.domain_tier,
+        domain_owner: snapshot.domain_owner.clone(),
+        provider: snapshot.provider.clone(),
+        badges: snapshot.badges.clone(),
+        interest_tags: snapshot.interest_tags.clone(),
+        presence_bucket: snapshot.presence_bucket.clone(),
+        selectors_version: snapshot.selectors_version,
+    }
+}
+
+fn cohort_key_snapshot_from_key(key: &CohortKey) -> CohortKeySnapshot {
+    CohortKeySnapshot {
+        domain: key.domain.clone(),
+        provider: key.provider.clone(),
+        badges: key.badges.clone(),
+        domain_tier: key.domain_tier,
+        domain_owner: key.domain_owner.clone(),
+        interest_tags: key.interest_tags.clone(),
+        presence_bucket: key.presence_bucket.clone(),
+        selectors_version: key.selectors_version,
+    }
+}
+
+fn normalize_quality_components(
+    mut components: QualitySignalComponents,
+) -> QualitySignalComponents {
+    if components.freshness_multiplier_ppm == 0 {
+        components.freshness_multiplier_ppm = PPM_SCALE as u32;
+    }
+    if components.readiness_multiplier_ppm == 0 {
+        components.readiness_multiplier_ppm = PPM_SCALE as u32;
+    }
+    if components.privacy_multiplier_ppm == 0 {
+        components.privacy_multiplier_ppm = PPM_SCALE as u32;
+    }
+    components
+}
+
+fn apply_quality_signals_to_map(
+    map: &mut HashMap<CohortKey, QualitySignalState>,
+    signals: Vec<QualitySignal>,
+    config: &MarketplaceConfig,
+) {
+    for signal in signals {
+        let key = cohort_key_from_snapshot(&signal.cohort);
+        let components = normalize_quality_components(signal.components.clone());
+        let multiplier = config.clamp_quality_signal_multiplier(signal.multiplier_ppm);
+        map.insert(
+            key,
+            QualitySignalState {
+                multiplier,
+                components,
+            },
+        );
+    }
 }
 
 fn presence_bucket_to_value(bucket: &PresenceBucketRef) -> JsonValue {
@@ -4060,6 +4451,10 @@ impl InMemoryMarketplace {
             uplift: RwLock::new(UpliftEstimator::new(normalized.uplift.clone())),
             token_remainders: RwLock::new(TokenRemainderLedger::default()),
             medians: RwLock::new(CostMedians::new()),
+            quality_signals: RwLock::new(HashMap::new()),
+            claim_registry: RwLock::new(ClaimRegistry::default()),
+            conversions: RwLock::new(HashMap::new()),
+            device_seen: RwLock::new(HashMap::new()),
         }
     }
 
@@ -4105,6 +4500,60 @@ impl InMemoryMarketplace {
             }
         }
         true
+    }
+
+    fn quality_multiplier_for(&self, cohort: &CohortKey) -> f64 {
+        self.quality_signals
+            .read()
+            .unwrap()
+            .get(cohort)
+            .map(|state| {
+                // Read components to keep them live for diagnostics if needed.
+                let _ = &state.components;
+                state.multiplier
+            })
+            .unwrap_or(1.0)
+    }
+
+    fn resource_scarcity_multiplier(&self) -> f64 {
+        let (m_storage, m_verifier, m_host) = self.medians.read().unwrap().snapshot();
+        let base_storage = self.config.min_price_per_mib_usd_micros.max(1);
+        let base_verifier = self.config.resource_floor.verifier_cost_usd_micros.max(1);
+        let base_host = self.config.resource_floor.host_fee_usd_micros.max(1);
+        let ratios = [
+            m_storage as f64 / base_storage as f64,
+            m_verifier as f64 / base_verifier as f64,
+            m_host as f64 / base_host as f64,
+        ];
+        let mut max_ratio = 1.0f64;
+        for r in ratios {
+            if r.is_finite() {
+                max_ratio = max_ratio.max(r);
+            }
+        }
+        let utilization_adjustment = {
+            let pricing = self.pricing.read().unwrap();
+            if pricing.is_empty() {
+                1.0
+            } else {
+                let mut sum_ratio = 0.0;
+                let mut count = 0.0;
+                for state in pricing.values() {
+                    if state.target_utilization_ppm > 0 {
+                        let ratio = state.observed_utilization_ppm as f64
+                            / state.target_utilization_ppm as f64;
+                        sum_ratio += ratio;
+                        count += 1.0;
+                    }
+                }
+                if count > 0.0 {
+                    (sum_ratio / count).clamp(0.8, 1.5)
+                } else {
+                    1.0
+                }
+            }
+        };
+        (max_ratio * utilization_adjustment).clamp(0.8, 2.0)
     }
 
     fn matches_creative(&self, creative: &Creative, ctx: &ImpressionContext) -> bool {
@@ -4200,6 +4649,57 @@ impl Marketplace for InMemoryMarketplace {
         &self.budget_broker
     }
 
+    fn update_quality_signals(&self, signals: Vec<QualitySignal>) {
+        let mut guard = self.quality_signals.write().unwrap();
+        apply_quality_signals_to_map(&mut guard, signals, &self.config);
+    }
+
+    fn quality_signal_config(&self) -> QualitySignalConfig {
+        self.config.quality_signal_config()
+    }
+
+    fn privacy_budget_snapshot(&self) -> PrivacyBudgetSnapshot {
+        self.privacy_budget.read().unwrap().snapshot()
+    }
+
+    fn preview_privacy_budget(
+        &self,
+        badges: &[String],
+        population_hint: Option<u64>,
+    ) -> PrivacyBudgetPreview {
+        self.privacy_budget
+            .read()
+            .unwrap()
+            .preview(badges, population_hint)
+    }
+
+    fn authorize_privacy_budget(
+        &self,
+        badges: &[String],
+        population_hint: Option<u64>,
+    ) -> PrivacyBudgetDecision {
+        let mut budgets = self.privacy_budget.write().unwrap();
+        budgets.authorize(badges, population_hint)
+    }
+
+    fn register_claim_route(
+        &self,
+        domain: &str,
+        role: &str,
+        address: &str,
+    ) -> Result<(), MarketplaceError> {
+        let mut registry = self.claim_registry.write().unwrap();
+        registry.register(domain, role, address);
+        Ok(())
+    }
+
+    fn claim_routes(&self, cohort: &CohortKeySnapshot) -> HashMap<String, String> {
+        self.claim_registry
+            .read()
+            .unwrap()
+            .for_domain(&cohort.domain)
+    }
+
     fn record_conversion(&self, event: ConversionEvent) -> Result<(), MarketplaceError> {
         {
             let campaigns = self.campaigns.read().unwrap();
@@ -4213,6 +4713,30 @@ impl Marketplace for InMemoryMarketplace {
                 .any(|creative| creative.id == event.creative_id)
             {
                 return Err(MarketplaceError::UnknownCreative);
+            }
+        }
+        let key = format!("{}::{}", event.campaign_id, event.creative_id);
+        let device_link = event.device_link.clone().filter(|l| l.opt_in);
+        if let Some(link) = device_link.as_ref() {
+            let mut seen = self.device_seen.write().unwrap();
+            let set = seen.entry(key.clone()).or_default();
+            if !set.insert(link.device_hash.clone()) {
+                return Ok(());
+            }
+            if set.len() > 10_000 {
+                if let Some(first) = set.iter().next().cloned() {
+                    set.remove(&first);
+                }
+            }
+        }
+        {
+            let mut conversions = self.conversions.write().unwrap();
+            let entry = conversions.entry(key).or_default();
+            entry.count = entry.count.saturating_add(1);
+            if let Some(link) = device_link {
+                if entry.device_links.len() < 1_000 {
+                    entry.device_links.push(link);
+                }
             }
         }
         {
@@ -4238,13 +4762,10 @@ impl Marketplace for InMemoryMarketplace {
         }
         self.badge_guard
             .record(&ctx.badges, ctx.population_estimate);
-        {
-            let mut budgets = self.privacy_budget.write().unwrap();
-            match budgets.authorize(&ctx.badges, ctx.population_estimate) {
-                PrivacyBudgetDecision::Allowed => {}
-                PrivacyBudgetDecision::Cooling { .. } | PrivacyBudgetDecision::Denied { .. } => {
-                    return None;
-                }
+        match self.authorize_privacy_budget(&ctx.badges, ctx.population_estimate) {
+            PrivacyBudgetDecision::Allowed => {}
+            PrivacyBudgetDecision::Cooling { .. } | PrivacyBudgetDecision::Denied { .. } => {
+                return None;
             }
         }
         let cohort = InMemoryMarketplace::cohort_key(&ctx);
@@ -4253,12 +4774,11 @@ impl Marketplace for InMemoryMarketplace {
             InMemoryMarketplace::get_price_and_state(&mut pricing, &cohort, &self.config)
                 .price_per_mib_usd_micros()
         };
-        let floor_breakdown = self.config.composite_floor_breakdown(
-            price_per_mib,
-            ctx.bytes,
-            &cohort,
-            ctx.population_estimate,
-        );
+        let scarcity = self.resource_scarcity_multiplier();
+        let floor_breakdown = self
+            .config
+            .composite_floor_breakdown(price_per_mib, ctx.bytes, &cohort, ctx.population_estimate)
+            .scale(scarcity);
         {
             let mut med = self.medians.write().unwrap();
             med.record_storage(price_per_mib);
@@ -4292,6 +4812,14 @@ impl Marketplace for InMemoryMarketplace {
         }
 
         let campaigns = self.campaigns.read().unwrap();
+        let quality_signal_multiplier = self.quality_multiplier_for(&cohort);
+        gauge!(
+            "ad_quality_signal_multiplier",
+            quality_signal_multiplier,
+            "domain" => cohort.domain.as_str(),
+            "domain_tier" => cohort.domain_tier.as_str(),
+            "provider" => cohort.provider.as_deref().unwrap_or("-"),
+        );
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut best_index: Option<usize> = None;
         for state in campaigns.values() {
@@ -4320,6 +4848,7 @@ impl Marketplace for InMemoryMarketplace {
                     broker.guidance_for(&state.campaign.id, &cohort)
                 };
                 let (quality, shading) = quality.shade(guidance, available_budget);
+                let quality = quality.apply_signal_multiplier(quality_signal_multiplier);
                 if quality.base_bid_usd_micros < resource_floor
                     || quality.quality_adjusted_usd_micros < resource_floor
                 {
@@ -4495,6 +5024,7 @@ impl Marketplace for InMemoryMarketplace {
                 .reserved_budget_usd_micros
                 .saturating_add(clearing_price);
         }
+        let cohort_snapshot = cohort_key_snapshot_from_key(&cohort);
         reservations.insert(
             key,
             ReservationState {
@@ -4515,6 +5045,7 @@ impl Marketplace for InMemoryMarketplace {
                 assignment: assignment.clone(),
                 delivery_channel: ctx.delivery_channel,
                 mesh_payload: winner_mesh_payload.clone(),
+                claim_routes: self.claim_routes(&cohort_snapshot),
             },
         );
         Some(MatchOutcome {
@@ -4610,6 +5141,11 @@ impl Marketplace for InMemoryMarketplace {
             mesh_digest_label
         ));
         let mesh_payload = reservation.mesh_payload.clone();
+        let conversion_key = format!("{}::{}", reservation.campaign_id, reservation.creative_id);
+        let conversion_snapshot = {
+            let mut conversions = self.conversions.write().unwrap();
+            conversions.remove(&conversion_key).unwrap_or_default()
+        };
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -4638,6 +5174,9 @@ impl Marketplace for InMemoryMarketplace {
             twap_window_id: oracle.twap_window_id,
             selection_receipt: reservation.selection_receipt,
             uplift: reservation.uplift,
+            claim_routes: reservation.claim_routes.clone(),
+            conversions: conversion_snapshot.count,
+            device_links: conversion_snapshot.device_links,
         })
     }
 
@@ -4792,6 +5331,14 @@ impl Marketplace for InMemoryMarketplace {
     fn cost_medians_usd_micros(&self) -> (u64, u64, u64) {
         self.medians.read().unwrap().snapshot()
     }
+
+    fn badge_guard_decision(
+        &self,
+        badges: &[String],
+        soft_intent: Option<&BadgeSoftIntentContext>,
+    ) -> BadgeDecision {
+        self.badge_guard.evaluate(badges, soft_intent)
+    }
 }
 impl SledMarketplace {
     fn persist_medians(&self) -> Result<(), PersistenceError> {
@@ -4881,6 +5428,15 @@ impl SledMarketplace {
             },
             None => CostMedians::new(),
         };
+        let claim_registry = claim_registry_from_metadata(&metadata_tree)?;
+        let conversions = match metadata_tree.get(KEY_CONVERSIONS)? {
+            Some(bytes) => deserialize_conversions(&bytes).unwrap_or_default(),
+            None => HashMap::new(),
+        };
+        let device_seen = match metadata_tree.get(KEY_DEVICE_SEEN)? {
+            Some(bytes) => deserialize_device_seen(&bytes).unwrap_or_default(),
+            None => HashMap::new(),
+        };
 
         Ok(Self {
             _db: db,
@@ -4902,6 +5458,10 @@ impl SledMarketplace {
             uplift: RwLock::new(uplift_estimator),
             token_remainders: RwLock::new(token_remainders),
             medians: RwLock::new(loaded_medians),
+            quality_signals: RwLock::new(HashMap::new()),
+            claim_registry: RwLock::new(claim_registry),
+            conversions: RwLock::new(conversions),
+            device_seen: RwLock::new(device_seen),
         })
     }
 
@@ -4951,6 +5511,83 @@ impl SledMarketplace {
         self.metadata_tree.insert(KEY_UPLIFT, bytes)?;
         self.metadata_tree.flush()?;
         Ok(())
+    }
+
+    fn persist_claim_registry(&self) -> Result<(), PersistenceError> {
+        let registry = self.claim_registry.read().unwrap().clone();
+        let bytes = serialize_claim_registry(&registry)?;
+        self.metadata_tree.insert(KEY_CLAIMS, bytes)?;
+        self.metadata_tree.flush()?;
+        Ok(())
+    }
+
+    fn persist_conversions(&self) -> Result<(), PersistenceError> {
+        let snapshot = self.conversions.read().unwrap().clone();
+        let bytes = serialize_conversions(&snapshot)?;
+        self.metadata_tree.insert(KEY_CONVERSIONS, bytes)?;
+        self.metadata_tree.flush()?;
+        Ok(())
+    }
+
+    fn persist_device_seen(&self) -> Result<(), PersistenceError> {
+        let snapshot = self.device_seen.read().unwrap().clone();
+        let bytes = serialize_device_seen(&snapshot)?;
+        self.metadata_tree.insert(KEY_DEVICE_SEEN, bytes)?;
+        self.metadata_tree.flush()?;
+        Ok(())
+    }
+
+    fn quality_multiplier_for(&self, cohort: &CohortKey) -> f64 {
+        self.quality_signals
+            .read()
+            .unwrap()
+            .get(cohort)
+            .map(|state| {
+                let _ = &state.components;
+                state.multiplier
+            })
+            .unwrap_or(1.0)
+    }
+
+    fn resource_scarcity_multiplier(&self) -> f64 {
+        let (m_storage, m_verifier, m_host) = self.medians.read().unwrap().snapshot();
+        let base_storage = self.config.min_price_per_mib_usd_micros.max(1);
+        let base_verifier = self.config.resource_floor.verifier_cost_usd_micros.max(1);
+        let base_host = self.config.resource_floor.host_fee_usd_micros.max(1);
+        let ratios = [
+            m_storage as f64 / base_storage as f64,
+            m_verifier as f64 / base_verifier as f64,
+            m_host as f64 / base_host as f64,
+        ];
+        let mut max_ratio = 1.0f64;
+        for r in ratios {
+            if r.is_finite() {
+                max_ratio = max_ratio.max(r);
+            }
+        }
+        let utilization_adjustment = {
+            let pricing = self.pricing.read().unwrap();
+            if pricing.is_empty() {
+                1.0
+            } else {
+                let mut sum_ratio = 0.0;
+                let mut count = 0.0;
+                for state in pricing.values() {
+                    if state.target_utilization_ppm > 0 {
+                        let ratio = state.observed_utilization_ppm as f64
+                            / state.target_utilization_ppm as f64;
+                        sum_ratio += ratio;
+                        count += 1.0;
+                    }
+                }
+                if count > 0.0 {
+                    (sum_ratio / count).clamp(0.8, 1.5)
+                } else {
+                    1.0
+                }
+            }
+        };
+        (max_ratio * utilization_adjustment).clamp(0.8, 2.0)
     }
 
     fn matches_targeting(&self, targeting: &CampaignTargeting, ctx: &ImpressionContext) -> bool {
@@ -5098,13 +5735,10 @@ impl Marketplace for SledMarketplace {
         }
         self.badge_guard
             .record(&ctx.badges, ctx.population_estimate);
-        {
-            let mut budgets = self.privacy_budget.write().unwrap();
-            match budgets.authorize(&ctx.badges, ctx.population_estimate) {
-                PrivacyBudgetDecision::Allowed => {}
-                PrivacyBudgetDecision::Cooling { .. } | PrivacyBudgetDecision::Denied { .. } => {
-                    return None;
-                }
+        match self.authorize_privacy_budget(&ctx.badges, ctx.population_estimate) {
+            PrivacyBudgetDecision::Allowed => {}
+            PrivacyBudgetDecision::Cooling { .. } | PrivacyBudgetDecision::Denied { .. } => {
+                return None;
             }
         }
         let cohort = InMemoryMarketplace::cohort_key(&ctx);
@@ -5113,12 +5747,11 @@ impl Marketplace for SledMarketplace {
             InMemoryMarketplace::get_price_and_state(&mut pricing, &cohort, &self.config)
                 .price_per_mib_usd_micros()
         };
-        let floor_breakdown = self.config.composite_floor_breakdown(
-            price_per_mib,
-            ctx.bytes,
-            &cohort,
-            ctx.population_estimate,
-        );
+        let scarcity = self.resource_scarcity_multiplier();
+        let floor_breakdown = self
+            .config
+            .composite_floor_breakdown(price_per_mib, ctx.bytes, &cohort, ctx.population_estimate)
+            .scale(scarcity);
         {
             let mut med = self.medians.write().unwrap();
             med.record_storage(price_per_mib);
@@ -5140,6 +5773,14 @@ impl Marketplace for SledMarketplace {
         }
 
         let campaigns = self.campaigns.read().unwrap();
+        let quality_signal_multiplier = self.quality_multiplier_for(&cohort);
+        gauge!(
+            "ad_quality_signal_multiplier",
+            quality_signal_multiplier,
+            "domain" => cohort.domain.as_str(),
+            "domain_tier" => cohort.domain_tier.as_str(),
+            "provider" => cohort.provider.as_deref().unwrap_or("-"),
+        );
         let mut candidates: Vec<Candidate> = Vec::new();
         let mut best_index: Option<usize> = None;
         for state in campaigns.values() {
@@ -5168,6 +5809,7 @@ impl Marketplace for SledMarketplace {
                     broker.guidance_for(&state.campaign.id, &cohort)
                 };
                 let (quality, shading) = quality.shade(guidance, available_budget);
+                let quality = quality.apply_signal_multiplier(quality_signal_multiplier);
                 if quality.base_bid_usd_micros < resource_floor
                     || quality.quality_adjusted_usd_micros < resource_floor
                 {
@@ -5346,6 +5988,7 @@ impl Marketplace for SledMarketplace {
                 return None;
             }
         }
+        let cohort_snapshot = cohort_key_snapshot_from_key(&cohort);
         reservations.insert(
             key,
             ReservationState {
@@ -5366,6 +6009,7 @@ impl Marketplace for SledMarketplace {
                 assignment: assignment.clone(),
                 delivery_channel: ctx.delivery_channel,
                 mesh_payload: winner_mesh_payload.clone(),
+                claim_routes: self.claim_routes(&cohort_snapshot),
             },
         );
         Some(MatchOutcome {
@@ -5478,6 +6122,14 @@ impl Marketplace for SledMarketplace {
             mesh_digest_label
         ));
         let mesh_payload = reservation.mesh_payload.clone();
+        let conversion_key = format!("{}::{}", reservation.campaign_id, reservation.creative_id);
+        let conversion_snapshot = {
+            let mut conversions = self.conversions.write().unwrap();
+            conversions.remove(&conversion_key).unwrap_or_default()
+        };
+        if let Err(err) = self.persist_conversions() {
+            eprintln!("failed to persist conversions: {err}");
+        }
         Some(SettlementBreakdown {
             campaign_id: reservation.campaign_id,
             creative_id: reservation.creative_id,
@@ -5506,6 +6158,9 @@ impl Marketplace for SledMarketplace {
             twap_window_id: oracle.twap_window_id,
             selection_receipt: reservation.selection_receipt,
             uplift: reservation.uplift,
+            claim_routes: reservation.claim_routes.clone(),
+            conversions: conversion_snapshot.count,
+            device_links: conversion_snapshot.device_links,
         })
     }
 
@@ -5578,6 +6233,66 @@ impl Marketplace for SledMarketplace {
         &self.budget_broker
     }
 
+    fn update_quality_signals(&self, signals: Vec<QualitySignal>) {
+        let mut guard = self.quality_signals.write().unwrap();
+        apply_quality_signals_to_map(&mut guard, signals, &self.config);
+    }
+
+    fn quality_signal_config(&self) -> QualitySignalConfig {
+        self.config.quality_signal_config()
+    }
+
+    fn privacy_budget_snapshot(&self) -> PrivacyBudgetSnapshot {
+        self.privacy_budget.read().unwrap().snapshot()
+    }
+
+    fn preview_privacy_budget(
+        &self,
+        badges: &[String],
+        population_hint: Option<u64>,
+    ) -> PrivacyBudgetPreview {
+        self.privacy_budget
+            .read()
+            .unwrap()
+            .preview(badges, population_hint)
+    }
+
+    fn authorize_privacy_budget(
+        &self,
+        badges: &[String],
+        population_hint: Option<u64>,
+    ) -> PrivacyBudgetDecision {
+        let mut budgets = self.privacy_budget.write().unwrap();
+        let decision = budgets.authorize(badges, population_hint);
+        if let Err(err) = self.persist_budget_broker() {
+            eprintln!("failed to persist budget broker after privacy update: {err}");
+        }
+        decision
+    }
+
+    fn register_claim_route(
+        &self,
+        domain: &str,
+        role: &str,
+        address: &str,
+    ) -> Result<(), MarketplaceError> {
+        {
+            let mut registry = self.claim_registry.write().unwrap();
+            registry.register(domain, role, address);
+        }
+        if let Err(err) = self.persist_claim_registry() {
+            return Err(MarketplaceError::PersistenceFailure(err.to_string()));
+        }
+        Ok(())
+    }
+
+    fn claim_routes(&self, cohort: &CohortKeySnapshot) -> HashMap<String, String> {
+        self.claim_registry
+            .read()
+            .unwrap()
+            .for_domain(&cohort.domain)
+    }
+
     fn record_conversion(&self, event: ConversionEvent) -> Result<(), MarketplaceError> {
         {
             let campaigns = self.campaigns.read().unwrap();
@@ -5592,6 +6307,40 @@ impl Marketplace for SledMarketplace {
             {
                 return Err(MarketplaceError::UnknownCreative);
             }
+        }
+        let key = format!("{}::{}", event.campaign_id, event.creative_id);
+        let device_link = event.device_link.clone().filter(|l| l.opt_in);
+        let mut persist_seen = false;
+        if let Some(link) = device_link.as_ref() {
+            let mut seen = self.device_seen.write().unwrap();
+            let set = seen.entry(key.clone()).or_default();
+            if !set.insert(link.device_hash.clone()) {
+                return Ok(());
+            }
+            persist_seen = true;
+            if set.len() > 10_000 {
+                if let Some(first) = set.iter().next().cloned() {
+                    set.remove(&first);
+                }
+            }
+        }
+        {
+            let mut conversions = self.conversions.write().unwrap();
+            let entry = conversions.entry(key.clone()).or_default();
+            entry.count = entry.count.saturating_add(1);
+            if let Some(link) = device_link {
+                if entry.device_links.len() < 1_000 {
+                    entry.device_links.push(link);
+                }
+            }
+        }
+        if persist_seen {
+            if let Err(err) = self.persist_device_seen() {
+                return Err(err.into());
+            }
+        }
+        if let Err(err) = self.persist_conversions() {
+            return Err(err.into());
         }
         {
             let mut estimator = self.uplift.write().unwrap();
@@ -5702,6 +6451,14 @@ impl Marketplace for SledMarketplace {
 
     fn cost_medians_usd_micros(&self) -> (u64, u64, u64) {
         self.medians.read().unwrap().snapshot()
+    }
+
+    fn badge_guard_decision(
+        &self,
+        badges: &[String],
+        soft_intent: Option<&BadgeSoftIntentContext>,
+    ) -> BadgeDecision {
+        self.badge_guard.evaluate(badges, soft_intent)
     }
 }
 struct RoleUsdParts {
@@ -6004,6 +6761,171 @@ mod tests {
         assert_eq!(medians, (111, 222, 333));
     }
 
+    #[test]
+    fn quality_signal_scales_quality_bid() {
+        let bid = QualityBid {
+            base_bid_usd_micros: 100,
+            quality_adjusted_usd_micros: 200,
+            quality_multiplier: 1.0,
+        };
+        let adjusted = bid.apply_signal_multiplier(0.5);
+        assert_eq!(adjusted.base_bid_usd_micros, 100);
+        assert_eq!(adjusted.quality_adjusted_usd_micros, 100);
+        assert!((adjusted.quality_multiplier - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn quality_signal_adjusts_quality_bid_outcome() {
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            provider: Some("provider".to_string()),
+            badges: Vec::new(),
+            bytes: BYTES_PER_MIB,
+            attestations: Vec::new(),
+            population_estimate: Some(1_000),
+            ..ImpressionContext::default()
+        };
+        let cohort = CohortKeySnapshot {
+            domain: ctx.domain.clone(),
+            provider: ctx.provider.clone(),
+            badges: ctx.badges.clone(),
+            domain_tier: ctx.domain_tier,
+            domain_owner: ctx.domain_owner.clone(),
+            interest_tags: ctx.interest_tags.clone(),
+            presence_bucket: ctx.presence_bucket.clone(),
+            selectors_version: ctx.selectors_version,
+        };
+        let signal = |multiplier_ppm| QualitySignal {
+            cohort: cohort.clone(),
+            multiplier_ppm,
+            components: QualitySignalComponents {
+                freshness_multiplier_ppm: multiplier_ppm,
+                readiness_multiplier_ppm: multiplier_ppm,
+                privacy_multiplier_ppm: multiplier_ppm,
+            },
+        };
+        let outcome_for = |multiplier_ppm| {
+            let market = InMemoryMarketplace::new(MarketplaceConfig::default());
+            market
+                .register_campaign(sample_campaign("cmp", 5 * MICROS_PER_DOLLAR))
+                .expect("campaign registered");
+            market.update_oracle(TokenOracle::new(50_000));
+            market.update_quality_signals(vec![signal(multiplier_ppm)]);
+            let key = ReservationKey {
+                manifest: [1u8; 32],
+                path_hash: [2u8; 32],
+                discriminator: [3u8; 32],
+            };
+            market
+                .reserve_impression(key, ctx.clone())
+                .expect("reservation succeeded")
+        };
+        let low = outcome_for(500_000);
+        let high = outcome_for(1_500_000);
+        assert!(high.quality_adjusted_bid_usd_micros > low.quality_adjusted_bid_usd_micros);
+    }
+
+    #[test]
+    fn quality_signal_scales_clearing_price() {
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            bytes: 1,
+            ..ImpressionContext::default()
+        };
+        let cohort = CohortKeySnapshot {
+            domain: ctx.domain.clone(),
+            provider: ctx.provider.clone(),
+            badges: ctx.badges.clone(),
+            domain_tier: ctx.domain_tier,
+            domain_owner: ctx.domain_owner.clone(),
+            interest_tags: ctx.interest_tags.clone(),
+            presence_bucket: ctx.presence_bucket.clone(),
+            selectors_version: ctx.selectors_version,
+        };
+        let signal = |multiplier_ppm| QualitySignal {
+            cohort: cohort.clone(),
+            multiplier_ppm,
+            components: QualitySignalComponents {
+                freshness_multiplier_ppm: multiplier_ppm,
+                readiness_multiplier_ppm: multiplier_ppm,
+                privacy_multiplier_ppm: multiplier_ppm,
+            },
+        };
+        let outcome_for = |multiplier_ppm| {
+            let market = InMemoryMarketplace::new(MarketplaceConfig::default());
+            let creatives = vec![
+                Creative {
+                    id: "creative-high".to_string(),
+                    action_rate_ppm: 1_000_000,
+                    margin_ppm: 1_000_000,
+                    value_per_action_usd_micros: 200_000,
+                    max_cpi_usd_micros: None,
+                    lift_ppm: 1_000_000,
+                    badges: Vec::new(),
+                    domains: vec!["example.test".to_string()],
+                    metadata: HashMap::new(),
+                    mesh_payload: None,
+                    placement: CreativePlacement::default(),
+                },
+                Creative {
+                    id: "creative-low".to_string(),
+                    action_rate_ppm: 1_000_000,
+                    margin_ppm: 1_000_000,
+                    value_per_action_usd_micros: 150_000,
+                    max_cpi_usd_micros: None,
+                    lift_ppm: 1_000_000,
+                    badges: Vec::new(),
+                    domains: vec!["example.test".to_string()],
+                    metadata: HashMap::new(),
+                    mesh_payload: None,
+                    placement: CreativePlacement::default(),
+                },
+            ];
+            let campaign = Campaign {
+                id: "cmp-signal".to_string(),
+                advertiser_account: "adv".to_string(),
+                budget_usd_micros: MICROS_PER_DOLLAR,
+                creatives,
+                targeting: CampaignTargeting {
+                    domains: vec!["example.test".to_string()],
+                    ..CampaignTargeting::default()
+                },
+                metadata: HashMap::new(),
+            };
+            market
+                .register_campaign(campaign)
+                .expect("campaign registered");
+            market.update_oracle(TokenOracle::new(50_000));
+            market.update_quality_signals(vec![signal(multiplier_ppm)]);
+            let key = ReservationKey {
+                manifest: [1u8; 32],
+                path_hash: [2u8; 32],
+                discriminator: [3u8; 32],
+            };
+            market
+                .reserve_impression(key, ctx.clone())
+                .expect("reservation succeeded")
+        };
+        let low = outcome_for(500_000);
+        let high = outcome_for(1_500_000);
+        assert!(high.clearing_price_usd_micros > low.clearing_price_usd_micros);
+    }
+
+    #[test]
+    fn resource_floor_scaling_applies_scarcity_multiplier() {
+        let breakdown = ResourceFloorBreakdown {
+            bandwidth_usd_micros: 100,
+            verifier_usd_micros: 50,
+            host_usd_micros: 25,
+            qualified_impressions_per_proof: 10,
+        };
+        let scaled = breakdown.scale(1.2);
+        assert_eq!(scaled.bandwidth_usd_micros, 120);
+        assert_eq!(scaled.verifier_usd_micros, 60);
+        assert_eq!(scaled.host_usd_micros, 30);
+        assert_eq!(scaled.total_usd_micros(), 210);
+    }
+
     fn encode_bytes(bytes: &[u8]) -> String {
         let mut encoded = String::from("[");
         for (idx, byte) in bytes.iter().enumerate() {
@@ -6250,6 +7172,98 @@ mod tests {
             5 * MICROS_PER_DOLLAR - settlement.total_usd_micros
         );
         assert_eq!(summary[0].reserved_budget_usd_micros, 0);
+    }
+
+    #[test]
+    fn claim_routes_flow_into_settlement() {
+        let market = InMemoryMarketplace::new(MarketplaceConfig::default());
+        market
+            .register_campaign(sample_campaign("cmp", 5 * MICROS_PER_DOLLAR))
+            .expect("campaign registered");
+        market
+            .register_claim_route("example.test", "publisher", "addr_pub")
+            .expect("claim route");
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            provider: Some("provider".to_string()),
+            badges: Vec::new(),
+            bytes: BYTES_PER_MIB,
+            attestations: Vec::new(),
+            population_estimate: Some(1_000),
+            ..ImpressionContext::default()
+        };
+        let key = ReservationKey {
+            manifest: [1u8; 32],
+            path_hash: [2u8; 32],
+            discriminator: [3u8; 32],
+        };
+        market.update_oracle(TokenOracle::new(50_000));
+        let _ = market
+            .reserve_impression(key, ctx.clone())
+            .expect("reservation succeeded");
+        let settlement = market.commit(&key).expect("commit succeeds");
+        assert_eq!(
+            settlement.claim_routes.get("publisher"),
+            Some(&"addr_pub".to_string())
+        );
+    }
+
+    #[test]
+    fn conversions_flow_into_settlement() {
+        let market = InMemoryMarketplace::new(MarketplaceConfig::default());
+        market
+            .register_campaign(sample_campaign("cmp", 5 * MICROS_PER_DOLLAR))
+            .expect("campaign registered");
+        market
+            .record_conversion(ConversionEvent {
+                campaign_id: "cmp".into(),
+                creative_id: "creative-cmp".into(),
+                assignment: UpliftHoldoutAssignment {
+                    fold: 0,
+                    in_holdout: false,
+                    propensity: 1.0,
+                },
+                value_usd_micros: Some(25_000),
+                occurred_at_micros: Some(123),
+                device_link: Some(DeviceLinkOptIn {
+                    device_hash: "device-1".into(),
+                    opt_in: true,
+                }),
+            })
+            .expect("conversion recorded");
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            provider: Some("provider".to_string()),
+            badges: Vec::new(),
+            bytes: BYTES_PER_MIB,
+            attestations: Vec::new(),
+            population_estimate: Some(1_000),
+            ..ImpressionContext::default()
+        };
+        let key = ReservationKey {
+            manifest: [9u8; 32],
+            path_hash: [8u8; 32],
+            discriminator: [7u8; 32],
+        };
+        market.update_oracle(TokenOracle::new(50_000));
+        let _ = market
+            .reserve_impression(key, ctx.clone())
+            .expect("reservation succeeded");
+        let settlement = market.commit(&key).expect("commit succeeds");
+        assert_eq!(settlement.conversions, 1);
+        assert_eq!(settlement.device_links.len(), 1);
+        assert_eq!(settlement.device_links[0].device_hash, "device-1");
+
+        let key2 = ReservationKey {
+            manifest: [3u8; 32],
+            path_hash: [2u8; 32],
+            discriminator: [1u8; 32],
+        };
+        let _ = market
+            .reserve_impression(key2, ctx)
+            .expect("reservation succeeded");
+        let settlement2 = market.commit(&key2).expect("commit succeeds");
+        assert_eq!(settlement2.conversions, 0);
     }
 
     #[test]
@@ -6693,6 +7707,7 @@ mod tests {
             },
             value_usd_micros: Some(250_000),
             occurred_at_micros: Some(123_456),
+            device_link: None,
         };
         market
             .record_conversion(event)
@@ -6749,6 +7764,7 @@ mod tests {
             },
             value_usd_micros: None,
             occurred_at_micros: Some(999_000),
+            device_link: None,
         };
         market
             .record_conversion(event)
@@ -6761,5 +7777,114 @@ mod tests {
         let creative_snapshot = &snapshot.creatives[0];
         assert_eq!(creative_snapshot.control_count, 1);
         assert_eq!(creative_snapshot.control_success, 1);
+    }
+
+    #[test]
+    fn sled_conversion_drains_into_settlement_after_restart() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("market");
+        let config = MarketplaceConfig::default();
+        let market = SledMarketplace::open(&path, config.clone()).expect("sled opened");
+        market
+            .register_campaign(sample_campaign("cmp", 5 * MICROS_PER_DOLLAR))
+            .expect("campaign registered");
+        market
+            .record_conversion(ConversionEvent {
+                campaign_id: "cmp".into(),
+                creative_id: "creative-cmp".into(),
+                assignment: UpliftHoldoutAssignment {
+                    fold: 0,
+                    in_holdout: false,
+                    propensity: 1.0,
+                },
+                value_usd_micros: None,
+                occurred_at_micros: Some(10),
+                device_link: Some(DeviceLinkOptIn {
+                    device_hash: "persisted-device".into(),
+                    opt_in: true,
+                }),
+            })
+            .expect("conversion recorded");
+        drop(market);
+
+        let reopened = SledMarketplace::open(&path, config).expect("reopened market");
+        reopened.update_oracle(TokenOracle::new(50_000));
+        let ctx = ImpressionContext {
+            domain: "example.test".to_string(),
+            provider: Some("provider".to_string()),
+            badges: Vec::new(),
+            bytes: BYTES_PER_MIB,
+            attestations: Vec::new(),
+            population_estimate: Some(1_000),
+            ..ImpressionContext::default()
+        };
+        let key = ReservationKey {
+            manifest: [4u8; 32],
+            path_hash: [5u8; 32],
+            discriminator: [6u8; 32],
+        };
+        let _ = reopened
+            .reserve_impression(key, ctx)
+            .expect("reservation succeeded");
+        let settlement = reopened.commit(&key).expect("commit succeeds");
+        assert_eq!(settlement.conversions, 1);
+        assert_eq!(settlement.device_links.len(), 1);
+        assert_eq!(settlement.device_links[0].device_hash, "persisted-device");
+    }
+
+    #[test]
+    fn conversion_device_link_deduplicates() {
+        let config = MarketplaceConfig::default();
+        let market = InMemoryMarketplace::new(config);
+        let creative = Creative {
+            id: "creative".into(),
+            action_rate_ppm: 100_000,
+            margin_ppm: PPM_SCALE as u32,
+            value_per_action_usd_micros: 100_000,
+            max_cpi_usd_micros: None,
+            lift_ppm: 0,
+            badges: Vec::new(),
+            domains: Vec::new(),
+            metadata: HashMap::new(),
+            mesh_payload: None,
+            placement: CreativePlacement::default(),
+        };
+        let campaign = Campaign {
+            id: "cmp".into(),
+            advertiser_account: "adv".into(),
+            budget_usd_micros: 5_000_000,
+            creatives: vec![creative],
+            targeting: CampaignTargeting::default(),
+            metadata: HashMap::new(),
+        };
+        market
+            .register_campaign(campaign)
+            .expect("campaign registered");
+        let base_event = ConversionEvent {
+            campaign_id: "cmp".into(),
+            creative_id: "creative".into(),
+            assignment: UpliftHoldoutAssignment {
+                fold: 0,
+                in_holdout: false,
+                propensity: 1.0,
+            },
+            value_usd_micros: Some(1),
+            occurred_at_micros: Some(1),
+            device_link: Some(DeviceLinkOptIn {
+                device_hash: "hash1".into(),
+                opt_in: true,
+            }),
+        };
+        market
+            .record_conversion(base_event.clone())
+            .expect("first conversion");
+        // duplicate should be dropped
+        market
+            .record_conversion(base_event)
+            .expect("second conversion ok");
+        let snapshot = market.uplift.read().unwrap().snapshot();
+        let creative_snapshot = &snapshot.creatives[0];
+        assert_eq!(creative_snapshot.treatment_count, 1);
+        assert_eq!(creative_snapshot.treatment_success, 1);
     }
 }

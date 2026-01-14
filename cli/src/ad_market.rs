@@ -66,6 +66,16 @@ pub enum AdMarketCmd {
         bucket_id: String,
         slot_count: u64,
     },
+    ClaimRoutes {
+        url: String,
+        auth: Option<String>,
+        pretty: bool,
+        domain: String,
+        provider: Option<String>,
+        domain_tier: Option<String>,
+        presence_bucket_id: Option<String>,
+        interest_tags: Option<String>,
+    },
 }
 
 impl AdMarketCmd {
@@ -83,6 +93,7 @@ impl AdMarketCmd {
         .subcommand(Self::readiness_command())
         .subcommand(Self::policy_command())
         .subcommand(Self::presence_command())
+        .subcommand(Self::claim_routes_command())
         .build()
     }
 
@@ -325,6 +336,51 @@ impl AdMarketCmd {
         .build()
     }
 
+    fn claim_routes_command() -> Command {
+        CommandBuilder::new(
+            CommandId("ad_market.claim_routes"),
+            "claim-routes",
+            "Inspect payout claim routes for a domain/cohort",
+        )
+        .arg(ArgSpec::Option(
+            OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "auth",
+            "auth",
+            "Bearer token or basic auth",
+        )))
+        .arg(ArgSpec::Flag(FlagSpec::new(
+            "pretty",
+            "pretty",
+            "Pretty-print JSON response",
+        )))
+        .arg(ArgSpec::Option(
+            OptionSpec::new("domain", "domain", "Domain to query").required(true),
+        ))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "provider",
+            "provider",
+            "Optional provider hint",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "domain_tier",
+            "domain-tier",
+            "Domain tier hint (premium|reserved|community|unverified)",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "presence_bucket_id",
+            "presence-bucket-id",
+            "Presence bucket id if applicable",
+        )))
+        .arg(ArgSpec::Option(OptionSpec::new(
+            "interest_tags",
+            "interest-tags",
+            "Comma-separated interest tags",
+        )))
+        .build()
+    }
+
     pub fn from_matches(matches: &Matches) -> Result<Self, String> {
         let (name, sub_matches) = matches
             .subcommand()
@@ -425,6 +481,21 @@ impl AdMarketCmd {
                     other => Err(format!("unknown ad-market presence subcommand '{other}'")),
                 }
             }
+            "claim-routes" => Ok(Self::ClaimRoutes {
+                url: take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string()),
+                auth: take_string(sub_matches, "auth"),
+                pretty: sub_matches.get_flag("pretty"),
+                domain: take_string(sub_matches, "domain")
+                    .ok_or_else(|| "missing '--domain'".to_string())?,
+                provider: take_string(sub_matches, "provider"),
+                domain_tier: take_string(sub_matches, "domain_tier")
+                    .or_else(|| take_string(sub_matches, "domain-tier")),
+                presence_bucket_id: take_string(sub_matches, "presence_bucket_id")
+                    .or_else(|| take_string(sub_matches, "presence-bucket-id")),
+                interest_tags: take_string(sub_matches, "interest_tags")
+                    .or_else(|| take_string(sub_matches, "interest-tags")),
+            }),
             other => Err(format!("unknown subcommand '{other}'")),
         }
     }
@@ -541,6 +612,39 @@ pub fn handle(cmd: AdMarketCmd) {
             );
             let payload = json_rpc_request("ad_market.reserve_presence", Value::Object(params));
             print_rpc_response(&client, &url, payload, auth.as_deref(), true);
+        }
+        AdMarketCmd::ClaimRoutes {
+            url,
+            auth,
+            pretty,
+            domain,
+            provider,
+            domain_tier,
+            presence_bucket_id,
+            interest_tags,
+        } => {
+            let client = RpcClient::from_env();
+            let mut params = json::Map::new();
+            params.insert("domain".into(), Value::String(domain));
+            if let Some(p) = provider {
+                params.insert("provider".into(), Value::String(p));
+            }
+            if let Some(dt) = domain_tier {
+                params.insert("domain_tier".into(), Value::String(dt));
+            }
+            if let Some(pb) = presence_bucket_id {
+                params.insert("presence_bucket_id".into(), Value::String(pb));
+            }
+            if let Some(tags) = interest_tags {
+                let arr: Vec<Value> = tags
+                    .split(',')
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| Value::String(s.trim().to_string()))
+                    .collect();
+                params.insert("interest_tags".into(), Value::Array(arr));
+            }
+            let payload = json_rpc_request("ad_market.claim_routes", Value::Object(params));
+            print_rpc_response(&client, &url, payload, auth.as_deref(), pretty);
         }
     }
 }
