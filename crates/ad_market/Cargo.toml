@@ -3,6 +3,9 @@ name = "ad_market"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+integration-tests = []
+
 [dependencies]
 diagnostics = { path = "../diagnostics" }
 foundation_serialization = { path = "../foundation_serialization" }

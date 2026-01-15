@@ -52,8 +52,23 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
     let mut tick: u64 = 0;
     loop {
-        let first = nodes[0].blockchain().block_height;
-        if nodes.iter().all(|n| n.blockchain().block_height == first) {
+        let mut heights = Vec::with_capacity(nodes.len());
+        let mut contended = false;
+        for n in nodes {
+            match n.try_block_height() {
+                Some(h) => heights.push(h),
+                None => {
+                    contended = true;
+                    break;
+                }
+            }
+        }
+        if contended {
+            the_block::sleep(Duration::from_millis(10)).await;
+            continue;
+        }
+        let first = heights[0];
+        if heights.iter().all(|h| *h == first) {
             return true;
         }
         if start.elapsed() > max {
@@ -64,10 +79,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
             eprintln!(
                 "wait_until_converged: elapsed={:?} heights={:?}",
                 start.elapsed(),
-                nodes
-                    .iter()
-                    .map(|n| n.blockchain().block_height)
-                    .collect::<Vec<_>>()
+                heights
             );
         }
         the_block::sleep(Duration::from_millis(20)).await;

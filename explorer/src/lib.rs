@@ -34,7 +34,7 @@ use the_block::{
     },
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
-    Block, BlockTreasuryEvent,
+    Block, BlockTreasuryEvent, Receipt,
 };
 pub mod ad_view;
 mod ai_summary;
@@ -1568,7 +1568,7 @@ impl BlockPayoutBreakdown {
         let mut ad_claim_routes = Vec::new();
         let mut ad_conversions = 0u64;
         for receipt in &block.receipts {
-            if let the_block::Receipt::Ad(ad) = receipt {
+            if let Receipt::Ad(ad) = receipt {
                 ad_conversions = ad_conversions.saturating_add(ad.conversions as u64);
                 if let Some(breakdown) = ad.role_breakdown.as_ref() {
                     let roles = [
@@ -1905,6 +1905,7 @@ impl RolePayoutBreakdown {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sys::tempfile;
 
     #[test]
     fn ad_claim_routes_and_conversions_round_trip() {
@@ -1920,7 +1921,7 @@ mod tests {
         block.ad_total_usd_micros = 1_000;
         block.ad_oracle_price_usd_micros = 50;
         block.ad_settlement_count = 1;
-        block.receipts = vec![the_block::Receipt::Ad(the_block::AdReceipt {
+        block.receipts = vec![Receipt::Ad(the_block::AdReceipt {
             campaign_id: "cmp".into(),
             creative_id: "cr".into(),
             publisher: "addr-host".into(),
@@ -1966,6 +1967,23 @@ mod tests {
             .expect("parsed from json");
         assert_eq!(parsed.ad_conversions, breakdown.ad_conversions);
         assert_eq!(parsed.ad_claim_routes, breakdown.ad_claim_routes);
+    }
+
+    #[test]
+    fn index_and_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("explorer.db");
+        let ex = Explorer::open(&db).unwrap();
+        ex.index_receipt(&ReceiptRecord {
+            key: "key-1".into(),
+            epoch: 1,
+            provider: "prov".into(),
+            buyer: "buyer".into(),
+            amount: 10,
+        })
+        .unwrap();
+        assert_eq!(ex.receipts_by_provider("prov").unwrap().len(), 1);
+        assert_eq!(ex.receipts_by_domain("buyer").unwrap().len(), 1);
     }
 }
 
@@ -3769,7 +3787,7 @@ impl Explorer {
             for ent in entries.flatten() {
                 if let Ok(epoch) = ent.file_name().to_string_lossy().parse::<u64>() {
                     if let Ok(bytes) = std::fs::read(ent.path()) {
-                        if let Ok(list) = binary::decode::<Vec<Receipt>>(&bytes) {
+                        if let Ok(list) = binary::decode::<Vec<ComputeReceipt>>(&bytes) {
                             for r in list {
                                 let rec = ReceiptRecord {
                                     key: hex_encode(r.idempotency_key),
@@ -3874,28 +3892,5 @@ impl Explorer {
             out.push_str(&format!("  {idx:04}: {line}\n"));
         }
         Some(out)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sys::tempfile;
-
-    #[test]
-    fn index_and_query() {
-        let dir = tempfile::tempdir().unwrap();
-        let db = dir.path().join("explorer.db");
-        let ex = Explorer::open(&db).unwrap();
-        ex.index_receipt(&ReceiptRecord {
-            key: "key-1".into(),
-            epoch: 1,
-            provider: "prov".into(),
-            buyer: "buyer".into(),
-            amount: 10,
-        })
-        .unwrap();
-        assert_eq!(ex.receipts_by_provider("prov").unwrap().len(), 1);
-        assert_eq!(ex.receipts_by_domain("buyer").unwrap().len(), 1);
     }
 }

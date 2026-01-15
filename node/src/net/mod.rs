@@ -86,7 +86,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 #[cfg(feature = "integration-tests")]
 use std::sync::OnceLock;
-use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::thread;
 use std::time::{Duration, Instant};
 use sys::paths;
@@ -2091,6 +2091,16 @@ impl Node {
     /// Access the underlying blockchain.
     pub fn blockchain(&self) -> std::sync::MutexGuard<'_, Blockchain> {
         self.chain.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Non-blocking accessor for the current block height.
+    /// Returns `None` if another thread holds the lock.
+    pub fn try_block_height(&self) -> Option<u64> {
+        match self.chain.try_lock() {
+            Ok(bc) => Some(bc.block_height),
+            Err(TryLockError::Poisoned(err)) => Some(err.into_inner().block_height),
+            Err(TryLockError::WouldBlock) => None,
+        }
     }
 
     fn broadcast_payload(&self, body: Payload) {

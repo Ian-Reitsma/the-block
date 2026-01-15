@@ -311,6 +311,8 @@ where
 mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::{Signature, SigningKey, SECRET_KEY_LENGTH};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
@@ -425,5 +427,25 @@ mod tests {
         adapter
             .enforce_policy(&slight_skew)
             .expect("within skew tolerance");
+    }
+
+    #[test]
+    fn submitter_invoked_for_chain_submission() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let submit_counter = counter.clone();
+        let adapter = OracleAdapter::new(
+            |_addr| Ok(sample_payload()),
+            move |_reading| {
+                submit_counter.fetch_add(1, Ordering::SeqCst);
+                // simulate network delay to exercise Duration/thread import
+                thread::sleep(Duration::from_millis(5));
+                Ok(())
+            },
+            Ed25519SignatureVerifier::new(),
+        );
+        adapter
+            .submit_reading_to_chain(sample_payload())
+            .expect("submit succeeded");
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
     }
 }

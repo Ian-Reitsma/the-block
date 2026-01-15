@@ -83,7 +83,21 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let mut last_broadcast = Instant::now();
     let mut last_request: HashMap<SocketAddr, Instant> = HashMap::new();
     loop {
-        let heights: Vec<_> = nodes.iter().map(|n| n.blockchain().block_height).collect();
+        let mut heights = Vec::with_capacity(nodes.len());
+        let mut contended = false;
+        for n in nodes {
+            match n.try_block_height() {
+                Some(h) => heights.push(h),
+                None => {
+                    contended = true;
+                    break;
+                }
+            }
+        }
+        if contended {
+            the_block::sleep(Duration::from_millis(10)).await;
+            continue;
+        }
         let first = heights[0];
         if heights.iter().all(|h| *h == first) {
             return true;

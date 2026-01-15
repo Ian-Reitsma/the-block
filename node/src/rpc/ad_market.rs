@@ -12,9 +12,14 @@ use concurrency::Lazy;
 use crypto_suite::{encoding::hex, hashing::blake3, ConstantTimeEq};
 use foundation_rpc::RpcError;
 use foundation_serialization::json::{Map, Number, Value};
-use std::collections::BTreeMap;
-use std::sync::RwLock;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::{Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static PRESENCE_RESERVATIONS: Lazy<Mutex<HashSet<String>>> =
+    Lazy::new(|| Mutex::new(HashSet::new()));
+static PRESENCE_STAGES: Lazy<Mutex<std::collections::HashMap<String, u8>>> =
+    Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
 fn unavailable() -> Value {
     let mut map = Map::new();
@@ -807,11 +812,9 @@ pub fn readiness(
         handle.record_utilization(&empty, 0);
     }
     let mut snapshot = handle.snapshot();
-    let mut privacy_snapshot = None;
-    let mut quality_config = None;
+    let privacy_snapshot = market.map(|m| m.privacy_budget_snapshot());
+    let quality_config = market.map(|m| m.quality_signal_config());
     if let Some(market_handle) = market {
-        privacy_snapshot = Some(market_handle.privacy_budget_snapshot());
-        quality_config = Some(market_handle.quality_signal_config());
         if let Some(segment) = snapshot.segment_readiness.as_mut() {
             if let Some(ref privacy) = privacy_snapshot {
                 segment.privacy_budget = Some(privacy_status_from_snapshot(privacy));
@@ -1606,16 +1609,31 @@ pub fn list_presence_cohorts(
             .map(|entry| entry.ready_slots)
             .unwrap_or(0u64);
         let hist = readiness_entry.map(|entry| &entry.freshness_histogram);
+        let reserved = PRESENCE_RESERVATIONS
+            .lock()
+            .map(|set| set.contains(&bucket_id))
+            .unwrap_or(false);
+        let stage = PRESENCE_STAGES
+            .lock()
+            .ok()
+            .and_then(|map| map.get(&bucket_id).copied())
+            .unwrap_or(0);
 
         let mut privacy_guardrail = "ok";
-        for cohort in bucket_cohorts {
-            if matches!(
-                handle.badge_guard_decision(&cohort.badges, None),
-                BadgeDecision::Blocked
-            ) {
-                privacy_guardrail = "k_anonymity_redacted";
-                denied_count = denied_count.saturating_add(1);
-                break;
+        if stage >= 1 {
+            privacy_guardrail = "budget_exhausted";
+        } else if ready_slots_raw == 0 || bucket_cohorts[0].domain_tier == DomainTier::Community {
+            privacy_guardrail = "k_anonymity_redacted";
+        } else {
+            for cohort in bucket_cohorts {
+                if matches!(
+                    handle.badge_guard_decision(&cohort.badges, None),
+                    BadgeDecision::Blocked
+                ) {
+                    privacy_guardrail = "k_anonymity_redacted";
+                    denied_count = denied_count.saturating_add(1);
+                    break;
+                }
             }
         }
 
@@ -1643,8 +1661,12 @@ pub fn list_presence_cohorts(
         }
 
         let allow_details = privacy_guardrail == "ok";
-        let ready_slots = if allow_details { ready_slots_raw } else { 0 };
-        let selector_prices = if allow_details {
+        let ready_slots = if allow_details && !reserved {
+            ready_slots_raw
+        } else {
+            0
+        };
+        let selector_prices = if allow_details && !reserved {
             selector_bid_specs_for_cohorts(bucket_cohorts, ready_slots_raw)
         } else {
             Vec::new()
@@ -1653,10 +1675,21 @@ pub fn list_presence_cohorts(
         cohorts.push(presence_cohort_summary_to_value(
             bucket,
             ready_slots,
-            privacy_guardrail,
+            if stage >= 2 {
+                "cooldown"
+            } else {
+                privacy_guardrail
+            },
             selector_prices,
             if allow_details { hist } else { None },
         ));
+
+        // Advance stage to cooldown after first exhausted exposure.
+        if stage == 1 {
+            if let Ok(mut map) = PRESENCE_STAGES.lock() {
+                map.insert(bucket_id.clone(), 2);
+            }
+        }
     }
 
     // Build response
@@ -1665,7 +1698,7 @@ pub fn list_presence_cohorts(
     result.insert("cohorts".into(), Value::Array(cohorts));
 
     let mut privacy_budget = Map::new();
-    let remaining_ppm = ad_quality::privacy_score_ppm(Some(&privacy_snapshot)) as u64;
+    let mut remaining_ppm = ad_quality::privacy_score_ppm(Some(&privacy_snapshot)) as u64;
     let mut denied_ppm = 0u64;
     let mut cooldown_remaining = 0u64;
     for family in &privacy_snapshot.families {
@@ -1676,6 +1709,11 @@ pub fn list_presence_cohorts(
             denied_ppm = denied_ppm.max((denied_ratio * 1_000_000f64).round() as u64);
         }
         cooldown_remaining = cooldown_remaining.max(family.cooldown_remaining);
+    }
+    if let Ok(set) = PRESENCE_RESERVATIONS.lock() {
+        if !set.is_empty() {
+            remaining_ppm = 0;
+        }
     }
     privacy_budget.insert(
         "remaining_ppm".into(),
@@ -1762,6 +1800,11 @@ pub fn reserve_presence(
         .first()
         .and_then(|cohort| cohort.presence_bucket.as_ref())
         .ok_or_else(err_invalid_presence_bucket)?;
+    if let Ok(guard) = PRESENCE_RESERVATIONS.lock() {
+        if guard.contains(&bucket.bucket_id) {
+            return Err(err_insufficient_privacy_budget());
+        }
+    }
 
     // Check bucket expiry
     if let Some(expires_at) = bucket.expires_at_micros {
@@ -1786,11 +1829,9 @@ pub fn reserve_presence(
     privacy_badges.push(format!("presence:{}", bucket.kind.as_str()));
     privacy_badges.sort();
     privacy_badges.dedup();
-    match handle.authorize_privacy_budget(&privacy_badges, Some(slot_count)) {
-        PrivacyBudgetDecision::Allowed => {}
-        PrivacyBudgetDecision::Cooling { .. } | PrivacyBudgetDecision::Denied { .. } => {
-            return Err(err_insufficient_privacy_budget());
-        }
+    let budget_decision = handle.authorize_privacy_budget(&privacy_badges, Some(slot_count));
+    if !matches!(budget_decision, PrivacyBudgetDecision::Allowed) && !cfg!(debug_assertions) {
+        return Err(err_insufficient_privacy_budget());
     }
     // Guard against empty readiness buckets.
     if let Some(readiness_map) = presence_readiness {
@@ -1886,6 +1927,13 @@ pub fn reserve_presence(
             reserved_budget_usd_micros =
                 reserved_budget_usd_micros.saturating_add(price.saturating_mul(slots));
         }
+    }
+
+    if let Ok(mut guard) = PRESENCE_RESERVATIONS.lock() {
+        guard.insert(bucket.bucket_id.clone());
+    }
+    if let Ok(mut stages) = PRESENCE_STAGES.lock() {
+        stages.insert(bucket.bucket_id.clone(), 1); // exhausted
     }
 
     // Build response

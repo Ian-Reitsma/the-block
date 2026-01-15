@@ -4720,7 +4720,9 @@ impl Blockchain {
             block_receipts.push(Receipt::Ad(AdReceipt {
                 campaign_id: record.campaign_id.clone(),
                 creative_id: record.creative_id.clone(),
-                publisher: host_addr,
+                // Receipt publisher should reflect the canonical host address,
+                // even if the payout is routed via claim routes.
+                publisher: record.host_addr.clone(),
                 impressions: record.impressions,
                 spend: record.total,
                 block_height: index,
