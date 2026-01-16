@@ -310,7 +310,7 @@ impl SelectionAttestationManager {
                     {
                         // Allow explicit integration-test permissive mode to bypass metadata
                         // strictness when harness fixtures use synthetic proofs.
-                        if cfg!(feature = "integration-tests") {
+                        if cfg!(feature = "integration-tests") && !cfg!(test) {
                             return Ok(());
                         }
                         return Err(SelectionReceiptError::InvalidAttestation {

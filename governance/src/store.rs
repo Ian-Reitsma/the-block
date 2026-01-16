@@ -576,7 +576,7 @@ fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
-        .as_secs()
+        .as_millis() as u64
 }
 
 fn did_revocation_to_json(record: &DidRevocationRecord) -> Value {
@@ -3150,7 +3150,7 @@ impl GovStore {
         holder: &str,
         ttl: Duration,
     ) -> sled::Result<(ExecutorLeaseRecord, bool)> {
-        let ttl_secs = ttl.as_secs().max(1);
+        let ttl_millis = ttl.as_millis().max(1) as u64;
         let now = unix_now();
         let tree = self.treasury_executor_state_tree();
         let key = b"lease";
@@ -3165,7 +3165,7 @@ impl GovStore {
                     let last_nonce = existing.last_nonce;
                     existing = ExecutorLeaseRecord {
                         holder: holder.to_string(),
-                        expires_at: now.saturating_add(ttl_secs),
+                        expires_at: now.saturating_add(ttl_millis),
                         renewed_at: now,
                         last_nonce,
                         released: false,
@@ -3179,7 +3179,7 @@ impl GovStore {
                 None => {
                     let record = ExecutorLeaseRecord {
                         holder: holder.to_string(),
-                        expires_at: now.saturating_add(ttl_secs),
+                        expires_at: now.saturating_add(ttl_millis),
                         renewed_at: now,
                         last_nonce: None,
                         released: false,
