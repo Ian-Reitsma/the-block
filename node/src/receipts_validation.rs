@@ -13,11 +13,36 @@ use crate::receipts::Receipt;
 use crypto_suite::hashing::blake3;
 use foundation_serialization::{Deserialize, Serialize};
 
-/// Maximum number of receipts allowed per block (DoS protection)
-pub const MAX_RECEIPTS_PER_BLOCK: usize = 10_000;
-
-/// Maximum total serialized receipt bytes per block (10MB limit)
-pub const MAX_RECEIPT_BYTES_PER_BLOCK: usize = 10_000_000;
+/// Hard ceiling for receipts per block (fuse; budgets are authoritative).
+pub const HARD_RECEIPT_CEILING: usize = 50_000;
+/// Byte budget per block for receipts (bandwidth + storage pressure).
+pub const RECEIPT_BYTE_BUDGET: usize = 10_000_000;
+/// Verify-unit budget per block for receipts (deterministic CPU budget).
+pub const RECEIPT_VERIFY_BUDGET: u64 = 100_000;
+/// Target fraction of the budget used by the EIP-1559-style controller (documented in system_reference.md).
+pub const RECEIPT_BUDGET_TARGET_FRACTION: f64 = 0.6;
+/// Minimum assumed encoded size per receipt when deriving the budget-based max count.
+pub const MIN_RECEIPT_BYTE_FLOOR: usize = 1_000;
+/// Minimum assumed verify units per receipt when deriving the budget-based max count.
+pub const MIN_RECEIPT_VERIFY_UNITS: u64 = 10;
+/// Number of logical receipt shards used when aggregating per-shard roots.
+pub const RECEIPT_SHARD_COUNT: u16 = 64;
+/// Required data-availability window for receipt blobs/commitments (seconds).
+pub const RECEIPT_BLOB_DA_WINDOW_SECS: u64 = 7 * 24 * 60 * 60; // 7 days
+const fn min_usize(a: usize, b: usize) -> usize {
+    if a < b {
+        a
+    } else {
+        b
+    }
+}
+/// Derived maximum receipts per block from both byte and verify budgets (deterministic, no magic constants).
+pub const MAX_RECEIPTS_PER_BLOCK: usize = {
+    let byte_bound = RECEIPT_BYTE_BUDGET / MIN_RECEIPT_BYTE_FLOOR;
+    let verify_bound = (RECEIPT_VERIFY_BUDGET / MIN_RECEIPT_VERIFY_UNITS) as usize;
+    let budget_bound = min_usize(byte_bound, verify_bound);
+    min_usize(budget_bound, HARD_RECEIPT_CEILING)
+};
 
 /// Maximum length for string fields (contract_id, provider, etc.)
 pub const MAX_STRING_FIELD_LENGTH: usize = 256;
@@ -36,6 +61,10 @@ pub enum ValidationError {
     ReceiptsTooLarge {
         bytes: usize,
         max: usize,
+    },
+    VerifyBudgetExceeded {
+        units: u64,
+        max: u64,
     },
     BlockHeightMismatch {
         receipt_height: u64,
@@ -75,6 +104,9 @@ impl std::fmt::Display for ValidationError {
             }
             ValidationError::ReceiptsTooLarge { bytes, max } => {
                 write!(f, "Receipts too large: {} bytes (max: {})", bytes, max)
+            }
+            ValidationError::VerifyBudgetExceeded { units, max } => {
+                write!(f, "Receipt verify budget exceeded: {} units (max: {})", units, max)
             }
             ValidationError::BlockHeightMismatch {
                 receipt_height,
@@ -346,13 +378,222 @@ pub fn validate_receipt_count(count: usize) -> Result<(), ValidationError> {
 }
 
 pub fn validate_receipt_size(bytes: usize) -> Result<(), ValidationError> {
-    if bytes > MAX_RECEIPT_BYTES_PER_BLOCK {
+    if bytes > RECEIPT_BYTE_BUDGET {
         return Err(ValidationError::ReceiptsTooLarge {
             bytes,
-            max: MAX_RECEIPT_BYTES_PER_BLOCK,
+            max: RECEIPT_BYTE_BUDGET,
         });
     }
     Ok(())
+}
+
+/// Aggregate resource usage for a block of receipts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReceiptBlockUsage {
+    pub count: usize,
+    pub bytes: usize,
+    pub verify_units: u64,
+}
+
+impl ReceiptBlockUsage {
+    pub fn new(count: usize, bytes: usize, verify_units: u64) -> Self {
+        Self {
+            count,
+            bytes,
+            verify_units,
+        }
+    }
+}
+
+/// Deterministic per-receipt verify-unit estimator (dominant-resource fairness guard).
+pub fn receipt_verify_units(receipt: &Receipt) -> u64 {
+    // Base signature verification cost for every receipt
+    let mut units: u64 = 10;
+    match receipt {
+        Receipt::Storage(r) => {
+            // Slightly scale with payload size to reflect hashing work
+            units += (r.bytes / 1_000).min(50) as u64;
+        }
+        Receipt::Compute(r) => {
+            units += 5;
+            if r.verified {
+                units += 5;
+            }
+        }
+        Receipt::Energy(_) => {
+            units += 3;
+        }
+        Receipt::Ad(r) => {
+            // Ad receipts can batch many impressions; cap per-receipt verify units.
+            units += (r.impressions / 10_000).min(10) as u64;
+        }
+    }
+    units
+}
+
+/// Validate a block-level receipt budget using both byte and verify-unit caps.
+pub fn validate_receipt_budget(usage: &ReceiptBlockUsage) -> Result<(), ValidationError> {
+    validate_receipt_count(usage.count)?;
+    validate_receipt_size(usage.bytes)?;
+    if usage.verify_units > RECEIPT_VERIFY_BUDGET {
+        return Err(ValidationError::VerifyBudgetExceeded {
+            units: usage.verify_units,
+            max: RECEIPT_VERIFY_BUDGET,
+        });
+    }
+    Ok(())
+}
+
+/// Per-shard aggregation of receipt roots and resource usage. This is a
+/// stateless, append-only accumulator intended for builders and macro-block
+/// assembly to avoid a single global receipts Vec bottleneck.
+#[derive(Debug, Clone)]
+pub struct ReceiptShardAccumulator {
+    shard_count: u16,
+    leaves: Vec<Vec<[u8; 32]>>,
+    usage: Vec<ReceiptBlockUsage>,
+}
+
+impl ReceiptShardAccumulator {
+    pub fn new(shard_count: u16) -> Self {
+        let len = shard_count as usize;
+        Self {
+            shard_count,
+            leaves: vec![Vec::new(); len],
+            usage: vec![
+                ReceiptBlockUsage {
+                    count: 0,
+                    bytes: 0,
+                    verify_units: 0
+                };
+                len
+            ],
+        }
+    }
+
+    pub fn add(&mut self, receipt: &Receipt, encoded_size: usize) {
+        let shard = shard_for_receipt(receipt, self.shard_count);
+        let idx = shard as usize;
+        self.leaves[idx].push(receipt_leaf_hash(receipt));
+        let units = receipt_verify_units(receipt);
+        let usage = &mut self.usage[idx];
+        usage.count += 1;
+        usage.bytes += encoded_size;
+        usage.verify_units += units;
+    }
+
+    /// Compute per-shard Merkle roots (empty shards use the zero hash).
+    pub fn roots(&self) -> Vec<[u8; 32]> {
+        self.leaves
+            .iter()
+            .map(|leaves| {
+                if leaves.is_empty() {
+                    [0u8; 32]
+                } else {
+                    merkle_root(leaves)
+                }
+            })
+            .collect()
+    }
+
+    pub fn per_shard_usage(&self) -> &[ReceiptBlockUsage] {
+        &self.usage
+    }
+
+    pub fn total_usage(&self) -> ReceiptBlockUsage {
+        self.usage.iter().fold(
+            ReceiptBlockUsage::new(0, 0, 0),
+            |mut acc, shard| {
+                acc.count += shard.count;
+                acc.bytes += shard.bytes;
+                acc.verify_units += shard.verify_units;
+                acc
+            },
+        )
+    }
+}
+
+/// Compute a stable shard assignment for a receipt based on provider/publisher
+/// identifier. This is deterministic and domain-separated so all nodes agree.
+pub fn shard_for_receipt(receipt: &Receipt, shard_count: u16) -> u16 {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"receipt_shard");
+    match receipt {
+        Receipt::Storage(r) => hasher.update(r.provider.as_bytes()),
+        Receipt::Compute(r) => hasher.update(r.provider.as_bytes()),
+        Receipt::Energy(r) => hasher.update(r.provider.as_bytes()),
+        Receipt::Ad(r) => hasher.update(r.publisher.as_bytes()),
+    }
+    let hash = hasher.finalize();
+    let mut bytes = [0u8; 2];
+    bytes.copy_from_slice(&hash.as_bytes()[..2]);
+    u16::from_le_bytes(bytes) % shard_count.max(1)
+}
+
+/// Leaf hash used for per-shard receipt Merkle trees.
+pub fn receipt_leaf_hash(receipt: &Receipt) -> [u8; 32] {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(b"receipt_leaf");
+    match receipt {
+        Receipt::Storage(r) => {
+            hasher.update(r.provider.as_bytes());
+            hasher.update(r.contract_id.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.signature_nonce.to_le_bytes());
+            hasher.update(&r.bytes.to_le_bytes());
+            hasher.update(&r.price.to_le_bytes());
+        }
+        Receipt::Compute(r) => {
+            hasher.update(r.provider.as_bytes());
+            hasher.update(r.job_id.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.signature_nonce.to_le_bytes());
+            hasher.update(&r.compute_units.to_le_bytes());
+            hasher.update(&r.payment.to_le_bytes());
+            hasher.update(&[u8::from(r.verified)]);
+        }
+        Receipt::Energy(r) => {
+            hasher.update(r.provider.as_bytes());
+            hasher.update(r.contract_id.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.signature_nonce.to_le_bytes());
+            hasher.update(&r.energy_units.to_le_bytes());
+            hasher.update(&r.price.to_le_bytes());
+        }
+        Receipt::Ad(r) => {
+            hasher.update(r.publisher.as_bytes());
+            hasher.update(r.campaign_id.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.signature_nonce.to_le_bytes());
+            hasher.update(&r.impressions.to_le_bytes());
+            hasher.update(&r.spend.to_le_bytes());
+        }
+    }
+    hasher.finalize().into()
+}
+
+/// Simple binary Merkle root over fixed-size leaf hashes.
+pub fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
+    if leaves.is_empty() {
+        return [0u8; 32];
+    }
+    let mut layer: Vec<[u8; 32]> = leaves.to_vec();
+    while layer.len() > 1 {
+        let mut next = Vec::with_capacity((layer.len() + 1) / 2);
+        for pair in layer.chunks(2) {
+            let combined = if pair.len() == 2 {
+                let mut hasher = blake3::Hasher::new();
+                hasher.update(&pair[0]);
+                hasher.update(&pair[1]);
+                hasher.finalize().into()
+            } else {
+                pair[0]
+            };
+            next.push(combined);
+        }
+        layer = next;
+    }
+    layer[0]
 }
 
 #[cfg(test)]

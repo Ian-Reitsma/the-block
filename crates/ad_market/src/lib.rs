@@ -2455,8 +2455,8 @@ impl SelectionReceipt {
                 winner: winner.quality_adjusted_bid_usd_micros,
             });
         }
-        // Permit an explicit integration-test bypass for synthetic proofs.
-        if cfg!(feature = "integration-tests") {
+        // Permit an explicit integration-test bypass for synthetic proofs, but never during tests.
+        if cfg!(feature = "integration-tests") && !cfg!(test) {
             return Ok(SelectionReceiptInsights {
                 winner_index: self.winner_index,
                 winner_quality_bid_usd_micros: winner.quality_adjusted_bid_usd_micros,

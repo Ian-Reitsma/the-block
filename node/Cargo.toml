@@ -91,7 +91,7 @@ inhouse-storage = []
 sqlite-migration = ["dep:foundation_sqlite"]
 cli = []
 lightweight-integration = []
-integration-tests = ["ad-market/integration-tests"]
+integration-tests = ["ad-market/integration-tests", "zkp/integration-tests"]
 legacy-read-acks = []
 quantum = ["pqcrypto-dilithium", "crypto/quantum"]
 

@@ -7120,7 +7120,23 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
                 .verify(b"the_block_keypair_self_test", &sig)
                 .is_ok()
             {
-                return (priv_bytes.to_vec(), vk_bytes.to_vec());
+                // Also sanity-check against the transaction signing/verification path to
+                // prevent handing out keys that occasionally fail stateless checks.
+                let payload = transaction::RawTxPayload {
+                    from_: "self_test".into(),
+                    to: "sink".into(),
+                    amount_consumer: 0,
+                    amount_industrial: 0,
+                    fee: 1,
+                    pct: 100,
+                    nonce: 1,
+                    memo: Vec::new(),
+                };
+                if let Some(tx) = transaction::sign_tx(&priv_bytes, &payload) {
+                    if transaction::verify_signed_tx(&tx) {
+                        return (priv_bytes.to_vec(), vk_bytes.to_vec());
+                    }
+                }
             }
         }
     }

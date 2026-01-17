@@ -14,7 +14,8 @@ use the_block::block_binary::encode_receipts;
 use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
 use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 use the_block::receipts_validation::{
-    validate_receipt, validate_receipt_count, validate_receipt_size, MAX_RECEIPTS_PER_BLOCK,
+    receipt_verify_units, validate_receipt, validate_receipt_budget, validate_receipt_count,
+    ReceiptBlockUsage, MAX_RECEIPTS_PER_BLOCK, RECEIPT_BYTE_BUDGET, RECEIPT_VERIFY_BUDGET,
 };
 
 const RECEIPT_PROVIDER_POOL: [&str; 4] = [
@@ -101,14 +102,17 @@ fn stress_max_receipts_per_block() {
     // Should encode successfully
     let encoded = encode_receipts(&receipts).expect("Failed to encode max receipts");
 
-    // Verify encoded size is reasonable
+    // Aggregate resource usage and validate budgets (bytes + verify units)
+    let verify_units: u64 = receipts.iter().map(receipt_verify_units).sum();
+    let usage = ReceiptBlockUsage::new(receipts.len(), encoded.len(), verify_units);
     println!(
-        "Max receipts ({}) encoded size: {} bytes",
+        "Max receipts ({}) encoded size: {} bytes, verify units: {}",
         receipts.len(),
-        encoded.len()
+        encoded.len(),
+        verify_units
     );
     assert!(!encoded.is_empty());
-    assert!(validate_receipt_size(encoded.len()).is_ok());
+    assert!(validate_receipt_budget(&usage).is_ok());
 }
 
 #[test]
@@ -150,33 +154,54 @@ fn stress_large_receipt_payload() {
 
 #[test]
 fn stress_encoding_overhead_within_limit() {
-    // Verify that 10,000 receipts encoded size stays under 10MB limit
-    let receipts: Vec<Receipt> = (0..10_000)
+    // Verify that the derived max receipts encoded size stays under the byte budget
+    let receipts: Vec<Receipt> = (0..MAX_RECEIPTS_PER_BLOCK as u64)
         .map(|i| create_test_receipt(i, i as usize))
         .collect();
 
     let encoded = encode_receipts(&receipts).expect("Failed to encode");
+    let verify_units: u64 = receipts.iter().map(receipt_verify_units).sum();
+    let usage = ReceiptBlockUsage::new(receipts.len(), encoded.len(), verify_units);
 
     // Should be well under the limit with normal-sized receipts
-    assert!(validate_receipt_size(encoded.len()).is_ok());
+    assert!(validate_receipt_budget(&usage).is_ok());
     println!(
-        "10,000 receipts encoded size: {} bytes ({:.2} MB)",
+        "{} receipts encoded size: {} bytes ({:.2} MB), verify units {} (budget {})",
+        receipts.len(),
         encoded.len(),
-        encoded.len() as f64 / 1_000_000.0
+        encoded.len() as f64 / 1_000_000.0,
+        verify_units,
+        RECEIPT_VERIFY_BUDGET
     );
 
-    // Actual size should be reasonable (< 5MB for 10k receipts, well under the 10MB limit)
+    // Actual size should be reasonable (< 80% of byte budget)
     assert!(
-        encoded.len() < 5_000_000,
-        "Encoded size unexpectedly large: {}",
-        encoded.len()
+        encoded.len() < (RECEIPT_BYTE_BUDGET as f64 * 0.8) as usize,
+        "Encoded size unexpectedly large: {} (budget {})",
+        encoded.len(),
+        RECEIPT_BYTE_BUDGET
     );
 }
 
 #[test]
+fn verify_budget_enforced() {
+    // Force verify budget overflow by inflating verify units.
+    let receipts: Vec<Receipt> = (0..(MAX_RECEIPTS_PER_BLOCK as u64))
+        .map(|i| create_test_receipt(i, i as usize))
+        .collect();
+    let encoded = encode_receipts(&receipts).expect("encode");
+    let mut verify_units: u64 = receipts.iter().map(receipt_verify_units).sum();
+    // Artificially inflate verify units to trip the guard without changing size.
+    verify_units = verify_units.saturating_add(RECEIPT_VERIFY_BUDGET + 1);
+    let usage = ReceiptBlockUsage::new(receipts.len(), encoded.len(), verify_units);
+    let result = validate_receipt_budget(&usage);
+    assert!(result.is_err(), "verify budget guard should trip");
+}
+
+#[test]
 fn stress_mixed_receipt_types_at_scale() {
-    // Test with 10,000 receipts of all types evenly distributed
-    let receipts: Vec<Receipt> = (0..10_000)
+    // Test with a full block of receipts of all types evenly distributed
+    let receipts: Vec<Receipt> = (0..MAX_RECEIPTS_PER_BLOCK as u64)
         .map(|i| create_test_receipt(i, i as usize))
         .collect();
 

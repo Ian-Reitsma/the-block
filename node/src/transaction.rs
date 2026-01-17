@@ -710,7 +710,8 @@ pub fn decode_payload_py(bytes: Vec<u8>) -> PyResult<RawTxPayload> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crypto_suite::signatures::ed25519::SIGNATURE_LENGTH;
+    use crypto_suite::signatures::ed25519::{SECRET_KEY_LENGTH, SIGNATURE_LENGTH};
+    use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 
     fn sample_payload() -> RawTxPayload {
         RawTxPayload {
@@ -728,7 +729,7 @@ mod tests {
     #[test]
     fn sign_tx_roundtrip_verifies_with_suite_types() {
         let payload = sample_payload();
-        let sk = [7u8; crypto_suite::signatures::ed25519::SECRET_KEY_LENGTH];
+        let sk = [7u8; SECRET_KEY_LENGTH];
         let signed = sign_tx(&sk, &payload).expect("tx signed");
 
         let mut pk_bytes = [0u8; 32];
@@ -852,9 +853,33 @@ mod tests {
     }
 
     #[test]
+    fn sign_tx_roundtrip_random_keys_and_payloads() {
+        let mut rng = StdRng::seed_from_u64(0xA4A1_5EA1_DEAD_BA11);
+        for idx in 0..16u64 {
+            let mut sk = [0u8; SECRET_KEY_LENGTH];
+            rng.fill_bytes(&mut sk);
+            let payload = RawTxPayload {
+                from_: format!("from-{idx}"),
+                to: format!("to-{idx}"),
+                amount_consumer: rng.gen_range(0..10_000u64),
+                amount_industrial: rng.gen_range(0..1_000u64),
+                fee: rng.gen_range(1..10_000u64),
+                pct: rng.gen_range(1..=100u64) as u8,
+                nonce: idx + 1,
+                memo: Vec::new(),
+            };
+            let tx = sign_tx(&sk, &payload).expect("tx signed");
+            assert!(
+                verify_signed_tx(&tx),
+                "signature verification failed for iteration {idx}"
+            );
+        }
+    }
+
+    #[test]
     fn verify_signed_tx_rejects_invalid_signature() {
         let payload = sample_payload();
-        let sk = [7u8; crypto_suite::signatures::ed25519::SECRET_KEY_LENGTH];
+        let sk = [7u8; SECRET_KEY_LENGTH];
         let mut signed = sign_tx(&sk, &payload).expect("tx signed");
 
         // Corrupt the signature
