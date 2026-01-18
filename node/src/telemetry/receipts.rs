@@ -4,12 +4,18 @@
 //! Enables monitoring of market activity at the consensus level.
 
 #[cfg(feature = "telemetry")]
-use super::{register_counter, register_gauge, register_histogram, register_int_gauge};
+use super::{
+    register_counter, register_gauge, register_histogram, register_int_gauge,
+    register_int_gauge_vec,
+};
 use crate::receipts::Receipt;
+use crate::receipts_validation::ReceiptBlockUsage;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
 use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
+#[cfg(feature = "telemetry")]
+use runtime::telemetry::IntGaugeVec;
 
 /// Receipt count by market type (telemetry)
 #[cfg(feature = "telemetry")]
@@ -159,6 +165,74 @@ pub static RECEIPT_DECODING_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     )
 });
 
+/// Shard-level usage gauges.
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_SHARD_USAGE_COUNT: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec(
+        "receipt_shard_count_per_block",
+        "Receipt count per shard in current block",
+        &["shard"],
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_SHARD_USAGE_BYTES: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec(
+        "receipt_shard_bytes_per_block",
+        "Serialized receipt bytes per shard in current block",
+        &["shard"],
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_SHARD_USAGE_VERIFY_UNITS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec(
+        "receipt_shard_verify_units_per_block",
+        "Deterministic verify units per shard in current block",
+        &["shard"],
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_DA_SAMPLE_SUCCESS_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipt_da_sample_success_total",
+        "Successful receipt data-availability samples",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_DA_SAMPLE_FAILURE_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipt_da_sample_failure_total",
+        "Failed receipt data-availability samples",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_AGG_SIG_MISMATCH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipt_aggregate_sig_mismatch_total",
+        "Aggregated receipt signature mismatches during validation",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_HEADER_MISMATCH_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipt_header_mismatch_total",
+        "Per-shard receipt root mismatch versus header",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_SHARD_DIVERSITY_VIOLATION_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipt_shard_diversity_violation_total",
+        "Receipt shard placement diversity violations (provider/region/ASN)",
+    )
+});
+
 /// Pending receipt depth gauges (per market)
 #[cfg(feature = "telemetry")]
 pub static PENDING_RECEIPTS_STORAGE: Lazy<IntGauge> = Lazy::new(|| {
@@ -254,6 +328,23 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
 /// Stub for non-telemetry builds
 #[cfg(not(feature = "telemetry"))]
 pub fn record_receipts(_receipts: &[Receipt], _serialized_bytes: usize) {}
+
+#[cfg(feature = "telemetry")]
+pub fn record_shard_usage(shard: u16, usage: &ReceiptBlockUsage) {
+    let label = shard.to_string();
+    RECEIPT_SHARD_USAGE_COUNT
+        .with_label_values(&[&label])
+        .set(usage.count as i64);
+    RECEIPT_SHARD_USAGE_BYTES
+        .with_label_values(&[&label])
+        .set(usage.bytes as i64);
+    RECEIPT_SHARD_USAGE_VERIFY_UNITS
+        .with_label_values(&[&label])
+        .set(usage.verify_units as i64);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn record_shard_usage(_shard: u16, _usage: &ReceiptBlockUsage) {}
 
 /// Record metrics derivation time
 #[cfg(feature = "telemetry")]

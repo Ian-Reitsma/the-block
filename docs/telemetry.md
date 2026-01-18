@@ -84,6 +84,16 @@ When dynamic fee pricing is recalculated:
 4. Use `code` for programmatic error handling
 5. Emit `fpb` for any fee-related decisions
 
+## Receipt Shard + Availability Metrics
+
+- `receipt_shard_count_per_block{shard="<idx>"}` — receipts per shard in the current block (gauge)
+- `receipt_shard_bytes_per_block{shard="<idx>"}` — serialized bytes per shard (gauge)
+- `receipt_shard_verify_units_per_block{shard="<idx>"}` — deterministic verify units per shard (gauge)
+- `receipt_da_sample_success_total` / `receipt_da_sample_failure_total` — data-availability sampling outcomes over receipt shards (counters)
+- `receipt_aggregate_sig_mismatch_total` — count of aggregated signature/header mismatches (counter)
+- `receipt_header_mismatch_total` — per-shard root mismatch versus header (counter)
+- `receipt_shard_diversity_violation_total` — count of shard placement violations (provider/region/ASN) caught during block build/validation (counter)
+
 ## See Also
 
 - [Operations Guide - Telemetry Wiring](operations.md#telemetry-wiring)

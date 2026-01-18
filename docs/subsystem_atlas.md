@@ -135,6 +135,7 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | `node/src/simple_db/` | SimpleDb snapshot layer used across subsystems (energy market, storage, governance). Implements fsync + atomic rename semantics and cross-platform safeguards. |
 | `node/src/treasury_executor.rs` | BLOCK ledger hooks that convert compute/storage receipts and treasury disbursements into coinbase outputs. |
 | `node/src/blob_chain.rs`, `node/src/storage/` | Glue between on-chain blob commitments and the actual storage backends. |
+| `node/src/receipts.rs`, `node/src/receipts_validation.rs`, `node/src/receipt_crypto.rs` | Receipt schemas, per-shard accumulator, DA/aggregate signature headers, and signature verification plumbing used during block/macro-block assembly. |
 
 ### Energy Market
 

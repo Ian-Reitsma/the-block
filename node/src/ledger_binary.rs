@@ -1106,7 +1106,7 @@ fn read_market_metrics(reader: &mut Reader<'_>) -> binary_struct::Result<economi
 }
 
 fn write_macro_block(writer: &mut Writer, block: &MacroBlock) -> EncodeResult<()> {
-    writer.write_u64(4);
+    writer.write_u64(6);
     writer.write_string("height");
     writer.write_u64(block.height);
     writer.write_string("shard_heights");
@@ -1117,6 +1117,8 @@ fn write_macro_block(writer: &mut Writer, block: &MacroBlock) -> EncodeResult<()
     writer.write_u64(block.total_reward);
     writer.write_string("queue_root");
     write_fixed(writer, &block.queue_root);
+    writer.write_string("receipt_header");
+    block_binary::write_optional_receipt_header(writer, &block.receipt_header)?;
     Ok(())
 }
 
@@ -1126,13 +1128,19 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
     let mut shard_roots = None;
     let mut total_reward = None;
     let mut queue_root = None;
+    let mut receipt_header = None;
 
-    decode_struct(reader, Some(4), |key, reader| match key {
+    decode_struct(reader, None, |key, reader| match key {
         "height" => assign_once(&mut height, reader.read_u64()?, "height"),
         "shard_heights" => assign_once(&mut shard_heights, read_u64_map(reader)?, "shard_heights"),
         "shard_roots" => assign_once(&mut shard_roots, read_root_map(reader)?, "shard_roots"),
         "total_reward" => assign_once(&mut total_reward, reader.read_u64()?, "total_reward"),
         "queue_root" => assign_once(&mut queue_root, read_fixed(reader)?, "queue_root"),
+        "receipt_header" => assign_once(
+            &mut receipt_header,
+            block_binary::read_optional_receipt_header(reader)?,
+            "receipt_header",
+        ),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
@@ -1142,6 +1150,7 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
         shard_roots: shard_roots.unwrap_or_default(),
         total_reward: total_reward.unwrap_or_default(),
         queue_root: queue_root.unwrap_or([0; 32]),
+        receipt_header: receipt_header.unwrap_or_default(),
     })
 }
 
@@ -1379,6 +1388,7 @@ mod tests {
             #[cfg(feature = "quantum")]
             dilithium_sig: vec![],
             receipts: Vec::new(),
+            receipt_header: None,
         }
     }
 

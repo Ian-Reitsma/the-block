@@ -33,6 +33,10 @@ use transport::{Config as TransportConfig, ProviderKind};
 pub struct ReceiptProviderConfig {
     pub provider_id: String,
     pub verifying_key_hex: String,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub region: Option<String>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub asn: Option<u32>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -120,6 +124,18 @@ pub struct NodeConfig {
     pub read_ack_privacy: ReadAckPrivacyMode,
     #[serde(default = "default_receipt_providers")]
     pub receipt_providers: Vec<ReceiptProviderConfig>,
+    #[serde(default = "default_receipt_shard_count")]
+    pub receipt_shard_count: u16,
+    #[serde(default = "default_receipt_blob_da_window_secs")]
+    pub receipt_blob_da_window_secs: u64,
+    #[serde(default = "default_receipt_header_activation_height")]
+    pub receipt_header_activation_height: u64,
+    #[serde(default = "default_receipt_min_region_diversity")]
+    pub receipt_min_region_diversity: u16,
+    #[serde(default = "default_receipt_min_asn_diversity")]
+    pub receipt_min_asn_diversity: u16,
+    #[serde(default = "default_receipt_max_per_provider_per_shard")]
+    pub receipt_max_per_provider_per_shard: u16,
 }
 
 impl Default for NodeConfig {
@@ -169,6 +185,12 @@ impl Default for NodeConfig {
             treasury_account: default_treasury_account(),
             read_ack_privacy: default_read_ack_privacy(),
             receipt_providers: default_receipt_providers(),
+            receipt_shard_count: default_receipt_shard_count(),
+            receipt_blob_da_window_secs: default_receipt_blob_da_window_secs(),
+            receipt_header_activation_height: default_receipt_header_activation_height(),
+            receipt_min_region_diversity: default_receipt_min_region_diversity(),
+            receipt_min_asn_diversity: default_receipt_min_asn_diversity(),
+            receipt_max_per_provider_per_shard: default_receipt_max_per_provider_per_shard(),
         }
     }
 }
@@ -183,6 +205,30 @@ fn default_read_ack_privacy() -> ReadAckPrivacyMode {
 
 fn default_receipt_providers() -> Vec<ReceiptProviderConfig> {
     Vec::new()
+}
+
+fn default_receipt_shard_count() -> u16 {
+    crate::receipts_validation::RECEIPT_SHARD_COUNT
+}
+
+fn default_receipt_blob_da_window_secs() -> u64 {
+    crate::receipts_validation::RECEIPT_BLOB_DA_WINDOW_SECS
+}
+
+fn default_receipt_header_activation_height() -> u64 {
+    0
+}
+
+fn default_receipt_min_region_diversity() -> u16 {
+    1
+}
+
+fn default_receipt_min_asn_diversity() -> u16 {
+    1
+}
+
+fn default_receipt_max_per_provider_per_shard() -> u16 {
+    1
 }
 
 #[derive(Clone, Serialize, Deserialize)]

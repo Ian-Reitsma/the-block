@@ -1,4 +1,5 @@
 use crate::ledger_binary;
+use crate::receipts_validation::ReceiptHeader;
 use crate::util::binary_struct;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
@@ -17,6 +18,9 @@ pub struct MacroBlock {
     pub total_reward: u64,
     /// Merkle root of the inter-shard message queue.
     pub queue_root: [u8; 32],
+    /// Optional receipt header captured at the macro-block boundary.
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub receipt_header: Option<ReceiptHeader>,
 }
 
 impl MacroBlock {

@@ -193,6 +193,7 @@ mod tests {
                 #[cfg(feature = "quantum")]
                 dilithium_sig: Vec::new(),
                 receipts: Vec::new(),
+                receipt_header: None,
             });
             ts += 2_000; // twice the target spacing
         }

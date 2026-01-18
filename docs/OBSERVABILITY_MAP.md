@@ -306,6 +306,47 @@ contract-cli receipts search --filter 'status=failed' --limit 20
 
 ---
 
+### Q: Are receipt shards healthy and available?
+
+**Canonical Metrics**:
+```promql
+# Per-shard load
+receipt_shard_count_per_block
+receipt_shard_bytes_per_block
+receipt_shard_verify_units_per_block
+
+# Availability + integrity
+receipt_da_sample_success_total
+receipt_da_sample_failure_total
+receipt_aggregate_sig_mismatch_total
+receipt_header_mismatch_total
+receipt_shard_diversity_violation_total
+```
+
+**Grafana Dashboard**: `monitoring/grafana_receipt_dashboard.json`
+- Panel: "Shard Usage" — Count/bytes/verify-units per shard (filters by shard label)
+- Panel: "Receipt DA Samples" — Success vs failure trend
+- Panel: "Aggregate Sig Mismatch" — Count of header/signature divergences
+
+**CLI Command**:
+```bash
+# Spot-check shard load (metrics scrape)
+curl -s http://localhost:9000/metrics | grep '^receipt_shard_'
+
+# Inspect latest macro-block receipt roots
+contract-cli ledger macro --limit 1 | jq '.receipt_header'
+```
+
+**Verification Checklist**:
+- [ ] No `receipt_da_sample_failure_total` increase over 10m
+- [ ] `receipt_aggregate_sig_mismatch_total` steady at 0
+- [ ] Shard usage within configured budgets; no shard spikes relative to peers
+- [ ] No `receipt_shard_diversity_violation_total` increments while building/validating blocks
+
+**Runbook**: `docs/operations.md#receipts-flatlining` (add DA drill if sampling fails)
+
+---
+
 ### Q: Are receipts flowing to explorers?
 
 **Canonical Metrics**:

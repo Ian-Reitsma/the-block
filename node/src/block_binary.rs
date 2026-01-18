@@ -10,6 +10,7 @@ use crate::{
     AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, EnergyReceipt, Receipt,
     SignedTransaction, StorageReceipt, TokenAmount,
 };
+use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
 
 /// Encode a [`Block`] into the canonical binary layout.
 pub fn encode_block(block: &Block) -> EncodeResult<Vec<u8>> {
@@ -127,6 +128,15 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
                 }
             });
         }
+        struct_writer.field_with("receipt_header", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) =
+                    write_optional_receipt_header(field_writer, &block.receipt_header)
+                {
+                    result = Err(err);
+                }
+            }
+        });
         struct_writer.field_with("receipts", |field_writer| {
             if result.is_ok() {
                 if let Err(err) = write_receipts(field_writer, &block.receipts) {
@@ -181,6 +191,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
     let mut dilithium_pubkey = None;
     #[cfg(feature = "quantum")]
     let mut dilithium_sig = None;
+    let mut receipt_header = None;
     let mut receipts = None;
 
     decode_struct(reader, None, |key, reader| match key {
@@ -272,6 +283,11 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         ),
         #[cfg(feature = "quantum")]
         "dilithium_sig" => assign_once(&mut dilithium_sig, reader.read_bytes()?, "dilithium_sig"),
+        "receipt_header" => assign_once(
+            &mut receipt_header,
+            read_optional_receipt_header(reader)?,
+            "receipt_header",
+        ),
         "receipts" => assign_once(&mut receipts, read_receipts(reader)?, "receipts"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
@@ -319,6 +335,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         dilithium_pubkey: dilithium_pubkey.unwrap_or_default(),
         #[cfg(feature = "quantum")]
         dilithium_sig: dilithium_sig.unwrap_or_default(),
+        receipt_header: receipt_header.unwrap_or_default(),
         receipts: receipts.unwrap_or_default(),
     })
 }
@@ -710,6 +727,121 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
     })
 }
 
+pub(crate) fn write_optional_receipt_header(
+    writer: &mut Writer,
+    header: &Option<ReceiptHeader>,
+) -> EncodeResult<()> {
+    match header {
+        Some(h) => {
+            writer.write_u64(1);
+            write_receipt_header(writer, h)
+        }
+        None => {
+            writer.write_u64(0);
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn read_optional_receipt_header(
+    reader: &mut Reader<'_>,
+) -> Result<Option<ReceiptHeader>, DecodeError> {
+    let flag = reader.read_u64()?;
+    if flag == 0 {
+        Ok(None)
+    } else {
+        read_receipt_header(reader).map(Some)
+    }
+}
+
+pub(crate) fn write_receipt_header(
+    writer: &mut Writer,
+    header: &ReceiptHeader,
+) -> EncodeResult<()> {
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_u64("shard_count", header.shard_count as u64);
+        struct_writer.field_with("shard_roots", |w| {
+            if result.is_ok() {
+                if let Err(err) = write_root_vec(w, &header.shard_roots) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("blob_commitments", |w| {
+            if result.is_ok() {
+                if let Err(err) = write_root_vec(w, &header.blob_commitments) {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_u64("available_until", header.available_until);
+        struct_writer.field_u64(
+            "aggregate_scheme",
+            match header.aggregate_scheme {
+                ReceiptAggregateScheme::None => 0,
+                ReceiptAggregateScheme::BatchEd25519 => 1,
+            },
+        );
+        struct_writer.field_with("aggregate_sig", |w| {
+            write_fixed(w, &header.aggregate_sig);
+        });
+    });
+    result
+}
+
+pub(crate) fn read_receipt_header(reader: &mut Reader<'_>) -> Result<ReceiptHeader, DecodeError> {
+    let mut shard_count = None;
+    let mut shard_roots = None;
+    let mut blob_commitments = None;
+    let mut available_until = None;
+    let mut aggregate_scheme = None;
+    let mut aggregate_sig = None;
+
+    decode_struct(reader, None, |key, reader| match key {
+        "shard_count" => assign_once(&mut shard_count, reader.read_u64()?, "shard_count"),
+        "shard_roots" => assign_once(&mut shard_roots, read_root_vec(reader)?, "shard_roots"),
+        "blob_commitments" => {
+            assign_once(&mut blob_commitments, read_root_vec(reader)?, "blob_commitments")
+        }
+        "available_until" => {
+            assign_once(&mut available_until, reader.read_u64()?, "available_until")
+        }
+        "aggregate_scheme" => {
+            assign_once(&mut aggregate_scheme, reader.read_u64()?, "aggregate_scheme")
+        }
+        "aggregate_sig" => assign_once(&mut aggregate_sig, read_fixed(reader)?, "aggregate_sig"),
+        other => Err(DecodeError::UnknownField(other.to_string())),
+    })?;
+
+    let shard_count_u16: u16 = shard_count
+        .unwrap_or_default()
+        .try_into()
+        .map_err(|_| DecodeError::InvalidFieldValue {
+            field: "shard_count",
+            reason: "value does not fit u16".into(),
+        })?;
+    let scheme = match aggregate_scheme.unwrap_or_default() {
+        0 => ReceiptAggregateScheme::None,
+        1 => ReceiptAggregateScheme::BatchEd25519,
+        other => {
+            return Err(DecodeError::InvalidFieldValue {
+                field: "aggregate_scheme",
+                reason: format!("unknown value {other}"),
+            })
+        }
+    };
+
+    Ok(ReceiptHeader {
+        shard_count: shard_count_u16,
+        shard_roots: shard_roots.unwrap_or_default(),
+        blob_commitments: blob_commitments.unwrap_or_default(),
+        available_until: available_until.unwrap_or_default(),
+        aggregate_scheme: scheme,
+        aggregate_sig: aggregate_sig.unwrap_or([0; 32]),
+    })
+}
+
 fn write_root_vec(writer: &mut Writer, roots: &[[u8; 32]]) -> EncodeResult<()> {
     write_vec(writer, roots, "l2_roots", |writer, root| {
         write_fixed(writer, root);
@@ -923,6 +1055,7 @@ mod tests {
             #[cfg(feature = "quantum")]
             dilithium_sig: vec![2, 4, 6],
             receipts: Vec::new(),
+            receipt_header: None,
         }
     }
 

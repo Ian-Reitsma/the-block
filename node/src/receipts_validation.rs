@@ -10,6 +10,7 @@ use crate::receipt_crypto::{
     verify_receipt_signature, CryptoError, NonceTracker, ProviderRegistry,
 };
 use crate::receipts::Receipt;
+use crate::block_binary;
 use crypto_suite::hashing::blake3;
 use foundation_serialization::{Deserialize, Serialize};
 
@@ -388,7 +389,8 @@ pub fn validate_receipt_size(bytes: usize) -> Result<(), ValidationError> {
 }
 
 /// Aggregate resource usage for a block of receipts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ReceiptBlockUsage {
     pub count: usize,
     pub bytes: usize,
@@ -402,6 +404,43 @@ impl ReceiptBlockUsage {
             bytes,
             verify_units,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub enum ReceiptAggregateScheme {
+    None,
+    BatchEd25519,
+}
+
+impl Default for ReceiptAggregateScheme {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// Header committed into block/macro-block receipts manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ReceiptHeader {
+    /// Number of logical shards used when aggregating receipts.
+    pub shard_count: u16,
+    /// Per-shard receipt Merkle roots (zeroed for empty shards).
+    pub shard_roots: Vec<[u8; 32]>,
+    /// Per-shard blob/DA commitments (aligned with `shard_roots`).
+    pub blob_commitments: Vec<[u8; 32]>,
+    /// Wall-clock expiry (ms since epoch) for DA sampling window.
+    pub available_until: u64,
+    /// Aggregation scheme used for high-volume receipts.
+    pub aggregate_scheme: ReceiptAggregateScheme,
+    /// Aggregated signature commitment for the selected scheme.
+    pub aggregate_sig: [u8; 32],
+}
+
+impl ReceiptHeader {
+    pub fn is_populated(&self) -> bool {
+        self.shard_count > 0 && !self.shard_roots.is_empty()
     }
 }
 
@@ -440,6 +479,203 @@ pub fn validate_receipt_budget(usage: &ReceiptBlockUsage) -> Result<(), Validati
             units: usage.verify_units,
             max: RECEIPT_VERIFY_BUDGET,
         });
+    }
+    Ok(())
+}
+
+fn signature_bytes_for_receipt(receipt: &Receipt) -> &[u8] {
+    match receipt {
+        Receipt::Storage(r) => r.provider_signature.as_slice(),
+        Receipt::Compute(r) => r.provider_signature.as_slice(),
+        Receipt::Energy(r) => r.provider_signature.as_slice(),
+        Receipt::Ad(r) => r.publisher_signature.as_slice(),
+    }
+}
+
+/// Deterministic aggregated signature commitment for high-volume receipts.
+pub fn aggregate_signature_digest(
+    receipts: &[Receipt],
+    scheme: ReceiptAggregateScheme,
+) -> [u8; 32] {
+    match scheme {
+        ReceiptAggregateScheme::None => [0u8; 32],
+        ReceiptAggregateScheme::BatchEd25519 => {
+            let mut hasher = blake3::Hasher::new();
+            hasher.update(b"receipt_batch_ed25519");
+            let mut seen = 0usize;
+            for receipt in receipts {
+                if matches!(receipt, Receipt::Ad(_) | Receipt::Energy(_)) {
+                    hasher.update(&receipt_leaf_hash(receipt));
+                    let sig_bytes = signature_bytes_for_receipt(receipt);
+                    hasher.update(&(sig_bytes.len() as u32).to_le_bytes());
+                    hasher.update(sig_bytes);
+                    seen += 1;
+                }
+            }
+            if seen == 0 {
+                [0u8; 32]
+            } else {
+                hasher.finalize().into()
+            }
+        }
+    }
+}
+
+/// Encode a single receipt to determine serialized size for budgeting.
+pub fn encoded_receipt_len(receipt: &Receipt) -> Result<usize, String> {
+    block_binary::encode_receipts(&[receipt.clone()])
+        .map(|bytes| bytes.len())
+        .map_err(|e| format!("encode receipt: {:?}", e))
+}
+
+/// Parameters controlling receipt header derivation/validation.
+#[derive(Debug, Clone, Copy)]
+pub struct ReceiptHeaderParams {
+    pub shard_count: u16,
+    pub da_window_secs: u64,
+    pub min_region_diversity: u16,
+    pub min_asn_diversity: u16,
+    pub max_per_provider_per_shard: u16,
+    pub aggregate_scheme: ReceiptAggregateScheme,
+}
+
+impl ReceiptHeaderParams {
+    pub fn new(
+        shard_count: u16,
+        da_window_secs: u64,
+        min_region_diversity: u16,
+        min_asn_diversity: u16,
+        max_per_provider_per_shard: u16,
+        aggregate_scheme: ReceiptAggregateScheme,
+    ) -> Self {
+        Self {
+            shard_count: shard_count.max(1),
+            da_window_secs: da_window_secs.max(1),
+            min_region_diversity: min_region_diversity.max(1),
+            min_asn_diversity: min_asn_diversity.max(1),
+            max_per_provider_per_shard: max_per_provider_per_shard.max(1),
+            aggregate_scheme,
+        }
+    }
+}
+
+/// Derive a receipt header from receipts and enforce shard-level budgets/diversity.
+pub fn derive_receipt_header(
+    receipts: &[Receipt],
+    timestamp_millis: u64,
+    params: ReceiptHeaderParams,
+    registry: &ProviderRegistry,
+) -> Result<ReceiptHeader, String> {
+    let mut acc = ReceiptShardAccumulator::new(params.shard_count);
+    #[derive(Default)]
+    struct ShardDiversity {
+        providers: std::collections::HashMap<String, u16>,
+        regions: std::collections::HashSet<String>,
+        asns: std::collections::HashSet<u32>,
+    }
+    let mut diversity: std::collections::HashMap<u16, ShardDiversity> = std::collections::HashMap::new();
+
+    for receipt in receipts {
+        let encoded_len = encoded_receipt_len(receipt)?;
+        acc.add(receipt, encoded_len);
+        let shard = shard_for_receipt(receipt, params.shard_count);
+        let entry = diversity.entry(shard).or_default();
+        let (id, region_hint, asn_hint) = match receipt {
+            Receipt::Storage(r) => (r.provider.as_str(), None, None),
+            Receipt::Compute(r) => (r.provider.as_str(), None, None),
+            Receipt::Energy(r) => (r.provider.as_str(), None, None),
+            Receipt::Ad(r) => (r.publisher.as_str(), None, None),
+        };
+        let record = registry.get_provider_record(id);
+        let region = region_hint
+            .clone()
+            .or_else(|| record.and_then(|r| r.region.clone()));
+        let asn = asn_hint.or_else(|| record.and_then(|r| r.asn));
+        let count = entry.providers.entry(id.to_string()).or_insert(0);
+        *count = count.saturating_add(1);
+        if *count as u16 > params.max_per_provider_per_shard {
+            return Err(format!(
+                "provider {} exceeds per-shard receipt limit {} on shard {}",
+                id, params.max_per_provider_per_shard, shard
+            ));
+        }
+        if let Some(region) = region {
+            entry.regions.insert(region);
+        }
+        if let Some(asn) = asn {
+            entry.asns.insert(asn);
+        }
+    }
+
+    for (_shard, entry) in &diversity {
+        if !entry.providers.is_empty()
+            && entry.regions.len() < params.min_region_diversity as usize
+        {
+            return Err(format!(
+                "region diversity violation: have {} need {}",
+                entry.regions.len(),
+                params.min_region_diversity
+            ));
+        }
+        if !entry.providers.is_empty()
+            && entry.asns.len() < params.min_asn_diversity as usize
+        {
+            return Err(format!(
+                "asn diversity violation: have {} need {}",
+                entry.asns.len(),
+                params.min_asn_diversity
+            ));
+        }
+    }
+
+    for usage in acc.per_shard_usage() {
+        if usage.count > 0 {
+            validate_receipt_budget(usage)
+                .map_err(|e| format!("per-shard budget: {}", e))?;
+        }
+    }
+    let total_usage = acc.total_usage();
+    validate_receipt_budget(&total_usage)
+        .map_err(|e| format!("total budget: {}", e))?;
+
+    let shard_roots = acc.roots();
+    let aggregate_sig = aggregate_signature_digest(receipts, params.aggregate_scheme);
+    let available_until = timestamp_millis.saturating_add(params.da_window_secs.saturating_mul(1000));
+    let blob_commitments = vec![[0u8; 32]; params.shard_count as usize];
+
+    Ok(ReceiptHeader {
+        shard_count: params.shard_count,
+        shard_roots,
+        blob_commitments,
+        available_until,
+        aggregate_scheme: params.aggregate_scheme,
+        aggregate_sig,
+    })
+}
+
+/// Validate receipt header against receipts and limits.
+pub fn validate_receipt_header(
+    header: &ReceiptHeader,
+    receipts: &[Receipt],
+    params: ReceiptHeaderParams,
+    registry: &ProviderRegistry,
+    now_millis: u64,
+) -> Result<(), String> {
+    if header.shard_count == 0
+        || header.shard_roots.len() != header.shard_count as usize
+        || header.blob_commitments.len() != header.shard_count as usize
+    {
+        return Err("receipt header malformed".into());
+    }
+    if now_millis > header.available_until {
+        return Err("receipt header expired".into());
+    }
+    let expected = derive_receipt_header(receipts, now_millis, params, registry)?;
+    if expected.shard_roots != header.shard_roots {
+        return Err("receipt shard roots mismatch".into());
+    }
+    if expected.aggregate_sig != header.aggregate_sig {
+        return Err("receipt aggregate signature mismatch".into());
     }
     Ok(())
 }
@@ -599,7 +835,8 @@ pub fn merkle_root(leaves: &[[u8; 32]]) -> [u8; 32] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::receipts::{ComputeReceipt, StorageReceipt};
+    use crate::receipt_crypto::ProviderRegistry;
+    use crate::receipts::{AdReceipt, ComputeReceipt, StorageReceipt};
     use crypto_suite::signatures::ed25519::SigningKey;
     use rand::{rngs::StdRng, SeedableRng};
 
@@ -789,5 +1026,73 @@ mod tests {
             result,
             Err(ValidationError::UnknownProvider { .. })
         ));
+    }
+
+    fn dummy_ad_receipt(publisher: &str, block_height: u64) -> Receipt {
+        Receipt::Ad(AdReceipt {
+            campaign_id: "camp".into(),
+            creative_id: "creative".into(),
+            publisher: publisher.to_string(),
+            impressions: 10,
+            spend: 5,
+            block_height,
+            conversions: 1,
+            claim_routes: Default::default(),
+            role_breakdown: None,
+            device_links: Vec::new(),
+            publisher_signature: vec![1, 2, 3],
+            signature_nonce: block_height,
+        })
+    }
+
+    #[test]
+    fn derive_header_enforces_provider_cap() {
+        let receipts = vec![
+            dummy_ad_receipt("p1", 1),
+            dummy_ad_receipt("p1", 1),
+        ];
+        let registry = ProviderRegistry::new();
+        let params = ReceiptHeaderParams::new(1, 10, 1, 1, 1, ReceiptAggregateScheme::BatchEd25519);
+        let err = derive_receipt_header(&receipts, 1_000, params, &registry)
+            .expect_err("should fail provider cap");
+        assert!(err.contains("per-shard receipt limit"));
+    }
+
+    #[test]
+    fn aggregate_sig_mismatch_detected() {
+        let receipts = vec![dummy_ad_receipt("p1", 1)];
+        let mut registry = ProviderRegistry::new();
+        let sk = SigningKey::generate(&mut StdRng::seed_from_u64(1));
+        let vk = sk.verifying_key();
+        registry
+            .register_provider_with_metadata("p1".into(), vk, 0, Some("r1".into()), Some(10))
+            .unwrap();
+        let params = ReceiptHeaderParams::new(2, 10, 1, 1, 2, ReceiptAggregateScheme::BatchEd25519);
+        let mut header =
+            derive_receipt_header(&receipts, 10_000, params, &registry).expect("derive header");
+        // Tamper aggregate signature
+        header.aggregate_sig[0] ^= 0xFF;
+        let err = validate_receipt_header(&header, &receipts, params, &registry, 10_000)
+            .expect_err("should detect agg mismatch");
+        assert!(err.contains("aggregate signature"));
+    }
+
+    #[test]
+    fn header_round_trip_validates() {
+        let receipts = vec![dummy_ad_receipt("pA", 5), dummy_ad_receipt("pB", 5)];
+        let mut registry = ProviderRegistry::new();
+        let sk = SigningKey::generate(&mut StdRng::seed_from_u64(2));
+        let vk = sk.verifying_key();
+        registry
+            .register_provider_with_metadata("pA".into(), vk.clone(), 0, Some("r1".into()), Some(10))
+            .unwrap();
+        registry
+            .register_provider_with_metadata("pB".into(), vk, 0, Some("r2".into()), Some(20))
+            .unwrap();
+        let params = ReceiptHeaderParams::new(1, 15, 2, 2, 3, ReceiptAggregateScheme::BatchEd25519);
+        let header =
+            derive_receipt_header(&receipts, 50_000, params, &registry).expect("derive header");
+        validate_receipt_header(&header, &receipts, params, &registry, 50_000)
+            .expect("validate header");
     }
 }

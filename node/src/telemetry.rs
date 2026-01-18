@@ -198,6 +198,21 @@ pub(super) fn register_int_gauge(name: &'static str, help: &'static str) -> IntG
 }
 
 #[cfg(feature = "telemetry")]
+pub(super) fn register_int_gauge_vec(
+    name: &'static str,
+    help: &'static str,
+    labels: &'static [&'static str],
+) -> IntGaugeVec {
+    let opts = Opts::new(name, help);
+    let gauge =
+        IntGaugeVec::new(opts, labels).unwrap_or_else(|err| panic!("int gauge {name}: {err}"));
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|err| panic!("registry {name}: {err}"));
+    gauge
+}
+
+#[cfg(feature = "telemetry")]
 pub(super) fn register_histogram(name: &'static str, help: &'static str) -> Histogram {
     let opts = HistogramOpts::new(name, help);
     let histogram =

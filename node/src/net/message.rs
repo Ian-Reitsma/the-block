@@ -549,6 +549,7 @@ mod tests {
             #[cfg(feature = "quantum")]
             dilithium_sig: vec![2, 4, 6],
             receipts: Vec::new(),
+            receipt_header: None,
         }
     }
 

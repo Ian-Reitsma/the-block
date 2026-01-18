@@ -42,6 +42,16 @@ pub struct BlockEncoder<'a> {
     pub vdf_output: [u8; 32],
     pub vdf_proof: &'a [u8],
     pub receipts_serialized: &'a [u8],
+    pub receipt_header: Option<ReceiptHeaderHash<'a>>,
+}
+
+pub struct ReceiptHeaderHash<'a> {
+    pub shard_count: u16,
+    pub shard_roots: &'a [[u8; 32]],
+    pub blob_commitments: &'a [[u8; 32]],
+    pub available_until: u64,
+    pub aggregate_scheme: crate::receipts_validation::ReceiptAggregateScheme,
+    pub aggregate_sig: [u8; 32],
 }
 
 impl<'a> HashEncoder for BlockEncoder<'a> {
@@ -86,6 +96,22 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.vdf_output);
         h.update(&(self.vdf_proof.len() as u32).to_le_bytes());
         h.update(self.vdf_proof);
+        if let Some(header) = &self.receipt_header {
+            h.update(&header.shard_count.to_le_bytes());
+            for root in header.shard_roots.iter() {
+                h.update(root);
+            }
+            for commitment in header.blob_commitments.iter() {
+                h.update(commitment);
+            }
+            h.update(&header.available_until.to_le_bytes());
+            let scheme: u8 = match header.aggregate_scheme {
+                crate::receipts_validation::ReceiptAggregateScheme::None => 0,
+                crate::receipts_validation::ReceiptAggregateScheme::BatchEd25519 => 1,
+            };
+            h.update(&[scheme]);
+            h.update(&header.aggregate_sig);
+        }
         // Consensus-critical: Include receipts in block hash
         // Receipts are serialized as bytes to ensure deterministic hashing
         h.update(&(self.receipts_serialized.len() as u32).to_le_bytes());

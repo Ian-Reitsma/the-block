@@ -16,7 +16,19 @@ use std::hash::{Hash, Hasher};
 #[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderRegistry {
     /// Map of provider_id -> (public_key, registered_at_block)
-    pub providers: HashMap<String, (VerifyingKey, u64)>,
+    pub providers: HashMap<String, ProviderRecord>,
+}
+
+/// Provider metadata attached to a verifying key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ProviderRecord {
+    pub verifying_key: VerifyingKey,
+    pub registered_at_block: u64,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub asn: Option<u32>,
 }
 
 impl ProviderRegistry {
@@ -33,6 +45,18 @@ impl ProviderRegistry {
         verifying_key: VerifyingKey,
         block_height: u64,
     ) -> Result<(), String> {
+        self.register_provider_with_metadata(provider_id, verifying_key, block_height, None, None)
+    }
+
+    /// Register provider metadata (region/ASN optional).
+    pub fn register_provider_with_metadata(
+        &mut self,
+        provider_id: String,
+        verifying_key: VerifyingKey,
+        block_height: u64,
+        region: Option<String>,
+        asn: Option<u32>,
+    ) -> Result<(), String> {
         if provider_id.is_empty() {
             return Err("provider_id cannot be empty".into());
         }
@@ -40,14 +64,27 @@ impl ProviderRegistry {
             return Err("provider_id too long".into());
         }
 
-        self.providers
-            .insert(provider_id, (verifying_key, block_height));
+        self.providers.insert(
+            provider_id,
+            ProviderRecord {
+                verifying_key,
+                registered_at_block: block_height,
+                region,
+                asn,
+            },
+        );
         Ok(())
     }
 
     /// Retrieve provider's public key
     pub fn get_provider(&self, provider_id: &str) -> Option<VerifyingKey> {
-        self.providers.get(provider_id).map(|(vk, _)| vk.clone())
+        self.providers
+            .get(provider_id)
+            .map(|record| record.verifying_key.clone())
+    }
+
+    pub fn get_provider_record(&self, provider_id: &str) -> Option<&ProviderRecord> {
+        self.providers.get(provider_id)
     }
 
     pub fn provider_registered(&self, provider_id: &str) -> bool {

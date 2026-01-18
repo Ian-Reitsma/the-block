@@ -702,6 +702,9 @@ pub struct Block {
     #[serde(default = "foundation_serialization::defaults::default")]
     /// Market settlement receipts for deterministic economics derivation.
     pub receipts: Vec<Receipt>,
+    #[serde(default = "foundation_serialization::defaults::default")]
+    /// Optional receipt manifest header (per-shard roots, DA window, aggregate sig).
+    pub receipt_header: Option<receipts_validation::ReceiptHeader>,
 }
 
 impl Default for Block {
@@ -750,6 +753,7 @@ impl Default for Block {
             #[cfg(feature = "quantum")]
             dilithium_sig: Vec::new(),
             receipts: Vec::new(),
+            receipt_header: None,
         }
     }
 }
@@ -919,6 +923,18 @@ pub struct Blockchain {
     pub provider_registry: ProviderRegistry,
     /// Nonce tracker for receipt replay protection
     pub nonce_tracker: NonceTracker,
+    /// Shard count used for receipt bucketing and header commitments.
+    pub receipt_shard_count: u16,
+    /// DA window (seconds) receipts must remain available.
+    pub receipt_blob_da_window_secs: u64,
+    /// Height gating receipt header/hash activation.
+    pub receipt_header_activation_height: u64,
+    /// Minimum distinct regions required within a shard (1 disables check).
+    pub receipt_min_region_diversity: u16,
+    /// Minimum distinct ASNs required within a shard (1 disables check).
+    pub receipt_min_asn_diversity: u16,
+    /// Max receipts per provider/publisher per shard to enforce diversity.
+    pub receipt_max_per_provider_per_shard: u16,
     /// Tracker for intermediate block hashes used in reorg rollback
     pub reorg: crate::blockchain::reorg::ReorgTracker,
     /// Recent miners for base-reward logistic feedback
@@ -1126,6 +1142,12 @@ impl Default for Blockchain {
             proof_tracker: crate::light_client::proof_tracker::ProofTracker::default(),
             provider_registry: ProviderRegistry::new(),
             nonce_tracker: NonceTracker::new(RECEIPT_NONCE_FINALITY),
+            receipt_shard_count: crate::receipts_validation::RECEIPT_SHARD_COUNT,
+            receipt_blob_da_window_secs: crate::receipts_validation::RECEIPT_BLOB_DA_WINDOW_SECS,
+            receipt_header_activation_height: u64::MAX,
+            receipt_min_region_diversity: 1,
+            receipt_min_asn_diversity: 1,
+            receipt_max_per_provider_per_shard: 1,
             reorg: crate::blockchain::reorg::ReorgTracker::default(),
             recent_miners: VecDeque::new(),
             recent_timestamps: VecDeque::new(),
@@ -1246,10 +1268,12 @@ impl Blockchain {
                 )
             })?;
             self.provider_registry
-                .register_provider(
+                .register_provider_with_metadata(
                     provider.provider_id.clone(),
                     verifying_key,
                     self.block_height,
+                    provider.region.clone(),
+                    provider.asn,
                 )
                 .map_err(|err| {
                     format!(
@@ -2127,6 +2151,7 @@ impl Blockchain {
                                 &b.vdf_proof,
                                 b.retune_hint,
                                 &b.receipts,
+                                b.receipt_header.as_ref(),
                             );
                         }
                         let mut em_c = 0u64;
@@ -2283,6 +2308,7 @@ impl Blockchain {
                                     &b.vdf_proof,
                                     b.retune_hint,
                                     &b.receipts,
+                                    b.receipt_header.as_ref(),
                                 );
                                 em_c = em_c.saturating_add(b.coinbase_block.get());
                                 em_i = em_i.saturating_add(b.coinbase_industrial.get());
@@ -2455,6 +2481,7 @@ impl Blockchain {
                             &b.vdf_proof,
                             b.retune_hint,
                             &b.receipts,
+                            b.receipt_header.as_ref(),
                         );
                     }
                     let mut em_c = 0u64;
@@ -2840,6 +2867,12 @@ impl Blockchain {
         #[cfg(feature = "telemetry")]
         telemetry::summary::spawn(cfg.telemetry_summary_interval);
         bc.config = cfg.clone();
+        bc.receipt_shard_count = cfg.receipt_shard_count.max(1);
+        bc.receipt_blob_da_window_secs = cfg.receipt_blob_da_window_secs.max(1);
+        bc.receipt_header_activation_height = cfg.receipt_header_activation_height;
+        bc.receipt_min_region_diversity = cfg.receipt_min_region_diversity.max(1);
+        bc.receipt_min_asn_diversity = cfg.receipt_min_asn_diversity.max(1);
+        bc.receipt_max_per_provider_per_shard = cfg.receipt_max_per_provider_per_shard.max(1);
         if let Err(err) = bc.register_receipt_providers(&cfg.receipt_providers) {
             #[cfg(feature = "telemetry")]
             diagnostics::tracing::warn!(reason = %err, "receipt_provider_registration_failed");
@@ -4794,6 +4827,40 @@ impl Blockchain {
             }
         }
 
+        // Compute per-shard roots/usages and enforce shard-level budgets.
+        let mut receipt_header: Option<receipts_validation::ReceiptHeader> = None;
+        if index >= self.receipt_header_activation_height {
+            let params = receipts_validation::ReceiptHeaderParams::new(
+                self.receipt_shard_count,
+                self.receipt_blob_da_window_secs,
+                self.receipt_min_region_diversity,
+                self.receipt_min_asn_diversity,
+                self.receipt_max_per_provider_per_shard,
+                receipts_validation::ReceiptAggregateScheme::BatchEd25519,
+            );
+            let derived = receipts_validation::derive_receipt_header(
+                &block_receipts,
+                timestamp_millis,
+                params,
+                &self.provider_registry,
+            )
+            .map_err(PyError::runtime)?;
+            #[cfg(feature = "telemetry")]
+            {
+                let mut acc =
+                    receipts_validation::ReceiptShardAccumulator::new(self.receipt_shard_count);
+                for receipt in &block_receipts {
+                    let encoded_len = receipts_validation::encoded_receipt_len(receipt)
+                        .unwrap_or_default();
+                    acc.add(receipt, encoded_len);
+                }
+                for (idx, usage) in acc.per_shard_usage().iter().enumerate() {
+                    crate::telemetry::receipts::record_shard_usage(idx as u16, usage);
+                }
+            }
+            receipt_header = Some(derived);
+        }
+
         liquidity_paid = liquidity_paid.saturating_add(ad_liquidity_total);
         miner_share_total = miner_share_total.saturating_add(ad_miner_total);
 
@@ -5114,6 +5181,7 @@ impl Blockchain {
             #[cfg(feature = "quantum")]
             dilithium_sig: Vec::new(),
             receipts: block_receipts,
+            receipt_header: receipt_header.clone(),
         };
 
         // Validate receipt size before mining (DoS protection)
@@ -5179,6 +5247,7 @@ impl Blockchain {
                 &block.vdf_proof,
                 block.retune_hint,
                 &receipts_serialized, // Use cached serialized receipts (performance optimization)
+                block.receipt_header.as_ref(),
             );
             let bytes = hex_to_bytes(&hash);
             if leading_zero_bits(&bytes) >= diff as u32 {
@@ -5607,6 +5676,7 @@ impl Blockchain {
                         shard_roots: self.shard_roots.clone(),
                         total_reward: self.macro_acc,
                         queue_root: self.inter_shard.root(),
+                        receipt_header: block.receipt_header.clone(),
                     };
                     let _ = self
                         .db
@@ -5721,6 +5791,7 @@ impl Blockchain {
             &block.vdf_proof,
             block.retune_hint,
             &block.receipts,
+            block.receipt_header.as_ref(),
         );
         if calc != block.hash {
             return Ok(false);
@@ -5804,6 +5875,34 @@ impl Blockchain {
         let expected_industrial = 0u128;
         if coinbase_block_total != expected_consumer
             || coinbase_industrial_total != expected_industrial
+        {
+            return Ok(false);
+        }
+
+        if let Some(header) = &block.receipt_header {
+            let params = receipts_validation::ReceiptHeaderParams::new(
+                self.receipt_shard_count,
+                self.receipt_blob_da_window_secs,
+                self.receipt_min_region_diversity,
+                self.receipt_min_asn_diversity,
+                self.receipt_max_per_provider_per_shard,
+                receipts_validation::ReceiptAggregateScheme::BatchEd25519,
+            );
+            if let Err(err) = receipts_validation::validate_receipt_header(
+                header,
+                &block.receipts,
+                params,
+                &self.provider_registry,
+                block.timestamp_millis,
+            ) {
+                #[cfg(feature = "telemetry")]
+                {
+                    crate::telemetry::receipts::RECEIPT_HEADER_MISMATCH_TOTAL.inc();
+                    crate::telemetry::receipts::RECEIPT_DA_SAMPLE_FAILURE_TOTAL.inc();
+                }
+                return Ok(false);
+            }
+        } else if block.index >= self.receipt_header_activation_height && !block.receipts.is_empty()
         {
             return Ok(false);
         }
@@ -6197,6 +6296,7 @@ impl Blockchain {
                 &b.vdf_proof,
                 b.retune_hint,
                 &b.receipts,
+                b.receipt_header.as_ref(),
             );
             if calc != b.hash {
                 return Err("hash_mismatch");
@@ -6954,9 +7054,19 @@ fn calculate_hash_with_cached_receipts(
     vdf_proof: &[u8],
     retune_hint: i8,
     receipts_serialized: &[u8], // Pre-serialized receipts (cached)
+    receipt_header: Option<&receipts_validation::ReceiptHeader>,
 ) -> String {
     let ids: Vec<[u8; 32]> = txs.iter().map(SignedTransaction::id).collect();
     let id_refs: Vec<&[u8]> = ids.iter().map(<[u8; 32]>::as_ref).collect();
+
+    let header_view = receipt_header.map(|header| hashlayout::ReceiptHeaderHash {
+        shard_count: header.shard_count,
+        shard_roots: &header.shard_roots,
+        blob_commitments: &header.blob_commitments,
+        available_until: header.available_until,
+        aggregate_scheme: header.aggregate_scheme,
+        aggregate_sig: header.aggregate_sig,
+    });
 
     // Use pre-serialized receipts (passed in) to avoid double encoding
     let enc = crate::hashlayout::BlockEncoder {
@@ -6997,6 +7107,7 @@ fn calculate_hash_with_cached_receipts(
         vdf_output,
         vdf_proof,
         receipts_serialized, // Use cached serialized receipts
+        receipt_header: header_view,
     };
     enc.hash()
 }
@@ -7042,6 +7153,7 @@ fn calculate_hash(
     vdf_proof: &[u8],
     retune_hint: i8,
     receipts: &[Receipt],
+    receipt_header: Option<&receipts_validation::ReceiptHeader>,
 ) -> String {
     // CRITICAL: Receipt encoding must succeed for consensus integrity.
     let receipts_bytes = crate::block_binary::encode_receipts(receipts).unwrap_or_else(|e| {
@@ -7095,6 +7207,7 @@ fn calculate_hash(
         vdf_proof,
         retune_hint,
         &receipts_bytes,
+        receipt_header,
     )
 }
 
