@@ -4793,20 +4793,6 @@ impl Marketplace for InMemoryMarketplace {
             .config
             .composite_floor_breakdown(price_per_mib, ctx.bytes, &cohort, ctx.population_estimate)
             .scale(scarcity);
-        {
-            let mut med = self.medians.write().unwrap();
-            med.record_storage(price_per_mib);
-            med.record_verifier(floor_breakdown.verifier_usd_micros);
-            med.record_host(floor_breakdown.host_usd_micros);
-        }
-        let (m_storage, m_verifier, m_host) = { self.medians.read().unwrap().snapshot() };
-        gauge!("ad_cost_median_usd_micros", m_storage as f64, "role" => "storage");
-        gauge!("ad_cost_median_usd_micros", m_verifier as f64, "role" => "verifier");
-        gauge!("ad_cost_median_usd_micros", m_host as f64, "role" => "host");
-        let (m_storage, m_verifier, m_host) = { self.medians.read().unwrap().snapshot() };
-        gauge!("ad_cost_median_usd_micros", m_storage as f64, "role" => "storage");
-        gauge!("ad_cost_median_usd_micros", m_verifier as f64, "role" => "verifier");
-        gauge!("ad_cost_median_usd_micros", m_host as f64, "role" => "host");
 
         let resource_floor = floor_breakdown.total_usd_micros();
         if resource_floor == 0 {
@@ -5183,6 +5169,16 @@ impl Marketplace for InMemoryMarketplace {
         if assignment.in_holdout {
             return None;
         }
+        let (m_storage, m_verifier, m_host) = {
+            let mut med = self.medians.write().unwrap();
+            med.record_storage(reservation.price_per_mib_usd_micros);
+            med.record_verifier(reservation.resource_floor_breakdown.verifier_usd_micros);
+            med.record_host(reservation.resource_floor_breakdown.host_usd_micros);
+            med.snapshot()
+        };
+        gauge!("ad_cost_median_usd_micros", m_storage as f64, "role" => "storage");
+        gauge!("ad_cost_median_usd_micros", m_verifier as f64, "role" => "verifier");
+        gauge!("ad_cost_median_usd_micros", m_host as f64, "role" => "host");
         let mesh_payload_digest = reservation
             .mesh_payload
             .as_ref()
@@ -5436,12 +5432,20 @@ impl Marketplace for InMemoryMarketplace {
     }
 }
 impl SledMarketplace {
-    fn persist_medians(&self) -> Result<(), PersistenceError> {
-        let snapshot = self.medians.read().unwrap().snapshot();
+    fn persist_medians_snapshot(
+        &self,
+        snapshot: (u64, u64, u64),
+    ) -> Result<(), PersistenceError> {
         let bytes = foundation_serialization::json::to_vec(&snapshot)?;
         self.metadata_tree.insert(KEY_MEDIANS, bytes)?;
         self.metadata_tree.flush()?;
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    fn persist_medians(&self) -> Result<(), PersistenceError> {
+        let snapshot = self.medians.read().unwrap().snapshot();
+        self.persist_medians_snapshot(snapshot)
     }
     pub fn open<P: AsRef<Path>>(
         path: P,
@@ -5847,13 +5851,6 @@ impl Marketplace for SledMarketplace {
             .config
             .composite_floor_breakdown(price_per_mib, ctx.bytes, &cohort, ctx.population_estimate)
             .scale(scarcity);
-        {
-            let mut med = self.medians.write().unwrap();
-            med.record_storage(price_per_mib);
-            med.record_verifier(floor_breakdown.verifier_usd_micros);
-            med.record_host(floor_breakdown.host_usd_micros);
-        }
-        let _ = self.persist_medians();
         let resource_floor = floor_breakdown.total_usd_micros();
         if resource_floor == 0 {
             return None;
@@ -6150,6 +6147,20 @@ impl Marketplace for SledMarketplace {
         if assignment.in_holdout {
             return None;
         }
+        let med_snapshot = {
+            let mut med = self.medians.write().unwrap();
+            med.record_storage(reservation.price_per_mib_usd_micros);
+            med.record_verifier(reservation.resource_floor_breakdown.verifier_usd_micros);
+            med.record_host(reservation.resource_floor_breakdown.host_usd_micros);
+            med.snapshot()
+        };
+        if let Err(err) = self.persist_medians_snapshot(med_snapshot) {
+            eprintln!("failed to persist medians after commit: {err}");
+        }
+        let (m_storage, m_verifier, m_host) = med_snapshot;
+        gauge!("ad_cost_median_usd_micros", m_storage as f64, "role" => "storage");
+        gauge!("ad_cost_median_usd_micros", m_verifier as f64, "role" => "verifier");
+        gauge!("ad_cost_median_usd_micros", m_host as f64, "role" => "host");
         let mesh_payload_digest = reservation
             .mesh_payload
             .as_ref()

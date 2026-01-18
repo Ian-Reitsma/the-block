@@ -589,8 +589,11 @@ pub fn derive_receipt_header(
         let record = registry.get_provider_record(id);
         let region = region_hint
             .clone()
-            .or_else(|| record.and_then(|r| r.region.clone()));
-        let asn = asn_hint.or_else(|| record.and_then(|r| r.asn));
+            .or_else(|| record.and_then(|r| r.region.clone()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let asn = asn_hint
+            .or_else(|| record.and_then(|r| r.asn))
+            .unwrap_or(0);
         let count = entry.providers.entry(id.to_string()).or_insert(0);
         *count = count.saturating_add(1);
         if *count as u16 > params.max_per_provider_per_shard {
@@ -599,12 +602,8 @@ pub fn derive_receipt_header(
                 id, params.max_per_provider_per_shard, shard
             ));
         }
-        if let Some(region) = region {
-            entry.regions.insert(region);
-        }
-        if let Some(asn) = asn {
-            entry.asns.insert(asn);
-        }
+        entry.regions.insert(region);
+        entry.asns.insert(asn);
     }
 
     for (_shard, entry) in &diversity {

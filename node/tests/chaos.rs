@@ -50,9 +50,11 @@ fn init_env() -> sys::tempfile::TempDir {
     std::env::set_var("TB_P2P_CHAIN_SYNC_INTERVAL_MS", "0");
     // Use fast mining
     std::env::set_var("TB_FAST_MINE", "1");
-    // Light chaos: 1% packet loss, 50ms jitter
-    std::env::set_var("TB_NET_PACKET_LOSS", "0.01");
-    std::env::set_var("TB_NET_JITTER_MS", "50");
+    // Light chaos defaults (overridable via env for targeted debugging)
+    let loss = std::env::var("TB_NET_PACKET_LOSS").unwrap_or_else(|_| "0.01".into());
+    let jitter = std::env::var("TB_NET_JITTER_MS").unwrap_or_else(|_| "50".into());
+    std::env::set_var("TB_NET_PACKET_LOSS", loss);
+    std::env::set_var("TB_NET_JITTER_MS", jitter);
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
     std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
     dir
@@ -81,6 +83,8 @@ fn cleanup_env() {
 async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
     let mut last_broadcast = Instant::now();
+    let mut last_progress = Instant::now();
+    let mut last_heights: Option<Vec<u64>> = None;
     let mut last_request: HashMap<SocketAddr, Instant> = HashMap::new();
     loop {
         let mut heights = Vec::with_capacity(nodes.len());
@@ -105,6 +109,21 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         if start.elapsed() > max {
             eprintln!("Convergence timeout: heights={:?}", heights);
             return false;
+        }
+        // Kick the network if we have not made observable progress recently.
+        if last_heights
+            .as_ref()
+            .map(|prev| *prev != heights)
+            .unwrap_or(true)
+        {
+            last_progress = Instant::now();
+            last_heights = Some(heights.clone());
+        } else if last_progress.elapsed() > Duration::from_secs(2) {
+            for node in nodes {
+                node.discover_peers();
+                node.broadcast_chain();
+            }
+            last_progress = Instant::now();
         }
         // Under packet loss, actively broadcast longest chain every 200ms
         if last_broadcast.elapsed() > Duration::from_millis(200) {

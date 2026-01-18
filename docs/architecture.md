@@ -231,6 +231,7 @@ Conversion events recorded via `ad_market.record_conversion` accumulate per `(ca
 
 - Receipt commitments are sharded across `receipt_shard_count` buckets; every block includes a `receipt_header` with per-shard roots, blob commitments, DA expiry (`available_until`), aggregate signature digest, and the shard count. Activation height defaults to `0` (always on); knobs live in `NodeConfig` (`receipt_shard_count`, `receipt_blob_da_window_secs`, `receipt_max_per_provider_per_shard`, `receipt_min_region_diversity`, `receipt_min_asn_diversity`, `receipt_header_activation_height`).
 - Shard-level and total budgets are enforced via `ReceiptShardAccumulator`; diversity checks cap receipts per provider/publisher per shard and require distinct regions/ASNs before proposal/validation succeeds. Validation recomputes roots/digest from delivered receipts and rejects expired headers.
+- Receipts missing region/ASN metadata are counted under an `unknown` placeholder so the baseline `min_region_diversity`/`min_asn_diversity` requirement of `1` does not reject empty registries; thresholds above `1` still require distinct populated values.
 - Aggregate signature is currently a batch-Ed25519 digest over high-volume receipts (ad/energy). Swap in a true aggregation backend under the existing `aggregate_scheme` enum when available.
 - Blob commitments are zero placeholders until the blob chain DA pointers land; the vector ordering matches shard roots so proofs can drop in without schema changes.
 
