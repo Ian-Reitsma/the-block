@@ -1,0 +1,4 @@
+# Core release signer public key fingerprints (OpenPGP)
+# Add/remove entries only when rotating hardware-backed keys.
+# Format: <label> <fingerprint>
+CoreReleaseSigner1 C213D2E0F8BCF523C46610FE18FBDEFF67871CA0

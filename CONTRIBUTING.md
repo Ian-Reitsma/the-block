@@ -1,5 +1,13 @@
 # Contributing
 
+## Contributor License Agreement & Sign-off
+
+All contributions require agreement to [`CLA.md`](CLA.md) and a Developer Certificate of Origin sign-off:
+
+- Before your first PR is merged, add a comment stating **“I agree to The Block CLA v1.0”** (or use the CLA portal if provided) so maintainers can record acceptance.
+- Every commit must include a `Signed-off-by: ...` line (`git commit -s`). Commits without the trailer will fail `scripts/check_cla.sh` and the `node/tests/cla_check.rs` gate.
+- The licensing split (Apache 2.0 open core vs proprietary enterprise stack) and trademark/official-release policy live in `docs/licensing_and_trademark.md`.
+
 ## CI Settlement Audit
 
 The CI pipeline runs a settlement audit job that executes
@@ -77,4 +85,3 @@ ln -s ../../scripts/pre-commit.sample .git/hooks/pre-commit
 - Fork or create a feature branch off `main` for all changes.
 - Rebase against `main` before opening a pull request; avoid merge commits.
 - Squash merges are performed by maintainers; do not force-push after review starts.
-

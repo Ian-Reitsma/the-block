@@ -1,4 +1,5 @@
 use self::snark::{SnarkBackend, SnarkError};
+use crate::receipts_validation::MIN_PAYMENT_FOR_RECEIPT;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
@@ -349,16 +350,21 @@ impl Market {
                         let total_payment = total_units.saturating_mul(state.price_per_unit);
                         let verified = state.paid_slices == state.job.slices.len();
 
-                        self.pending_receipts.push(crate::ComputeReceipt {
-                            job_id: resolution.job_id.clone(),
-                            provider: state.provider.clone(),
-                            compute_units: total_units,
-                            payment: total_payment,
-                            block_height: self.current_block,
-                            verified,
-                            provider_signature: vec![],
-                            signature_nonce: self.current_block,
-                        });
+                        if total_payment < MIN_PAYMENT_FOR_RECEIPT {
+                            #[cfg(feature = "telemetry")]
+                            crate::telemetry::receipts::RECEIPT_MIN_PAYMENT_REJECTED_TOTAL.inc();
+                        } else {
+                            self.pending_receipts.push(crate::ComputeReceipt {
+                                job_id: resolution.job_id.clone(),
+                                provider: state.provider.clone(),
+                                compute_units: total_units,
+                                payment: total_payment,
+                                block_height: self.current_block,
+                                verified,
+                                provider_signature: vec![],
+                                signature_nonce: self.current_block,
+                            });
+                        }
                     }
                     scheduler::end_job(&resolution.job_id);
                 }

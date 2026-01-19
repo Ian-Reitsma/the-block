@@ -4750,31 +4750,36 @@ impl Blockchain {
             ad_total_usd_micros = ad_total_usd_micros.saturating_add(record.total_usd_micros);
             ad_last_price_usd_micros = record.price_usd_micros;
             ad_settlement_count = ad_settlement_count.saturating_add(1);
-            block_receipts.push(Receipt::Ad(AdReceipt {
-                campaign_id: record.campaign_id.clone(),
-                creative_id: record.creative_id.clone(),
-                // Receipt publisher should reflect the canonical host address,
-                // even if the payout is routed via claim routes.
-                publisher: record.host_addr.clone(),
-                impressions: record.impressions,
-                spend: record.total,
-                block_height: index,
-                conversions: record.conversions,
-                claim_routes,
-                role_breakdown: Some(crate::receipts::AdRoleBreakdown {
-                    viewer: record.viewer,
-                    host: record.host,
-                    hardware: record.hardware,
-                    verifier: record.verifier,
-                    liquidity: record.liquidity,
-                    miner: record.miner,
-                    price_usd_micros: record.price_usd_micros,
-                    clearing_price_usd_micros: record.clearing_price_usd_micros,
-                }),
-                device_links: record.device_links.clone(),
-                publisher_signature: vec![],
-                signature_nonce: index,
-            }));
+            if record.total < crate::receipts_validation::MIN_PAYMENT_FOR_RECEIPT {
+                #[cfg(feature = "telemetry")]
+                crate::telemetry::receipts::RECEIPT_MIN_PAYMENT_REJECTED_TOTAL.inc();
+            } else {
+                block_receipts.push(Receipt::Ad(AdReceipt {
+                    campaign_id: record.campaign_id.clone(),
+                    creative_id: record.creative_id.clone(),
+                    // Receipt publisher should reflect the canonical host address,
+                    // even if the payout is routed via claim routes.
+                    publisher: record.host_addr.clone(),
+                    impressions: record.impressions,
+                    spend: record.total,
+                    block_height: index,
+                    conversions: record.conversions,
+                    claim_routes,
+                    role_breakdown: Some(crate::receipts::AdRoleBreakdown {
+                        viewer: record.viewer,
+                        host: record.host,
+                        hardware: record.hardware,
+                        verifier: record.verifier,
+                        liquidity: record.liquidity,
+                        miner: record.miner,
+                        price_usd_micros: record.price_usd_micros,
+                        clearing_price_usd_micros: record.clearing_price_usd_micros,
+                    }),
+                    device_links: record.device_links.clone(),
+                    publisher_signature: vec![],
+                    signature_nonce: index,
+                }));
+            }
         }
         for receipt in crate::energy::drain_energy_receipts() {
             block_receipts.push(Receipt::Energy(EnergyReceipt {
@@ -4850,8 +4855,8 @@ impl Blockchain {
                 let mut acc =
                     receipts_validation::ReceiptShardAccumulator::new(self.receipt_shard_count);
                 for receipt in &block_receipts {
-                    let encoded_len = receipts_validation::encoded_receipt_len(receipt)
-                        .unwrap_or_default();
+                    let encoded_len =
+                        receipts_validation::encoded_receipt_len(receipt).unwrap_or_default();
                     acc.add(receipt, encoded_len);
                 }
                 for (idx, usage) in acc.per_shard_usage().iter().enumerate() {

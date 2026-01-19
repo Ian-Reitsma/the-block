@@ -2,6 +2,10 @@
 
 use crate::{ProofOutcome, ProofRecord};
 
+/// Minimum BLOCK payment required to emit a storage settlement receipt.
+/// Mirrors `MIN_PAYMENT_FOR_RECEIPT` in the node validator path.
+pub const MIN_PAYMENT_FOR_RECEIPT: u64 = 1_000; // 0.001 BLOCK
+
 /// Storage settlement receipt for block inclusion.
 ///
 /// This matches the `StorageReceipt` structure in `node/src/receipts.rs` but is
@@ -25,7 +29,10 @@ impl StorageSettlementReceipt {
         block_height: u64,
     ) -> Option<Self> {
         // Only emit receipts for successful proofs with payment
-        if proof.outcome == ProofOutcome::Success && proof.amount_accrued > 0 {
+        if proof.outcome == ProofOutcome::Success
+            && proof.amount_accrued > 0
+            && price_per_block >= MIN_PAYMENT_FOR_RECEIPT
+        {
             Some(Self {
                 contract_id: proof.object_id.clone(),
                 provider: proof.provider_id.clone(),
@@ -100,6 +107,24 @@ mod tests {
         };
 
         let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100);
+        assert!(receipt.is_none());
+    }
+
+    #[test]
+    fn no_receipt_below_min_payment_floor() {
+        let proof = ProofRecord {
+            object_id: "obj_123".into(),
+            provider_id: "provider_a".into(),
+            outcome: ProofOutcome::Success,
+            slashed: 0,
+            amount_accrued: 1, // non-zero to satisfy payment check
+            remaining_deposit: 900,
+            proof_successes: 1,
+            proof_failures: 0,
+        };
+
+        let receipt =
+            StorageSettlementReceipt::from_proof(&proof, 1024, MIN_PAYMENT_FOR_RECEIPT - 1, 100);
         assert!(receipt.is_none());
     }
 }

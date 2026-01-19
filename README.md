@@ -58,6 +58,11 @@ This means when you run The Block, you're not duct-taping together 50 different 
 
 ---
 
+## Licensing model
+- **Open core (this repo, `the-block-core`)** — Apache 2.0 for all chain-critical surfaces: consensus, networking, ledger/state, VM, receipts, governance, protocol economics, node runtime, CLI, explorer, light clients/bridges. No restrictive licenses land on validator/exchange paths.
+- **Enterprise stack (`the-block-enterprise`)** — Separately licensed under a commercial EULA (optional BSL for non-consensus modules) for managed validator orchestration, enterprise observability, compliance/reporting pipelines, SLA/coordination services, premium SDKs/adapters, and “one-click” deployments. Lives as a sibling repo (not a submodule) at `../the-block-enterprise`.
+- **CLA + sign-off** — Contributors must agree to `CLA.md` and use `git commit -s`; see `docs/licensing_and_trademark.md`, `TRADEMARK.md`, and `docs/official_chain_policy.md` for the full policy and official chain rules.
+
 ## Technical Summary
 
 The Block is a Rust-first, proof-of-work + proof-of-service L1 that mints a single transferable currency (BLOCK), notarises micro-shard roots every second, and ships every critical component in-repo. Transport, HTTP/TLS, serialization, overlay, storage, governance, CLI, explorer, metrics, and tooling all share the same first-party stacks so operators can run a full cluster without third-party glue. The newest tranche of work extends the ad marketplace into a multi-signal targeting engine (domain tiers, interest tags, presence attestations) while keeping privacy budgets, telemetry, and governance knobs front-and-center. BlockTorch (metal-backend) anchors the deterministic tensor/autograd layer for verified ML compute workloads in the marketplace.

@@ -16,7 +16,8 @@ use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
 use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 use the_block::receipts_validation::{
     receipt_verify_units, validate_receipt, validate_receipt_budget, validate_receipt_count,
-    ReceiptBlockUsage, MAX_RECEIPTS_PER_BLOCK, RECEIPT_BYTE_BUDGET, RECEIPT_VERIFY_BUDGET,
+    ReceiptBlockUsage, MAX_RECEIPTS_PER_BLOCK, MIN_PAYMENT_FOR_RECEIPT, RECEIPT_BYTE_BUDGET,
+    RECEIPT_VERIFY_BUDGET,
 };
 
 fn derive_test_signing_key() -> SigningKey {
@@ -128,7 +129,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             contract_id: format!("sc_{}", id),
             provider: provider_for_index(id).to_string(),
             bytes: 1024,
-            price: 100,
+            price: MIN_PAYMENT_FOR_RECEIPT,
             block_height: id,
             provider_escrow: 1000,
             provider_signature: vec![0u8; 64],
@@ -138,7 +139,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             job_id: format!("job_{}", id),
             provider: provider_for_index(id).to_string(),
             compute_units: 1000,
-            payment: 50,
+            payment: MIN_PAYMENT_FOR_RECEIPT,
             block_height: id,
             verified: true,
             provider_signature: vec![0u8; 64],
@@ -148,7 +149,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             contract_id: format!("energy_{}", id),
             provider: provider_for_index(id).to_string(),
             energy_units: 500,
-            price: 75,
+            price: MIN_PAYMENT_FOR_RECEIPT,
             block_height: id,
             proof_hash: [0u8; 32],
             provider_signature: vec![0u8; 64],
@@ -159,7 +160,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             creative_id: format!("creative_{}", id),
             publisher: publisher_for_index(id).to_string(),
             impressions: 1000,
-            spend: 20,
+            spend: MIN_PAYMENT_FOR_RECEIPT,
             block_height: id,
             conversions: 10,
             claim_routes: std::collections::HashMap::new(),
@@ -375,6 +376,28 @@ fn stress_validation_at_scale() {
 }
 
 #[test]
+fn stress_rejects_below_minimum_payment() {
+    let sk = derive_test_signing_key();
+    let vk = sk.verifying_key();
+    let mut receipt = create_test_receipt(1, 1);
+    if let Receipt::Compute(r) = &mut receipt {
+        r.payment = MIN_PAYMENT_FOR_RECEIPT - 1;
+    }
+    sign_receipt(&mut receipt, &sk);
+    let mut registry = ProviderRegistry::new();
+    registry
+        .register_provider(receipt_provider_id(&receipt).to_string(), vk, 0)
+        .expect("register provider");
+    let mut nonce_tracker = NonceTracker::new(10);
+
+    let result = validate_receipt(&receipt, 1, &registry, &mut nonce_tracker);
+    assert!(matches!(
+        result,
+        Err(the_block::receipts_validation::ValidationError::PaymentBelowMinimum { .. })
+    ));
+}
+
+#[test]
 fn signature_round_trip_single_case() {
     // Regression guard for the stress loop: a single receipt should always validate.
     let idx: u64 = 2069;
@@ -406,11 +429,7 @@ fn signature_round_trip_single_case() {
 
     let mut registry = ProviderRegistry::new();
     registry
-        .register_provider(
-            receipt_provider_id(&receipt).to_string(),
-            vk.clone(),
-            0,
-        )
+        .register_provider(receipt_provider_id(&receipt).to_string(), vk.clone(), 0)
         .expect("register provider");
     let mut nonce_tracker = NonceTracker::new(100);
     validate_receipt(&receipt, idx, &registry, &mut nonce_tracker)
@@ -435,7 +454,10 @@ fn ed25519_sign_verify_32_bytes() {
     let mut msg = [0u8; 32];
     rng.fill(&mut msg);
     let sig = sk.sign(&msg);
-    assert!(vk.verify(&msg, &sig).is_ok(), "ed25519 32-byte sign/verify failed");
+    assert!(
+        vk.verify(&msg, &sig).is_ok(),
+        "ed25519 32-byte sign/verify failed"
+    );
 }
 
 fn receipt_provider_id(receipt: &Receipt) -> &str {

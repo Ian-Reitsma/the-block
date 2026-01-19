@@ -27,9 +27,14 @@ render_loop() {
 
 render_loop &
 RENDER_PID=$!
+SERVER_PID=""
 
 cleanup() {
-  kill "$RENDER_PID" "$SERVER_PID" 2>/dev/null || true
+  if [[ -n "${SERVER_PID}" ]]; then
+    kill "$RENDER_PID" "$SERVER_PID" 2>/dev/null || true
+  else
+    kill "$RENDER_PID" 2>/dev/null || true
+  fi
   if [[ "${DETACH}" -eq 0 ]]; then
     rm -rf "$OUTPUT_DIR"
   fi

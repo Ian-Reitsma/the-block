@@ -87,6 +87,8 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 >
 > **Why this matters:** Without receipts in consensus, malicious nodes could lie about market activity. With receipts, the entire network validates every settlement.
 
+**Spam floor:** Receipts are only emitted when the settlement amount is at least `MIN_PAYMENT_FOR_RECEIPT` (0.001 BLOCK). Smaller settlements still settle but do not create receipts.
+
 ### Receipt Types and Schema
 
 **Four market receipt types exist** (`node/src/receipts.rs`):
@@ -347,6 +349,7 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
 | `receipt_settlement_compute` | Gauge | Compute settlement amount (BLOCK) |
 | `receipt_settlement_energy` | Gauge | Energy settlement amount (BLOCK) |
 | `receipt_settlement_ad` | Gauge | Ad settlement amount (BLOCK) |
+| `receipt_min_payment_rejected_total` | Counter | Receipts rejected for falling below `MIN_PAYMENT_FOR_RECEIPT` |
 | `metrics_derivation_duration_ms` | Histogram | Time to derive metrics from receipts |
 | `receipt_shard_count_per_block{shard}` | Gauge | Receipt count per shard |
 | `receipt_shard_bytes_per_block{shard}` | Gauge | Serialized bytes per shard |

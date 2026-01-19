@@ -84,6 +84,12 @@ When dynamic fee pricing is recalculated:
 4. Use `code` for programmatic error handling
 5. Emit `fpb` for any fee-related decisions
 
+## Receipt Validation Metrics
+
+- `receipt_validation_failures_total` — malformed receipts rejected during validation (counter)
+- `receipt_decoding_failures_total` — decoding failures when reading blocks (counter)
+- `receipt_min_payment_rejected_total` — receipts dropped for falling below `MIN_PAYMENT_FOR_RECEIPT` (counter)
+
 ## Receipt Shard + Availability Metrics
 
 - `receipt_shard_count_per_block{shard="<idx>"}` — receipts per shard in the current block (gauge)

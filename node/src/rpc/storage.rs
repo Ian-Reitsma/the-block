@@ -8,6 +8,7 @@ use storage_market::{
     ProofOutcome, ProofRecord, ReplicaIncentive, StorageMarket, StorageMarketError,
 };
 
+use crate::receipts_validation::MIN_PAYMENT_FOR_RECEIPT;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
@@ -591,19 +592,26 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
 /// settlement receipts, and converts them to the canonical `StorageReceipt` format
 /// used in blocks.
 pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
-    let receipts: Vec<_> = MARKET
-        .guard()
-        .drain_receipts()
+    let drained = MARKET.guard().drain_receipts();
+    let mut dropped = 0u64;
+    let receipts: Vec<_> = drained
         .into_iter()
-        .map(|r| crate::receipts::StorageReceipt {
-            contract_id: r.contract_id,
-            provider: r.provider,
-            bytes: r.bytes,
-            price: r.price,
-            block_height: r.block_height,
-            provider_escrow: r.provider_escrow,
-            provider_signature: vec![],
-            signature_nonce: 0,
+        .filter_map(|r| {
+            if r.price < MIN_PAYMENT_FOR_RECEIPT {
+                dropped = dropped.saturating_add(1);
+                None
+            } else {
+                Some(crate::receipts::StorageReceipt {
+                    contract_id: r.contract_id,
+                    provider: r.provider,
+                    bytes: r.bytes,
+                    price: r.price,
+                    block_height: r.block_height,
+                    provider_escrow: r.provider_escrow,
+                    provider_signature: vec![],
+                    signature_nonce: 0,
+                })
+            }
         })
         .collect();
 
@@ -611,6 +619,9 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::receipts::RECEIPT_DRAIN_OPERATIONS_TOTAL.inc();
+        if dropped > 0 {
+            crate::telemetry::receipts::RECEIPT_MIN_PAYMENT_REJECTED_TOTAL.inc_by(dropped);
+        }
         if !receipts.is_empty() {
             diagnostics::tracing::debug!(
                 receipt_count = receipts.len(),

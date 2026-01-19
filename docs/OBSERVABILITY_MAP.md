@@ -272,6 +272,9 @@ receipt_emitted_total{market=~"storage|compute|energy|ad"}
 # Validation failures
 receipt_validation_errors_total{reason=~".*"}
 
+# Min-payment floor rejections
+receipt_min_payment_rejected_total
+
 # Pending depth
 receipt_pending_depth{market=~".*"}
 ```

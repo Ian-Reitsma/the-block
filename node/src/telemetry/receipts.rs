@@ -13,9 +13,9 @@ use crate::receipts_validation::ReceiptBlockUsage;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
-#[cfg(feature = "telemetry")]
 use runtime::telemetry::IntGaugeVec;
+#[cfg(feature = "telemetry")]
+use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
 
 /// Receipt count by market type (telemetry)
 #[cfg(feature = "telemetry")]
@@ -153,6 +153,15 @@ pub static RECEIPT_VALIDATION_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     register_counter(
         "receipt_validation_failures_total",
         "Total receipt validation failures (malformed receipts)",
+    )
+});
+
+/// Receipt rejections due to minimum-payment floor
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_MIN_PAYMENT_REJECTED_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipt_min_payment_rejected_total",
+        "Total receipts rejected for falling below MIN_PAYMENT_FOR_RECEIPT",
     )
 });
 

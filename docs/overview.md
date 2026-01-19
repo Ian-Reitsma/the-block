@@ -131,6 +131,8 @@ All remaining detail sits in six focused guides:
 - [`docs/apis_and_tooling.md`](apis_and_tooling.md) — JSON-RPC, CLI, gateway HTTP & DNS, explorer, probe CLI, metrics endpoints, schema references.
 - [`docs/subsystem_atlas.md`](subsystem_atlas.md) — workspace atlas + node subsystem index that maps every directory/file to plain-English context so newcomers know where to start.
 - [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md) — economic strategy deep-dive, including the BlockTorch compute framework roadmap.
+- [`docs/licensing_and_trademark.md`](licensing_and_trademark.md) — licensing split (open core vs enterprise), CLA requirements, trademark policy, and canonical release rules.
+- [`docs/official_chain_policy.md`](official_chain_policy.md) — what makes a build official, how to verify releases, and how forks should brand themselves.
 - **🆕 [`RECEIPT_INTEGRATION_INDEX.md`](../RECEIPT_INTEGRATION_INDEX.md) — Receipt integration guide**: Market audit trails, consensus validation, telemetry system, metrics derivation. See this for the complete receipt integration status, implementation guides, and next steps (December 2025).
 
 For historical breadcrumbs the removed per-subsystem files now redirect through [`docs/LEGACY_MAPPING.md`](LEGACY_MAPPING.md).

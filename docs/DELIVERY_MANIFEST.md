@@ -387,4 +387,4 @@ No external dependencies for integration.
 **Delivery Date**: 2025-12-19  
 **Delivery Time**: 09:30 EST  
 **Prepared By**: Claude (Anthropic)  
-**License**: [Your project license]
+**License**: Apache 2.0 for `the-block-core`; see `docs/licensing_and_trademark.md` for the open-core vs enterprise split and CLA/trademark policy.

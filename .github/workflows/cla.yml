@@ -1,0 +1,16 @@
+name: CLA
+
+on:
+  pull_request:
+
+jobs:
+  check-cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Signed-off-by trailers
+        run: |
+          scripts/check_cla_range.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"

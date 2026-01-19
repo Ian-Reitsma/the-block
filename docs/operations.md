@@ -531,6 +531,9 @@ for reason in schema_mismatch duplicate_detection signature_invalid; do
   count=$(prometheus_query "receipt_validation_errors_total{reason=\"$reason\"}" | jq '.data.result[0].value[1]')
   echo "  $reason: $count"
 done
+
+echo "=== Min-payment receipt rejections (0.001 BLOCK floor) ==="
+prometheus_query 'receipt_min_payment_rejected_total'
 ```
 
 **Step 3**: Per-market diagnostics
@@ -739,6 +742,7 @@ export PROMETHEUS_URL="http://prometheus.infra.internal:9090"
 |--------|--------|----------|
 | Emission Rate | All markets | Any market = 0 for 5 blocks |
 | Validation Success | > 99.99% | < 99% for 10 min |
+| Min-Payment Rejections | Near-zero | Sudden increase in `receipt_min_payment_rejected_total` |
 | Storage | All receipts | Storage > 1 week |
 | Query Latency p99 | < 100ms | > 500ms for 5 min |
 

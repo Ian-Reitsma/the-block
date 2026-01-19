@@ -1,3 +1,5 @@
+use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
+use the_block::receipts_validation::{validate_receipt, ValidationError, MIN_PAYMENT_FOR_RECEIPT};
 /// Integration test for receipt serialization and deterministic metrics.
 ///
 /// This test validates:
@@ -258,6 +260,33 @@ fn deterministic_metrics_from_receipts_chain() {
     );
 
     println!("✓ Metrics derivation is deterministic (same chain → same metrics)");
+}
+
+#[test]
+fn receipts_below_minimum_are_rejected() {
+    let receipt = Receipt::Ad(AdReceipt {
+        campaign_id: "campaign_min".into(),
+        creative_id: "creative_min".into(),
+        publisher: "publisher_min".into(),
+        impressions: 1,
+        spend: MIN_PAYMENT_FOR_RECEIPT - 1,
+        block_height: 42,
+        conversions: 0,
+        claim_routes: std::collections::HashMap::new(),
+        role_breakdown: None,
+        device_links: Vec::new(),
+        publisher_signature: vec![1],
+        signature_nonce: 7,
+    });
+
+    let registry = ProviderRegistry::new();
+    let mut nonce_tracker = NonceTracker::new(100);
+
+    let result = validate_receipt(&receipt, 42, &registry, &mut nonce_tracker);
+    assert!(matches!(
+        result,
+        Err(ValidationError::PaymentBelowMinimum { .. })
+    ));
 }
 
 #[test]

@@ -8,18 +8,19 @@
 ## Constants
 
 ```rust
-/// Maximum receipts allowed per block (DoS protection)
-pub const MAX_RECEIPTS_PER_BLOCK: usize = 10_000;
-
-/// Maximum total serialized receipt bytes per block (10MB)
-pub const MAX_RECEIPT_BYTES_PER_BLOCK: usize = 10_000_000;
-
-/// Maximum length for string fields (contract_id, provider, etc.)
+pub const HARD_RECEIPT_CEILING: usize = 50_000;
+pub const RECEIPT_BYTE_BUDGET: usize = 10_000_000;
+pub const RECEIPT_VERIFY_BUDGET: u64 = 100_000;
+pub const RECEIPT_BUDGET_TARGET_FRACTION: f64 = 0.6;
+pub const MIN_RECEIPT_BYTE_FLOOR: usize = 1_000;
+pub const MIN_RECEIPT_VERIFY_UNITS: u64 = 10;
+pub const MAX_RECEIPTS_PER_BLOCK: usize = 10_000; // min of byte/verify budgets and HARD_RECEIPT_CEILING
 pub const MAX_STRING_FIELD_LENGTH: usize = 256;
-
-/// Minimum payment amount to emit a receipt (spam protection) in BLOCK
-pub const MIN_PAYMENT_FOR_RECEIPT: u64 = 1;
+pub const MIN_PAYMENT_FOR_RECEIPT: u64 = 1_000; // 0.001 BLOCK
+pub const RECEIPT_SHARD_COUNT: u16 = 64;
+pub const RECEIPT_BLOB_DA_WINDOW_SECS: u64 = 7 * 24 * 60 * 60; // 7 days
 ```
+*Max receipt count derives from `min(RECEIPT_BYTE_BUDGET / MIN_RECEIPT_BYTE_FLOOR, RECEIPT_VERIFY_BUDGET / MIN_RECEIPT_VERIFY_UNITS, HARD_RECEIPT_CEILING)` to keep bandwidth and verification budgets deterministic.*
 
 ---
 
@@ -33,6 +34,7 @@ Validates a single receipt's fields.
 - Block height matches expected height
 - String fields non-empty and ≤ 256 chars
 - Numeric fields > 0 for required fields
+- Settlement/payment amount ≥ `MIN_PAYMENT_FOR_RECEIPT`
 
 **Example:**
 ```rust
@@ -42,7 +44,7 @@ let receipt = Receipt::Storage(StorageReceipt {
     contract_id: "sc_123".into(),
     provider: "provider_1".into(),
     bytes: 1000,
-    price: 500,
+    price: 2_000,
     block_height: 100,
     provider_escrow: 10000,
 });
@@ -93,10 +95,18 @@ validate_receipt_size(encoded.len())?;
 pub enum ValidationError {
     TooManyReceipts { count: usize, max: usize },
     ReceiptsTooLarge { bytes: usize, max: usize },
+    VerifyBudgetExceeded { units: u64, max: u64 },
     BlockHeightMismatch { receipt_height: u64, block_height: u64 },
-    EmptyStringField { field: &'static str },
-    StringFieldTooLong { field: &'static str, length: usize, max: usize },
-    ZeroValue { field: &'static str },
+    EmptyStringField { field: String },
+    StringFieldTooLong { field: String, length: usize, max: usize },
+    PaymentBelowMinimum { amount: u64, min: u64 },
+    ZeroValue { field: String },
+    MissingSignature,
+    InvalidSignature { reason: String },
+    UnknownProvider { provider_id: String },
+    ReplayedNonce { provider_id: String, nonce: u64 },
+    DuplicateReceipt,
+    EmptySignature,
 }
 ```
 
@@ -117,6 +127,9 @@ All errors implement `Display` and `Error` traits.
    - Incremented when receipt validation fails
    - Tracks malformed receipts from markets
    - Use for debugging market-side issues
+3. **`receipt_min_payment_rejected_total`** (Counter)
+   - Incremented when receipts are dropped for falling below `MIN_PAYMENT_FOR_RECEIPT`
+   - Use for tracking spam-floor pressure
 
 **Usage:**
 ```rust

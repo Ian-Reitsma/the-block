@@ -383,6 +383,42 @@
           {"format": "short", "label": "Receipts/min"},
           {"format": "short"}
         ]
+      },
+      {
+        "id": 11,
+        "title": "Min-Payment Receipt Rejections",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 28, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "receipt_min_payment_rejected_total",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "yellow"},
+                {"value": 10, "color": "red"}
+              ]
+            }
+          }
+        }
       }
     ],
     "templating": {

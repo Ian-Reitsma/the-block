@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::governance::NODE_GOV_STORE;
+use crate::receipts_validation::MIN_PAYMENT_FOR_RECEIPT;
 use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::energy as energy_metrics;
@@ -484,11 +485,27 @@ pub fn drain_energy_receipts() -> Vec<EnergyReceipt> {
         let mut guard = store();
         guard.market.drain_receipts()
     }; // Lock released here
+    let drained_any = !receipts.is_empty();
+    let mut dropped = 0u64;
+    let receipts: Vec<_> = receipts
+        .into_iter()
+        .filter(|receipt| {
+            if receipt.price_paid < MIN_PAYMENT_FOR_RECEIPT {
+                dropped = dropped.saturating_add(1);
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
 
     // Record telemetry for drain operation
     #[cfg(feature = "telemetry")]
     {
         crate::telemetry::receipts::RECEIPT_DRAIN_OPERATIONS_TOTAL.inc();
+        if dropped > 0 {
+            crate::telemetry::receipts::RECEIPT_MIN_PAYMENT_REJECTED_TOTAL.inc_by(dropped);
+        }
         if !receipts.is_empty() {
             diagnostics::tracing::debug!(
                 receipt_count = receipts.len(),
@@ -499,7 +516,7 @@ pub fn drain_energy_receipts() -> Vec<EnergyReceipt> {
     }
 
     // Persist market state outside of critical section to avoid blocking
-    if !receipts.is_empty() {
+    if drained_any {
         // Re-acquire lock only for persistence
         let mut guard = store();
         if let Err(err) = guard.persist_market() {
