@@ -13,6 +13,14 @@ An official build must satisfy all of the following:
 - The binary hash matches `env!("BUILD_BIN_HASH")` checks enforced by
   `node/src/provenance.rs`.
 
+### Current official tag
+- **Tag:** `core-0.1.1`
+- **Tag object hash:** `3b459b5e29790a1b13a2d2220d577394d0a4a423`
+- **Points to commit:** `97986ef27f918a7f064bc91729120e2c1addeba8`
+- **Signature:** Good signature from `CoreReleaseSigner1` (fingerprint
+  `C213D2E0F8BCF523C46610FE18FBDEFF67871CA0`) as verified by
+  `git tag -v core-0.1.1`
+
 ## Verification steps
 1. Fetch the release artifacts, `provenance.json`, and `checksums.txt`.
 2. Verify the signatures against the public keys in

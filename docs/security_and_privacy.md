@@ -109,6 +109,7 @@ Security is enforced in code, not promises. This guide consolidates the former t
 ## Release Provenance and Supply Chain
 - Release provenance is enforced by `node/src/provenance.rs`, `config/release_signers.txt`, and the CI job that verifies `provenance.json` + `checksums.txt`.
 - Official builds are defined in `docs/official_chain_policy.md`. Unsigned or unverifiable artifacts are non-canonical and must not be branded as official (see `TRADEMARK.md`).
+- Current release: `core-0.1.1` (tag hash `3b459b5e29790a1b13a2d2220d577394d0a4a423`, commit `97986ef27f918a7f064bc91729120e2c1addeba8`), signed by `CoreReleaseSigner1` (`C213D2E0F8BCF523C46610FE18FBDEFF67871CA0`). Verify via `git tag -v core-0.1.1`.
 - Dependency independence: first-party wrappers (`foundation_*` crates) replace third-party TLS/HTTP/serialization stacks. `docs/developer_handbook.md#dependency-policy` covers required tooling and audits.
 - Reproducible builds: `docs/repro.md` + `docs/reproducible_builds.md` were merged here. Build IDs must match `env!("BUILD_BIN_HASH")` or binaries are rejected on startup.
 - Energy/oracle crates (`crates/energy-market`, `crates/oracle-adapter`) and transport overlays fall under the same supply-chain gates: refresh `cargo vendor`, regenerate `provenance.json`/`checksums.txt`, attach fuzz coverage summaries, and document the attestation bundle in every release checklist (per `AGENTS.md §§15.F, 15.I`). Release tooling refuses tags when these artifacts drift.
