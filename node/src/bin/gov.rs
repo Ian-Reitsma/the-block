@@ -15,7 +15,7 @@ use cli_core::{
     command::{Command as CliCommand, CommandBuilder, CommandId},
     parse::Matches,
 };
-use the_block::{governance::House, Governance};
+use the_block::{governance::House, Governance, LegacyProposal};
 
 mod cli_support;
 use cli_support::{collect_args, parse_matches};
@@ -112,11 +112,16 @@ fn main() {
                 .unwrap_or_default()
                 .as_secs();
             let (p, remaining) = gov.status(id, now).expect("status");
-            print_proposal(&p, Some(remaining), &gov);
+            print_proposal(&p, remaining, &gov);
         }
         Command::List => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
             for p in gov.list() {
-                print_proposal(&p, None, &gov);
+                let remaining = gov.status(p.id, now).map(|(_, r)| r).unwrap_or(0);
+                print_proposal(&p, remaining, &gov);
             }
         }
     }
@@ -226,20 +231,11 @@ fn parse_u64(matches: &Matches, name: &str) -> Result<u64, String> {
         .map_err(|err| format!("invalid {name}: {err}"))
 }
 
-fn print_proposal(p: &the_block::governance::Proposal, remaining: Option<u64>, gov: &Governance) {
+fn print_proposal(p: &LegacyProposal, remaining: u64, gov: &Governance) {
     let now_can_execute = gov.bicameral.can_execute_now(p);
-    let remaining_secs = remaining.unwrap_or_else(|| {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        p.end
-            .saturating_add(gov.bicameral.timelock_secs)
-            .saturating_sub(now)
-    });
     println!(
         "id={} start={} end={} ops_for={} builders_for={} executed={} can_execute_now={} timelock_remaining={}s",
-        p.id, p.start, p.end, p.ops_for, p.builders_for, p.executed, now_can_execute, remaining_secs
+        p.id, p.start, p.end, p.ops_for, p.builders_for, p.executed, now_can_execute, remaining
     );
 }
 
@@ -250,11 +246,7 @@ mod tests {
     #[test]
     fn command_shape_includes_all_subcommands() {
         let cmd = build_command();
-        let ids: Vec<_> = cmd
-            .subcommands()
-            .iter()
-            .map(|s| s.id().0.to_owned())
-            .collect();
+        let ids: Vec<_> = cmd.subcommands.iter().map(|s| s.id().0.to_owned()).collect();
         assert!(
             ids.contains(&"gov.submit".to_string())
                 && ids.contains(&"gov.vote".to_string())
