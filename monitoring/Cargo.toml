@@ -14,6 +14,7 @@ foundation_metrics = { path = "../crates/foundation_metrics" }
 http_env = { path = "../crates/http_env" }
 httpd = { path = "../crates/httpd" }
 crypto_suite = { path = "../crates/crypto_suite" }
+foundation_telemetry = { path = "../crates/foundation_telemetry" }
 
 [build-dependencies]
 foundation_serialization = { path = "../crates/foundation_serialization" }

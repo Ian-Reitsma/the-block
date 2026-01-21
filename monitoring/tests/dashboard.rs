@@ -1,4 +1,5 @@
 use foundation_serialization::json::{self, Value};
+use crypto_suite::hashing::blake3;
 use std::fs;
 
 struct PanelExpectation<'a> {
@@ -166,6 +167,25 @@ fn dashboard_ack_latency_panel_includes_targets() {
     assert!(exprs
         .iter()
         .any(|expr| expr == "bridge_remediation_ack_target_seconds{phase=\"escalate\"}"));
+}
+
+#[test]
+fn treasury_dashboard_snapshot_and_hash() {
+    let content =
+        fs::read_to_string("grafana_treasury_dashboard.json").expect("treasury dashboard json");
+    let expected = fs::read_to_string("tests/snapshots/treasury_dashboard.json")
+        .expect("treasury dashboard snapshot");
+    assert_eq!(
+        content, expected,
+        "treasury dashboard drifted; run `make -C monitoring dashboard` to refresh"
+    );
+    let hash = blake3::hash(content.as_bytes()).to_hex().to_string();
+    assert_eq!(
+        hash.as_str(),
+        "e9d9dc350aeedbe1167c6120b8f5600f7f079b3e2ffe9ab7542917de021a61a0",
+        "treasury dashboard hash changed; refresh snapshot intentionally (current {})",
+        hash
+    );
 }
 
 #[test]

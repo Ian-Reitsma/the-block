@@ -5,9 +5,12 @@ use metrics_aggregator::{metrics_registry_guard, router, AppState};
 use std::env;
 use std::fs;
 use std::future::Future;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 use sys::tempfile;
+use foundation_telemetry::{GovernanceWrapperEntry, WrapperMetricEntry, WrapperSummaryEntry};
+use crypto_suite::hashing::blake3;
 use the_block::governance::treasury::{mark_cancelled, mark_executed, TreasuryBalanceEventKind};
 use the_block::governance::{GovStore, TreasuryBalanceSnapshot, TreasuryDisbursement};
 
@@ -173,4 +176,48 @@ fn treasury_metrics_accept_legacy_string_fields() {
         let body = String::from_utf8(resp.body().to_vec()).expect("metrics utf8");
         assert!(body.contains("treasury_balance_current 450"));
     });
+}
+
+#[test]
+fn wrappers_schema_hash_is_stable() {
+    let mut map: BTreeMap<String, WrapperSummaryEntry> = BTreeMap::new();
+    map.insert(
+        "node-a".into(),
+        WrapperSummaryEntry {
+            metrics: vec![WrapperMetricEntry {
+                metric: "governance.treasury.executor.last_submitted_nonce".into(),
+                labels: HashMap::new(),
+                value: 7.0,
+            }],
+            governance: Some(GovernanceWrapperEntry {
+                treasury_balance: 1_200,
+                disbursements_total: 3,
+                executed_total: 1,
+                rolled_back_total: 1,
+                draft_total: 1,
+                voting_total: 0,
+                queued_total: 0,
+                timelocked_total: 0,
+                executor_pending_matured: 0,
+                executor_staged_intents: 0,
+                executor_lease_released: false,
+                executor_last_success_at: Some(123),
+                executor_last_error_at: None,
+            }),
+        },
+    );
+    let value = foundation_serialization::json::to_value(&map).expect("serialize wrappers map");
+    let encoded = foundation_serialization::json::to_vec_value(&value);
+    if std::env::var("PRINT_WRAPPERS_SNAPSHOT").as_deref() == Ok("1") {
+        let serialized =
+            String::from_utf8(encoded.clone()).expect("wrappers map utf8 serialization");
+        eprintln!("{serialized}");
+    }
+    let hash = blake3::hash(&encoded);
+    let hash_hex = hash.to_hex().to_string();
+    assert_eq!(
+        hash_hex.as_str(),
+        "e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595",
+        "wrappers schema or field set drifted; update consumers or refresh the expected hash intentionally"
+    );
 }

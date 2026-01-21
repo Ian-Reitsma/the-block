@@ -79,6 +79,8 @@
   - Use `tb-cli governor status` to confirm the matching `ad_contextual`/`ad_presence` gate streaks and snapshot hashes.
 - **Dashboards and wrappers**
   - Update `monitoring/ad_market_dashboard.json` and `metrics-aggregator` `/wrappers` snapshots whenever these series change; include refreshed panel screenshots (`npm ci --prefix monitoring && make monitor`) in reviews.
+  - CI pins the governance treasury wrapper summary hash (`e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595`) and the explorer/CLI treasury timeline schema hash (`c48f401c3792195c9010024b8ba0269b0efd56c227be9cb5dd1ddba793b2cbd1`); update the expected values only when intentionally changing the telemetry or response shape and refresh Grafana alongside.
+  - `monitoring/grafana_treasury_dashboard.json` is snapshot-checked in CI with hash `e9d9dc350aeedbe1167c6120b8f5600f7f079b3e2ffe9ab7542917de021a61a0`; regenerate with `make -C monitoring dashboard` and update snapshots/hash when panels change, and include refreshed screenshots in review notes.
 
 ### Energy RPC Guardrails
 

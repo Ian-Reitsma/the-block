@@ -11,6 +11,16 @@ use governance_spec::treasury::{
 const DEFAULT_LIMIT: u64 = 50;
 const MAX_LIMIT: u64 = 200;
 
+/// RPC method names for treasury operations (kept in sync with auth token suffixes).
+pub const METHOD_TREASURY_DISBURSEMENTS: &str = "gov.treasury.disbursements";
+pub const METHOD_TREASURY_SUBMIT: &str = "gov.treasury.submit_disbursement";
+pub const METHOD_TREASURY_GET: &str = "gov.treasury.disbursement";
+pub const METHOD_TREASURY_QUEUE: &str = "gov.treasury.queue_disbursement";
+pub const METHOD_TREASURY_EXECUTE: &str = "gov.treasury.execute_disbursement";
+pub const METHOD_TREASURY_ROLLBACK: &str = "gov.treasury.rollback_disbursement";
+pub const METHOD_TREASURY_BALANCE: &str = "gov.treasury.balance";
+pub const METHOD_TREASURY_BALANCE_HISTORY: &str = "gov.treasury.balance_history";
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryDisbursementsRequest {

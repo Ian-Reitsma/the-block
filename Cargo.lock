@@ -619,6 +619,7 @@ dependencies = [
  "crypto_suite",
  "foundation_metrics",
  "foundation_serialization",
+ "foundation_telemetry",
  "http_env",
  "httpd",
 ]

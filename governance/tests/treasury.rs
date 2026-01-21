@@ -531,3 +531,45 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn disbursement_auth_operation_tokens_match_rpc_suffixes() {
+    use crypto_suite::hashing::blake3;
+    use governance::authorization::Operation;
+
+    let queue = Operation::QueueDisbursement {
+        proposal_id: "proposal-123".into(),
+        amount: 500,
+    };
+    let mut queue_hasher = blake3::Hasher::new();
+    queue_hasher.update(b"queue_disbursement");
+    queue_hasher.update(b"proposal-123");
+    queue_hasher.update(&500u64.to_le_bytes());
+    assert_eq!(
+        queue.to_bytes(),
+        queue_hasher.finalize().as_bytes().to_vec(),
+        "QueueDisbursement auth token must hash the RPC suffix 'queue_disbursement'"
+    );
+
+    let cancel = Operation::CancelDisbursement {
+        disbursement_id: "99".into(),
+    };
+    let mut cancel_hasher = blake3::Hasher::new();
+    cancel_hasher.update(b"cancel_disbursement");
+    cancel_hasher.update(b"99");
+    assert_eq!(
+        cancel.to_bytes(),
+        cancel_hasher.finalize().as_bytes().to_vec(),
+        "CancelDisbursement auth token must hash the RPC suffix 'cancel_disbursement'"
+    );
+
+    let mut wrong_prefix = blake3::Hasher::new();
+    wrong_prefix.update(b"gov.treasury.queue_disbursement");
+    wrong_prefix.update(b"proposal-123");
+    wrong_prefix.update(&500u64.to_le_bytes());
+    assert_ne!(
+        queue.to_bytes(),
+        wrong_prefix.finalize().as_bytes().to_vec(),
+        "RPC renames must update authorization tokens; prefixed method names are rejected"
+    );
+}

@@ -181,6 +181,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 ```
 
 - Validation: destinations must start with `tb1`, memos are capped at 8KiB, dependency lists are limited to 100 entries (proposal `deps` take precedence over memo hints), and `expected_receipts` must sum to `amount`.
+- Explorer/CLI surfaces clamp `deps` to 100 entries and ignore memo-derived dependency hints once the memo crosses the 8KiB cap so RPC payloads, explorer timelines, and schema snapshots stay in lockstep (see `explorer/tests/treasury_api.rs` for the enforced shape).
 - RPC exposure:
   - `gov.treasury.submit_disbursement { payload, signature }` – create proposal from JSON.
   - `gov.treasury.disbursement { id }` – fetch canonical status/timeline for a single record.
@@ -188,6 +189,8 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `gov.treasury.list_disbursements { cursor?, status?, limit? }` – explorer/CLI listings; responses flatten the governance struct and expose `expected_receipts` plus a canonical `deps` vector (proposal.deps if present, else memo-derived and capped at 100).
 - CLI exposes `--schema` and `--check` flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under `examples/governance/` in sync by running `contract-cli gov disburse preview --json … --check` during docs tests.
 - Explorer’s REST API mirrors the RPC fields so UI timelines and CLI scripts stay aligned; see `explorer/src/treasury.rs`.
+- Timeline response shape is pinned via a Blake3 hash (`c48f401c3792195c9010024b8ba0269b0efd56c227be9cb5dd1ddba793b2cbd1`) enforced in explorer/CLI tests; bump the fixtures and the documented hash intentionally when adding or removing fields.
+- `/wrappers` governance summaries are likewise hash-checked in CI (`e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595`) so dashboards and downstream consumers detect schema drift; refresh the wrappers snapshot and Grafana panels together when the telemetry surface changes.
 
 
 ## Gateway HTTP and CDN Surfaces

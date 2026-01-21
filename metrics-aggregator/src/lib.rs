@@ -687,7 +687,10 @@ impl AppState {
                             );
                         }
                         Self::apply_balance_metrics(metrics, &history, Some(current_balances), now);
-                        let released = snapshot.map(|snap| snap.lease_released).unwrap_or(false);
+                        let released = snapshot
+                            .as_ref()
+                            .map(|snap| snap.lease_released)
+                            .unwrap_or(false);
                         let pending = snapshot
                             .as_ref()
                             .map(|snap| snap.pending_matured)
@@ -2669,6 +2672,7 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
         memory,
         wrappers: WrapperSummaryEntry {
             metrics: wrapper_metrics,
+            governance: None,
         },
         ad_readiness,
     })
@@ -10337,6 +10341,7 @@ mod tests {
                         ]),
                         value: 2.0,
                     }],
+                    governance: None,
                 },
                 ad_readiness: None,
             });

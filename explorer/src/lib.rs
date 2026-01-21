@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use the_block::compute_market::settlement::{SlaResolution, SlaResolutionKind};
 use the_block::compute_market::snark::{CircuitArtifact, ProofBundle, SnarkBackend};
-use the_block::governance::treasury::{canonical_dependencies, ExpectedReceipt};
+use the_block::governance::treasury::{canonical_dependencies, ExpectedReceipt, MAX_MEMO_BYTES};
 use the_block::{
     compute_market::{receipt::Receipt as ComputeReceipt, Job},
     dex::order_book::OrderBook,
@@ -3650,13 +3650,17 @@ impl Explorer {
         let mut conn = self.conn()?;
         let tx = conn.transaction()?;
         for entry in events {
+            let mut memo = entry.memo.clone();
+            if memo.len() > MAX_MEMO_BYTES {
+                memo.truncate(MAX_MEMO_BYTES);
+            }
             tx.execute(
                 "INSERT OR REPLACE INTO treasury_timeline (disbursement_id, destination, amount, memo, scheduled_epoch, tx_hash, executed_at, block_hash, block_height) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     entry.disbursement_id as i64,
                     &entry.destination,
                     entry.amount as i64,
-                    &entry.memo,
+                    &memo,
                     entry.scheduled_epoch as i64,
                     &entry.tx_hash,
                     entry.executed_at as i64,
@@ -3708,24 +3712,24 @@ impl Explorer {
             };
             let destination: String = parsed
                 .as_ref()
-                .map(|d| d.destination.clone())
-                .unwrap_or_else(|| row.get(1)?);
+                .map(|d| Ok(d.destination.clone()))
+                .unwrap_or_else(|| row.get(1))?;
             let amount = parsed
                 .as_ref()
-                .map(|d| d.amount)
-                .unwrap_or_else(|| row.get::<_, i64>(2)? as u64);
+                .map(|d| Ok(d.amount))
+                .unwrap_or_else(|| row.get::<_, i64>(2).map(|v| v as u64))?;
             let memo: String = parsed
                 .as_ref()
-                .map(|d| d.memo.clone())
-                .unwrap_or_else(|| row.get(3)?);
+                .map(|d| Ok(d.memo.clone()))
+                .unwrap_or_else(|| row.get(3))?;
             let scheduled_epoch = parsed
                 .as_ref()
-                .map(|d| d.scheduled_epoch)
-                .unwrap_or_else(|| row.get::<_, i64>(4)? as u64);
+                .map(|d| Ok(d.scheduled_epoch))
+                .unwrap_or_else(|| row.get::<_, i64>(4).map(|v| v as u64))?;
             let created_at = parsed
                 .as_ref()
-                .map(|d| d.created_at)
-                .unwrap_or_else(|| row.get::<_, i64>(5)? as u64);
+                .map(|d| Ok(d.created_at))
+                .unwrap_or_else(|| row.get::<_, i64>(5).map(|v| v as u64))?;
             let expected_receipts = parsed
                 .as_ref()
                 .map(|d| d.expected_receipts.clone())

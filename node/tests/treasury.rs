@@ -203,3 +203,50 @@ fn treasury_executor_gauges_accept_updates() {
     assert_eq!(TREASURY_EXECUTOR_LAST_SUBMITTED_NONCE.value(), 321);
     assert_eq!(TREASURY_EXECUTOR_LEASE_LAST_NONCE.value(), 314);
 }
+
+#[test]
+fn treasury_rpc_method_names_track_auth_tokens() {
+    use crypto_suite::hashing::blake3;
+    use the_block::rpc::treasury::{
+        METHOD_TREASURY_EXECUTE, METHOD_TREASURY_QUEUE, METHOD_TREASURY_ROLLBACK,
+    };
+
+    for method in [METHOD_TREASURY_QUEUE, METHOD_TREASURY_EXECUTE, METHOD_TREASURY_ROLLBACK] {
+        assert!(
+            method.starts_with("gov.treasury."),
+            "treasury RPC methods should remain under gov.treasury.*"
+        );
+    }
+
+    let queue_suffix = METHOD_TREASURY_QUEUE
+        .rsplit('.')
+        .next()
+        .expect("queue suffix present");
+    assert_eq!(queue_suffix, "queue_disbursement");
+    let mut queue_hasher = blake3::Hasher::new();
+    queue_hasher.update(queue_suffix.as_bytes());
+    queue_hasher.update(b"proposal-abc");
+    queue_hasher.update(&77u64.to_le_bytes());
+    let suffix_digest = queue_hasher.finalize();
+    let mut queue_wrong = blake3::Hasher::new();
+    queue_wrong.update(METHOD_TREASURY_QUEUE.as_bytes());
+    queue_wrong.update(b"proposal-abc");
+    queue_wrong.update(&77u64.to_le_bytes());
+    assert_ne!(
+        suffix_digest.as_bytes(),
+        queue_wrong.finalize().as_bytes(),
+        "RPC method prefix drift should invalidate auth signatures"
+    );
+
+    let execute_suffix = METHOD_TREASURY_EXECUTE
+        .rsplit('.')
+        .next()
+        .expect("execute suffix present");
+    assert_eq!(execute_suffix, "execute_disbursement");
+
+    let rollback_suffix = METHOD_TREASURY_ROLLBACK
+        .rsplit('.')
+        .next()
+        .expect("rollback suffix present");
+    assert_eq!(rollback_suffix, "rollback_disbursement");
+}
