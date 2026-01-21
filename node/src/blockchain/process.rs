@@ -83,23 +83,26 @@ pub fn validate_and_apply(
     let mut accounts = HashMap::new();
     let mut touched: HashSet<String> = HashSet::new();
     let zero_address = "0".repeat(34);
-    // Apply coinbase mint first; coinbase is always the first transaction and
-    // uses the zero address to represent minting new supply.
-    if let Some(coinbase) = block.transactions.first() {
-        if coinbase.payload.from_ != zero_address {
-            return Err(TxAdmissionError::BadSignature);
+    // Apply coinbase mint first when present; the mint uses the zero address
+    // (or legacy empty default) to represent new supply.
+    let mut tx_iter = block.transactions.iter();
+    if let Some(coinbase) = tx_iter.next() {
+        if coinbase.payload.from_ == zero_address || coinbase.payload.from_.is_empty() {
+            let recv_key = coinbase.payload.to.clone();
+            let recv = ensure_account_mut(&mut accounts, &chain.accounts, &recv_key);
+            recv.balance.amount = recv
+                .balance
+                .amount
+                .saturating_add(coinbase.payload.amount_consumer)
+                .saturating_add(coinbase.payload.amount_industrial);
+            touched.insert(recv_key);
+        } else {
+            // Not a coinbase; process the full transaction list below.
+            tx_iter = block.transactions.iter();
         }
-        let recv_key = coinbase.payload.to.clone();
-        let recv = ensure_account_mut(&mut accounts, &chain.accounts, &recv_key);
-        recv.balance.amount = recv
-            .balance
-            .amount
-            .saturating_add(coinbase.payload.amount_consumer)
-            .saturating_add(coinbase.payload.amount_industrial);
-        touched.insert(recv_key);
     }
 
-    for tx in block.transactions.iter().skip(1) {
+    for tx in tx_iter {
         #[cfg(feature = "telemetry")]
         let _tx_timer = TransactionProcessingTimer::new();
 

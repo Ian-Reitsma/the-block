@@ -29,7 +29,9 @@ pub use governance_spec::{
 pub use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
-pub use governance_spec::{EnergySettlementMode, EnergySettlementPayload};
+pub use governance_spec::{
+    EnergySettlementChangePayload, EnergySettlementMode, EnergySettlementPayload,
+};
 // Circuit breaker pattern for executor resilience
 pub use governance_spec::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};
@@ -40,9 +42,9 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryExecutorConfig,
-    TreasuryExecutorError, TreasuryExecutorHandle, ACTIVATION_DELAY, QUORUM,
-    ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, EnergySettlementChangeRecord, GovStore,
+    LastActivation, TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle,
+    ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use token::{TokenAction, TokenProposal};
 

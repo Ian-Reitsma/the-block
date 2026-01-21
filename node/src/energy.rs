@@ -342,6 +342,14 @@ pub fn set_governance_params(params: GovernanceEnergyParams) {
         params.settlement.quorum_threshold_ppm =
             params.settlement.quorum_threshold_ppm.min(1_000_000);
     }
+    #[cfg(feature = "telemetry")]
+    {
+        let mode_val = match params.settlement.mode {
+            EnergySettlementMode::Batch => 0,
+            EnergySettlementMode::RealTime => 1,
+        };
+        crate::telemetry::ENERGY_SETTLEMENT_MODE.set(mode_val as i64);
+    }
     {
         let mut guard = ENERGY_PARAMS
             .lock()

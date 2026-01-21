@@ -1788,6 +1788,12 @@ impl AppState {
                 if let Some(v) = number_from_value(obj.get("energy_treasury_fee_total")) {
                     summary.merge_treasury_fee(v);
                 }
+                if let Some(v) = number_from_value(obj.get("energy_settlement_mode")) {
+                    summary.settlement_mode = Some(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_settlement_rollback_total")) {
+                    summary.merge_settlement_rollbacks(v);
+                }
             }
         }
         if !summary.sources.is_empty() {
@@ -8978,6 +8984,8 @@ struct EnergySummarySnapshot {
     settlement_total: Option<u64>,
     signature_failures: Option<u64>,
     treasury_fee_total: Option<u64>,
+    settlement_mode: Option<u64>,
+    settlement_rollbacks: Option<u64>,
 }
 
 impl EnergySummarySnapshot {
@@ -8998,6 +9006,9 @@ impl EnergySummarySnapshot {
     }
     fn merge_treasury_fee(&mut self, value: u64) {
         self.treasury_fee_total = Some(self.treasury_fee_total.map_or(value, |v| v.max(value)));
+    }
+    fn merge_settlement_rollbacks(&mut self, value: u64) {
+        self.settlement_rollbacks = Some(self.settlement_rollbacks.map_or(value, |v| v.max(value)));
     }
 
     fn to_value(&self) -> Value {
@@ -9038,6 +9049,16 @@ impl EnergySummarySnapshot {
         map.insert(
             "treasury_fee_total".into(),
             self.treasury_fee_total
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "settlement_mode".into(),
+            self.settlement_mode.map(Value::from).unwrap_or(Value::Null),
+        );
+        map.insert(
+            "settlement_rollbacks_total".into(),
+            self.settlement_rollbacks
                 .map(Value::from)
                 .unwrap_or(Value::Null),
         );

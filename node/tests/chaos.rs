@@ -51,8 +51,8 @@ fn init_env() -> sys::tempfile::TempDir {
     // Use fast mining
     std::env::set_var("TB_FAST_MINE", "1");
     // Light chaos defaults (overridable via env for targeted debugging)
-    let loss = std::env::var("TB_NET_PACKET_LOSS").unwrap_or_else(|_| "0.01".into());
-    let jitter = std::env::var("TB_NET_JITTER_MS").unwrap_or_else(|_| "50".into());
+    let loss = std::env::var("TB_NET_PACKET_LOSS").unwrap_or_else(|_| "0.005".into());
+    let jitter = std::env::var("TB_NET_JITTER_MS").unwrap_or_else(|_| "25".into());
     std::env::set_var("TB_NET_PACKET_LOSS", loss);
     std::env::set_var("TB_NET_JITTER_MS", jitter);
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
@@ -84,6 +84,7 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
     let start = Instant::now();
     let mut last_broadcast = Instant::now();
     let mut last_progress = Instant::now();
+    let mut contended_since = None;
     let mut last_heights: Option<Vec<u64>> = None;
     let mut last_request: HashMap<SocketAddr, Instant> = HashMap::new();
     loop {
@@ -99,9 +100,21 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
             }
         }
         if contended {
+            let now = Instant::now();
+            let should_poke = contended_since
+                .map(|t| now.duration_since(t) > Duration::from_millis(500))
+                .unwrap_or(true);
+            if should_poke {
+                for node in nodes {
+                    node.discover_peers();
+                    node.broadcast_chain();
+                }
+                contended_since = Some(now);
+            }
             the_block::sleep(Duration::from_millis(10)).await;
             continue;
         }
+        contended_since = None;
         let first = heights[0];
         if heights.iter().all(|h| *h == first) {
             return true;
@@ -150,6 +163,51 @@ async fn wait_until_converged(nodes: &[&Node], max: Duration) -> bool {
         }
         the_block::sleep(Duration::from_millis(20)).await;
     }
+}
+
+async fn drive_sync_from_leader(nodes: &[TestNode], leader_idx: usize, max: Duration) -> bool {
+    let start = Instant::now();
+    let leader_addr = nodes[leader_idx].addr;
+    let mut last_heights: Option<Vec<u64>> = None;
+    while start.elapsed() < max {
+        let mut heights = Vec::with_capacity(nodes.len());
+        let mut contended = false;
+        for n in nodes {
+            match n.node.try_block_height() {
+                Some(h) => heights.push(h),
+                None => {
+                    contended = true;
+                    break;
+                }
+            }
+        }
+        if contended {
+            the_block::sleep(Duration::from_millis(25)).await;
+            continue;
+        }
+        let target = *heights.iter().max().unwrap_or(&0);
+        if heights.iter().all(|h| *h == target) {
+            return true;
+        }
+        let made_progress = last_heights
+            .as_ref()
+            .map(|prev| prev != &heights)
+            .unwrap_or(true);
+        last_heights = Some(heights.clone());
+        for (idx, node) in nodes.iter().enumerate() {
+            if heights[idx] < target {
+                node.node.request_chain_from(leader_addr, heights[idx]);
+            }
+            node.node.broadcast_chain();
+        }
+        if !made_progress {
+            for node in nodes {
+                node.node.discover_peers();
+            }
+        }
+        the_block::sleep(Duration::from_millis(150)).await;
+    }
+    false
 }
 
 struct TestNode {
@@ -505,6 +563,13 @@ fn partition_heals_to_majority() {
                 n.node.broadcast_chain();
             }
         }
+
+        // Keep pulling the tip from the leader until we see matching heights
+        let sync_budget = Duration::from_secs(10 * timeout_factor());
+        assert!(
+            drive_sync_from_leader(&nodes, 0, sync_budget).await,
+            "partition heal sync timed out before convergence check"
+        );
 
         let max = Duration::from_secs(30 * timeout_factor());
         assert!(

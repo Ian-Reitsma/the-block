@@ -388,6 +388,78 @@
       ],
       "title": "Signature Verification Failures (5m Rate)",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 0.5},
+              {"color": "green", "value": 1}
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 0, "y": 24},
+      "id": 9,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {"values": false, "fields": "", "calcs": ["lastNotNull"]},
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "energy_settlement_mode",
+          "legendFormat": "Mode",
+          "refId": "A"
+        }
+      ],
+      "title": "Settlement Mode (0=batch, 1=real_time)",
+      "type": "gauge"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "thresholds"},
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {"h": 8, "w": 6, "x": 6, "y": 24},
+      "id": 10,
+      "options": {
+        "orientation": "auto",
+        "reduceOptions": {"values": false, "fields": "", "calcs": ["lastNotNull"]},
+        "showThresholdLabels": true,
+        "showThresholdMarkers": true
+      },
+      "targets": [
+        {
+          "expr": "energy_settlement_rollback_total",
+          "legendFormat": "Rollbacks",
+          "refId": "A"
+        }
+      ],
+      "title": "Settlement Rollbacks Total",
+      "type": "gauge"
     }
   ],
   "refresh": "10s",

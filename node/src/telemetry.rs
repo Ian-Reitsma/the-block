@@ -4440,6 +4440,30 @@ pub static ENERGY_DISPUTE_RESOLVE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     c.handle()
 });
 
+pub static ENERGY_SETTLEMENT_MODE: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "energy_settlement_mode",
+        "Active energy settlement mode (0=batch, 1=real_time)",
+    )
+    .unwrap_or_else(|e| panic!("gauge energy_settlement_mode: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_settlement_mode: {e}"));
+    g.handle()
+});
+
+pub static ENERGY_SETTLEMENT_ROLLBACK_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "energy_settlement_rollback_total",
+        "Energy settlement mode rollbacks applied",
+    )
+    .unwrap_or_else(|e| panic!("counter energy_settlement_rollback_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry energy_settlement_rollback_total: {e}"));
+    c.handle()
+});
+
 pub static SCHEDULER_ACCELERATOR_MISS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "scheduler_accelerator_miss_total",

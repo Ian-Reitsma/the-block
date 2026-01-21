@@ -740,6 +740,8 @@ export PROMETHEUS_URL="http://prometheus.infra.internal:9090"
 | Settlement Rate | > 95% | < 90% for 10 min |
 | Dispute Resolution | < 1 hour | Unresolved > 2 hours |
 
+Track `energy_settlement_mode` (0=batch,1=real_time) and `energy_settlement_rollback_total` in Prometheus/aggregator dashboards; rollbacks leave a persistent entry in the explorer’s `/governance/energy/settlement/history` endpoint and can be previewed via `contract-cli gov energy-settlement --timeline`.
+
 ### Receipts System
 
 | Metric | Target | Alert Threshold |

@@ -42,7 +42,9 @@ pub use bicameral::{
     Bicameral, Governance as BicameralGovernance, House, Proposal as BicameralProposal,
 };
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
-pub use energy_params::{EnergySettlementMode, EnergySettlementPayload};
+pub use energy_params::{
+    EnergySettlementChangePayload, EnergySettlementMode, EnergySettlementPayload,
+};
 pub use params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
     encode_runtime_backend_policy, encode_storage_engine_policy, encode_transport_provider_policy,

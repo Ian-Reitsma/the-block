@@ -1,10 +1,11 @@
 use super::RpcError;
 use crate::governance::{
     decode_binary, decode_runtime_backend_policy, decode_storage_engine_policy,
-    decode_transport_provider_policy, encode_binary, GovStore, ParamKey, Params, Proposal,
+    decode_transport_provider_policy, encode_binary, EnergySettlementChangePayload,
+    EnergySettlementChangeRecord, EnergySettlementMode, GovStore, ParamKey, Params, Proposal,
     ProposalStatus, Runtime, Vote, VoteChoice,
 };
-use foundation_serialization::Serialize;
+use foundation_serialization::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -47,6 +48,31 @@ pub struct GovParamsResponse {
     pub transport_provider_mask: i64,
     pub storage_engine_policy: Vec<String>,
     pub storage_engine_mask: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct EnergySettlementChangeRequest {
+    pub proposer: String,
+    pub mode: String,
+    #[serde(default)]
+    pub activation_epoch: u64,
+    #[serde(default = "default_rollback_window")]
+    pub rollback_window_epochs: u64,
+    #[serde(default)]
+    pub deps: Vec<u64>,
+    #[serde(default)]
+    pub memo: String,
+    #[serde(default)]
+    pub quorum_threshold_ppm: u32,
+    #[serde(default)]
+    pub expiry_blocks: u64,
+    #[serde(default)]
+    pub current_epoch: u64,
+}
+
+fn default_rollback_window() -> u64 {
+    1
 }
 
 fn parse_key(k: &str) -> Option<ParamKey> {
@@ -206,6 +232,43 @@ pub fn gov_params(params: &Params, epoch: u64) -> Result<GovParamsResponse, RpcE
         storage_engine_policy: decode_storage_engine_policy(params.storage_engine_policy),
         storage_engine_mask: params.storage_engine_policy,
     })
+}
+
+pub fn energy_settlement_change(
+    store: &GovStore,
+    req: EnergySettlementChangeRequest,
+) -> Result<ProposalSubmissionResponse, RpcError> {
+    let desired_mode = match req.mode.to_ascii_lowercase().as_str() {
+        "batch" => EnergySettlementMode::Batch,
+        "real_time" | "realtime" | "real-time" => EnergySettlementMode::RealTime,
+        other => {
+            return Err(RpcError::new(
+                -32071,
+                format!("unknown energy settlement mode: {other}"),
+            ))
+        }
+    };
+    let payload = EnergySettlementChangePayload {
+        desired_mode,
+        activation_epoch: req.activation_epoch,
+        rollback_window_epochs: req.rollback_window_epochs,
+        deps: req.deps,
+        memo: req.memo,
+        quorum_threshold_ppm: req.quorum_threshold_ppm,
+        expiry_blocks: req.expiry_blocks,
+    };
+    let id = store
+        .submit_energy_settlement_change(payload, req.proposer, req.current_epoch)
+        .map_err(|_| RpcError::new(-32072, "energy settlement submission failed"))?;
+    Ok(ProposalSubmissionResponse { id })
+}
+
+pub fn energy_settlement_history(
+    store: &GovStore,
+) -> Result<Vec<EnergySettlementChangeRecord>, RpcError> {
+    store
+        .energy_settlement_history()
+        .map_err(|_| RpcError::new(-32073, "energy settlement history read failed"))
 }
 
 pub fn release_signers(store: &GovStore) -> Result<ReleaseSignersResponse, RpcError> {

@@ -111,6 +111,10 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
         .get("/governance/dependency_policy", dependency_policy_history)
         .get("/governance/treasury/disbursements", treasury_disbursements)
         .get("/governance/treasury/timeline", treasury_timeline)
+        .get(
+            "/governance/energy/settlement/history",
+            energy_settlement_history,
+        )
         .get("/governance/treasury/executor", treasury_executor_status)
         .get("/energy/providers", energy_providers)
         .get("/energy/disputes", energy_disputes)
@@ -804,6 +808,22 @@ async fn treasury_timeline(request: Request<ExplorerHttpState>) -> Result<Respon
         Err(err) => {
             log_error("treasury timeline failed", &err);
             Err(HttpError::Handler("treasury timeline failed".into()))
+        }
+    }
+}
+
+async fn energy_settlement_history(
+    request: Request<ExplorerHttpState>,
+) -> Result<Response, HttpError> {
+    let explorer = explorer_from(&request);
+    let store = GovStore::open(&explorer.gov_db_path);
+    match store.energy_settlement_history() {
+        Ok(history) => Ok(Response::new(StatusCode::OK).json(&history)?),
+        Err(err) => {
+            log_error("energy settlement history failed", &err);
+            Err(HttpError::Handler(
+                "energy settlement history failed".into(),
+            ))
         }
     }
 }

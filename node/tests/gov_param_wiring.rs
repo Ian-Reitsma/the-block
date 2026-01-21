@@ -7,8 +7,8 @@ use the_block::{
     energy::{self, GovernanceEnergyParams},
     generate_keypair,
     governance::{
-        EnergySettlementMode, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote,
-        VoteChoice, ACTIVATION_DELAY,
+        EnergySettlementChangePayload, EnergySettlementMode, GovStore, ParamKey, Params, Proposal,
+        ProposalStatus, Runtime, Vote, VoteChoice, ACTIVATION_DELAY,
     },
     scheduler::{self, current_default_weights, ServiceClass},
     sign_tx, Blockchain, FeeLane, RawTxPayload, TxAdmissionError,
@@ -455,4 +455,67 @@ fn energy_params_update_market_runtime() {
     assert_eq!(energy::governance_params().settlement.expiry_blocks, 12);
     let snapshot = energy::market_snapshot();
     assert_eq!(snapshot.governance.settlement.expiry_blocks, 12);
+}
+
+#[testkit::tb_serial]
+fn energy_settlement_history_records_rollbacks() {
+    let dir = tempdir().unwrap();
+    let store = GovStore::open(dir.path());
+    let mut bc = Blockchain::new(dir.path().to_str().unwrap());
+    let mut rt = Runtime::new(&mut bc);
+    let mut params = Params::default();
+    rt.set_consumer_p90_comfort(params.consumer_fee_comfort_p90_microunits as u64);
+    rt.set_snapshot_interval(Duration::from_secs(params.snapshot_interval_secs as u64));
+    let payload = EnergySettlementChangePayload {
+        desired_mode: EnergySettlementMode::RealTime,
+        activation_epoch: 0,
+        rollback_window_epochs: 3,
+        deps: Vec::new(),
+        memo: "rollback-test".into(),
+        quorum_threshold_ppm: 250_000,
+        expiry_blocks: 12,
+    };
+    let pid = store
+        .submit_energy_settlement_change(payload.clone(), "g".into(), 0)
+        .unwrap();
+    store
+        .vote(
+            pid,
+            Vote {
+                proposal_id: pid,
+                voter: "v".into(),
+                choice: VoteChoice::Yes,
+                weight: 1,
+                received_at: 0,
+            },
+            0,
+        )
+        .unwrap();
+    assert_eq!(
+        store.tally_and_queue(pid, 1).unwrap(),
+        ProposalStatus::Passed
+    );
+    store
+        .activate_ready(1 + ACTIVATION_DELAY, &mut rt, &mut params)
+        .unwrap();
+    let record = store
+        .energy_settlement_record(pid)
+        .unwrap()
+        .expect("history entry");
+    assert_eq!(record.memo, "rollback-test");
+    assert_eq!(record.rollback_window_epochs, 3);
+    assert_eq!(record.quorum_threshold_ppm, 250_000);
+    assert_eq!(record.expiry_blocks, 12);
+    assert!(record.rolled_back_at.is_none());
+    let history = store.energy_settlement_history().unwrap();
+    assert!(!history.is_empty());
+    assert_eq!(history[0].proposal_id, pid);
+    store
+        .rollback_last(record.applied_at_epoch + 1, &mut rt, &mut params)
+        .unwrap();
+    let record = store
+        .energy_settlement_record(pid)
+        .unwrap()
+        .expect("record still present");
+    assert!(record.rolled_back_at.is_some());
 }

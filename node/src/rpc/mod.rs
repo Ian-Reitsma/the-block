@@ -84,8 +84,8 @@ pub mod vm;
 pub mod vm_trace;
 use treasury::{
     METHOD_TREASURY_BALANCE, METHOD_TREASURY_BALANCE_HISTORY, METHOD_TREASURY_DISBURSEMENTS,
-    METHOD_TREASURY_EXECUTE, METHOD_TREASURY_GET, METHOD_TREASURY_QUEUE,
-    METHOD_TREASURY_ROLLBACK, METHOD_TREASURY_SUBMIT,
+    METHOD_TREASURY_EXECUTE, METHOD_TREASURY_GET, METHOD_TREASURY_QUEUE, METHOD_TREASURY_ROLLBACK,
+    METHOD_TREASURY_SUBMIT,
 };
 
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
@@ -3099,6 +3099,16 @@ fn dispatch(
             storage::set_provider_maintenance(provider, maintenance)
         }
         "storage_incentives" => storage::incentives_snapshot(),
+        "gov.energy_settlement" => {
+            let params = parse_params::<governance::EnergySettlementChangeRequest>(&req.params)?;
+            serialize_response(governance::energy_settlement_change(
+                &NODE_GOV_STORE,
+                params,
+            )?)?
+        }
+        "gov.energy_settlement_history" => {
+            serialize_response(governance::energy_settlement_history(&NODE_GOV_STORE)?)?
+        }
         "gov_propose" => {
             let proposer = req
                 .params

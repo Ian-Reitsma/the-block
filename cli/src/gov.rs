@@ -1,5 +1,6 @@
 extern crate foundation_serialization as serde;
 
+use crate::json_helpers::json_u64;
 use crate::parse_utils::{
     parse_optional, parse_positional_u64, parse_u64, parse_u64_required, require_positional,
     take_string,
@@ -25,12 +26,12 @@ use governance::{
 use httpd::ClientError;
 use std::io::{self, Write};
 use std::time::SystemTime;
-use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
 use the_block::rpc::treasury::{
     METHOD_TREASURY_BALANCE, METHOD_TREASURY_BALANCE_HISTORY, METHOD_TREASURY_DISBURSEMENTS,
-    METHOD_TREASURY_EXECUTE, METHOD_TREASURY_GET, METHOD_TREASURY_QUEUE,
-    METHOD_TREASURY_ROLLBACK, METHOD_TREASURY_SUBMIT,
+    METHOD_TREASURY_EXECUTE, METHOD_TREASURY_GET, METHOD_TREASURY_QUEUE, METHOD_TREASURY_ROLLBACK,
+    METHOD_TREASURY_SUBMIT,
 };
+use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
 
 struct CliReleaseVerifier;
 
@@ -187,6 +188,24 @@ where
             format!("failed to decode {method} response: {err}"),
         )
     })
+}
+
+fn call_rpc(rpc: &str, method: &'static str, params: Value) -> io::Result<Value> {
+    let client = RpcClient::from_env();
+    let envelope = call_rpc_envelope(&client, rpc, method, params)?;
+    if let Some(result) = envelope.result {
+        Ok(result)
+    } else if let Some(error) = envelope.error {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("rpc {method} error {code}: {message}", code = error.code, message = error.message),
+        ))
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("rpc {method} returned no result"),
+        ))
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -402,6 +421,21 @@ pub enum GovCmd {
     Treasury { action: GovTreasuryCmd },
     /// Disbursement management via RPC
     Disburse { action: GovDisbursementCmd },
+    /// Submit an energy settlement mode change payload via governance
+    EnergySettlement {
+        mode: String,
+        activation_epoch: u64,
+        rollback_window_epochs: u64,
+        deps: Vec<u64>,
+        memo: String,
+        quorum_threshold_ppm: u32,
+        expiry_blocks: u64,
+        epoch: u64,
+        proposer: String,
+        rpc: String,
+        timeline: bool,
+        dry_run: bool,
+    },
 }
 
 pub enum GovParamCmd {
@@ -629,6 +663,80 @@ impl GovCmd {
             .subcommand(GovTreasuryCmd::command())
             .subcommand(GovParamCmd::command())
             .subcommand(GovDisbursementCmd::command())
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("gov.energy_settlement"),
+                    "energy-settlement",
+                    "Submit energy settlement mode change via governance",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "mode",
+                    "Desired mode (batch|real_time)",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "activation_epoch",
+                        "activation-epoch",
+                        "Target activation epoch",
+                    )
+                    .default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "rollback_window_epochs",
+                        "rollback-window",
+                        "Rollback window epochs",
+                    )
+                    .default("1"),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "deps",
+                    "deps",
+                    "Dependency proposal IDs (comma-separated)",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "memo",
+                    "memo",
+                    "Human-readable memo for explorers",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "quorum_threshold_ppm",
+                        "quorum-ppm",
+                        "Quorum threshold (ppm) for settlement credits",
+                    )
+                    .default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "expiry_blocks",
+                        "expiry-blocks",
+                        "Credit expiry window (blocks)",
+                    )
+                    .default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("epoch", "epoch", "Current epoch for submission").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("proposer", "proposer", "Proposer identity").default("cli"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("rpc", "rpc", "Node RPC endpoint")
+                        .default("http://localhost:26658"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "timeline",
+                    "timeline",
+                    "Print energy settlement history instead of submitting",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "dry-run",
+                    "dry-run",
+                    "Print the payload for manual inspection without submitting",
+                )))
+                .build(),
+            )
             .build()
     }
 
@@ -706,6 +814,50 @@ impl GovCmd {
             "disburse" => {
                 let cmd = GovDisbursementCmd::from_matches(sub_matches)?;
                 Ok(GovCmd::Disburse { action: cmd })
+            }
+            "energy-settlement" => {
+                let mode = require_positional(sub_matches, "mode")?.to_string();
+                let activation_epoch = parse_u64_required(
+                    take_string(sub_matches, "activation_epoch"),
+                    "activation_epoch",
+                )?;
+                let rollback_window_epochs = parse_u64_required(
+                    take_string(sub_matches, "rollback_window_epochs"),
+                    "rollback_window_epochs",
+                )?;
+                let deps = take_string(sub_matches, "deps")
+                    .unwrap_or_default()
+                    .split(',')
+                    .filter_map(|s| s.trim().parse::<u64>().ok())
+                    .collect::<Vec<_>>();
+                let memo = take_string(sub_matches, "memo").unwrap_or_default();
+                let quorum_threshold_ppm = parse_u64_required(
+                    take_string(sub_matches, "quorum_threshold_ppm"),
+                    "quorum_threshold_ppm",
+                )? as u32;
+                let expiry_blocks =
+                    parse_u64_required(take_string(sub_matches, "expiry_blocks"), "expiry_blocks")?;
+                let epoch = parse_u64_required(take_string(sub_matches, "epoch"), "epoch")?;
+                let proposer =
+                    take_string(sub_matches, "proposer").unwrap_or_else(|| "cli".to_string());
+                let rpc = take_string(sub_matches, "rpc")
+                    .unwrap_or_else(|| "http://localhost:26658".into());
+                let timeline = sub_matches.get_flag("timeline");
+                let dry_run = sub_matches.get_flag("dry-run");
+                Ok(GovCmd::EnergySettlement {
+                    mode,
+                    activation_epoch,
+                    rollback_window_epochs,
+                    deps,
+                    memo,
+                    quorum_threshold_ppm,
+                    expiry_blocks,
+                    epoch,
+                    proposer,
+                    rpc,
+                    timeline,
+                    dry_run,
+                })
             }
             other => Err(format!("unknown subcommand '{other}' for 'gov'")),
         }
@@ -1477,6 +1629,69 @@ pub fn handle(cmd: GovCmd) {
             let mut stdout = io::stdout();
             if let Err(err) = handle_disburse(action, &mut stdout) {
                 eprintln!("disburse command failed: {err}");
+            }
+        }
+        GovCmd::EnergySettlement {
+            mode,
+            activation_epoch,
+            rollback_window_epochs,
+            deps,
+            memo,
+            quorum_threshold_ppm,
+            expiry_blocks,
+            epoch,
+            proposer,
+            rpc,
+            timeline,
+            dry_run,
+        } => {
+            let mut payload = json::Map::new();
+            payload.insert("mode".into(), Value::String(mode));
+            payload.insert("activation_epoch".into(), json_u64(activation_epoch));
+            payload.insert(
+                "rollback_window_epochs".into(),
+                json_u64(rollback_window_epochs),
+            );
+            payload.insert(
+                "deps".into(),
+                Value::Array(deps.into_iter().map(json_u64).collect()),
+            );
+            payload.insert("memo".into(), Value::String(memo));
+            payload.insert(
+                "quorum_threshold_ppm".into(),
+                json_u64(quorum_threshold_ppm as u64),
+            );
+            payload.insert("expiry_blocks".into(), json_u64(expiry_blocks));
+            payload.insert("current_epoch".into(), json_u64(epoch));
+            payload.insert("proposer".into(), Value::String(proposer));
+            let payload_value = Value::Object(payload.clone());
+            if timeline {
+                match call_rpc(&rpc, "gov.energy_settlement_history", Value::Object(json::Map::new()))
+                {
+                    Ok(resp) => {
+                        let pretty =
+                            json::to_string_pretty(&resp).unwrap_or_else(|_| resp.to_string());
+                        println!("{pretty}");
+                    }
+                    Err(err) => eprintln!("energy-settlement timeline failed: {err}"),
+                }
+                return;
+            }
+            if dry_run {
+                let pretty = json::to_string_pretty(&payload_value)
+                    .unwrap_or_else(|_| payload_value.to_string());
+                println!("{pretty}");
+                return;
+            }
+            match call_rpc(&rpc, "gov.energy_settlement", payload_value.clone()) {
+                Ok(resp) => {
+                    if let Some(id) = resp.get("id").and_then(|v| v.as_u64()) {
+                        println!("submitted energy settlement change as proposal {id}");
+                    } else {
+                        println!("submitted energy settlement change");
+                    }
+                }
+                Err(err) => eprintln!("energy-settlement submit failed: {err}"),
             }
         }
         GovCmd::List { state } => {

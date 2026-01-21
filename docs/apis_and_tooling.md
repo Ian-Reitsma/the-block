@@ -92,6 +92,8 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 
 **Energy CLI** (`contract-cli energy`) wraps the `energy.*` RPCs (`register`, `market`, `settle`, `submit-reading`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads. See `docs/testnet/ENERGY_QUICKSTART.md` for walkthroughs.
 
+**Energy settlement governance** uses `gov.energy_settlement` to submit mode changes and `gov.energy_settlement_history` to enumerate the applied/rollback timeline. `contract-cli gov energy-settlement` supports `--dry-run` to print the request payload and `--timeline` to fetch the persisted history before executing. Both RPCs/CLI commands surface the `energy_settlement_mode` gauge and `energy_settlement_rollback_total` counter described in `docs/operations.md#telemetry-wiring`.
+
 ### Energy RPC payloads, auth, and error contracts
 - Endpoints live under `energy.*` and inherit the RPC server’s mutual-TLS/auth policy (`TB_RPC_AUTH_TOKEN`, allowlists) plus IP-based rate limiting defined in `docs/operations.md#gateway-policy`. Use `contract-cli diagnostics rpc-policy` to inspect the live policy before enabling public oracle submitters.
 - Endpoint map:

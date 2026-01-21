@@ -98,6 +98,7 @@ Use the dedicated dispute RPCs + CLI to rehearse investigations before falling b
 - Grafana: `http://localhost:3000` (default `admin/admin`). Panels show `energy_providers_count`, `energy_kwh_traded_total`, `energy_avg_price`, slash totals, and oracle latency histograms exported by `crates/energy-market`. Add alerts that trigger whenever pending credits exceed 25 or when oracle latency > threshold.
 - Metrics aggregator: `make monitor` exposes `/telemetry/summary` and `/wrappers` so you can scrape energy KPIs alongside transport/runtime metadata. The `energy_providers_count` and `oracle_reading_latency_seconds` series feed the default dashboards.
 - Health checks: `node::energy::check_energy_market_health` logs warnings if oracle latency or pending credits trip the thresholds. Monitor the log stream or scrape `journalctl` for `energy market pending credits`.
+- Governance review: `contract-cli gov energy-settlement --timeline` prints the persisted mode/timeline log, `--dry-run` renders the payload, and the explorer endpoint `/governance/energy/settlement/history` exposes the same records for auditors/telemetry.
 
 ## 9. Snapshot, Restore, and Chaos Drills
 - **SimpleDb + sled snapshots** — Stop the node, copy `$TB_ENERGY_MARKET_DIR`, restart on staging, and run `contract-cli energy market --verbose` to confirm byte-identical state. Log the drill duration, `energy_snapshot_duration_seconds`, and any errors surfaced via `/wrappers`. Repeat after schema changes.

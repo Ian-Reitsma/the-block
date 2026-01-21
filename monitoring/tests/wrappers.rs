@@ -48,7 +48,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595",
+        "ed8e176654d4d57e208984a0291e1fa743463ebeda81d1d2b1e701e09f39a3fe",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );
@@ -79,4 +79,3 @@ fn wrappers_snapshot_hash_is_pinned() {
         "governance wrapper missing treasury_balance"
     );
 }
-

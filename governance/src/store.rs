@@ -17,6 +17,7 @@ use crate::treasury::{
     DisbursementReceipt, DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind,
     TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
+use crate::{EnergySettlementChangePayload, EnergySettlementMode};
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
@@ -42,6 +43,7 @@ const DID_REVOCATION_HISTORY_LIMIT: usize = 512;
 const TREASURY_HISTORY_LIMIT: usize = 1024;
 const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
 const TREASURY_INTENT_HISTORY_LIMIT: usize = 512;
+const ENERGY_SETTLEMENT_HISTORY_LIMIT: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TreasuryBalances {
@@ -62,6 +64,78 @@ impl TreasuryBalances {
         }
         Ok(Self {
             balance: updated as u64,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct EnergySettlementChangeRecord {
+    pub proposal_id: u64,
+    pub previous_mode: i64,
+    pub new_mode: i64,
+    pub applied_at_epoch: u64,
+    pub activation_epoch: u64,
+    pub rollback_window_epochs: u64,
+    pub memo: String,
+    pub deps: Vec<u64>,
+    pub quorum_threshold_ppm: u32,
+    pub expiry_blocks: u64,
+    pub rolled_back_at: Option<u64>,
+}
+
+impl BinaryCodec for EnergySettlementChangePayload {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.desired_mode.encode(writer);
+        self.activation_epoch.encode(writer);
+        self.rollback_window_epochs.encode(writer);
+        self.deps.encode(writer);
+        self.memo.encode(writer);
+        self.quorum_threshold_ppm.encode(writer);
+        self.expiry_blocks.encode(writer);
+    }
+
+    fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            desired_mode: EnergySettlementMode::decode(reader)?,
+            activation_epoch: u64::decode(reader)?,
+            rollback_window_epochs: u64::decode(reader)?,
+            deps: Vec::<u64>::decode(reader)?,
+            memo: String::decode(reader)?,
+            quorum_threshold_ppm: u32::decode(reader)?,
+            expiry_blocks: u64::decode(reader)?,
+        })
+    }
+}
+
+impl BinaryCodec for EnergySettlementChangeRecord {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.proposal_id.encode(writer);
+        self.previous_mode.encode(writer);
+        self.new_mode.encode(writer);
+        self.applied_at_epoch.encode(writer);
+        self.activation_epoch.encode(writer);
+        self.rollback_window_epochs.encode(writer);
+        self.memo.encode(writer);
+        self.deps.encode(writer);
+        self.quorum_threshold_ppm.encode(writer);
+        self.expiry_blocks.encode(writer);
+        self.rolled_back_at.encode(writer);
+    }
+
+    fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            proposal_id: u64::decode(reader)?,
+            previous_mode: i64::decode(reader)?,
+            new_mode: i64::decode(reader)?,
+            applied_at_epoch: u64::decode(reader)?,
+            activation_epoch: u64::decode(reader)?,
+            rollback_window_epochs: u64::decode(reader)?,
+            memo: String::decode(reader)?,
+            deps: Vec::<u64>::decode(reader)?,
+            quorum_threshold_ppm: u32::decode(reader)?,
+            expiry_blocks: u64::decode(reader)?,
+            rolled_back_at: Option::<u64>::decode(reader)?,
         })
     }
 }
@@ -1309,6 +1383,18 @@ impl GovStore {
             .unwrap_or_else(|e| panic!("open treasury balance history tree: {e}"))
     }
 
+    fn energy_settlement_payloads(&self) -> sled::Tree {
+        self.db
+            .open_tree("energy/settlement_payloads")
+            .unwrap_or_else(|e| panic!("open energy settlement payloads tree: {e}"))
+    }
+
+    fn energy_settlement_history_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("energy/settlement_history")
+            .unwrap_or_else(|e| panic!("open energy settlement history tree: {e}"))
+    }
+
     fn treasury_execution_intent_path(&self) -> PathBuf {
         self.base_path
             .join("governance")
@@ -1968,6 +2054,46 @@ impl GovStore {
         Ok(next)
     }
 
+    pub fn submit_energy_settlement_change(
+        &self,
+        payload: EnergySettlementChangePayload,
+        proposer: String,
+        current_epoch: u64,
+    ) -> sled::Result<u64> {
+        payload
+            .validate()
+            .map_err(|err| sled::Error::Unsupported(err.into()))?;
+        let desired_mode = match payload.desired_mode {
+            crate::EnergySettlementMode::Batch => 0,
+            crate::EnergySettlementMode::RealTime => 1,
+        };
+        let proposal = Proposal {
+            id: 0,
+            key: ParamKey::EnergySettlementMode,
+            new_value: desired_mode,
+            min: 0,
+            max: 1,
+            proposer,
+            created_epoch: current_epoch,
+            vote_deadline_epoch: payload
+                .activation_epoch
+                .max(current_epoch + ACTIVATION_DELAY),
+            activation_epoch: Some(
+                payload
+                    .activation_epoch
+                    .max(current_epoch + ACTIVATION_DELAY),
+            ),
+            status: ProposalStatus::Open,
+            deps: payload.deps.clone(),
+        };
+        let id = self.submit(proposal)?;
+        let encoded = encode_binary(&payload)
+            .map_err(|_| sled::Error::Unsupported("encode energy payload".into()))?;
+        self.energy_settlement_payloads()
+            .insert(ser(&id)?, encoded)?;
+        Ok(id)
+    }
+
     pub fn submit_release(&self, mut r: ReleaseVote) -> sled::Result<u64> {
         if r.build_hash.len() != 64 || !r.build_hash.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(sled::Error::Unsupported("invalid release hash".into()));
@@ -2500,6 +2626,36 @@ impl GovStore {
                                     .map_err(|_| sled::Error::Unsupported("apply".into()))?;
                                 (spec.apply_runtime)(prop.new_value, rt)
                                     .map_err(|_| sled::Error::Unsupported("apply".into()))?;
+                                if prop.key == ParamKey::EnergySettlementMode {
+                                    if let Ok(payload_opt) = self.energy_settlement_payload(prop.id)
+                                    {
+                                        if let Some(p) = payload_opt {
+                                            params.energy_settlement_quorum_ppm =
+                                                p.quorum_threshold_ppm as i64;
+                                            params.energy_settlement_expiry_blocks =
+                                                p.expiry_blocks as i64;
+                                            rt.set_energy_settlement_quorum_ppm(
+                                                p.quorum_threshold_ppm,
+                                            );
+                                            rt.set_energy_settlement_expiry_blocks(p.expiry_blocks);
+                                            self.record_energy_settlement_change(
+                                                prop.id,
+                                                old,
+                                                prop.new_value,
+                                                Some(p),
+                                                current_epoch,
+                                            )?;
+                                        } else {
+                                            self.record_energy_settlement_change(
+                                                prop.id,
+                                                old,
+                                                prop.new_value,
+                                                None,
+                                                current_epoch,
+                                            )?;
+                                        }
+                                    }
+                                }
                             }
                             let last = LastActivation {
                                 proposal_id: prop.id,
@@ -2542,6 +2698,110 @@ impl GovStore {
         }
     }
 
+    pub fn energy_settlement_payload(
+        &self,
+        proposal_id: u64,
+    ) -> sled::Result<Option<EnergySettlementChangePayload>> {
+        match self.energy_settlement_payloads().get(ser(&proposal_id)?) {
+            Ok(Some(raw)) => {
+                let payload: EnergySettlementChangePayload = de(&raw)?;
+                Ok(Some(payload))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn energy_settlement_record(
+        &self,
+        proposal_id: u64,
+    ) -> sled::Result<Option<EnergySettlementChangeRecord>> {
+        match self
+            .energy_settlement_history_tree()
+            .get(ser(&proposal_id)?)
+        {
+            Ok(Some(raw)) => {
+                let record: EnergySettlementChangeRecord = de(&raw)?;
+                Ok(Some(record))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn energy_settlement_history(&self) -> sled::Result<Vec<EnergySettlementChangeRecord>> {
+        let mut history = Vec::new();
+        let tree = self.energy_settlement_history_tree();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let record: EnergySettlementChangeRecord = de(&raw)?;
+            history.push(record);
+        }
+        history.sort_by(|a, b| b.applied_at_epoch.cmp(&a.applied_at_epoch));
+        Ok(history)
+    }
+
+    fn energy_settlement_window(&self, proposal_id: u64) -> sled::Result<u64> {
+        if let Some(record) = self.energy_settlement_record(proposal_id)? {
+            Ok(record.rollback_window_epochs)
+        } else {
+            Ok(ROLLBACK_WINDOW_EPOCHS)
+        }
+    }
+
+    fn record_energy_settlement_change(
+        &self,
+        proposal_id: u64,
+        previous_mode: i64,
+        new_mode: i64,
+        payload: Option<EnergySettlementChangePayload>,
+        applied_at: u64,
+    ) -> sled::Result<()> {
+        let record = EnergySettlementChangeRecord {
+            proposal_id,
+            previous_mode,
+            new_mode,
+            applied_at_epoch: applied_at,
+            activation_epoch: payload
+                .as_ref()
+                .map(|p| p.activation_epoch)
+                .unwrap_or(applied_at),
+            rollback_window_epochs: payload
+                .as_ref()
+                .map(|p| p.rollback_window_epochs)
+                .unwrap_or(ROLLBACK_WINDOW_EPOCHS),
+            memo: payload.as_ref().map(|p| p.memo.clone()).unwrap_or_default(),
+            deps: payload.as_ref().map(|p| p.deps.clone()).unwrap_or_default(),
+            quorum_threshold_ppm: payload
+                .as_ref()
+                .map(|p| p.quorum_threshold_ppm)
+                .unwrap_or(0),
+            expiry_blocks: payload.as_ref().map(|p| p.expiry_blocks).unwrap_or(0),
+            rolled_back_at: None,
+        };
+        let tree = self.energy_settlement_history_tree();
+        tree.insert(ser(&proposal_id)?, ser(&record)?)?;
+        if tree.len() > ENERGY_SETTLEMENT_HISTORY_LIMIT {
+            // keep newest by proposal id; remove smallest keys
+            let excess = tree.len().saturating_sub(ENERGY_SETTLEMENT_HISTORY_LIMIT);
+            for item in tree.iter().take(excess) {
+                if let Ok((k, _)) = item {
+                    let _ = tree.remove(k);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn mark_energy_settlement_rollback(&self, proposal_id: u64, current_epoch: u64) {
+        if let Ok(Some(mut record)) = self.energy_settlement_record(proposal_id) {
+            record.rolled_back_at = Some(current_epoch);
+            let _ = self
+                .energy_settlement_history_tree()
+                .insert(ser(&proposal_id).unwrap(), ser(&record).unwrap());
+        }
+    }
+
     pub fn rollback_last(
         &self,
         current_epoch: u64,
@@ -2553,7 +2813,12 @@ impl GovStore {
             let hist_dir = self.base_path.join("governance/history");
             let _ = std::fs::create_dir_all(&hist_dir);
             let last: LastActivation = de(&raw)?;
-            if current_epoch > last.activated_epoch + ROLLBACK_WINDOW_EPOCHS {
+            let window = if last.key == ParamKey::EnergySettlementMode {
+                self.energy_settlement_window(last.proposal_id)?
+            } else {
+                ROLLBACK_WINDOW_EPOCHS
+            };
+            if current_epoch > last.activated_epoch + window {
                 return Err(sled::Error::Unsupported("expired".into()));
             }
             if let Some(spec) = registry().iter().find(|s| s.key == last.key) {
@@ -2577,6 +2842,9 @@ impl GovStore {
                 let mut prop: Proposal = de(&prop_raw)?;
                 prop.status = ProposalStatus::RolledBack;
                 self.proposals().insert(ser(&prop.id)?, ser(&prop)?)?;
+            }
+            if last.key == ParamKey::EnergySettlementMode {
+                self.mark_energy_settlement_rollback(last.proposal_id, current_epoch);
             }
             self.last_activation().remove("last")?;
             rt.clear_current_params();
@@ -2859,6 +3127,9 @@ impl GovStore {
         );
         prop.status = ProposalStatus::RolledBack;
         self.proposals().insert(key, ser(&prop)?)?;
+        if prop.key == ParamKey::EnergySettlementMode {
+            self.mark_energy_settlement_rollback(prop.id, current_epoch);
+        }
         rt.clear_current_params();
         Ok(())
     }
