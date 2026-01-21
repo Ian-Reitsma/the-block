@@ -14,15 +14,14 @@ fn admission_enforces_sender_limits_and_tracks_fee_floor() {
     }
     assert_eq!(state.floor(), 12);
 
-    // Limit 1 per sender enforced.
-    let second = state.reserve_sender("alice", 1).unwrap();
+    // Limit 1 per sender enforced (reservation remains held after commit).
     let err = match state.reserve_sender("alice", 1) {
         Ok(_) => panic!("should hit sender limit"),
         Err(err) => err,
     };
     assert!(matches!(err, TxAdmissionError::PendingLimitReached));
 
-    // Dropping the reservation releases the slot.
-    drop(second);
+    // Releasing the slot allows new reservations.
+    state.release_sender("alice");
     assert!(state.reserve_sender("alice", 1).is_ok());
 }

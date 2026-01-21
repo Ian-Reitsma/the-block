@@ -93,9 +93,9 @@ pub struct GovernanceWrapperEntry {
     pub executor_pending_matured: u64,
     pub executor_staged_intents: u64,
     pub executor_lease_released: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_last_success_at: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub executor_last_error_at: Option<u64>,
 }
 
@@ -427,7 +427,20 @@ mod tests {
                 "wrappers": {
                     "metrics": [
                         {"metric": "foo", "labels": {"region": "us"}, "value": 1.0}
-                    ]
+                    ],
+                    "governance": {
+                        "treasury_balance": 0,
+                        "disbursements_total": 0,
+                        "executed_total": 0,
+                        "rolled_back_total": 0,
+                        "draft_total": 0,
+                        "voting_total": 0,
+                        "queued_total": 0,
+                        "timelocked_total": 0,
+                        "executor_pending_matured": 0,
+                        "executor_staged_intents": 0,
+                        "executor_lease_released": false
+                    }
                 },
                 "ad_readiness": null
             }"#,

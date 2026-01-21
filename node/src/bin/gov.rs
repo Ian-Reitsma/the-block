@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn command_shape_includes_all_subcommands() {
         let cmd = build_command();
-        let ids: Vec<_> = cmd.subcommands.iter().map(|s| s.id().0.to_owned()).collect();
+        let ids: Vec<_> = cmd.subcommands.iter().map(|s| s.id.0.to_owned()).collect();
         assert!(
             ids.contains(&"gov.submit".to_string())
                 && ids.contains(&"gov.vote".to_string())

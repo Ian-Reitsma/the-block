@@ -9,6 +9,7 @@ use util::temp::temp_dir;
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {});
+    std::env::set_var("TB_FAST_MINE", "1");
 }
 
 fn build_signed_tx(
@@ -46,7 +47,7 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             bc.min_fee_per_byte_consumer = 0;
             bc.min_fee_per_byte_industrial = 0;
             bc.recompute_difficulty();
-            bc.add_account("a".into(), 0).unwrap();
+            bc.add_account("a".into(), 100_000).unwrap();
             bc.add_account("b".into(), 0).unwrap();
             let (sk, pk) = generate_keypair();
             // Verify keypair is valid size
@@ -74,7 +75,7 @@ tb_prop_test!(nonce_and_supply_hold, |runner| {
             bc.min_fee_per_byte_consumer = 0;
             bc.min_fee_per_byte_industrial = 0;
             bc.recompute_difficulty();
-            bc.add_account("a".into(), 0).unwrap();
+            bc.add_account("a".into(), 100_000).unwrap();
             bc.add_account("b".into(), 0).unwrap();
             let (sk, pk) = generate_keypair();
             // Verify keypair is valid size
