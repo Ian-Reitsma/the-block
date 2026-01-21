@@ -23,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use the_block::compute_market::settlement::{SlaResolution, SlaResolutionKind};
 use the_block::compute_market::snark::{CircuitArtifact, ProofBundle, SnarkBackend};
-use the_block::governance::treasury::parse_dependency_list;
+use the_block::governance::treasury::{canonical_dependencies, ExpectedReceipt, MAX_MEMO_BYTES};
 use the_block::{
     compute_market::{receipt::Receipt as ComputeReceipt, Job},
     dex::order_book::OrderBook,
@@ -981,7 +981,7 @@ pub fn build_executor_report(store_path: &str) -> Result<ExplorerExecutorReport,
             )
         })
         .filter_map(|d| {
-            let deps = parse_dependency_list(&d.memo);
+            let deps = canonical_dependencies(&d);
             if deps.is_empty() {
                 None
             } else {
@@ -2064,6 +2064,10 @@ pub struct TreasuryDisbursementRow {
     pub status_label: String,
     pub status_timestamp: u64,
     pub status: DisbursementStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_receipts: Vec<ExpectedReceipt>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deps: Vec<u64>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub executed_tx_hash: Option<String>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
@@ -2191,6 +2195,25 @@ impl TreasuryDisbursementRow {
             Self::number(self.status_timestamp),
         );
         map.insert("status".into(), Self::status_json(&self.status));
+        if !self.expected_receipts.is_empty() {
+            map.insert(
+                "expected_receipts".into(),
+                json::to_value(&self.expected_receipts)
+                    .unwrap_or_else(|_| json::Value::Array(Vec::new())),
+            );
+        }
+        if !self.deps.is_empty() {
+            map.insert(
+                "deps".into(),
+                json::Value::Array(
+                    self.deps
+                        .iter()
+                        .copied()
+                        .map(|v| json::Number::from(v).into())
+                        .collect(),
+                ),
+            );
+        }
         if let Some(hash) = &self.executed_tx_hash {
             map.insert("executed_tx_hash".into(), json::Value::String(hash.clone()));
         }
@@ -3595,7 +3618,7 @@ impl Explorer {
         tx.execute("DELETE FROM treasury_disbursements", params![])?;
         for record in records {
             let fields = derive_status_fields(&record.status);
-            let status_payload = json::to_string(&record.status).unwrap_or_else(|_| "{}".into());
+            let status_payload = json::to_string(record).unwrap_or_else(|_| "{}".into());
             tx.execute(
                 "INSERT OR REPLACE INTO treasury_disbursements (id, destination, amount, memo, scheduled_epoch, created_at, status, status_ts, tx_hash, cancel_reason, status_payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 params![
@@ -3627,13 +3650,17 @@ impl Explorer {
         let mut conn = self.conn()?;
         let tx = conn.transaction()?;
         for entry in events {
+            let mut memo = entry.memo.clone();
+            if memo.len() > MAX_MEMO_BYTES {
+                memo.truncate(MAX_MEMO_BYTES);
+            }
             tx.execute(
                 "INSERT OR REPLACE INTO treasury_timeline (disbursement_id, destination, amount, memo, scheduled_epoch, tx_hash, executed_at, block_hash, block_height) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     entry.disbursement_id as i64,
                     &entry.destination,
                     entry.amount as i64,
-                    &entry.memo,
+                    &memo,
                     entry.scheduled_epoch as i64,
                     &entry.tx_hash,
                     entry.executed_at as i64,
@@ -3660,43 +3687,69 @@ impl Explorer {
             let tx_hash: Option<String> = row.get(8)?;
             let cancel_reason: Option<String> = row.get(9)?;
             let status_payload: Option<String> = row.get(10)?;
-            let status = if let Some(payload) = status_payload {
-                json::from_str(&payload).unwrap_or_else(|_| {
+            let parsed: Option<TreasuryDisbursement> = status_payload
+                .as_deref()
+                .and_then(|payload| json::from_str(payload).ok());
+            let status = parsed
+                .as_ref()
+                .map(|d| d.status.clone())
+                .unwrap_or_else(|| {
                     legacy_status_from_label(
                         &status_text,
                         status_ts.max(0) as u64,
                         &tx_hash,
                         &cancel_reason,
                     )
-                })
-            } else {
-                legacy_status_from_label(
-                    &status_text,
-                    status_ts.max(0) as u64,
-                    &tx_hash,
-                    &cancel_reason,
-                )
+                });
+            let executed_tx_hash = match &status {
+                DisbursementStatus::Executed { tx_hash, .. }
+                | DisbursementStatus::Finalized { tx_hash, .. } => Some(tx_hash.clone()),
+                _ => tx_hash.clone(),
             };
-            let executed_tx_hash = if matches!(status, DisbursementStatus::Executed { .. }) {
-                tx_hash.clone()
-            } else {
-                None
+            let cancel_text = match &status {
+                DisbursementStatus::RolledBack { reason, .. } => Some(reason.clone()),
+                _ => cancel_reason.clone(),
             };
-            let cancel_text = if matches!(status, DisbursementStatus::RolledBack { .. }) {
-                cancel_reason.clone()
-            } else {
-                None
-            };
+            let destination: String = parsed
+                .as_ref()
+                .map(|d| Ok(d.destination.clone()))
+                .unwrap_or_else(|| row.get(1))?;
+            let amount = parsed
+                .as_ref()
+                .map(|d| Ok(d.amount))
+                .unwrap_or_else(|| row.get::<_, i64>(2).map(|v| v as u64))?;
+            let memo: String = parsed
+                .as_ref()
+                .map(|d| Ok(d.memo.clone()))
+                .unwrap_or_else(|| row.get(3))?;
+            let scheduled_epoch = parsed
+                .as_ref()
+                .map(|d| Ok(d.scheduled_epoch))
+                .unwrap_or_else(|| row.get::<_, i64>(4).map(|v| v as u64))?;
+            let created_at = parsed
+                .as_ref()
+                .map(|d| Ok(d.created_at))
+                .unwrap_or_else(|| row.get::<_, i64>(5).map(|v| v as u64))?;
+            let expected_receipts = parsed
+                .as_ref()
+                .map(|d| d.expected_receipts.clone())
+                .unwrap_or_default();
+            let deps = parsed
+                .as_ref()
+                .map(|d| canonical_dependencies(d))
+                .unwrap_or_default();
             Ok(TreasuryDisbursementRow {
                 id: row.get::<_, i64>(0)? as u64,
-                destination: row.get(1)?,
-                amount: row.get::<_, i64>(2)? as u64,
-                memo: row.get(3)?,
-                scheduled_epoch: row.get::<_, i64>(4)? as u64,
-                created_at: row.get::<_, i64>(5)? as u64,
+                destination,
+                amount,
+                memo,
+                scheduled_epoch,
+                created_at,
                 status_label: status_text,
                 status_timestamp: status_ts.max(0) as u64,
                 status,
+                expected_receipts,
+                deps,
                 executed_tx_hash,
                 cancel_reason: cancel_text,
             })

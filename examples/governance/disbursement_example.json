@@ -18,7 +18,7 @@
     "rollback_window_epochs": 1
   },
   "disbursement": {
-    "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
+    "destination": "tb1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
     "amount": 125000000,
     "memo": "Core grants Q2",
     "scheduled_epoch": 180500,

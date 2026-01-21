@@ -4325,6 +4325,50 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Derive the network-driven base reward for the next block using the NetworkIssuanceController.
+    fn compute_network_block_reward(&mut self) -> u64 {
+        let econ_params = economics::GovernanceEconomicParams::from_governance_params(
+            &self.params,
+            self.economics_prev_annual_issuance_block,
+            self.economics_prev_subsidy.clone(),
+            self.economics_prev_tariff.clone(),
+            self.economics_baseline_tx_count,
+            self.economics_baseline_tx_volume,
+            self.economics_baseline_miners,
+        );
+
+        let mut controller = economics::NetworkIssuanceController::with_baselines(
+            econ_params.network_issuance,
+            self.economics_baseline_tx_count,
+            self.economics_baseline_tx_volume,
+            self.economics_baseline_miners,
+        );
+
+        let util = &self.economics_prev_market_metrics;
+        let avg_market_utilization = (util.storage.utilization
+            + util.compute.utilization
+            + util.energy.utilization
+            + util.ad.utilization)
+            / 4.0;
+
+        let metrics = economics::network_issuance::NetworkMetrics {
+            tx_count: self.economics_epoch_tx_count,
+            tx_volume_block: self.economics_epoch_tx_volume_block,
+            unique_miners: self.recent_miners.len() as u64,
+            avg_market_utilization,
+            block_height: self.block_height,
+            total_emission: self.emission,
+        };
+
+        let reward = controller.compute_block_reward(&metrics);
+        let (baseline_tx_count, baseline_tx_volume, baseline_miners) =
+            controller.get_adaptive_baselines();
+        self.economics_baseline_tx_count = baseline_tx_count;
+        self.economics_baseline_tx_volume = baseline_tx_volume;
+        self.economics_baseline_miners = baseline_miners;
+        reward
+    }
+
     /// Mine a new block and award rewards to `miner_addr`.
     ///
     /// # Errors
@@ -4337,9 +4381,11 @@ impl Blockchain {
         let ts = self.recent_timestamps.make_contiguous();
         let (expected, _) =
             consensus::difficulty_retune::retune(last, ts, self.retune_hint, &self.params);
-        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
-            self.difficulty = expected;
+        let fast_mine = std::env::var("TB_FAST_MINE").as_deref() == Ok("1");
+        if fast_mine {
+            self.difficulty = 1;
         } else {
+            self.difficulty = expected;
             debug_assert_eq!(
                 self.difficulty, expected,
                 "stale difficulty; call recompute_difficulty after mutating timestamps"
@@ -4354,32 +4400,9 @@ impl Blockchain {
                 .ok_or_else(|| py_value_err("empty chain"))?
         };
 
-        if std::env::var("TB_FAST_MINE").as_deref() == Ok("1") {
-            let mut block = Block::default();
-            block.index = index;
-            block.previous_hash = prev_hash.clone();
-            block.timestamp_millis = timestamp_millis;
-            block.difficulty = 1;
-            block.retune_hint = self.retune_hint;
-            block.base_fee = self.base_fee;
-            block.nonce = 0;
-            let mut hash_input = Vec::new();
-            hash_input.extend_from_slice(prev_hash.as_bytes());
-            hash_input.extend_from_slice(&index.to_le_bytes());
-            hash_input.extend_from_slice(&timestamp_millis.to_le_bytes());
-            block.hash = blake3::hash(&hash_input).to_hex().to_string();
-            self.chain.push(block.clone());
-            self.block_height = index + 1;
-            self.recent_timestamps.push_back(timestamp_millis);
-            return Ok(block);
-        }
-
-        // use the network-controlled base reward (falling back to the genesis value)
-        let base_reward = if self.economics_block_reward_per_block == 0 {
-            INITIAL_BLOCK_REWARD
-        } else {
-            self.economics_block_reward_per_block
-        };
+        // Drive the base reward from the NetworkIssuanceController; keep logistic as a fairness multiplier.
+        let base_reward = self.compute_network_block_reward().max(1);
+        self.economics_block_reward_per_block = base_reward;
         self.block_reward = TokenAmount::new(base_reward);
         let active_eff = {
             let mut counts: HashMap<String, u64> = HashMap::new();
@@ -4850,8 +4873,8 @@ impl Blockchain {
                 let mut acc =
                     receipts_validation::ReceiptShardAccumulator::new(self.receipt_shard_count);
                 for receipt in &block_receipts {
-                    let encoded_len = receipts_validation::encoded_receipt_len(receipt)
-                        .unwrap_or_default();
+                    let encoded_len =
+                        receipts_validation::encoded_receipt_len(receipt).unwrap_or_default();
                     acc.add(receipt, encoded_len);
                 }
                 for (idx, usage) in acc.per_shard_usage().iter().enumerate() {
@@ -4914,7 +4937,13 @@ impl Blockchain {
         }
 
         let treasury_percent = self.params.treasury_percent.clamp(0, 100) as u64;
-        let treasury_cut = base_coinbase_block.saturating_mul(treasury_percent) / 100;
+        let treasury_cut = if treasury_percent == 0 {
+            0
+        } else {
+            // Ceil division to ensure a non-zero treasury share when rewards are tiny.
+            ((base_coinbase_block as u128 * treasury_percent as u128 + 99) / 100)
+                .min(base_coinbase_block as u128) as u64
+        };
         let mut actual_treasury_accrued = 0u64;
         if treasury_cut > 0 {
             if let Err(err) = NODE_GOV_STORE.record_treasury_accrual(treasury_cut) {
@@ -5214,7 +5243,7 @@ impl Blockchain {
                 &prev_hash,
                 timestamp_millis,
                 nonce,
-                diff,
+                if fast_mine { 1 } else { diff },
                 block_base_fee,
                 block.coinbase_block,
                 block.coinbase_industrial,
@@ -5250,7 +5279,7 @@ impl Blockchain {
                 block.receipt_header.as_ref(),
             );
             let bytes = hex_to_bytes(&hash);
-            if leading_zero_bits(&bytes) >= diff as u32 {
+            if fast_mine || leading_zero_bits(&bytes) >= diff as u32 {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());

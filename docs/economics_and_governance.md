@@ -40,6 +40,8 @@ The canonical issuance controller lives in `node/src/economics/network_issuance.
 
 All state for this controller (EMA baselines, clamp bounds, alpha values) is stored in the governance params struct `NetworkIssuanceParams` and exposed via telemetry so replay stays deterministic.
 
+During block production, the node takes the controller’s per-block reward output and only multiplies it by the miner-fairness logistic factor (based on recent miner diversity); the legacy decay math is gone. This keeps runtime rewards aligned with the controller while still smoothing miner concentration.
+
 ### Telemetry-driven gating
 
 Every epoch `node/src/lib.rs` increments the on-chain counters `economics_epoch_tx_count`,
@@ -220,6 +222,7 @@ Conversions can optionally include device-link attestations (explicit opt-in) to
 - Once a disbursement proposal passes, `GovStore` persists the queued entry in sled and snapshots the activation epoch + prior rollbacks to `provenance.json` using first-party encoding (Option A from the task brief). The rollback window remains **block-height bounded** via `governance::store::ROLLBACK_WINDOW_EPOCHS`, guaranteeing deterministic replay on both x86_64 and AArch64.
 - Executions emit BLOCK receipts inside the consolidated ledger—no new token types—and every transition (queued, timelocked, executed, rollback) records a ledger journal entry so the explorer and CLI timelines never diverge. Rollbacks simply mark the disbursement as `RolledBack { rolled_back_at, reason }` and append a compensating ledger entry; finalized executions capture the `tx_hash`, execution height, and attested receipt bundle.
 - Metrics wiring tracks both balances and pipeline health: `treasury_balance`, `treasury_disbursement_backlog`, and `governance_disbursements_total{status}`. The metrics aggregator exposes `/treasury/summary` and `/governance/disbursements` so dashboards can chart backlog age, quorum wait time, and execution throughput alongside existing treasury gauges. Explorer timelines render the same data (proposal metadata, vote outcomes, timelock window, execution tx, affected accounts, receipts, and rollback annotations).
+- Payload invariants: `destination` addresses must start with `tb1`, memos are capped at 8KiB, dependency lists are deduped and capped at 100 entries (proposal `deps` are preferred over memo hints), and `expected_receipts` must sum to the disbursement `amount`. RPC/CLI/Explorer expose the same `expected_receipts` + canonical `deps` view.
 - **Implementation checklist (AGENTS.md §15.A)** — The governance crate, CLI, explorer, and telemetry stack must:
   1. Extend DAG schemas with multi-stage approvals and attested release bundles (`governance/`, `node/src/governance`, `cli/src/governance`, explorer dashboards).
   2. Emit `/wrappers` metadata whenever treasury diffs occur so operators can diff governance state without scraping sled stores.

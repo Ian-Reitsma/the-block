@@ -5,9 +5,12 @@ use metrics_aggregator::{metrics_registry_guard, router, AppState};
 use std::env;
 use std::fs;
 use std::future::Future;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::time::Duration;
 use sys::tempfile;
+use foundation_telemetry::{GovernanceWrapperEntry, WrapperMetricEntry, WrapperSummaryEntry};
+use crypto_suite::hashing::blake3;
 use the_block::governance::treasury::{mark_cancelled, mark_executed, TreasuryBalanceEventKind};
 use the_block::governance::{GovStore, TreasuryBalanceSnapshot, TreasuryDisbursement};
 
@@ -21,10 +24,10 @@ fn treasury_metrics_exposed_via_prometheus() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo".into(), 75);
-    let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, String::new(), 50);
+    let scheduled = TreasuryDisbursement::new(1, "tb1dest-1".into(), 100, "memo".into(), 75);
+    let mut executed = TreasuryDisbursement::new(2, "tb1dest-2".into(), 200, String::new(), 50);
     mark_executed(&mut executed, "0xfeed".into());
-    let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, String::new(), 60);
+    let mut cancelled = TreasuryDisbursement::new(3, "tb1dest-3".into(), 150, String::new(), 60);
     mark_cancelled(&mut cancelled, "duplicate".into());
 
     let records = vec![scheduled, executed, cancelled];
@@ -89,7 +92,7 @@ fn treasury_metrics_from_store_source() {
     let queued = store
         .queue_disbursement(DisbursementPayload {
             disbursement: DisbursementDetails {
-                destination: "dest-4".into(),
+                destination: "tb1dest-4".into(),
                 amount: 120,
                 memo: "".into(),
                 scheduled_epoch: 400,
@@ -133,8 +136,9 @@ fn treasury_metrics_accept_legacy_string_fields() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let scheduled = TreasuryDisbursement::new(5, "legacy".into(), 300, String::new(), 10);
-    let mut executed = TreasuryDisbursement::new(6, "legacy-dest".into(), 150, String::new(), 11);
+    let scheduled = TreasuryDisbursement::new(5, "tb1legacy".into(), 300, String::new(), 10);
+    let mut executed =
+        TreasuryDisbursement::new(6, "tb1legacy-dest".into(), 150, String::new(), 11);
     mark_executed(&mut executed, "0xdead".into());
     let payload = json::to_vec_value(&disbursements_to_json_array(&[scheduled, executed]));
     fs::write(&treasury_file, payload).expect("write treasury file");
@@ -172,4 +176,48 @@ fn treasury_metrics_accept_legacy_string_fields() {
         let body = String::from_utf8(resp.body().to_vec()).expect("metrics utf8");
         assert!(body.contains("treasury_balance_current 450"));
     });
+}
+
+#[test]
+fn wrappers_schema_hash_is_stable() {
+    let mut map: BTreeMap<String, WrapperSummaryEntry> = BTreeMap::new();
+    map.insert(
+        "node-a".into(),
+        WrapperSummaryEntry {
+            metrics: vec![WrapperMetricEntry {
+                metric: "governance.treasury.executor.last_submitted_nonce".into(),
+                labels: HashMap::new(),
+                value: 7.0,
+            }],
+            governance: Some(GovernanceWrapperEntry {
+                treasury_balance: 1_200,
+                disbursements_total: 3,
+                executed_total: 1,
+                rolled_back_total: 1,
+                draft_total: 1,
+                voting_total: 0,
+                queued_total: 0,
+                timelocked_total: 0,
+                executor_pending_matured: 0,
+                executor_staged_intents: 0,
+                executor_lease_released: false,
+                executor_last_success_at: Some(123),
+                executor_last_error_at: None,
+            }),
+        },
+    );
+    let value = foundation_serialization::json::to_value(&map).expect("serialize wrappers map");
+    let encoded = foundation_serialization::json::to_vec_value(&value);
+    if std::env::var("PRINT_WRAPPERS_SNAPSHOT").as_deref() == Ok("1") {
+        let serialized =
+            String::from_utf8(encoded.clone()).expect("wrappers map utf8 serialization");
+        eprintln!("{serialized}");
+    }
+    let hash = blake3::hash(&encoded);
+    let hash_hex = hash.to_hex().to_string();
+    assert_eq!(
+        hash_hex.as_str(),
+        "e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595",
+        "wrappers schema or field set drifted; update consumers or refresh the expected hash intentionally"
+    );
 }

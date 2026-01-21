@@ -16,7 +16,7 @@ use foundation_serialization::{Deserialize, Serialize};
 use governance::{
     controller, encode_runtime_backend_policy, encode_storage_engine_policy,
     encode_transport_provider_policy, registry,
-    treasury::{parse_dependency_list, ExpectedReceipt, QuorumSpec},
+    treasury::{canonical_dependencies, ExpectedReceipt, QuorumSpec},
     DisbursementStatus, GovStore, ParamKey, Proposal, ProposalStatus,
     ReleaseAttestation as GovReleaseAttestation, ReleaseBallot, ReleaseVerifier, ReleaseVote,
     SignedExecutionIntent, TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
@@ -26,6 +26,11 @@ use httpd::ClientError;
 use std::io::{self, Write};
 use std::time::SystemTime;
 use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
+use the_block::rpc::treasury::{
+    METHOD_TREASURY_BALANCE, METHOD_TREASURY_BALANCE_HISTORY, METHOD_TREASURY_DISBURSEMENTS,
+    METHOD_TREASURY_EXECUTE, METHOD_TREASURY_GET, METHOD_TREASURY_QUEUE,
+    METHOD_TREASURY_ROLLBACK, METHOD_TREASURY_SUBMIT,
+};
 
 struct CliReleaseVerifier;
 
@@ -806,7 +811,7 @@ impl GovTreasuryCmd {
                 "Optional memo recorded alongside the disbursement",
             )))
             .arg(ArgSpec::Option(
-                OptionSpec::new("epoch", "epoch", "Epoch to execute the disbursement").default("0"),
+                OptionSpec::new("epoch", "epoch", "Epoch to execute the disbursement").default("1"),
             ))
             .arg(ArgSpec::Option(
                 OptionSpec::new("state", "state", "Path to governance state store")
@@ -866,7 +871,7 @@ impl GovTreasuryCmd {
             )))
             .arg(ArgSpec::Option(
                 OptionSpec::new("epoch", "epoch", "Current epoch for state advancement")
-                    .default("0"),
+                    .default("1"),
             ))
             .arg(ArgSpec::Option(
                 OptionSpec::new("rpc", "rpc", "JSON-RPC endpoint")
@@ -1743,7 +1748,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                     destination,
                     amount,
                     memo: memo_value.clone(),
-                    scheduled_epoch: epoch,
+                    scheduled_epoch: epoch.max(1),
                     expected_receipts: Vec::new(),
                 },
             };
@@ -1782,10 +1787,10 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let client = RpcClient::from_env();
             let request = QueueRequest {
                 id,
-                current_epoch: epoch.unwrap_or(0),
+                current_epoch: epoch.unwrap_or(1).max(1),
             };
             let envelope: RpcEnvelope<QueueResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.queue_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_QUEUE, request)?;
             let response = unwrap_rpc_result(envelope)?;
             if response.ok {
                 writeln!(out, "Disbursement {id} advanced successfully")?;
@@ -1851,7 +1856,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 receipts,
             };
             let envelope: RpcEnvelope<ExecuteResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.execute_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_EXECUTE, request)?;
             let response = unwrap_rpc_result(envelope)?;
             if response.ok {
                 writeln!(out, "Disbursement executed successfully")?;
@@ -1881,7 +1886,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let client = RpcClient::from_env();
             let request = RollbackRequest { id, reason };
             let envelope: RpcEnvelope<RollbackResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.rollback_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_ROLLBACK, request)?;
             let response = unwrap_rpc_result(envelope)?;
             if response.ok {
                 writeln!(out, "Disbursement rolled back successfully")?;
@@ -1928,7 +1933,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let disb_envelope: RpcEnvelope<RpcTreasuryDisbursementsResult> = call_rpc_envelope(
                 &client,
                 &rpc,
-                "gov.treasury.disbursements",
+                METHOD_TREASURY_DISBURSEMENTS,
                 disb_params.clone(),
             )?;
             let disbursement_result = unwrap_rpc_result(disb_envelope)?;
@@ -1936,7 +1941,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let balance_envelope: RpcEnvelope<RpcTreasuryBalanceResult> = call_rpc_envelope(
                 &client,
                 &rpc,
-                "gov.treasury.balance",
+                METHOD_TREASURY_BALANCE,
                 Value::Object(json::Map::new()),
             )?;
             let balance_result = unwrap_rpc_result(balance_envelope)?;
@@ -1946,7 +1951,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                 let history_envelope: RpcEnvelope<RpcTreasuryHistoryResult> = call_rpc_envelope(
                     &client,
                     &rpc,
-                    "gov.treasury.balance_history",
+                    METHOD_TREASURY_BALANCE_HISTORY,
                     history_params,
                 )?;
                 Some(unwrap_rpc_result(history_envelope)?)
@@ -1981,7 +1986,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let disb_envelope: RpcEnvelope<RpcTreasuryDisbursementsResult> = call_rpc_envelope(
                 &client,
                 &rpc,
-                "gov.treasury.disbursements",
+                METHOD_TREASURY_DISBURSEMENTS,
                 disb_params.clone(),
             )?;
             let disbursement_result = unwrap_rpc_result(disb_envelope)?;
@@ -1989,7 +1994,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
             let balance_envelope: RpcEnvelope<RpcTreasuryBalanceResult> = call_rpc_envelope(
                 &client,
                 &rpc,
-                "gov.treasury.balance",
+                METHOD_TREASURY_BALANCE,
                 Value::Object(json::Map::new()),
             )?;
             let balance_result = unwrap_rpc_result(balance_envelope)?;
@@ -2111,7 +2116,7 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
                     )
                 })
                 .filter_map(|d| {
-                    let deps = parse_dependency_list(&d.memo);
+                    let deps = canonical_dependencies(&d);
                     if deps.is_empty() {
                         None
                     } else {
@@ -2341,7 +2346,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                 signature: None,
             };
             let envelope: RpcEnvelope<SubmitResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.submit_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_SUBMIT, request)?;
             let response = unwrap_rpc_result(envelope)?;
             writeln!(out, "Disbursement submitted successfully")?;
             writeln!(out, "ID: {}", response.id)?;
@@ -2363,7 +2368,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             let client = RpcClient::from_env();
             let request = GetRequest { id };
             let envelope: RpcEnvelope<GetResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_GET, request)?;
             let response = unwrap_rpc_result(envelope)?;
             let serialized =
                 foundation_serialization::json::to_string_pretty(&response.disbursement)
@@ -2392,7 +2397,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                 current_epoch: epoch.unwrap_or(0),
             };
             let envelope: RpcEnvelope<QueueResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.queue_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_QUEUE, request)?;
             let response = unwrap_rpc_result(envelope)?;
             if response.ok {
                 writeln!(out, "Disbursement {id} advanced successfully")?;
@@ -2458,7 +2463,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                 receipts,
             };
             let envelope: RpcEnvelope<ExecuteResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.execute_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_EXECUTE, request)?;
             let response = unwrap_rpc_result(envelope)?;
             if response.ok {
                 writeln!(out, "Disbursement executed successfully")?;
@@ -2488,7 +2493,7 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             let client = RpcClient::from_env();
             let request = RollbackRequest { id, reason };
             let envelope: RpcEnvelope<RollbackResponse> =
-                call_rpc_envelope(&client, &rpc, "gov.treasury.rollback_disbursement", request)?;
+                call_rpc_envelope(&client, &rpc, METHOD_TREASURY_ROLLBACK, request)?;
             let response = unwrap_rpc_result(envelope)?;
             if response.ok {
                 writeln!(out, "Disbursement rolled back successfully")?;

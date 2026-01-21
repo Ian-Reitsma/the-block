@@ -5432,10 +5432,7 @@ impl Marketplace for InMemoryMarketplace {
     }
 }
 impl SledMarketplace {
-    fn persist_medians_snapshot(
-        &self,
-        snapshot: (u64, u64, u64),
-    ) -> Result<(), PersistenceError> {
+    fn persist_medians_snapshot(&self, snapshot: (u64, u64, u64)) -> Result<(), PersistenceError> {
         let bytes = foundation_serialization::json::to_vec(&snapshot)?;
         self.metadata_tree.insert(KEY_MEDIANS, bytes)?;
         self.metadata_tree.flush()?;

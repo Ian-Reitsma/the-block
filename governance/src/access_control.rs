@@ -426,4 +426,28 @@ mod tests {
         let result = ctx.authorize(&auth, Role::Operator);
         assert!(matches!(result, Err(AuthError::InvalidSignature { .. })));
     }
+
+    #[test]
+    fn rpc_method_prefix_invalidates_signatures() {
+        let (sk, vk) = create_test_keypair();
+
+        let mut ctx = AuthContext::new(60);
+        let mut roles = HashSet::new();
+        roles.insert(Role::Operator);
+        ctx.operator_registry
+            .register_operator(vk, roles, 0)
+            .expect("register");
+
+        let auth = AuthorizedCall::new("queue_disbursement".into(), current_timestamp(), 7, &sk);
+        assert!(ctx.authorize(&auth, Role::Operator).is_ok());
+
+        // Pretend a client signed the RPC method name instead of the auth token suffix.
+        let mut prefixed = auth.clone();
+        prefixed.operation = "gov.treasury.queue_disbursement".into();
+        let result = ctx.authorize(&prefixed, Role::Operator);
+        assert!(
+            matches!(result, Err(AuthError::InvalidSignature { .. })),
+            "signatures must be computed over the auth token suffix, not the RPC method name"
+        );
+    }
 }

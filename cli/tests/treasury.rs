@@ -9,6 +9,11 @@ use governance::{
     DisbursementStatus, GovStore, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
     TreasuryDisbursement,
 };
+use crypto_suite::hashing::blake3;
+use std::collections::HashSet;
+use the_block::rpc::treasury::{
+    METHOD_TREASURY_DISBURSEMENTS, METHOD_TREASURY_QUEUE, METHOD_TREASURY_SUBMIT,
+};
 use std::time::Duration;
 use sys::tempfile;
 
@@ -38,7 +43,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     handle_with_writer(
         GovCmd::Treasury {
             action: GovTreasuryCmd::Schedule {
-                destination: "dest-1".into(),
+                destination: "tb1dest-1".into(),
                 amount: 500,
                 memo: Some("ecosystem grant".into()),
                 epoch: 2048,
@@ -49,7 +54,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     )
     .expect("schedule disbursement");
     let scheduled = fetch_disbursement(&state, 1);
-    assert_eq!(scheduled.destination, "dest-1");
+    assert_eq!(scheduled.destination, "tb1dest-1");
     assert_eq!(scheduled.amount, 500);
     assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
     let first_created_at = scheduled.created_at;
@@ -58,7 +63,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     handle_with_writer(
         GovCmd::Treasury {
             action: GovTreasuryCmd::Schedule {
-                destination: "dest-2".into(),
+                destination: "tb1dest-2".into(),
                 amount: 200,
                 memo: None,
                 epoch: 4096,
@@ -69,7 +74,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     )
     .expect("schedule second disbursement");
     let queued_second = fetch_disbursement(&state, 2);
-    assert_eq!(queued_second.destination, "dest-2");
+    assert_eq!(queued_second.destination, "tb1dest-2");
     assert!(matches!(
         queued_second.status,
         DisbursementStatus::Draft { .. }
@@ -138,6 +143,95 @@ fn treasury_lifecycle_outputs_structured_json() {
     assert!(entries
         .iter()
         .any(|entry| matches!(entry.status, DisbursementStatus::RolledBack { .. })));
+}
+
+#[test]
+fn treasury_schema_hash_matches_explorer_and_rpc_constants() {
+    assert!(
+        METHOD_TREASURY_QUEUE.ends_with("queue_disbursement"),
+        "RPC suffix drift would desync auth tokens"
+    );
+    assert!(
+        METHOD_TREASURY_SUBMIT.starts_with("gov.treasury."),
+        "treasury RPC methods must stay under gov.treasury.*"
+    );
+
+    let value: JsonValue = foundation_serialization::json::from_str(
+        r#"{
+            "disbursements": [{
+                "id": 7,
+                "destination": "tb1cli",
+                "amount": 42,
+                "memo": "memo",
+                "scheduled_epoch": 9,
+                "created_at": 1,
+                "status": "draft",
+                "status_label": "draft",
+                "status_timestamp": 1,
+                "deps": [],
+                "expected_receipts": [],
+                "executed_tx_hash": null,
+                "cancel_reason": null
+            }],
+            "next_cursor": null
+        }"#,
+    )
+    .expect("build treasury payload");
+    let entry = value["disbursements"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|v| v.as_object())
+        .cloned()
+        .expect("disbursement object");
+    let mut keys: Vec<String> = entry.keys().cloned().collect();
+    keys.sort();
+    let required_keys: HashSet<&str> = [
+        "amount",
+        "cancel_reason",
+        "created_at",
+        "deps",
+        "destination",
+        "executed_tx_hash",
+        "expected_receipts",
+        "id",
+        "memo",
+        "scheduled_epoch",
+        "status",
+        "status_label",
+        "status_timestamp",
+    ]
+    .into_iter()
+    .collect();
+    let key_set: HashSet<&str> = keys.iter().map(|k| k.as_str()).collect();
+    assert!(required_keys.is_subset(&key_set));
+    let allowed_hash = blake3::hash(
+        [
+            "amount",
+            "cancel_reason",
+            "created_at",
+            "deps",
+            "destination",
+            "executed_tx_hash",
+            "expected_receipts",
+            "id",
+            "memo",
+            "scheduled_epoch",
+            "status",
+            "status_label",
+            "status_timestamp",
+        ]
+        .join("|")
+        .as_bytes(),
+    );
+    let hash_hex = allowed_hash.to_hex().to_string();
+    assert_eq!(
+        hash_hex.as_str(),
+        "c48f401c3792195c9010024b8ba0269b0efd56c227be9cb5dd1ddba793b2cbd1",
+        "treasury schema hash drift; refresh CLI/SDK fixtures intentionally if expected"
+    );
+
+    // Guard against RPC method renames breaking CLI envelopes.
+    assert_eq!(METHOD_TREASURY_DISBURSEMENTS, "gov.treasury.disbursements");
 }
 
 #[test]

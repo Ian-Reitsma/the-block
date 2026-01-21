@@ -81,8 +81,30 @@ pub struct WrapperMetricEntry {
 
 #[derive(Clone, Serialize, Deserialize, Debug, Default)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct GovernanceWrapperEntry {
+    pub treasury_balance: u64,
+    pub disbursements_total: u64,
+    pub executed_total: u64,
+    pub rolled_back_total: u64,
+    pub draft_total: u64,
+    pub voting_total: u64,
+    pub queued_total: u64,
+    pub timelocked_total: u64,
+    pub executor_pending_matured: u64,
+    pub executor_staged_intents: u64,
+    pub executor_lease_released: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_last_success_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executor_last_error_at: Option<u64>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct WrapperSummaryEntry {
     pub metrics: Vec<WrapperMetricEntry>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub governance: Option<GovernanceWrapperEntry>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -405,7 +427,20 @@ mod tests {
                 "wrappers": {
                     "metrics": [
                         {"metric": "foo", "labels": {"region": "us"}, "value": 1.0}
-                    ]
+                    ],
+                    "governance": {
+                        "treasury_balance": 0,
+                        "disbursements_total": 0,
+                        "executed_total": 0,
+                        "rolled_back_total": 0,
+                        "draft_total": 0,
+                        "voting_total": 0,
+                        "queued_total": 0,
+                        "timelocked_total": 0,
+                        "executor_pending_matured": 0,
+                        "executor_staged_intents": 0,
+                        "executor_lease_released": false
+                    }
                 },
                 "ad_readiness": null
             }"#,

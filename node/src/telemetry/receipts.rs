@@ -13,9 +13,9 @@ use crate::receipts_validation::ReceiptBlockUsage;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
-#[cfg(feature = "telemetry")]
 use runtime::telemetry::IntGaugeVec;
+#[cfg(feature = "telemetry")]
+use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
 
 /// Receipt count by market type (telemetry)
 #[cfg(feature = "telemetry")]

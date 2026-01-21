@@ -406,11 +406,7 @@ fn signature_round_trip_single_case() {
 
     let mut registry = ProviderRegistry::new();
     registry
-        .register_provider(
-            receipt_provider_id(&receipt).to_string(),
-            vk.clone(),
-            0,
-        )
+        .register_provider(receipt_provider_id(&receipt).to_string(), vk.clone(), 0)
         .expect("register provider");
     let mut nonce_tracker = NonceTracker::new(100);
     validate_receipt(&receipt, idx, &registry, &mut nonce_tracker)
@@ -435,7 +431,10 @@ fn ed25519_sign_verify_32_bytes() {
     let mut msg = [0u8; 32];
     rng.fill(&mut msg);
     let sig = sk.sign(&msg);
-    assert!(vk.verify(&msg, &sig).is_ok(), "ed25519 32-byte sign/verify failed");
+    assert!(
+        vk.verify(&msg, &sig).is_ok(),
+        "ed25519 32-byte sign/verify failed"
+    );
 }
 
 fn receipt_provider_id(receipt: &Receipt) -> &str {

@@ -71,8 +71,8 @@ use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{json, Deserialize};
 use foundation_telemetry::{
     AdReadinessCohortTelemetry, AdReadinessTelemetry, AdReadinessUtilizationSummary,
-    MemorySnapshotEntry, TelemetrySummary, ValidationError, WrapperMetricEntry,
-    WrapperSummaryEntry,
+    GovernanceWrapperEntry, MemorySnapshotEntry, TelemetrySummary, ValidationError,
+    WrapperMetricEntry, WrapperSummaryEntry,
 };
 use std::collections::{
     btree_map::Entry, hash_map::Entry as HashMapEntry, BTreeMap, HashMap, HashSet, VecDeque,
@@ -254,6 +254,10 @@ const METRIC_TREASURY_SCHEDULED_OLDEST_AGE: &str =
 const METRIC_TREASURY_NEXT_EPOCH: &str = "treasury_disbursement_next_epoch";
 const METRIC_TREASURY_EXECUTION_LAG: &str = "treasury_disbursement_execution_lag_seconds";
 const METRIC_TREASURY_LEASE_RELEASED: &str = "treasury_executor_lease_released";
+const METRIC_TREASURY_EXECUTOR_PENDING: &str = "treasury_executor_pending_matured";
+const METRIC_TREASURY_EXECUTOR_STAGED: &str = "treasury_executor_staged_intents";
+const METRIC_TREASURY_EXECUTOR_SUCCESS: &str = "treasury_executor_success_total";
+const METRIC_TREASURY_EXECUTOR_FAILURE: &str = "treasury_executor_failure_total";
 const METRIC_TREASURY_BALANCE_CURRENT: &str = "treasury_balance_current";
 const METRIC_TREASURY_BALANCE_LAST_DELTA: &str = "treasury_balance_last_delta";
 const METRIC_TREASURY_BALANCE_SNAPSHOT_COUNT: &str = "treasury_balance_snapshot_count";
@@ -613,6 +617,17 @@ impl AppState {
                 Ok(records) => {
                     let summary = TreasurySummary::from_records(&records);
                     Self::apply_disbursement_metrics(metrics, &summary, now);
+                    let success_total = summary.metrics_for_status("executed").0
+                        + summary.metrics_for_status("finalized").0;
+                    let failure_total = summary.metrics_for_status("rolled_back").0;
+                    metrics
+                        .treasury_executor_success_total
+                        .set(success_total as f64);
+                    metrics
+                        .treasury_executor_failure_total
+                        .set(failure_total as f64);
+                    metrics.treasury_executor_pending_matured.set(0.0);
+                    metrics.treasury_executor_staged_intents.set(0.0);
                     match load_treasury_balance_history(path) {
                         Ok(history) => {
                             if history.is_empty() && !records.is_empty() {
@@ -656,6 +671,15 @@ impl AppState {
                     (Ok(records), Ok(history), Ok(current_balances), Ok(snapshot)) => {
                         let summary = TreasurySummary::from_records(&records);
                         Self::apply_disbursement_metrics(metrics, &summary, now);
+                        let success_total = summary.metrics_for_status("executed").0
+                            + summary.metrics_for_status("finalized").0;
+                        let failure_total = summary.metrics_for_status("rolled_back").0;
+                        metrics
+                            .treasury_executor_success_total
+                            .set(success_total as f64);
+                        metrics
+                            .treasury_executor_failure_total
+                            .set(failure_total as f64);
                         if history.is_empty() && !records.is_empty() {
                             warn!(
                                 target: "aggregator",
@@ -663,7 +687,22 @@ impl AppState {
                             );
                         }
                         Self::apply_balance_metrics(metrics, &history, Some(current_balances), now);
-                        let released = snapshot.map(|snap| snap.lease_released).unwrap_or(false);
+                        let released = snapshot
+                            .as_ref()
+                            .map(|snap| snap.lease_released)
+                            .unwrap_or(false);
+                        let pending = snapshot
+                            .as_ref()
+                            .map(|snap| snap.pending_matured)
+                            .unwrap_or(0);
+                        let staged = snapshot
+                            .as_ref()
+                            .map(|snap| snap.staged_intents)
+                            .unwrap_or(0);
+                        metrics
+                            .treasury_executor_pending_matured
+                            .set(pending as f64);
+                        metrics.treasury_executor_staged_intents.set(staged as f64);
                         metrics.treasury_executor_lease_released.set(if released {
                             1.0
                         } else {
@@ -795,6 +834,10 @@ impl AppState {
         Self::zero_disbursement_metrics(metrics);
         Self::zero_balance_metrics(metrics);
         metrics.treasury_executor_lease_released.set(0.0);
+        metrics.treasury_executor_pending_matured.set(0.0);
+        metrics.treasury_executor_staged_intents.set(0.0);
+        metrics.treasury_executor_success_total.set(0.0);
+        metrics.treasury_executor_failure_total.set(0.0);
     }
 
     fn current_token(&self) -> String {
@@ -1968,6 +2011,10 @@ struct AggregatorMetrics {
     treasury_disbursement_next_epoch: Gauge,
     treasury_disbursement_execution_lag: GaugeVec,
     treasury_executor_lease_released: Gauge,
+    treasury_executor_pending_matured: Gauge,
+    treasury_executor_staged_intents: Gauge,
+    treasury_executor_success_total: Gauge,
+    treasury_executor_failure_total: Gauge,
     treasury_balance_current: Gauge,
     treasury_balance_last_delta: Gauge,
     treasury_balance_snapshot_count: Gauge,
@@ -2152,6 +2199,49 @@ fn wrapper_metric_to_value(entry: &WrapperMetricEntry) -> Value {
     Value::Object(map)
 }
 
+fn governance_wrapper_to_value(entry: &GovernanceWrapperEntry) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "treasury_balance".into(),
+        Value::from(entry.treasury_balance),
+    );
+    map.insert(
+        "disbursements_total".into(),
+        Value::from(entry.disbursements_total),
+    );
+    map.insert("executed_total".into(), Value::from(entry.executed_total));
+    map.insert(
+        "rolled_back_total".into(),
+        Value::from(entry.rolled_back_total),
+    );
+    map.insert("draft_total".into(), Value::from(entry.draft_total));
+    map.insert("voting_total".into(), Value::from(entry.voting_total));
+    map.insert("queued_total".into(), Value::from(entry.queued_total));
+    map.insert(
+        "timelocked_total".into(),
+        Value::from(entry.timelocked_total),
+    );
+    map.insert(
+        "executor_pending_matured".into(),
+        Value::from(entry.executor_pending_matured),
+    );
+    map.insert(
+        "executor_staged_intents".into(),
+        Value::from(entry.executor_staged_intents),
+    );
+    map.insert(
+        "executor_lease_released".into(),
+        Value::Bool(entry.executor_lease_released),
+    );
+    if let Some(ts) = entry.executor_last_success_at {
+        map.insert("executor_last_success_at".into(), Value::from(ts));
+    }
+    if let Some(ts) = entry.executor_last_error_at {
+        map.insert("executor_last_error_at".into(), Value::from(ts));
+    }
+    Value::Object(map)
+}
+
 fn wrapper_summary_to_value(summary: &WrapperSummaryEntry) -> Value {
     let metrics = summary
         .metrics
@@ -2160,6 +2250,12 @@ fn wrapper_summary_to_value(summary: &WrapperSummaryEntry) -> Value {
         .collect();
     let mut map = Map::new();
     map.insert("metrics".to_string(), Value::Array(metrics));
+    if let Some(governance) = &summary.governance {
+        map.insert(
+            "governance".to_string(),
+            governance_wrapper_to_value(governance),
+        );
+    }
     Value::Object(map)
 }
 
@@ -2576,6 +2672,7 @@ fn telemetry_summary_from_value(value: &Value) -> Result<TelemetrySummary, Valid
         memory,
         wrappers: WrapperSummaryEntry {
             metrics: wrapper_metrics,
+            governance: None,
         },
         ad_readiness,
     })
@@ -3514,6 +3611,34 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
     registry
         .register(Box::new(treasury_disbursement_next_epoch.clone()))
         .expect("register treasury_disbursement_next_epoch");
+    let treasury_executor_pending_matured = Gauge::new(
+        METRIC_TREASURY_EXECUTOR_PENDING,
+        "Matured disbursements pending execution",
+    );
+    registry
+        .register(Box::new(treasury_executor_pending_matured.clone()))
+        .expect("register treasury_executor_pending_matured");
+    let treasury_executor_staged_intents = Gauge::new(
+        METRIC_TREASURY_EXECUTOR_STAGED,
+        "Staged treasury execution intents",
+    );
+    registry
+        .register(Box::new(treasury_executor_staged_intents.clone()))
+        .expect("register treasury_executor_staged_intents");
+    let treasury_executor_success_total = Gauge::new(
+        METRIC_TREASURY_EXECUTOR_SUCCESS,
+        "Total executed treasury disbursements (executor success count)",
+    );
+    registry
+        .register(Box::new(treasury_executor_success_total.clone()))
+        .expect("register treasury_executor_success_total");
+    let treasury_executor_failure_total = Gauge::new(
+        METRIC_TREASURY_EXECUTOR_FAILURE,
+        "Total rolled back treasury disbursements (executor failure count)",
+    );
+    registry
+        .register(Box::new(treasury_executor_failure_total.clone()))
+        .expect("register treasury_executor_failure_total");
     let treasury_executor_lease_released = Gauge::new(
         METRIC_TREASURY_LEASE_RELEASED,
         "Flag indicating the treasury executor lease is released (1=released)",
@@ -3921,6 +4046,10 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         treasury_disbursement_next_epoch,
         treasury_disbursement_execution_lag,
         treasury_executor_lease_released,
+        treasury_executor_pending_matured,
+        treasury_executor_staged_intents,
+        treasury_executor_success_total,
+        treasury_executor_failure_total,
         treasury_balance_current,
         treasury_balance_last_delta,
         treasury_balance_snapshot_count,
@@ -10212,6 +10341,7 @@ mod tests {
                         ]),
                         value: 2.0,
                     }],
+                    governance: None,
                 },
                 ad_readiness: None,
             });

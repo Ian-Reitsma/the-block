@@ -19,6 +19,7 @@ static PY_INIT: Once = Once::new();
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");
+    std::env::set_var("TB_FAST_MINE", "1");
     PY_INIT.call_once(|| {});
 }
 
@@ -57,7 +58,8 @@ fn replacement_rejected() {
     let mut bc = Blockchain::new(dir.path().to_str().unwrap());
     bc.min_fee_per_byte_consumer = 0;
     bc.min_fee_per_byte_industrial = 0;
-    bc.add_account("miner".into(), 0).unwrap();
+    // Seed balances so replacement attempts are not blocked by funding.
+    bc.add_account("miner".into(), 10_000).unwrap();
     bc.add_account("alice".into(), 0).unwrap();
     bc.mine_block("miner").unwrap();
     let (sk, _pk) = generate_keypair();

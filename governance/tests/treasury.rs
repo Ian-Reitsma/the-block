@@ -36,7 +36,7 @@ fn treasury_disbursements_roundtrip() {
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
-                destination: "dest-1".into(),
+                destination: "tb1dest-1".into(),
                 amount: 42,
                 memo: "initial memo".into(),
                 scheduled_epoch: 100,
@@ -50,7 +50,7 @@ fn treasury_disbursements_roundtrip() {
 
     let list = store.disbursements().expect("list disbursements");
     assert_eq!(list.len(), 1);
-    assert_eq!(list[0].destination, "dest-1");
+    assert_eq!(list[0].destination, "tb1dest-1");
 
     let executed = store
         .execute_disbursement(scheduled.id, "0xfeed", Vec::new())
@@ -78,7 +78,7 @@ fn treasury_disbursements_roundtrip() {
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
-                destination: "dest-2".into(),
+                destination: "tb1dest-2".into(),
                 amount: 7,
                 memo: "".into(),
                 scheduled_epoch: 200,
@@ -123,10 +123,10 @@ fn execute_requires_balance() {
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
-                destination: "dest-1".into(),
+                destination: "tb1dest-1".into(),
                 amount: 5,
                 memo: "".into(),
-                scheduled_epoch: 0,
+                scheduled_epoch: 10,
                 expected_receipts: Vec::new(),
             },
         })
@@ -147,7 +147,7 @@ fn treasury_executor_stages_and_executes() {
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
-                destination: "dest-exec".into(),
+                destination: "tb1dest-exec".into(),
                 amount: 1_000,
                 memo: "intent".into(),
                 scheduled_epoch: 5,
@@ -236,7 +236,7 @@ fn treasury_executor_reuses_staged_intents() {
         .queue_disbursement(DisbursementPayload {
             proposal: Default::default(),
             disbursement: DisbursementDetails {
-                destination: "reuse".into(),
+                destination: "tb1reuse".into(),
                 amount: 500,
                 memo: "memo".into(),
                 scheduled_epoch: 1,
@@ -337,10 +337,10 @@ fn treasury_executor_records_submission_errors() -> Result<()> {
     let disbursement = store.queue_disbursement(DisbursementPayload {
         proposal: Default::default(),
         disbursement: DisbursementDetails {
-            destination: "omega".into(),
+            destination: "tb1omega".into(),
             amount: 250,
             memo: "{}".into(),
-            scheduled_epoch: 0,
+            scheduled_epoch: 1,
             expected_receipts: Vec::new(),
         },
     })?;
@@ -407,20 +407,20 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
     let first = store.queue_disbursement(DisbursementPayload {
         proposal: Default::default(),
         disbursement: DisbursementDetails {
-            destination: "failover-a".into(),
+            destination: "tb1failover-a".into(),
             amount: 250,
             memo: "".into(),
-            scheduled_epoch: 0,
+            scheduled_epoch: 1,
             expected_receipts: Vec::new(),
         },
     })?;
     let second = store.queue_disbursement(DisbursementPayload {
         proposal: Default::default(),
         disbursement: DisbursementDetails {
-            destination: "failover-b".into(),
+            destination: "tb1failover-b".into(),
             amount: 250,
             memo: "".into(),
-            scheduled_epoch: 0,
+            scheduled_epoch: 1,
             expected_receipts: Vec::new(),
         },
     })?;
@@ -530,4 +530,46 @@ fn executor_failover_preserves_nonce_watermark() -> Result<()> {
     assert_eq!(snapshot.last_submitted_nonce, Some(2));
 
     Ok(())
+}
+
+#[test]
+fn disbursement_auth_operation_tokens_match_rpc_suffixes() {
+    use crypto_suite::hashing::blake3;
+    use governance::authorization::Operation;
+
+    let queue = Operation::QueueDisbursement {
+        proposal_id: "proposal-123".into(),
+        amount: 500,
+    };
+    let mut queue_hasher = blake3::Hasher::new();
+    queue_hasher.update(b"queue_disbursement");
+    queue_hasher.update(b"proposal-123");
+    queue_hasher.update(&500u64.to_le_bytes());
+    assert_eq!(
+        queue.to_bytes(),
+        queue_hasher.finalize().as_bytes().to_vec(),
+        "QueueDisbursement auth token must hash the RPC suffix 'queue_disbursement'"
+    );
+
+    let cancel = Operation::CancelDisbursement {
+        disbursement_id: "99".into(),
+    };
+    let mut cancel_hasher = blake3::Hasher::new();
+    cancel_hasher.update(b"cancel_disbursement");
+    cancel_hasher.update(b"99");
+    assert_eq!(
+        cancel.to_bytes(),
+        cancel_hasher.finalize().as_bytes().to_vec(),
+        "CancelDisbursement auth token must hash the RPC suffix 'cancel_disbursement'"
+    );
+
+    let mut wrong_prefix = blake3::Hasher::new();
+    wrong_prefix.update(b"gov.treasury.queue_disbursement");
+    wrong_prefix.update(b"proposal-123");
+    wrong_prefix.update(&500u64.to_le_bytes());
+    assert_ne!(
+        queue.to_bytes(),
+        wrong_prefix.finalize().as_bytes().to_vec(),
+        "RPC renames must update authorization tokens; prefixed method names are rejected"
+    );
 }

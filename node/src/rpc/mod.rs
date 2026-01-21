@@ -82,6 +82,11 @@ pub mod storage;
 pub mod treasury;
 pub mod vm;
 pub mod vm_trace;
+use treasury::{
+    METHOD_TREASURY_BALANCE, METHOD_TREASURY_BALANCE_HISTORY, METHOD_TREASURY_DISBURSEMENTS,
+    METHOD_TREASURY_EXECUTE, METHOD_TREASURY_GET, METHOD_TREASURY_QUEUE,
+    METHOD_TREASURY_ROLLBACK, METHOD_TREASURY_SUBMIT,
+};
 
 static GOV_PARAMS: Lazy<Mutex<Params>> = Lazy::new(|| Mutex::new(Params::default()));
 static LOCALNET_RECEIPTS: Lazy<Mutex<SimpleDb>> = Lazy::new(|| {
@@ -3233,19 +3238,19 @@ fn dispatch(
                 epoch,
             )?)?
         }
-        "gov.treasury.disbursements" => {
+        METHOD_TREASURY_DISBURSEMENTS => {
             let params = parse_params::<treasury::TreasuryDisbursementsRequest>(&req.params)?;
             serialize_response(treasury::disbursements(&NODE_GOV_STORE, params)?)?
         }
-        "gov.treasury.submit_disbursement" => {
+        METHOD_TREASURY_SUBMIT => {
             let params = parse_params::<treasury::SubmitDisbursementRequest>(&req.params)?;
             serialize_response(treasury::submit_disbursement(&NODE_GOV_STORE, params)?)?
         }
-        "gov.treasury.disbursement" => {
+        METHOD_TREASURY_GET => {
             let params = parse_params::<treasury::GetDisbursementRequest>(&req.params)?;
             serialize_response(treasury::get_disbursement(&NODE_GOV_STORE, params)?)?
         }
-        "gov.treasury.queue_disbursement" => {
+        METHOD_TREASURY_QUEUE => {
             let mut params = parse_params::<treasury::QueueDisbursementRequest>(&req.params)?;
             if params.current_epoch == 0 {
                 let epoch = bc
@@ -3256,16 +3261,16 @@ fn dispatch(
             }
             serialize_response(treasury::queue_disbursement(&NODE_GOV_STORE, params)?)?
         }
-        "gov.treasury.execute_disbursement" => {
+        METHOD_TREASURY_EXECUTE => {
             let params = parse_params::<treasury::ExecuteDisbursementRequest>(&req.params)?;
             serialize_response(treasury::execute_disbursement(&NODE_GOV_STORE, params)?)?
         }
-        "gov.treasury.rollback_disbursement" => {
+        METHOD_TREASURY_ROLLBACK => {
             let params = parse_params::<treasury::RollbackDisbursementRequest>(&req.params)?;
             serialize_response(treasury::rollback_disbursement(&NODE_GOV_STORE, params)?)?
         }
-        "gov.treasury.balance" => serialize_response(treasury::balance(&NODE_GOV_STORE)?)?,
-        "gov.treasury.balance_history" => {
+        METHOD_TREASURY_BALANCE => serialize_response(treasury::balance(&NODE_GOV_STORE)?)?,
+        METHOD_TREASURY_BALANCE_HISTORY => {
             let params = parse_params::<treasury::TreasuryBalanceHistoryRequest>(&req.params)?;
             serialize_response(treasury::balance_history(&NODE_GOV_STORE, params)?)?
         }

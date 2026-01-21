@@ -2,7 +2,7 @@ use super::RpcError;
 use crate::governance::GovStore;
 use foundation_serialization::{Deserialize, Serialize};
 use governance_spec::treasury::{
-    validate_disbursement_payload, DisbursementPayload,
+    canonical_dependencies, validate_disbursement_payload, DisbursementPayload,
     DisbursementStatus as GovDisbursementStatus, TreasuryBalanceEventKind as GovBalanceEventKind,
     TreasuryBalanceSnapshot as GovBalanceSnapshot, TreasuryDisbursement as GovDisbursement,
     TreasuryExecutorSnapshot as GovExecutorSnapshot,
@@ -10,6 +10,16 @@ use governance_spec::treasury::{
 
 const DEFAULT_LIMIT: u64 = 50;
 const MAX_LIMIT: u64 = 200;
+
+/// RPC method names for treasury operations (kept in sync with auth token suffixes).
+pub const METHOD_TREASURY_DISBURSEMENTS: &str = "gov.treasury.disbursements";
+pub const METHOD_TREASURY_SUBMIT: &str = "gov.treasury.submit_disbursement";
+pub const METHOD_TREASURY_GET: &str = "gov.treasury.disbursement";
+pub const METHOD_TREASURY_QUEUE: &str = "gov.treasury.queue_disbursement";
+pub const METHOD_TREASURY_EXECUTE: &str = "gov.treasury.execute_disbursement";
+pub const METHOD_TREASURY_ROLLBACK: &str = "gov.treasury.rollback_disbursement";
+pub const METHOD_TREASURY_BALANCE: &str = "gov.treasury.balance";
+pub const METHOD_TREASURY_BALANCE_HISTORY: &str = "gov.treasury.balance_history";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -52,13 +62,10 @@ pub struct TreasuryBalanceHistoryRequest {
 #[derive(Debug, Clone, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct TreasuryDisbursementRecord {
-    pub id: u64,
-    pub destination: String,
-    pub amount: u64,
-    pub memo: String,
-    pub scheduled_epoch: u64,
-    pub created_at: u64,
-    pub status: TreasuryDisbursementStatus,
+    #[serde(flatten)]
+    pub disbursement: GovDisbursement,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deps: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,40 +93,6 @@ pub struct TreasuryBalanceHistoryResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<u64>,
     pub current_balance: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum TreasuryDisbursementStatus {
-    Draft {
-        created_at: u64,
-    },
-    Voting {
-        vote_deadline_epoch: u64,
-    },
-    Queued {
-        queued_at: u64,
-        activation_epoch: u64,
-    },
-    Timelocked {
-        ready_epoch: u64,
-    },
-    Executed {
-        tx_hash: String,
-        executed_at: u64,
-    },
-    Finalized {
-        tx_hash: String,
-        executed_at: u64,
-        finalized_at: u64,
-    },
-    RolledBack {
-        reason: String,
-        rolled_back_at: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        prior_tx: Option<String>,
-    },
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -289,63 +262,8 @@ pub fn balance_history(
 impl From<GovDisbursement> for TreasuryDisbursementRecord {
     fn from(value: GovDisbursement) -> Self {
         Self {
-            id: value.id,
-            destination: value.destination,
-            amount: value.amount,
-            memo: value.memo,
-            scheduled_epoch: value.scheduled_epoch,
-            created_at: value.created_at,
-            status: value.status.into(),
-        }
-    }
-}
-
-impl From<GovDisbursementStatus> for TreasuryDisbursementStatus {
-    fn from(value: GovDisbursementStatus) -> Self {
-        match value {
-            GovDisbursementStatus::Draft { created_at } => {
-                TreasuryDisbursementStatus::Draft { created_at }
-            }
-            GovDisbursementStatus::Voting {
-                vote_deadline_epoch,
-            } => TreasuryDisbursementStatus::Voting {
-                vote_deadline_epoch,
-            },
-            GovDisbursementStatus::Queued {
-                queued_at,
-                activation_epoch,
-            } => TreasuryDisbursementStatus::Queued {
-                queued_at,
-                activation_epoch,
-            },
-            GovDisbursementStatus::Timelocked { ready_epoch } => {
-                TreasuryDisbursementStatus::Timelocked { ready_epoch }
-            }
-            GovDisbursementStatus::Executed {
-                tx_hash,
-                executed_at,
-            } => TreasuryDisbursementStatus::Executed {
-                tx_hash,
-                executed_at,
-            },
-            GovDisbursementStatus::Finalized {
-                tx_hash,
-                executed_at,
-                finalized_at,
-            } => TreasuryDisbursementStatus::Finalized {
-                tx_hash,
-                executed_at,
-                finalized_at,
-            },
-            GovDisbursementStatus::RolledBack {
-                reason,
-                rolled_back_at,
-                prior_tx,
-            } => TreasuryDisbursementStatus::RolledBack {
-                reason,
-                rolled_back_at,
-                prior_tx,
-            },
+            deps: canonical_dependencies(&value),
+            disbursement: value,
         }
     }
 }
@@ -466,6 +384,10 @@ fn default_limit() -> u64 {
     DEFAULT_LIMIT
 }
 
+fn default_epoch() -> u64 {
+    1
+}
+
 fn normalize_limit(limit: u64) -> usize {
     let effective = if limit == 0 { default_limit() } else { limit };
     effective.clamp(1, MAX_LIMIT) as usize
@@ -502,7 +424,7 @@ pub struct GetDisbursementResponse {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct QueueDisbursementRequest {
     pub id: u64,
-    #[serde(default, alias = "epoch")]
+    #[serde(default = "default_epoch", alias = "epoch")]
     pub current_epoch: u64,
 }
 
