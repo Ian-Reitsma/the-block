@@ -112,17 +112,11 @@ fn main() {
                 .unwrap_or_default()
                 .as_secs();
             let (p, remaining) = gov.status(id, now).expect("status");
-            println!(
-                "id={} ops_for={} builders_for={} executed={} timelock_remaining={}s",
-                p.id, p.ops_for, p.builders_for, p.executed, remaining
-            );
+            print_proposal(&p, Some(remaining), &gov);
         }
         Command::List => {
             for p in gov.list() {
-                println!(
-                    "id={} start={} end={} ops_for={} builders_for={} executed={}",
-                    p.id, p.start, p.end, p.ops_for, p.builders_for, p.executed
-                );
+                print_proposal(&p, None, &gov);
             }
         }
     }
@@ -230,4 +224,44 @@ fn parse_u64(matches: &Matches, name: &str) -> Result<u64, String> {
     let raw = require_positional(matches, name)?;
     raw.parse::<u64>()
         .map_err(|err| format!("invalid {name}: {err}"))
+}
+
+fn print_proposal(p: &the_block::governance::Proposal, remaining: Option<u64>, gov: &Governance) {
+    let now_can_execute = gov.bicameral.can_execute_now(p);
+    let remaining_secs = remaining.unwrap_or_else(|| {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        p.end
+            .saturating_add(gov.bicameral.timelock_secs)
+            .saturating_sub(now)
+    });
+    println!(
+        "id={} start={} end={} ops_for={} builders_for={} executed={} can_execute_now={} timelock_remaining={}s",
+        p.id, p.start, p.end, p.ops_for, p.builders_for, p.executed, now_can_execute, remaining_secs
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_shape_includes_all_subcommands() {
+        let cmd = build_command();
+        let ids: Vec<_> = cmd
+            .subcommands()
+            .iter()
+            .map(|s| s.id().0.to_owned())
+            .collect();
+        assert!(
+            ids.contains(&"gov.submit".to_string())
+                && ids.contains(&"gov.vote".to_string())
+                && ids.contains(&"gov.exec".to_string())
+                && ids.contains(&"gov.status".to_string())
+                && ids.contains(&"gov.list".to_string()),
+            "missing expected subcommands: {ids:?}"
+        );
+    }
 }

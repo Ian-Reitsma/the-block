@@ -720,7 +720,7 @@ Upcoming gates extend the same pattern:
 
 | Gate (planned) | Scope | Notes |
 |----------------|-------|-------|
-| **economics** | Block reward + subsidy autopilot | Shadow mode will ensure `NetworkIssuanceController` outputs count/volume/treasury metrics (`economics_epoch_*`) and the persisted `economics_block_reward_per_block` stay within bounds before runtime parameters flip. |
+| **economics** | Block reward + subsidy autopilot | Shadow mode tracks `NetworkIssuanceController` outputs (per-block rewards derived from count/volume/utilization with only the logistic miner-fairness multiplier applied), the persisted `economics_block_reward_per_block`, and `economics_prev_market_metrics` gauges. The gate flips only after those values stay within bounds for a streak and match `/wrappers` telemetry. |
 | **storage**, **compute**, **energy**, **ad** | Market-specific rehearsal/live toggles | Each gate will watch the telemetry already described in the respective architecture sections (utilization, margins, disputes, backlog) and will only enable “trade” mode after sustained streaks. Backlog tracked in `AGENTS.md §15`. |
 
 Gate states progress as: `Inactive` → `Active`/`Rehearsal` → `Trade`

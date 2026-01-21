@@ -4325,6 +4325,50 @@ impl Blockchain {
         Ok(())
     }
 
+    /// Derive the network-driven base reward for the next block using the NetworkIssuanceController.
+    fn compute_network_block_reward(&mut self) -> u64 {
+        let econ_params = economics::GovernanceEconomicParams::from_governance_params(
+            &self.params,
+            self.economics_prev_annual_issuance_block,
+            self.economics_prev_subsidy.clone(),
+            self.economics_prev_tariff.clone(),
+            self.economics_baseline_tx_count,
+            self.economics_baseline_tx_volume,
+            self.economics_baseline_miners,
+        );
+
+        let mut controller = economics::NetworkIssuanceController::with_baselines(
+            econ_params.network_issuance,
+            self.economics_baseline_tx_count,
+            self.economics_baseline_tx_volume,
+            self.economics_baseline_miners,
+        );
+
+        let util = &self.economics_prev_market_metrics;
+        let avg_market_utilization = (util.storage.utilization
+            + util.compute.utilization
+            + util.energy.utilization
+            + util.ad.utilization)
+            / 4.0;
+
+        let metrics = economics::network_issuance::NetworkMetrics {
+            tx_count: self.economics_epoch_tx_count,
+            tx_volume_block: self.economics_epoch_tx_volume_block,
+            unique_miners: self.recent_miners.len() as u64,
+            avg_market_utilization,
+            block_height: self.block_height,
+            total_emission: self.emission,
+        };
+
+        let reward = controller.compute_block_reward(&metrics);
+        let (baseline_tx_count, baseline_tx_volume, baseline_miners) =
+            controller.get_adaptive_baselines();
+        self.economics_baseline_tx_count = baseline_tx_count;
+        self.economics_baseline_tx_volume = baseline_tx_volume;
+        self.economics_baseline_miners = baseline_miners;
+        reward
+    }
+
     /// Mine a new block and award rewards to `miner_addr`.
     ///
     /// # Errors
@@ -4374,12 +4418,9 @@ impl Blockchain {
             return Ok(block);
         }
 
-        // use the network-controlled base reward (falling back to the genesis value)
-        let base_reward = if self.economics_block_reward_per_block == 0 {
-            INITIAL_BLOCK_REWARD
-        } else {
-            self.economics_block_reward_per_block
-        };
+        // Drive the base reward from the NetworkIssuanceController; keep logistic as a fairness multiplier.
+        let base_reward = self.compute_network_block_reward().max(1);
+        self.economics_block_reward_per_block = base_reward;
         self.block_reward = TokenAmount::new(base_reward);
         let active_eff = {
             let mut counts: HashMap<String, u64> = HashMap::new();
@@ -4850,8 +4891,8 @@ impl Blockchain {
                 let mut acc =
                     receipts_validation::ReceiptShardAccumulator::new(self.receipt_shard_count);
                 for receipt in &block_receipts {
-                    let encoded_len = receipts_validation::encoded_receipt_len(receipt)
-                        .unwrap_or_default();
+                    let encoded_len =
+                        receipts_validation::encoded_receipt_len(receipt).unwrap_or_default();
                     acc.add(receipt, encoded_len);
                 }
                 for (idx, usage) in acc.per_shard_usage().iter().enumerate() {

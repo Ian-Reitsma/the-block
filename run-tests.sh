@@ -151,6 +151,24 @@ echo ""
 echo -e "${BLUE}Test suite completed in ${DURATION_STR}${NC}"
 echo ""
 
+# Targeted regressions for critical paths
+EXTRA_TESTS=(
+  "cargo test -p the_block --test light_sync --all-features -- --nocapture"
+  "cargo test -p the_block --test mempool_qos --all-features -- --nocapture"
+)
+
+for cmd in "${EXTRA_TESTS[@]}"; do
+  echo -e "${CYAN}Running targeted test: ${cmd}${NC}"
+  echo "==== ${cmd} ====" >> "$FULL_LOG"
+  if eval "$cmd" >> "$FULL_LOG" 2>&1; then
+    echo "ok - ${cmd}"
+  else
+    echo -e "${RED}failed - ${cmd}${NC}"
+    echo "$cmd" >> "$FAILED_TESTS_LOG"
+    TOTAL_FAILED=$((TOTAL_FAILED + 1))
+  fi
+done
+
 # Function to extract errors from log
 extract_errors() {
     local log_file="$1"

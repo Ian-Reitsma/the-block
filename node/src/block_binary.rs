@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 
 use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 
+use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
 use crate::transaction::binary as tx_binary;
 use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
@@ -10,7 +11,6 @@ use crate::{
     AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, EnergyReceipt, Receipt,
     SignedTransaction, StorageReceipt, TokenAmount,
 };
-use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
 
 /// Encode a [`Block`] into the canonical binary layout.
 pub fn encode_block(block: &Block) -> EncodeResult<Vec<u8>> {
@@ -130,8 +130,7 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
         }
         struct_writer.field_with("receipt_header", |field_writer| {
             if result.is_ok() {
-                if let Err(err) =
-                    write_optional_receipt_header(field_writer, &block.receipt_header)
+                if let Err(err) = write_optional_receipt_header(field_writer, &block.receipt_header)
                 {
                     result = Err(err);
                 }
@@ -801,26 +800,31 @@ pub(crate) fn read_receipt_header(reader: &mut Reader<'_>) -> Result<ReceiptHead
     decode_struct(reader, None, |key, reader| match key {
         "shard_count" => assign_once(&mut shard_count, reader.read_u64()?, "shard_count"),
         "shard_roots" => assign_once(&mut shard_roots, read_root_vec(reader)?, "shard_roots"),
-        "blob_commitments" => {
-            assign_once(&mut blob_commitments, read_root_vec(reader)?, "blob_commitments")
-        }
+        "blob_commitments" => assign_once(
+            &mut blob_commitments,
+            read_root_vec(reader)?,
+            "blob_commitments",
+        ),
         "available_until" => {
             assign_once(&mut available_until, reader.read_u64()?, "available_until")
         }
-        "aggregate_scheme" => {
-            assign_once(&mut aggregate_scheme, reader.read_u64()?, "aggregate_scheme")
-        }
+        "aggregate_scheme" => assign_once(
+            &mut aggregate_scheme,
+            reader.read_u64()?,
+            "aggregate_scheme",
+        ),
         "aggregate_sig" => assign_once(&mut aggregate_sig, read_fixed(reader)?, "aggregate_sig"),
         other => Err(DecodeError::UnknownField(other.to_string())),
     })?;
 
-    let shard_count_u16: u16 = shard_count
-        .unwrap_or_default()
-        .try_into()
-        .map_err(|_| DecodeError::InvalidFieldValue {
-            field: "shard_count",
-            reason: "value does not fit u16".into(),
-        })?;
+    let shard_count_u16: u16 =
+        shard_count
+            .unwrap_or_default()
+            .try_into()
+            .map_err(|_| DecodeError::InvalidFieldValue {
+                field: "shard_count",
+                reason: "value does not fit u16".into(),
+            })?;
     let scheme = match aggregate_scheme.unwrap_or_default() {
         0 => ReceiptAggregateScheme::None,
         1 => ReceiptAggregateScheme::BatchEd25519,

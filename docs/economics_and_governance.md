@@ -40,6 +40,8 @@ The canonical issuance controller lives in `node/src/economics/network_issuance.
 
 All state for this controller (EMA baselines, clamp bounds, alpha values) is stored in the governance params struct `NetworkIssuanceParams` and exposed via telemetry so replay stays deterministic.
 
+During block production, the node takes the controller’s per-block reward output and only multiplies it by the miner-fairness logistic factor (based on recent miner diversity); the legacy decay math is gone. This keeps runtime rewards aligned with the controller while still smoothing miner concentration.
+
 ### Telemetry-driven gating
 
 Every epoch `node/src/lib.rs` increments the on-chain counters `economics_epoch_tx_count`,
