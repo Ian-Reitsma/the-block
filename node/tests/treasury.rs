@@ -25,7 +25,7 @@ fn node_treasury_accrual_flow() -> Result<()> {
     store.record_treasury_accrual(64)?;
     assert_eq!(store.treasury_balance()?, 64);
 
-    let queued = store.queue_disbursement(disbursement_payload("dest", 10, "", 0))?;
+    let queued = store.queue_disbursement(disbursement_payload("tb1dest", 10, "", 1))?;
     assert_eq!(queued.id, 1);
     assert_eq!(store.treasury_balance()?, 64);
 
@@ -78,9 +78,9 @@ fn treasury_executor_respects_dependency_schedule() -> Result<()> {
     let db_path = dir.path().join("gov.db");
     let store = GovStore::open(&db_path);
     store.record_treasury_accrual(2_000)?;
-    let first = store.queue_disbursement(disbursement_payload("alpha", 100, "{}", 2))?;
+    let first = store.queue_disbursement(disbursement_payload("tb1alpha", 100, "{}", 2))?;
     let second_memo = "{\"depends_on\":[1]}";
-    let second = store.queue_disbursement(disbursement_payload("beta", 120, second_memo, 1))?;
+    let second = store.queue_disbursement(disbursement_payload("tb1beta", 120, second_memo, 1))?;
     let blockchain = Arc::new(Mutex::new(Blockchain::default()));
     {
         let mut chain = blockchain.lock().unwrap();

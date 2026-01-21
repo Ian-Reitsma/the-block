@@ -21,10 +21,10 @@ fn treasury_metrics_exposed_via_prometheus() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let scheduled = TreasuryDisbursement::new(1, "dest-1".into(), 100, "memo".into(), 75);
-    let mut executed = TreasuryDisbursement::new(2, "dest-2".into(), 200, String::new(), 50);
+    let scheduled = TreasuryDisbursement::new(1, "tb1dest-1".into(), 100, "memo".into(), 75);
+    let mut executed = TreasuryDisbursement::new(2, "tb1dest-2".into(), 200, String::new(), 50);
     mark_executed(&mut executed, "0xfeed".into());
-    let mut cancelled = TreasuryDisbursement::new(3, "dest-3".into(), 150, String::new(), 60);
+    let mut cancelled = TreasuryDisbursement::new(3, "tb1dest-3".into(), 150, String::new(), 60);
     mark_cancelled(&mut cancelled, "duplicate".into());
 
     let records = vec![scheduled, executed, cancelled];
@@ -89,7 +89,7 @@ fn treasury_metrics_from_store_source() {
     let queued = store
         .queue_disbursement(DisbursementPayload {
             disbursement: DisbursementDetails {
-                destination: "dest-4".into(),
+                destination: "tb1dest-4".into(),
                 amount: 120,
                 memo: "".into(),
                 scheduled_epoch: 400,
@@ -133,8 +133,9 @@ fn treasury_metrics_accept_legacy_string_fields() {
     let dir = tempfile::tempdir().expect("temp dir");
     let treasury_file = dir.path().join("treasury_disbursements.json");
 
-    let scheduled = TreasuryDisbursement::new(5, "legacy".into(), 300, String::new(), 10);
-    let mut executed = TreasuryDisbursement::new(6, "legacy-dest".into(), 150, String::new(), 11);
+    let scheduled = TreasuryDisbursement::new(5, "tb1legacy".into(), 300, String::new(), 10);
+    let mut executed =
+        TreasuryDisbursement::new(6, "tb1legacy-dest".into(), 150, String::new(), 11);
     mark_executed(&mut executed, "0xdead".into());
     let payload = json::to_vec_value(&disbursements_to_json_array(&[scheduled, executed]));
     fs::write(&treasury_file, payload).expect("write treasury file");

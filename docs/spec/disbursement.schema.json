@@ -1,82 +1,103 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "DisbursementPayload",
-  "description": "Treasury disbursement proposal payload for governance-approved fund distributions.",
+  "description": "Treasury disbursement payload shared by RPC/CLI/explorer and validated in governance/src/treasury.rs.",
   "type": "object",
   "properties": {
-    "id": {
-      "type": "string",
-      "description": "Unique disbursement identifier"
-    },
-    "title": {
-      "type": "string",
-      "description": "Human-readable title for the disbursement proposal"
-    },
-    "description": {
-      "type": "string",
-      "description": "Detailed description of the disbursement purpose"
-    },
-    "amount": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Total BLOCK amount to disburse"
-    },
-    "destination": {
-      "type": "string",
-      "description": "Recipient account address (must start with 'ct1')",
-      "pattern": "^ct1[a-zA-Z0-9]+$"
-    },
-    "expected_receipts": {
-      "type": "array",
-      "description": "Expected receipt breakdown (must sum to amount)",
-      "items": {
-        "type": "object",
-        "properties": {
-          "recipient": {
-            "type": "string",
-            "pattern": "^ct1[a-zA-Z0-9]+$"
-          },
-          "amount": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "purpose": {
-            "type": "string"
+    "proposal": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "deps": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "maxItems": 100,
+          "uniqueItems": true,
+          "description": "Optional dependency list; executor honors proposal.deps before memo hints."
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "uri": { "type": "string" }
+            },
+            "required": ["name", "uri"],
+            "additionalProperties": false
           }
         },
-        "required": ["recipient", "amount"]
-      }
+        "quorum": {
+          "type": "object",
+          "properties": {
+            "operators_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 },
+            "builders_ppm": { "type": "integer", "minimum": 0, "maximum": 1000000 }
+          },
+          "required": ["operators_ppm", "builders_ppm"],
+          "additionalProperties": false
+        },
+        "vote_window_epochs": { "type": "integer", "minimum": 1 },
+        "timelock_epochs": { "type": "integer", "minimum": 1 },
+        "rollback_window_epochs": { "type": "integer", "minimum": 1 }
+      },
+      "required": ["title", "summary", "quorum"],
+      "additionalProperties": true
     },
-    "timelock_epochs": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Number of epochs to wait after approval before execution"
-    },
-    "proposer": {
-      "type": "string",
-      "description": "Account that proposed the disbursement"
-    },
-    "created_at": {
-      "type": "integer",
-      "description": "Unix timestamp of proposal creation"
+    "disbursement": {
+      "type": "object",
+      "properties": {
+        "destination": {
+          "type": "string",
+          "pattern": "^tb1[a-zA-Z0-9]+$",
+          "description": "Recipient address; governance validation rejects non-tb1 prefixes."
+        },
+        "amount": { "type": "integer", "minimum": 1 },
+        "memo": { "type": "string", "maxLength": 8192 },
+        "scheduled_epoch": { "type": "integer", "minimum": 1 },
+        "expected_receipts": {
+          "type": "array",
+          "description": "Optional receipt breakdown that must sum to amount.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "account": { "type": "string" },
+              "amount": { "type": "integer", "minimum": 1 }
+            },
+            "required": ["account", "amount"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["destination", "amount", "memo", "scheduled_epoch"],
+      "additionalProperties": false
     }
   },
-  "required": ["id", "title", "amount", "destination"],
-  "additionalProperties": true,
+  "required": ["disbursement"],
+  "additionalProperties": false,
   "examples": [
     {
-      "id": "disb-2024-001",
-      "title": "Q1 Developer Grants",
-      "description": "Quarterly grants for ecosystem developers",
-      "amount": 100000,
-      "destination": "ct1abc123...",
-      "expected_receipts": [
-        {"recipient": "ct1abc123...", "amount": 100000, "purpose": "Developer grants"}
-      ],
-      "timelock_epochs": 3,
-      "proposer": "ct1proposer...",
-      "created_at": 1710000000
+      "proposal": {
+        "title": "2025-Q1 Treasury Grants",
+        "summary": "Fund three core contributors and the security retainer.",
+        "deps": [1203, 1207],
+        "attachments": [{ "name": "proposal", "uri": "ipfs://bafy..." }],
+        "quorum": { "operators_ppm": 670000, "builders_ppm": 670000 },
+        "vote_window_epochs": 6,
+        "timelock_epochs": 2,
+        "rollback_window_epochs": 1
+      },
+      "disbursement": {
+        "destination": "tb1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
+        "amount": 125000000,
+        "memo": "Core grants Q1",
+        "scheduled_epoch": 180500,
+        "expected_receipts": [
+          { "account": "foundation", "amount": 100000000 },
+          { "account": "audit-retainer", "amount": 25000000 }
+        ]
+      }
     }
   ],
-  "$comment": "See governance/src/treasury.rs for validation rules. expected_receipts must sum to amount."
+  "$comment": "See governance/src/treasury.rs for validation rules; executor clamps memo size to 8KiB and dependency lists to 100 entries."
 }

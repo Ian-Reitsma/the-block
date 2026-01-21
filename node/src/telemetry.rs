@@ -401,6 +401,9 @@ pub struct WrapperMetricSample {
 pub struct WrapperSummary {
     #[cfg(feature = "telemetry")]
     pub metrics: Vec<WrapperMetricSample>,
+    #[cfg(feature = "telemetry")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub governance: Option<foundation_telemetry::GovernanceWrapperEntry>,
 }
 
 #[cfg(feature = "telemetry")]
@@ -1218,7 +1221,27 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         );
     }
 
-    WrapperSummary { metrics }
+    for (name, gauge) in [
+        (
+            "treasury_executor_pending_matured",
+            &*TREASURY_EXECUTOR_PENDING_MATURED,
+        ),
+        (
+            "treasury_executor_staged_intents",
+            &*TREASURY_EXECUTOR_STAGED_INTENTS,
+        ),
+        (
+            "treasury_executor_lease_released",
+            &*TREASURY_EXECUTOR_LEASE_RELEASED,
+        ),
+    ] {
+        push_metric(&mut metrics, name, &[], gauge.get() as f64);
+    }
+
+    WrapperSummary {
+        metrics,
+        governance: governance_wrapper_snapshot(),
+    }
 }
 
 #[cfg(not(feature = "telemetry"))]
@@ -1232,6 +1255,58 @@ pub fn record_compression_ratio(algorithm: &str, ratio: f64) {
         .ensure_handle_for_label_values(&[algorithm])
         .expect(LABEL_REGISTRATION_ERR)
         .observe(ratio);
+}
+
+#[cfg(feature = "telemetry")]
+fn governance_wrapper_snapshot() -> Option<foundation_telemetry::GovernanceWrapperEntry> {
+    use crate::governance::{DisbursementStatus, NODE_GOV_STORE};
+    let disbursements = NODE_GOV_STORE.disbursements().ok()?;
+    let balance = NODE_GOV_STORE.treasury_balances().ok()?.balance;
+    let mut draft = 0u64;
+    let mut voting = 0u64;
+    let mut queued = 0u64;
+    let mut timelocked = 0u64;
+    let mut executed = 0u64;
+    let mut rolled_back = 0u64;
+    for d in &disbursements {
+        match d.status {
+            DisbursementStatus::Draft { .. } => draft += 1,
+            DisbursementStatus::Voting { .. } => voting += 1,
+            DisbursementStatus::Queued { .. } => queued += 1,
+            DisbursementStatus::Timelocked { .. } => timelocked += 1,
+            DisbursementStatus::Executed { .. } => executed += 1,
+            DisbursementStatus::Finalized { .. } => executed += 1,
+            DisbursementStatus::RolledBack { .. } => rolled_back += 1,
+        }
+    }
+    let executor = NODE_GOV_STORE.executor_snapshot().ok().flatten();
+    let (pending, staged, released, last_success_at, last_error_at) = executor
+        .map(|snap| {
+            (
+                snap.pending_matured,
+                snap.staged_intents,
+                snap.lease_released,
+                snap.last_success_at,
+                snap.last_error_at,
+            )
+        })
+        .unwrap_or((0, 0, false, None, None));
+
+    Some(foundation_telemetry::GovernanceWrapperEntry {
+        treasury_balance: balance,
+        disbursements_total: disbursements.len() as u64,
+        executed_total: executed,
+        rolled_back_total: rolled_back,
+        draft_total: draft,
+        voting_total: voting,
+        queued_total: queued,
+        timelocked_total: timelocked,
+        executor_pending_matured: pending,
+        executor_staged_intents: staged,
+        executor_lease_released: released,
+        executor_last_success_at: last_success_at,
+        executor_last_error_at: last_error_at,
+    })
 }
 
 #[cfg(feature = "telemetry")]

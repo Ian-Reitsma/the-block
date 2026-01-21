@@ -89,6 +89,11 @@
 
 ## Treasury Stuck
 
+Payload alignment and telemetry:
+- RPC/CLI/Explorer now surface `expected_receipts` and a canonical `deps` list (proposal `deps` preferred; memo hints capped at 100 entries, memo size limited to 8KiB, destinations must start with `tb1`).
+- `/wrappers` exports treasury executor gauges (`treasury_executor_pending_matured`, `treasury_executor_staged_intents`, `treasury_executor_lease_released`) so dashboards can alert on queue depth and lease state alongside `treasury_disbursement_backlog`.
+- When dashboards change, re-run `/wrappers` and capture the updated hash in review notes so operators can verify they scraped the latest governance/treasury snapshot.
+
 ### Symptoms
 
 - [ ] `treasury_disbursement_backlog > 50` for 2+ epochs

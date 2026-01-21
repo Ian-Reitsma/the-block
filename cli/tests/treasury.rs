@@ -38,7 +38,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     handle_with_writer(
         GovCmd::Treasury {
             action: GovTreasuryCmd::Schedule {
-                destination: "dest-1".into(),
+                destination: "tb1dest-1".into(),
                 amount: 500,
                 memo: Some("ecosystem grant".into()),
                 epoch: 2048,
@@ -49,7 +49,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     )
     .expect("schedule disbursement");
     let scheduled = fetch_disbursement(&state, 1);
-    assert_eq!(scheduled.destination, "dest-1");
+    assert_eq!(scheduled.destination, "tb1dest-1");
     assert_eq!(scheduled.amount, 500);
     assert!(matches!(scheduled.status, DisbursementStatus::Draft { .. }));
     let first_created_at = scheduled.created_at;
@@ -58,7 +58,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     handle_with_writer(
         GovCmd::Treasury {
             action: GovTreasuryCmd::Schedule {
-                destination: "dest-2".into(),
+                destination: "tb1dest-2".into(),
                 amount: 200,
                 memo: None,
                 epoch: 4096,
@@ -69,7 +69,7 @@ fn treasury_lifecycle_outputs_structured_json() {
     )
     .expect("schedule second disbursement");
     let queued_second = fetch_disbursement(&state, 2);
-    assert_eq!(queued_second.destination, "dest-2");
+    assert_eq!(queued_second.destination, "tb1dest-2");
     assert!(matches!(
         queued_second.status,
         DisbursementStatus::Draft { .. }

@@ -150,7 +150,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   - `preview --json <file>` validates the payload against the schema and prints the derived timeline: quorum requirements, vote window, activation epoch, timelock height, and resulting treasury deltas.
   - `submit --json <file>` posts the signed proposal to the node via `gov.treasury.submit_disbursement`; dry-run with `--check` to ensure hashes match before sending live traffic.
   - `show --id <proposal-id>` renders the explorer-style timeline (metadata, quorum/vote tallies, timelock window, execution tx hash, receipts, rollback annotations).
-  - `queue`, `execute`, and `rollback` mirror the on-chain transitions for operators who hold the treasury executor lease. `queue` acknowledges that the proposal passed and seeds the executor queue (it derives the current epoch from the node unless `--epoch` is supplied), `execute` pushes the signed transaction (recording `tx_hash`, nonce, receipts), and `rollback` reverts executions within the bounded window.
+  - `queue`, `execute`, and `rollback` mirror the on-chain transitions for operators who hold the treasury executor lease. `queue` acknowledges that the proposal passed and seeds the executor queue (pass `--epoch`; the CLI clamps missing/zero values to epoch 1), `execute` pushes the signed transaction (recording `tx_hash`, nonce, receipts), and `rollback` reverts executions within the bounded window.
 - `DisbursementPayload` JSON schema (shared by CLI, explorer, RPC, and tests):
 
 ```jsonc
@@ -162,29 +162,30 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
     "attachments": [
       { "name": "proposal-pdf", "uri": "ipfs://bafy..." }
     ],
-    "quorum": { "operators": 0.67, "builders": 0.67 },
+    "quorum": { "operators_ppm": 670000, "builders_ppm": 670000 },
     "vote_window_epochs": 6,
     "timelock_epochs": 2,
     "rollback_window_epochs": 1
   },
   "disbursement": {
-    "destination": "ct1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
-    "amount": 125_000_000,
+    "destination": "tb1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqe4tqx9",
+    "amount": 125000000,
     "memo": "Core grants Q2",
-    "scheduled_epoch": 180_500,
+    "scheduled_epoch": 180500,
     "expected_receipts": [
-      { "account": "foundation", "amount": 100_000_000 },
-      { "account": "audit-retainer", "amount": 25_000_000 }
+      { "account": "foundation", "amount": 100000000 },
+      { "account": "audit-retainer", "amount": 25000000 }
     ]
   }
 }
 ```
 
+- Validation: destinations must start with `tb1`, memos are capped at 8KiB, dependency lists are limited to 100 entries (proposal `deps` take precedence over memo hints), and `expected_receipts` must sum to `amount`.
 - RPC exposure:
   - `gov.treasury.submit_disbursement { payload, signature }` – create proposal from JSON.
   - `gov.treasury.disbursement { id }` – fetch canonical status/timeline for a single record.
-  - `gov.treasury.queue_disbursement { id, current_epoch? }`, `gov.treasury.execute_disbursement { id, tx_hash, receipts }`, `gov.treasury.rollback_disbursement { id, reason }` – maintenance hooks for executor operators (all auth gated). Passing `current_epoch = 0` tells the node to derive it from block height automatically.
-  - `gov.treasury.list_disbursements { cursor?, status?, limit? }` – explorer/CLI listings.
+  - `gov.treasury.queue_disbursement { id, current_epoch }`, `gov.treasury.execute_disbursement { id, tx_hash, receipts }`, `gov.treasury.rollback_disbursement { id, reason }` – maintenance hooks for executor operators (all auth gated). Provide the current epoch explicitly so timelock math matches the chain (CLI defaults to epoch 1 if omitted).
+  - `gov.treasury.list_disbursements { cursor?, status?, limit? }` – explorer/CLI listings; responses flatten the governance struct and expose `expected_receipts` plus a canonical `deps` vector (proposal.deps if present, else memo-derived and capped at 100).
 - CLI exposes `--schema` and `--check` flags to dump the JSON schema and to validate payloads offline. CI keeps the examples under `examples/governance/` in sync by running `contract-cli gov disburse preview --json … --check` during docs tests.
 - Explorer’s REST API mirrors the RPC fields so UI timelines and CLI scripts stay aligned; see `explorer/src/treasury.rs`.
 

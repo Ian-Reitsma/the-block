@@ -33,6 +33,12 @@ const fn default_rollback_epochs() -> u64 {
     1
 }
 
+/// Maximum number of dependencies allowed per disbursement to prevent DOS attacks
+pub const MAX_DEPENDENCIES: usize = 100;
+
+/// Maximum memo length accepted when parsing dependency hints or producing executor payloads
+pub const MAX_MEMO_BYTES: usize = 8 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct QuorumSpec {
@@ -190,8 +196,11 @@ impl TreasuryDisbursement {
         )
     }
 
-    pub fn from_payload(id: u64, payload: DisbursementPayload) -> Self {
+    pub fn from_payload(id: u64, mut payload: DisbursementPayload) -> Self {
         let created_at = now_ts();
+        if !payload.proposal.deps.is_empty() {
+            payload.proposal.deps = sanitize_dependencies(payload.proposal.deps);
+        }
         // Convert empty/default proposal metadata to None to indicate this is a
         // treasury-initiated disbursement that doesn't require governance approval.
         // If the proposal has any non-default values, preserve it for governance workflow.
@@ -277,6 +286,7 @@ pub enum DisbursementValidationError {
     InvalidTimelock,
     InvalidRollbackWindow,
     ExpectedReceiptsMismatch { expected_total: u64, actual: u64 },
+    MemoTooLong { len: usize, max: usize },
 }
 
 /// Explicit error states for treasury execution tracking
@@ -334,6 +344,10 @@ impl std::fmt::Display for DisbursementValidationError {
                 "expected receipts total {} does not match disbursement amount {}",
                 expected_total, actual
             ),
+            Self::MemoTooLong { len, max } => write!(
+                f,
+                "memo length {len} exceeds maximum treasury memo size of {max} bytes"
+            ),
         }
     }
 }
@@ -344,6 +358,8 @@ impl std::error::Error for DisbursementValidationError {}
 pub fn validate_disbursement_payload(
     payload: &DisbursementPayload,
 ) -> Result<(), DisbursementValidationError> {
+    validate_disbursement_details(&payload.disbursement)?;
+
     // Validate proposal metadata
     if payload.proposal.title.trim().is_empty() {
         return Err(DisbursementValidationError::EmptyTitle);
@@ -373,43 +389,50 @@ pub fn validate_disbursement_payload(
     if payload.proposal.rollback_window_epochs == 0 {
         return Err(DisbursementValidationError::InvalidRollbackWindow);
     }
+    Ok(())
+}
 
-    // Validate disbursement details
-    if payload.disbursement.destination.trim().is_empty() {
+/// Validate disbursement details (without requiring proposal metadata)
+pub fn validate_disbursement_details(
+    details: &DisbursementDetails,
+) -> Result<(), DisbursementValidationError> {
+    if details.destination.trim().is_empty() {
         return Err(DisbursementValidationError::InvalidDestination(
             "empty destination".into(),
         ));
     }
 
     // Validate destination address format (basic check - starts with "tb1" for mainnet)
-    if !payload.disbursement.destination.starts_with("tb1") {
+    if !details.destination.starts_with("tb1") {
         return Err(DisbursementValidationError::InvalidDestination(format!(
             "address must start with 'tb1', got: {}",
-            payload.disbursement.destination
+            details.destination
         )));
     }
 
-    if payload.disbursement.amount == 0 {
+    if details.amount == 0 {
         return Err(DisbursementValidationError::ZeroAmount);
     }
 
-    if payload.disbursement.scheduled_epoch == 0 {
+    if details.scheduled_epoch == 0 {
         return Err(DisbursementValidationError::ZeroScheduledEpoch);
     }
 
-    // Validate expected receipts sum matches disbursement amount
-    if !payload.disbursement.expected_receipts.is_empty() {
-        let total: u64 = payload
-            .disbursement
-            .expected_receipts
-            .iter()
-            .map(|r| r.amount)
-            .sum();
+    if details.memo.len() > MAX_MEMO_BYTES {
+        return Err(DisbursementValidationError::MemoTooLong {
+            len: details.memo.len(),
+            max: MAX_MEMO_BYTES,
+        });
+    }
 
-        if total != payload.disbursement.amount {
+    // Validate expected receipts sum matches disbursement amount
+    if !details.expected_receipts.is_empty() {
+        let total: u64 = details.expected_receipts.iter().map(|r| r.amount).sum();
+
+        if total != details.amount {
             return Err(DisbursementValidationError::ExpectedReceiptsMismatch {
                 expected_total: total,
-                actual: payload.disbursement.amount,
+                actual: details.amount,
             });
         }
     }
@@ -457,9 +480,6 @@ pub fn validate_dependencies(
 /// Parse dependency IDs out of a memo string.
 ///
 /// The parser supports both JSON and key=value styles so tooling that relies on
-/// Maximum number of dependencies allowed per disbursement to prevent DOS attacks
-const MAX_DEPENDENCIES: usize = 100;
-
 /// memo-based dependency hints can stay in sync. This is the canonical implementation
 /// used by the executor, CLI, and explorer layers.
 ///
@@ -471,7 +491,7 @@ pub fn parse_dependency_list(memo: &str) -> Vec<u64> {
     let trimmed = memo.trim();
 
     // Security: Reject excessively large memos (potential DOS)
-    if trimmed.is_empty() || trimmed.len() > 8192 {
+    if trimmed.is_empty() || trimmed.len() > MAX_MEMO_BYTES {
         return Vec::new();
     }
 
@@ -506,6 +526,31 @@ pub fn parse_dependency_list(memo: &str) -> Vec<u64> {
     deps.sort_unstable();
     deps.dedup();
     deps
+}
+
+fn sanitize_dependencies(mut deps: Vec<u64>) -> Vec<u64> {
+    deps.sort_unstable();
+    deps.dedup();
+    deps.truncate(MAX_DEPENDENCIES);
+    deps
+}
+
+/// Canonical dependency list derived from a payload (prefers explicit deps, falls back to memo)
+pub fn canonical_dependencies_from_payload(payload: &DisbursementPayload) -> Vec<u64> {
+    if !payload.proposal.deps.is_empty() {
+        return sanitize_dependencies(payload.proposal.deps.clone());
+    }
+    parse_dependency_list(&payload.disbursement.memo)
+}
+
+/// Canonical dependency list derived from a stored disbursement (prefers explicit deps)
+pub fn canonical_dependencies(disbursement: &TreasuryDisbursement) -> Vec<u64> {
+    if let Some(proposal) = &disbursement.proposal {
+        if !proposal.deps.is_empty() {
+            return sanitize_dependencies(proposal.deps.clone());
+        }
+    }
+    parse_dependency_list(&disbursement.memo)
 }
 
 /// Check if a disbursement is eligible for execution at the given epoch
@@ -567,6 +612,7 @@ pub fn is_eligible_for_execution(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{rngs::StdRng, Rng};
 
     fn valid_payload() -> DisbursementPayload {
         DisbursementPayload {
@@ -692,6 +738,37 @@ mod tests {
     }
 
     #[test]
+    fn memo_too_long_fails_validation() {
+        let mut payload = valid_payload();
+        payload.disbursement.memo = "x".repeat(MAX_MEMO_BYTES + 1);
+        let err = validate_disbursement_payload(&payload).unwrap_err();
+        assert!(matches!(
+            err,
+            DisbursementValidationError::MemoTooLong { .. }
+        ));
+    }
+
+    #[test]
+    fn canonical_dependencies_prefer_proposal_over_memo() {
+        let mut payload = valid_payload();
+        payload.proposal.deps = vec![3, 2, 3, 1];
+        payload.disbursement.memo = r#"{"depends_on":[9,8]}"#.into();
+        let deps = canonical_dependencies_from_payload(&payload);
+        assert_eq!(deps, vec![1, 2, 3]);
+
+        let disbursement = TreasuryDisbursement::from_payload(7, payload.clone());
+        assert_eq!(canonical_dependencies(&disbursement), vec![1, 2, 3]);
+
+        let mut fallback_payload = valid_payload();
+        fallback_payload.proposal.deps.clear();
+        fallback_payload.disbursement.memo = r#"{"depends_on":[9,1,1]}"#.into();
+        assert_eq!(
+            canonical_dependencies_from_payload(&fallback_payload),
+            vec![1, 9]
+        );
+    }
+
+    #[test]
     fn parse_dependency_list_json() {
         let memo = r#"{"depends_on": [1234, 5678]}"#;
         assert_eq!(parse_dependency_list(memo), vec![1234, 5678]);
@@ -745,6 +822,63 @@ mod tests {
         let result = parse_dependency_list(memo);
         // Should parse valid numbers only
         assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn disbursement_payload_roundtrips_json() {
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..128 {
+            let amount = rng.gen_range(1..1_000_000u64);
+            let memo_len = rng.gen_range(0..64usize);
+            let memo: String = (0..memo_len)
+                .map(|_| {
+                    let offset: u8 = rng.gen_range(0u32..26u32) as u8;
+                    (b'a'.saturating_add(offset)) as char
+                })
+                .collect();
+            let dep_count = rng.gen_range(0..4usize);
+            let mut deps = Vec::new();
+            for _ in 0..dep_count {
+                deps.push(rng.gen_range(1..200u64));
+            }
+            let destination = format!("tb1{:08x}", rng.gen::<u32>());
+            let include_receipts = rng.gen_bool(0.5);
+            let expected_receipts = if include_receipts {
+                vec![ExpectedReceipt {
+                    account: "ledger".into(),
+                    amount,
+                }]
+            } else {
+                Vec::new()
+            };
+            let payload = DisbursementPayload {
+                proposal: DisbursementProposalMetadata {
+                    title: "Fuzz Title".into(),
+                    summary: "Fuzz Summary".into(),
+                    deps,
+                    attachments: Vec::new(),
+                    quorum: QuorumSpec {
+                        operators_ppm: 500_000,
+                        builders_ppm: 500_000,
+                    },
+                    vote_window_epochs: 2,
+                    timelock_epochs: 1,
+                    rollback_window_epochs: 1,
+                },
+                disbursement: DisbursementDetails {
+                    destination,
+                    amount,
+                    memo,
+                    scheduled_epoch: 1,
+                    expected_receipts,
+                },
+            };
+            let encoded = foundation_serialization::json::to_string(&payload).unwrap();
+            let decoded: DisbursementPayload =
+                foundation_serialization::json::from_str(&encoded).unwrap();
+            assert_eq!(payload, decoded);
+            assert!(validate_disbursement_payload(&decoded).is_ok());
+        }
     }
 }
 

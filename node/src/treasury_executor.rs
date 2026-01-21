@@ -1,4 +1,4 @@
-use crate::governance::treasury::parse_dependency_list;
+use crate::governance::treasury::{canonical_dependencies, MAX_MEMO_BYTES};
 use crate::governance::{
     CircuitBreaker, CircuitBreakerConfig, DisbursementStatus, GovStore, SignedExecutionIntent,
     TreasuryDisbursement, TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle,
@@ -25,22 +25,19 @@ pub struct ExecutorParams {
     pub dependency_check: Option<DependencyCheck>,
 }
 
-/// Maximum memo size allowed in transaction payloads (bytes)
-const MAX_MEMO_SIZE: usize = 1024;
-
 fn dependencies_ready(
     store: &GovStore,
     disbursement: &TreasuryDisbursement,
 ) -> Result<bool, TreasuryExecutorError> {
     // Security: Validate memo size before parsing to prevent DOS
-    if disbursement.memo.len() > MAX_MEMO_SIZE * 8 {
+    if disbursement.memo.len() > MAX_MEMO_BYTES {
         return Err(TreasuryExecutorError::Storage(format!(
             "disbursement {} memo exceeds maximum size",
             disbursement.id
         )));
     }
 
-    let dependencies = parse_dependency_list(&disbursement.memo);
+    let dependencies = canonical_dependencies(disbursement);
     if dependencies.is_empty() {
         return Ok(true);
     }
@@ -125,8 +122,8 @@ fn signer_closure(
 
         // Security: Truncate memo if it exceeds maximum size to prevent transaction DOS
         let memo_bytes = disbursement.memo.as_bytes();
-        let safe_memo = if memo_bytes.len() > MAX_MEMO_SIZE {
-            memo_bytes[..MAX_MEMO_SIZE].to_vec()
+        let safe_memo = if memo_bytes.len() > MAX_MEMO_BYTES {
+            memo_bytes[..MAX_MEMO_BYTES].to_vec()
         } else {
             memo_bytes.to_vec()
         };

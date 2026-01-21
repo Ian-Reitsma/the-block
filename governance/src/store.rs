@@ -12,9 +12,10 @@ use crate::params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
 };
 use crate::treasury::{
-    mark_cancelled, mark_executed, mark_rolled_back, DisbursementPayload, DisbursementReceipt,
-    DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind, TreasuryBalanceSnapshot,
-    TreasuryDisbursement, TreasuryExecutorSnapshot,
+    mark_cancelled, mark_executed, mark_rolled_back, validate_disbursement_details,
+    validate_disbursement_payload, DisbursementPayload, DisbursementProposalMetadata,
+    DisbursementReceipt, DisbursementStatus, SignedExecutionIntent, TreasuryBalanceEventKind,
+    TreasuryBalanceSnapshot, TreasuryDisbursement, TreasuryExecutorSnapshot,
 };
 use foundation_lazy::sync::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
@@ -2904,6 +2905,16 @@ impl GovStore {
         &self,
         payload: DisbursementPayload,
     ) -> sled::Result<TreasuryDisbursement> {
+        let validation_result = if payload.proposal == DisbursementProposalMetadata::default() {
+            validate_disbursement_details(&payload.disbursement)
+        } else {
+            validate_disbursement_payload(&payload)
+        };
+        if let Err(err) = validation_result {
+            return Err(sled::Error::Unsupported(
+                format!("invalid disbursement payload: {err}").into(),
+            ));
+        }
         let mut records = self.load_disbursements()?;
         let next_id = records
             .iter()
