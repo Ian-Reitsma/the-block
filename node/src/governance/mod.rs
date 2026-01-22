@@ -42,9 +42,9 @@ pub use release::{
 };
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, EnergySettlementChangeRecord, GovStore,
-    LastActivation, TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle,
-    ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, EnergySettlementChangeRecord, EnergySlashRecord,
+    GovStore, LastActivation, TreasuryExecutorConfig, TreasuryExecutorError,
+    TreasuryExecutorHandle, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use token::{TokenAction, TokenProposal};
 

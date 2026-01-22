@@ -677,6 +677,7 @@ const ENERGY_METHODS: &[&str] = &[
     "energy.receipts",
     "energy.credits",
     "energy.disputes",
+    "energy.slashes",
     "energy.settle",
     "energy.submit_reading",
     "energy.flag_dispute",
@@ -693,9 +694,11 @@ fn required_energy_role(method: &str) -> Option<EnergyRole> {
         | "energy.resolve_dispute"
         | "energy.register_provider"
         | "energy.update_provider" => Some(EnergyRole::Admin),
-        "energy.market_state" | "energy.receipts" | "energy.credits" | "energy.disputes" => {
-            Some(EnergyRole::Provider)
-        }
+        "energy.market_state"
+        | "energy.receipts"
+        | "energy.credits"
+        | "energy.disputes"
+        | "energy.slashes" => Some(EnergyRole::Provider),
         _ => None,
     }
 }
@@ -2943,6 +2946,7 @@ fn dispatch(
         "energy.receipts" => energy::receipts(&req.params)?,
         "energy.credits" => energy::credits(&req.params)?,
         "energy.disputes" => energy::disputes(&req.params)?,
+        "energy.slashes" => energy::slashes(&req.params)?,
         "energy.settle" => {
             let height = bc
                 .lock()

@@ -10,8 +10,8 @@ use sys::tempfile::tempdir;
 use testkit::tb_serial;
 use the_block::energy::{
     configure_provider_keys, flag_dispute, register_provider, resolve_dispute,
-    settle_energy_delivery, submit_meter_reading, DisputeStatus, GovernanceEnergyParams,
-    ProviderKeyConfig,
+    settle_energy_delivery, slashes_page, submit_meter_reading, DisputeStatus,
+    GovernanceEnergyParams, ProviderKeyConfig,
 };
 use the_block::governance::{EnergySettlementMode, EnergySettlementPayload};
 
@@ -181,6 +181,12 @@ fn energy_oracle_enforcement_and_disputes() {
         EnergyMarketError::SettlementBelowQuorum { .. }
     ));
 
+    let slashes = slashes_page(Some(&provider.provider_id), 0, 10);
+    assert!(
+        slashes.items.iter().any(|slash| slash.reason == "quorum"),
+        "quorum shortfall should record a slash"
+    );
+
     // Valid settlement succeeds
     let receipt = settle_energy_delivery(
         "buyer-1".into(),
@@ -197,6 +203,20 @@ fn energy_oracle_enforcement_and_disputes() {
             .iter()
             .any(|r| r.meter_reading_hash == credit.meter_reading_hash),
         "anchored receipts should persist settlement history"
+    );
+
+    let fake_hash = [9u8; 32];
+    let conflict_err =
+        settle_energy_delivery("buyer-1".into(), &provider.provider_id, 10, 20, fake_hash)
+            .expect_err("unknown reading should fail");
+    assert!(matches!(conflict_err, EnergyMarketError::UnknownReading(_)));
+    let conflict_slashes = slashes_page(Some(&provider.provider_id), 0, 10);
+    assert!(
+        conflict_slashes
+            .items
+            .iter()
+            .any(|slash| slash.reason == "conflict"),
+        "Unknown reading should produce a conflict slash"
     );
 
     // Dispute open/resolve flow

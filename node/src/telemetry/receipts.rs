@@ -78,6 +78,31 @@ pub static RECEIPTS_ENERGY_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
     )
 });
 
+/// Slashed energy receipt count per block (gauge)
+#[cfg(feature = "telemetry")]
+pub static RECEIPTS_ENERGY_SLASH_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
+    register_int_gauge(
+        "receipts_energy_slash_per_block",
+        "Number of energy slash receipts in current block",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPTS_ENERGY_SLASH: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipts_energy_slash_total",
+        "Total number of energy slash receipts emitted across all blocks",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_SETTLEMENT_ENERGY_SLASH: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge(
+        "receipt_settlement_energy_slash",
+        "Aggregated ENERGY slash amounts (BLOCK) for the current block",
+    )
+});
+
 /// Ad receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_AD_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
@@ -283,6 +308,8 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     let mut compute_settlement = 0.0;
     let mut energy_count = 0i64;
     let mut energy_settlement = 0.0;
+    let mut energy_slash_count = 0i64;
+    let mut energy_slash_settlement = 0.0;
     let mut ad_count = 0i64;
     let mut ad_settlement = 0.0;
 
@@ -304,6 +331,14 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
                 energy_settlement += settlement;
                 RECEIPTS_ENERGY.inc();
             }
+            Receipt::EnergySlash(_) => {
+                energy_count += 1;
+                energy_settlement += settlement;
+                energy_slash_count += 1;
+                energy_slash_settlement += settlement;
+                RECEIPTS_ENERGY.inc();
+                RECEIPTS_ENERGY_SLASH.inc();
+            }
             Receipt::Ad(_) => {
                 ad_count += 1;
                 ad_settlement += settlement;
@@ -316,12 +351,14 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     RECEIPTS_STORAGE_PER_BLOCK.set(storage_count);
     RECEIPTS_COMPUTE_PER_BLOCK.set(compute_count);
     RECEIPTS_ENERGY_PER_BLOCK.set(energy_count);
+    RECEIPTS_ENERGY_SLASH_PER_BLOCK.set(energy_slash_count);
     RECEIPTS_AD_PER_BLOCK.set(ad_count);
 
     // Update settlement amounts
     RECEIPT_SETTLEMENT_STORAGE.set(storage_settlement);
     RECEIPT_SETTLEMENT_COMPUTE.set(compute_settlement);
     RECEIPT_SETTLEMENT_ENERGY.set(energy_settlement);
+    RECEIPT_SETTLEMENT_ENERGY_SLASH.set(energy_slash_settlement);
     RECEIPT_SETTLEMENT_AD.set(ad_settlement);
 }
 

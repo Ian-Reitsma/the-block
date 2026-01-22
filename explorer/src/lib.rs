@@ -115,6 +115,7 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
             "/governance/energy/settlement/history",
             energy_settlement_history,
         )
+        .get("/governance/energy/slashes", energy_slash_history)
         .get("/governance/treasury/executor", treasury_executor_status)
         .get("/energy/providers", energy_providers)
         .get("/energy/disputes", energy_disputes)
@@ -824,6 +825,40 @@ async fn energy_settlement_history(
             Err(HttpError::Handler(
                 "energy settlement history failed".into(),
             ))
+        }
+    }
+}
+
+async fn energy_slash_history(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let provider_filter = request.query_param("provider_id").map(str::to_string);
+    let explorer = explorer_from(&request);
+    let store = GovStore::open(&explorer.gov_db_path);
+    match store.energy_slash_history() {
+        Ok(mut history) => {
+            if let Some(provider) = provider_filter {
+                history.retain(|slash| slash.provider_id == provider);
+            }
+            let payload: Vec<_> = history
+                .into_iter()
+                .filter_map(|slash| json::to_value(&slash).ok())
+                .collect();
+            let mut map = json::Map::new();
+            map.insert("status".into(), json::Value::String("ok".into()));
+            map.insert("slashes".into(), json::Value::Array(payload));
+            map.insert(
+                "refreshed_at".into(),
+                json::Value::Number(json::Number::from(
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                )),
+            );
+            Ok(Response::new(StatusCode::OK).json(&json::Value::Object(map))?)
+        }
+        Err(err) => {
+            log_error("energy slash history failed", &err);
+            Err(HttpError::Handler("energy slash history failed".into()))
         }
     }
 }

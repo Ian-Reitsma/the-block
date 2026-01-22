@@ -559,6 +559,21 @@ echo "=== Energy market ==="
 contract-cli receipts stats --market energy
 grep energy /var/log/node/receipts.log | tail -20
 
+### Slash & rejection monitoring
+
+```bash
+echo "=== Energy slash receipts ==="
+contract-cli energy slashes --provider-id energy-0x00 --json
+
+echo "=== Quorum shortfall rate (5m) ==="
+prometheus_query 'rate(energy_quorum_shortfall_total[5m])'
+
+echo "=== Reading rejection rate (5m) ==="
+prometheus_query 'rate(energy_reading_reject_total[5m])'
+```
+
+The Grafana energy dashboard now surfaces these metrics (quorum shortfalls, reading rejects, dispute states) alongside the existing slash/settlement panels so operators can correlate telemetry with ledger events.
+
 # Ad market
 echo "=== Ad market ==="
 contract-cli receipts stats --market ad

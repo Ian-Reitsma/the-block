@@ -8,8 +8,8 @@ use crate::transaction::binary as tx_binary;
 use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{
-    AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, EnergyReceipt, Receipt,
-    SignedTransaction, StorageReceipt, TokenAmount,
+    AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, EnergyReceipt, EnergySlashReceipt,
+    Receipt, SignedTransaction, StorageReceipt, TokenAmount,
 };
 
 /// Encode a [`Block`] into the canonical binary layout.
@@ -446,6 +446,16 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 });
                 struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
+            Receipt::EnergySlash(r) => {
+                struct_writer.field_string("type", "energy_slash");
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_with("meter_hash", |field_writer| {
+                    write_fixed(field_writer, &r.meter_hash);
+                });
+                struct_writer.field_u64("slash_amount", r.slash_amount);
+                struct_writer.field_string("reason", &r.reason);
+                struct_writer.field_u64("block_height", r.block_height);
+            }
             Receipt::Ad(r) => {
                 struct_writer.field_string("type", "ad");
                 struct_writer.field_string("campaign_id", &r.campaign_id);
@@ -536,6 +546,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut provider_escrow = None;
         let mut verified = None;
         let mut proof_hash = None;
+        let mut meter_hash = None;
+        let mut slash_amount = None;
+        let mut reason = None;
         let mut conversions = None;
         let mut claim_routes: Option<HashMap<String, String>> = None;
         let mut role_breakdown: Option<crate::receipts::AdRoleBreakdown> = None;
@@ -565,6 +578,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             }
             "verified" => assign_once(&mut verified, reader.read_u64()?, "verified"),
             "proof_hash" => assign_once(&mut proof_hash, read_fixed(reader)?, "proof_hash"),
+            "meter_hash" => assign_once(&mut meter_hash, read_fixed(reader)?, "meter_hash"),
+            "slash_amount" => assign_once(&mut slash_amount, reader.read_u64()?, "slash_amount"),
+            "reason" => assign_once(&mut reason, reader.read_string()?, "reason"),
             "conversions" => assign_once(&mut conversions, reader.read_u64()?, "conversions"),
             "claim_routes" => {
                 let routes = read_vec(reader, |reader| {
@@ -701,6 +717,13 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                     .ok_or(DecodeError::MissingField("provider_signature"))?,
                 signature_nonce: signature_nonce
                     .ok_or(DecodeError::MissingField("signature_nonce"))?,
+            })),
+            "energy_slash" => Ok(Receipt::EnergySlash(EnergySlashReceipt {
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                meter_hash: meter_hash.ok_or(DecodeError::MissingField("meter_hash"))?,
+                slash_amount: slash_amount.ok_or(DecodeError::MissingField("slash_amount"))?,
+                reason: reason.ok_or(DecodeError::MissingField("reason"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
             })),
             "ad" => Ok(Receipt::Ad(AdReceipt {
                 campaign_id: campaign_id.ok_or(DecodeError::MissingField("campaign_id"))?,

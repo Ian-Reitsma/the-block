@@ -62,9 +62,9 @@ pub use release::{
 pub use reward::{approved_reward_claims, ensure_reward_claim_authorized, RewardClaimApproval};
 pub use state::TreasuryState;
 pub use store::{
-    DependencyPolicyRecord, DidRevocationRecord, GovStore, LastActivation, TreasuryBalances,
-    TreasuryExecutorConfig, TreasuryExecutorError, TreasuryExecutorHandle, ACTIVATION_DELAY,
-    QUORUM, ROLLBACK_WINDOW_EPOCHS,
+    DependencyPolicyRecord, DidRevocationRecord, EnergySettlementChangeRecord, EnergySlashRecord,
+    GovStore, LastActivation, TreasuryBalances, TreasuryExecutorConfig, TreasuryExecutorError,
+    TreasuryExecutorHandle, ACTIVATION_DELAY, QUORUM, ROLLBACK_WINDOW_EPOCHS,
 };
 pub use treasury::{
     parse_dependency_list, validate_disbursement_payload, DisbursementDetails, DisbursementPayload,

@@ -2,8 +2,8 @@ use super::RpcError;
 use crate::governance::{
     decode_binary, decode_runtime_backend_policy, decode_storage_engine_policy,
     decode_transport_provider_policy, encode_binary, EnergySettlementChangePayload,
-    EnergySettlementChangeRecord, EnergySettlementMode, GovStore, ParamKey, Params, Proposal,
-    ProposalStatus, Runtime, Vote, VoteChoice,
+    EnergySettlementChangeRecord, EnergySettlementMode, EnergySlashRecord, GovStore, ParamKey,
+    Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
 };
 use foundation_serialization::{Deserialize, Serialize};
 
@@ -269,6 +269,12 @@ pub fn energy_settlement_history(
     store
         .energy_settlement_history()
         .map_err(|_| RpcError::new(-32073, "energy settlement history read failed"))
+}
+
+pub fn energy_slash_history(store: &GovStore) -> Result<Vec<EnergySlashRecord>, RpcError> {
+    store
+        .energy_slash_history()
+        .map_err(|_| RpcError::new(-32074, "energy slash history read failed"))
 }
 
 pub fn release_signers(store: &GovStore) -> Result<ReleaseSignersResponse, RpcError> {

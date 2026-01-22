@@ -183,6 +183,13 @@ impl ReceiptId {
                 hasher.update(&r.block_height.to_le_bytes());
                 hasher.update(&r.signature_nonce.to_le_bytes());
             }
+            Receipt::EnergySlash(r) => {
+                hasher.update(b"energy_slash");
+                hasher.update(r.provider.as_bytes());
+                hasher.update(&r.meter_hash);
+                hasher.update(r.reason.as_bytes());
+                hasher.update(&r.block_height.to_le_bytes());
+            }
             Receipt::Ad(r) => {
                 hasher.update(b"ad");
                 hasher.update(r.publisher.as_bytes());
@@ -238,6 +245,7 @@ fn receipt_provider_and_nonce(receipt: &Receipt) -> (&str, u64) {
         Receipt::Storage(r) => (r.provider.as_str(), r.signature_nonce),
         Receipt::Compute(r) => (r.provider.as_str(), r.signature_nonce),
         Receipt::Energy(r) => (r.provider.as_str(), r.signature_nonce),
+        Receipt::EnergySlash(r) => (r.provider.as_str(), 0),
         Receipt::Ad(r) => (r.publisher.as_str(), r.signature_nonce),
     }
 }
@@ -249,6 +257,9 @@ pub fn validate_receipt(
     provider_registry: &ProviderRegistry,
     nonce_tracker: &mut NonceTracker,
 ) -> Result<(), ValidationError> {
+    if matches!(receipt, Receipt::EnergySlash(_)) {
+        return Ok(());
+    }
     let (provider_id, nonce) = receipt_provider_and_nonce(receipt);
     if nonce_tracker.has_seen_nonce(provider_id, nonce) {
         return Err(ValidationError::ReplayedNonce {
@@ -317,6 +328,10 @@ pub fn validate_receipt(
             if r.provider_signature.is_empty() {
                 return Err(ValidationError::EmptySignature);
             }
+        }
+        Receipt::EnergySlash(r) => {
+            validate_string_field("provider", &r.provider)?;
+            validate_string_field("reason", &r.reason)?;
         }
         Receipt::Ad(r) => {
             validate_string_field("campaign_id", &r.campaign_id)?;
@@ -466,6 +481,9 @@ pub fn receipt_verify_units(receipt: &Receipt) -> u64 {
         Receipt::Energy(_) => {
             units += 3;
         }
+        Receipt::EnergySlash(_) => {
+            units += 2;
+        }
         Receipt::Ad(r) => {
             // Ad receipts can batch many impressions; cap per-receipt verify units.
             units += (r.impressions / 10_000).min(10) as u64;
@@ -492,6 +510,7 @@ fn signature_bytes_for_receipt(receipt: &Receipt) -> &[u8] {
         Receipt::Storage(r) => r.provider_signature.as_slice(),
         Receipt::Compute(r) => r.provider_signature.as_slice(),
         Receipt::Energy(r) => r.provider_signature.as_slice(),
+        Receipt::EnergySlash(_) => &[],
         Receipt::Ad(r) => r.publisher_signature.as_slice(),
     }
 }
@@ -589,6 +608,7 @@ pub fn derive_receipt_header(
             Receipt::Storage(r) => (r.provider.as_str(), None, None),
             Receipt::Compute(r) => (r.provider.as_str(), None, None),
             Receipt::Energy(r) => (r.provider.as_str(), None, None),
+            Receipt::EnergySlash(r) => (r.provider.as_str(), None, None),
             Receipt::Ad(r) => (r.publisher.as_str(), None, None),
         };
         let record = registry.get_provider_record(id);
@@ -755,6 +775,7 @@ pub fn shard_for_receipt(receipt: &Receipt, shard_count: u16) -> u16 {
         Receipt::Storage(r) => hasher.update(r.provider.as_bytes()),
         Receipt::Compute(r) => hasher.update(r.provider.as_bytes()),
         Receipt::Energy(r) => hasher.update(r.provider.as_bytes()),
+        Receipt::EnergySlash(r) => hasher.update(r.provider.as_bytes()),
         Receipt::Ad(r) => hasher.update(r.publisher.as_bytes()),
     }
     let hash = hasher.finalize();
@@ -792,6 +813,13 @@ pub fn receipt_leaf_hash(receipt: &Receipt) -> [u8; 32] {
             hasher.update(&r.signature_nonce.to_le_bytes());
             hasher.update(&r.energy_units.to_le_bytes());
             hasher.update(&r.price.to_le_bytes());
+        }
+        Receipt::EnergySlash(r) => {
+            hasher.update(r.provider.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.meter_hash);
+            hasher.update(&r.slash_amount.to_le_bytes());
+            hasher.update(r.reason.as_bytes());
         }
         Receipt::Ad(r) => {
             hasher.update(r.publisher.as_bytes());

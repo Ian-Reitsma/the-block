@@ -117,6 +117,7 @@ pub fn derive_market_metrics_from_chain(
                     energy_state.settlement_count += 1;
                     energy_state.providers.insert(r.provider.clone());
                 }
+                Receipt::EnergySlash(_) => {}
                 Receipt::Ad(r) => {
                     ad_state.revenue = ad_state.revenue.saturating_add(r.spend);
                     ad_state.impressions = ad_state.impressions.saturating_add(r.impressions);

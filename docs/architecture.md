@@ -615,17 +615,17 @@ See `docs/operations.md#receipt-telemetry` for Grafana dashboard setup and alert
   - Expand dependency graph support in proposals (deps validation in the node mirror + conflict tests).
   - Harden param persistence snapshots and rollback audits with more regression coverage.
   - Surface the energy settlement mode workflow end-to-end: expose `gov.energy_settlement`/`gov.energy_settlement_history`, let `contract-cli gov energy-settlement` render payloads via `--dry-run` and timeline entries via `--timeline`, and persist each activation+rollback record so `/governance/energy/settlement/history` returns the approved memo, deps, quorum, expiry and rollback timestamps for auditors. Telemetry now increments `energy_settlement_mode` (0=batch, 1=real_time) plus `energy_settlement_rollback_total`; feed both into the metrics-aggregator summaries, `/wrappers`, and Grafana dashboards so operators can spot mode drifts and rollbacks without digging through raw blocks.
-- **Energy + Oracle**
-  - Ed25519 verification now lives inside `oracle-adapter` (`Ed25519SignatureVerifier`) with provider-key registration so adapters reject unsigned readings. Provider keys load from `energy.provider_keys` in the node config and propagate into the sled-backed verifier registry automatically. Remaining work focuses on oracle quorum/expiry policies, ledger anchoring, and advanced telemetry.
-  - Add oracle quorum/expiry policy (multi-reading attestation) with richer slashing telemetry.
-  - Persist energy receipts to ledger anchors or dedicated sled trees with replay tests.
-  - Expand CLI/ explorer flows for provider updates (price, stake top-up) once governance exposes the payloads.
+ - **Energy + Oracle**
+   - Ed25519 verification now lives inside `oracle-adapter` (`Ed25519SignatureVerifier`) with provider-key registration so adapters reject unsigned readings. Provider keys load from `energy.provider_keys` in the node config and propagate into the sled-backed verifier registry automatically. Remaining work focuses on oracle quorum/expiry policies, ledger anchoring, and advanced telemetry.
+   - Add oracle quorum/expiry policy (multi-reading attestation) with richer slashing telemetry, emit ledger-backed slash receipts for quorum/expiry/conflict events, and surface them through `energy.slashes`, `contract-cli energy slashes`, and `/governance/energy/slashes` so operators can inspect the failure reason before retrying settlements.
+   - Persist energy receipts to ledger anchors or dedicated sled trees with replay tests.
+   - Expand CLI/explorer flows for provider updates (price, stake top-up) once governance exposes the payloads.
 - **RPC + CLI Hardening**
   - Add RPC auth + rate limiting specific to the `energy.*` endpoints (aligned with gateway policy).
   - Cover negative cases + structured errors for `energy.submit_reading` (bad signature, stale timestamp, wrong meter) and the new dispute endpoints.
   - Publish JSON schema snippets for energy payloads/oracle messages plus round-trip CLI tests.
 - **Telemetry + Observability**
-  - Extend Grafana dashboards: provider count, pending credits, dispute trends, settlement rate, slash totals.
+  - Extend Grafana dashboards with panels for quorum shortfalls, reading rejections, dispute states, plus the existing slash-rate/settlement panels so operators can triangulate the root cause of every rejection.
   - Add SLOs/alerts for oracle latency, slashing spikes, settlement stalls, and dispute backlog.
   - Wire metrics-aggregator summary endpoints so `/wrappers` and `/telemetry/summary` expose the new energy stats.
 - **Network + Transport**

@@ -314,6 +314,9 @@ pub fn verify_receipt_signature(
     nonce_tracker: &mut NonceTracker,
     current_block: u64,
 ) -> Result<(), CryptoError> {
+    if matches!(receipt, Receipt::EnergySlash(_)) {
+        return Ok(());
+    }
     // Get preimage and provider info based on receipt type
     let (preimage, provider_id, signature_bytes, nonce) = match receipt {
         Receipt::Storage(r) => (
@@ -334,6 +337,7 @@ pub fn verify_receipt_signature(
             &r.provider_signature,
             r.signature_nonce,
         ),
+        Receipt::EnergySlash(_) => unreachable!("energy slash receipts are unsigned"),
         Receipt::Ad(r) => (
             build_ad_preimage(r),
             r.publisher.as_str(),

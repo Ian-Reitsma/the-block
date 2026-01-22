@@ -130,6 +130,22 @@ fn receipt_value(receipt: &EnergyReceipt) -> Value {
     Value::Object(map)
 }
 
+fn slash_value(slash: &energy::EnergySlash) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "provider_id".into(),
+        Value::String(slash.provider_id.clone()),
+    );
+    map.insert(
+        "meter_hash".into(),
+        Value::String(hex::encode(slash.meter_hash)),
+    );
+    map.insert("block_height".into(), number(slash.block_height));
+    map.insert("amount".into(), number(slash.amount));
+    map.insert("reason".into(), Value::String(slash.reason.clone()));
+    Value::Object(map)
+}
+
 fn credit_value(credit: &EnergyCredit) -> Value {
     let mut map = Map::new();
     map.insert("provider".into(), Value::String(credit.provider.clone()));
@@ -539,6 +555,28 @@ pub fn receipts(params: &Params) -> Result<Value, RpcError> {
     map.insert("page_size".into(), number(page.page_size as u64));
     map.insert("total".into(), number(page.total as u64));
     map.insert("receipts".into(), Value::Array(receipts));
+    Ok(Value::Object(map))
+}
+
+pub fn slashes(params: &Params) -> Result<Value, RpcError> {
+    let params = params_object(params)?;
+    let provider_id = params.get("provider_id").and_then(|value| value.as_str());
+    let page = params
+        .get("page")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    let page_size = params
+        .get("page_size")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(25) as usize;
+    let page = energy::slashes_page(provider_id, page, page_size);
+    let slashes: Vec<Value> = page.items.iter().map(slash_value).collect();
+    let mut map = Map::new();
+    map.insert("status".into(), Value::String("ok".into()));
+    map.insert("page".into(), number(page.page as u64));
+    map.insert("page_size".into(), number(page.page_size as u64));
+    map.insert("total".into(), number(page.total as u64));
+    map.insert("slashes".into(), Value::Array(slashes));
     Ok(Value::Object(map))
 }
 

@@ -81,7 +81,9 @@ pub mod simple_db;
 use crate::receipt_crypto::{NonceTracker, ProviderRegistry};
 use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};
-pub use receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
+pub use receipts::{
+    AdReceipt, ComputeReceipt, EnergyReceipt, EnergySlashReceipt, Receipt, StorageReceipt,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadAckError {
@@ -1312,6 +1314,7 @@ impl Blockchain {
                         Receipt::Storage(_) => has_storage_receipts = true,
                         Receipt::Compute(_) => has_compute_receipts = true,
                         Receipt::Energy(_) => has_energy_receipts = true,
+                        Receipt::EnergySlash(_) => {}
                         Receipt::Ad(_) => has_ad_receipts = true,
                     }
                     if has_storage_receipts
@@ -4812,6 +4815,15 @@ impl Blockchain {
                 proof_hash: receipt.meter_reading_hash,
                 provider_signature: vec![],
                 signature_nonce: receipt.block_settled,
+            }));
+        }
+        for slash in crate::energy::drain_energy_slash_receipts() {
+            block_receipts.push(Receipt::EnergySlash(EnergySlashReceipt {
+                provider: slash.provider_id,
+                meter_hash: slash.meter_hash,
+                slash_amount: slash.amount,
+                reason: slash.reason,
+                block_height: slash.block_height,
             }));
         }
         for receipt in crate::rpc::storage::drain_storage_receipts() {

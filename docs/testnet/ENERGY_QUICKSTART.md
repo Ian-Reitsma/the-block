@@ -95,6 +95,15 @@ Use the dedicated dispute RPCs + CLI to rehearse investigations before falling b
 6. If a dispute uncovers systemic issues, you can still tighten governance parameters (e.g. `energy_slashing_rate_bps`) via `contract-cli gov param update`, but run the dispute drill first so the sled log, CLI, and dashboards all reflect the investigation history.
 
 ## 8. Dashboards, Monitoring, and SLOs
+Use `contract-cli energy slashes` or the `/governance/energy/slashes` explorer route to inspect anything the metrics stream pinpoints. Watch the new panels for `energy_quorum_shortfall_total`, `energy_reading_reject_total`, and `energy_dispute_total` alongside the existing slash/settlement charts. You can also run Prometheus queries directly:
+
+```bash
+contract-cli energy slashes --provider-id energy-0x00 --json
+prometheus_query 'rate(energy_quorum_shortfall_total[5m])'
+prometheus_query 'rate(energy_reading_reject_total[5m])'
+prometheus_query 'energy_dispute_total'
+```
+
 - Grafana: `http://localhost:3000` (default `admin/admin`). Panels show `energy_providers_count`, `energy_kwh_traded_total`, `energy_avg_price`, slash totals, and oracle latency histograms exported by `crates/energy-market`. Add alerts that trigger whenever pending credits exceed 25 or when oracle latency > threshold.
 - Metrics aggregator: `make monitor` exposes `/telemetry/summary` and `/wrappers` so you can scrape energy KPIs alongside transport/runtime metadata. The `energy_providers_count` and `oracle_reading_latency_seconds` series feed the default dashboards.
 - Health checks: `node::energy::check_energy_market_health` logs warnings if oracle latency or pending credits trip the thresholds. Monitor the log stream or scrape `journalctl` for `energy market pending credits`.

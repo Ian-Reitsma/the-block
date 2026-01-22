@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::governance::NODE_GOV_STORE;
-use crate::simple_db::{names, SimpleDb};
+use crate::simple_db::{SimpleDb, names};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::energy as energy_metrics;
 #[cfg(feature = "telemetry")]
@@ -16,9 +16,9 @@ use crypto_suite::hex;
 use diagnostics::tracing::{info, warn};
 use energy_market::{
     AccountId, EnergyCredit, EnergyMarket, EnergyMarketConfig, EnergyMarketError, EnergyProvider,
-    EnergyReceipt, MeterReading, ProviderId, SettlementMode, SignatureScheme, H256,
+    EnergyReceipt, H256, MeterReading, ProviderId, SettlementMode, SignatureScheme,
 };
-use foundation_serialization::{binary, Deserialize, Serialize};
+use foundation_serialization::{Deserialize, Serialize, binary};
 use governance_spec::{EnergySettlementMode, EnergySettlementPayload};
 use std::io;
 use std::sync::{Mutex, MutexGuard};
@@ -27,6 +27,7 @@ use thiserror::Error;
 const KEY_STATE: &str = "state";
 const KEY_DISPUTES: &str = "disputes";
 const KEY_RECEIPTS: &str = "receipts";
+const KEY_SLASHES: &str = "slashes";
 
 #[derive(Clone, Copy, Debug)]
 pub struct GovernanceEnergyParams {
@@ -139,11 +140,26 @@ impl Default for DisputeLog {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct EnergySlash {
+    pub provider_id: String,
+    pub meter_hash: H256,
+    pub block_height: u64,
+    pub amount: u64,
+    pub reason: String,
+}
+
+const SLASH_REASON_QUORUM: &str = "quorum";
+const SLASH_REASON_EXPIRY: &str = "expiry";
+const SLASH_REASON_CONFLICT: &str = "conflict";
+
 struct EnergyMarketStore {
     db: SimpleDb,
     market: EnergyMarket,
     disputes: DisputeLog,
     receipts: Vec<EnergyReceipt>,
+    slashes: Vec<EnergySlash>,
 }
 
 impl EnergyMarketStore {
@@ -161,11 +177,16 @@ impl EnergyMarketStore {
             .get(KEY_RECEIPTS)
             .and_then(|bytes| binary::decode::<Vec<EnergyReceipt>>(&bytes).ok())
             .unwrap_or_default();
+        let slashes = db
+            .get(KEY_SLASHES)
+            .and_then(|bytes| binary::decode::<Vec<EnergySlash>>(&bytes).ok())
+            .unwrap_or_default();
         Self {
             db,
             market,
             disputes,
             receipts,
+            slashes,
         }
     }
 
@@ -173,6 +194,7 @@ impl EnergyMarketStore {
         self.persist_market()?;
         self.persist_disputes()?;
         self.persist_receipts()?;
+        self.persist_slashes()?;
         Ok(())
     }
 
@@ -199,6 +221,23 @@ impl EnergyMarketStore {
         Ok(())
     }
 
+    fn persist_slashes(&mut self) -> io::Result<()> {
+        let bytes = binary::encode(&self.slashes)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        self.db.insert(KEY_SLASHES, bytes);
+        Ok(())
+    }
+
+    fn record_slash(&mut self, slash: EnergySlash) {
+        self.slashes.push(slash);
+    }
+
+    fn drain_slashes(&mut self) -> Vec<EnergySlash> {
+        let drained = self.slashes.clone();
+        self.slashes.clear();
+        drained
+    }
+
     fn snapshot(&self, governance: GovernanceEnergyParams) -> EnergySnapshot {
         EnergySnapshot {
             providers: self.market.providers().cloned().collect(),
@@ -210,6 +249,7 @@ impl EnergyMarketStore {
                 .map(|(_, credit)| credit.clone())
                 .collect(),
             disputes: self.disputes.entries.clone(),
+            slashes: self.slashes.clone(),
             governance,
         }
     }
@@ -243,6 +283,7 @@ pub struct EnergySnapshot {
     pub anchored_receipts: Vec<EnergyReceipt>,
     pub credits: Vec<EnergyCredit>,
     pub disputes: Vec<EnergyDispute>,
+    pub slashes: Vec<EnergySlash>,
     pub governance: GovernanceEnergyParams,
 }
 
@@ -482,6 +523,10 @@ pub fn settle_energy_delivery(
     ) {
         Ok(receipt) => receipt,
         Err(err) => {
+            let mut slash_reason = None;
+            let mut slash_hash = meter_hash;
+            let mut slash_kwh = kwh_consumed;
+            let mut provider_label = Some(provider_id.to_string());
             #[cfg(feature = "telemetry")]
             {
                 match &err {
@@ -490,19 +535,55 @@ pub fn settle_energy_delivery(
                         energy_metrics::increment_slashing(provider_id.as_str(), "quorum");
                     }
                     EnergyMarketError::CreditExpired(hash) => {
-                        let provider_label = guard
+                        let provider = guard
                             .provider_for_hash(hash)
-                            .unwrap_or_else(|| "unknown".into());
-                        energy_metrics::increment_slashing(&provider_label, "expiry");
+                            .unwrap_or_else(|| provider_id.to_string());
+                        energy_metrics::increment_slashing(&provider, "expiry");
                     }
                     EnergyMarketError::UnknownReading(hash) => {
-                        let provider_label = guard
+                        let provider = guard
                             .provider_for_hash(hash)
-                            .unwrap_or_else(|| "unknown".into());
-                        energy_metrics::increment_slashing(&provider_label, "conflict");
+                            .unwrap_or_else(|| provider_id.to_string());
+                        energy_metrics::increment_slashing(&provider, "conflict");
                     }
                     _ => {}
                 }
+            }
+            match &err {
+                EnergyMarketError::SettlementBelowQuorum { .. } => {
+                    slash_reason = Some(SLASH_REASON_QUORUM);
+                }
+                EnergyMarketError::CreditExpired(hash) => {
+                    slash_reason = Some(SLASH_REASON_EXPIRY);
+                    slash_hash = *hash;
+                    if let Some(provider) = guard.provider_for_hash(hash) {
+                        provider_label = Some(provider);
+                    }
+                }
+                EnergyMarketError::UnknownReading(hash) => {
+                    slash_reason = Some(SLASH_REASON_CONFLICT);
+                    slash_hash = *hash;
+                    if let Some(provider) = guard.provider_for_hash(hash) {
+                        provider_label = Some(provider);
+                    }
+                    slash_kwh = 0;
+                }
+                _ => {}
+            }
+            if let Some(reason) = slash_reason {
+                let provider = provider_label.unwrap_or_else(|| "unknown".into());
+                let price_per_kwh = guard
+                    .market
+                    .provider(&provider)
+                    .map(|provider| provider.price_per_kwh)
+                    .unwrap_or(0);
+                let amount = compute_slash_amount(
+                    price_per_kwh,
+                    slash_kwh,
+                    guard.market.config().slashing_rate_bps,
+                );
+                record_slash_event(&mut guard, provider, slash_hash, block, amount, reason);
+                persist_or_warn(&mut guard);
             }
             return Err(err);
         }
@@ -553,6 +634,24 @@ pub fn drain_energy_receipts() -> Vec<EnergyReceipt> {
     receipts
 }
 
+pub fn drain_energy_slash_receipts() -> Vec<EnergySlash> {
+    let slashes = {
+        let mut guard = store();
+        guard.drain_slashes()
+    };
+    if !slashes.is_empty() {
+        let mut guard = store();
+        if let Err(err) = guard.persist_slashes() {
+            warn!(
+                ?err,
+                slash_count = slashes.len(),
+                "failed to persist energy slashes after draining"
+            );
+        }
+    }
+    slashes
+}
+
 fn record_treasury_fee(amount: u64) {
     if amount == 0 {
         return;
@@ -564,6 +663,46 @@ fn record_treasury_fee(amount: u64) {
         warn!(amount, ?err, "failed to accrue energy treasury fee");
         #[cfg(not(feature = "telemetry"))]
         let _ = (amount, err);
+    }
+}
+
+const BASIS_POINTS_DIVISOR: u64 = 10_000;
+
+fn compute_slash_amount(price_per_kwh: u64, kwh: u64, rate_bps: u16) -> u64 {
+    if price_per_kwh == 0 || kwh == 0 || rate_bps == 0 {
+        return 0;
+    }
+    let total_cost = (price_per_kwh as u128) * (kwh as u128);
+    ((total_cost * rate_bps as u128) / BASIS_POINTS_DIVISOR as u128) as u64
+}
+
+fn record_slash_event(
+    store: &mut EnergyMarketStore,
+    provider_id: String,
+    meter_hash: H256,
+    block_height: u64,
+    amount: u64,
+    reason: &'static str,
+) {
+    let slash = EnergySlash {
+        provider_id: provider_id.clone(),
+        meter_hash,
+        block_height,
+        amount,
+        reason: reason.into(),
+    };
+    store.record_slash(slash.clone());
+    if amount > 0 {
+        record_treasury_fee(amount);
+    }
+    if let Err(err) = NODE_GOV_STORE.record_energy_slash(
+        slash.provider_id.as_str(),
+        &slash.meter_hash,
+        slash.block_height,
+        slash.amount,
+        reason,
+    ) {
+        warn!(?err, "failed to persist energy slash record");
     }
 }
 
@@ -595,6 +734,22 @@ pub fn receipts_page(
     }
     receipts.sort_by(|a, b| b.block_settled.cmp(&a.block_settled));
     paginate_from_vec(receipts, page, page_size)
+}
+
+pub fn slashes_page(provider_id: Option<&str>, page: usize, page_size: usize) -> Page<EnergySlash> {
+    let guard = store();
+    let mut slashes: Vec<_> = guard
+        .slashes
+        .iter()
+        .filter(|slash| {
+            provider_id
+                .map(|provider| slash.provider_id == provider)
+                .unwrap_or(true)
+        })
+        .cloned()
+        .collect();
+    slashes.sort_by(|a, b| b.block_height.cmp(&a.block_height));
+    paginate_from_vec(slashes, page, page_size)
 }
 
 /// Return anchored receipts (append-only log) for audit/replay.

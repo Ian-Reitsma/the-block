@@ -52,7 +52,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 
 ## CLI (`contract-cli`)
 - Main entry in `cli/src/main.rs`. Subcommands include: `node`, `gov`, `wallet`, `bridge`, `dex`, `compute`, `storage`, `gateway`, `mesh`, `light`, `telemetry`, `probe`, `diagnostics`, `service-badge`, `remediation`, `ai`, `ann`, `identity`.
-- `contract-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `receipts`, `credits`, `settle`, `submit-reading`, `disputes`, `flag-dispute`, `resolve-dispute`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts/disputes for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
+- `contract-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `receipts`, `credits`, `settle`, `submit-reading`, `disputes`, `flag-dispute`, `resolve-dispute`, `slashes`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts/disputes/slashes for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
 - Provider trust roots live in `config/default.toml` under `energy.provider_keys`. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings will be rejected once keys are registered.
 - The `/wrappers` energy section now exposes `energy_quorum_shortfall_total`, `energy_reading_reject_total{reason}`, and `energy_dispute_total{state}` so CLI diagnostics and alerts can point operators to the exact condition that triggered a rejection or a dispute lifecycle update.
 - Use `contract-cli --help` or `contract-cli <cmd> --help`. Structured output via `--format json` for automation.
@@ -108,8 +108,10 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 | `energy.receipts` | Paginated settlement history (optionally filtered by provider). | `{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }` |
 | `energy.credits` | Paginated meter-credit listing (optionally filtered by provider). | `{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }` |
 | `energy.disputes` | Paginated dispute log with optional filters (provider, status, meter hash). | `{ "provider_id"?: "energy-0x00", "status"?: "open", "meter_hash"?: "hex", "page"?: u64, "page_size"?: u64 }` |
+| `energy.slashes` | Paginated energy slash receipts (quorum/expiry/conflict) with provider filter. | `{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }` |
 | `energy.flag_dispute` | Open a dispute tied to a `meter_hash`. | `{ "meter_hash": "hex", "reason": "string", "reporter"?: "account" }` |
 | `energy.resolve_dispute` | Resolve an existing dispute, recording a resolver/note. | `{ "dispute_id": u64, "resolver"?: "account", "resolution_note"?: "string" }` |
+| `energy.slashes` | Retrieve the ledger of slap receipts (quorum, expiry, conflict). | `{ "provider_id"?: "energy-0x00", "page"?: u64, "page_size"?: u64 }` |
 
 - `energy.market_state` response structure:
 
@@ -119,7 +121,8 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
   "providers": [ { "provider_id": "energy-0x00", "capacity_kwh": 10_000, "...": "..." } ],
   "credits": [ { "provider": "energy-0x00", "meter_hash": "e3c3…", "amount_kwh": 120, "timestamp": 123456 } ],
   "receipts": [ { "buyer": "acct", "seller": "energy-0x00", "kwh_delivered": 50, "price_paid": 2500, "treasury_fee": 125, "slash_applied": 0, "meter_hash": "e3c3…" } ],
-  "disputes": [ { "id": 1, "meter_hash": "e3c3…", "provider_id": "energy-0x00", "status": "open", "reason": "bad reading", "opened_at": 1234567890 } ]
+  "disputes": [ { "id": 1, "meter_hash": "e3c3…", "provider_id": "energy-0x00", "status": "open", "reason": "bad reading", "opened_at": 1234567890 } ],
+  "slashes": [ { "provider_id": "energy-0x00", "meter_hash": "e3c3…", "reason": "quorum", "amount": 10, "block_height": 1234 } ]
 }
 ```
 

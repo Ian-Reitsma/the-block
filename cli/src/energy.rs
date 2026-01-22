@@ -79,6 +79,13 @@ pub enum EnergyCmd {
         url: String,
         json: bool,
     },
+    Slashes {
+        provider_id: Option<String>,
+        page: u64,
+        page_size: u64,
+        url: String,
+        json: bool,
+    },
 }
 
 impl EnergyCmd {
@@ -319,6 +326,33 @@ impl EnergyCmd {
             )
             .subcommand(
                 CommandBuilder::new(
+                    CommandId("energy.slashes"),
+                    "slashes",
+                    "List recorded energy slash receipts",
+                )
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "provider_id",
+                    "provider-id",
+                    "Filter by provider identifier",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page", "page", "Page index").default("0"),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("page_size", "page-size", "Page size").default("25"),
+                ))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit raw JSON response",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("url", "url", "RPC endpoint").default(DEFAULT_RPC_URL),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
                     CommandId("energy.flag_dispute"),
                     "flag-dispute",
                     "Flag a meter reading or receipt for dispute review",
@@ -524,6 +558,21 @@ impl EnergyCmd {
                     json,
                 })
             }
+            "slashes" => {
+                let provider_id = take_string(sub_matches, "provider_id");
+                let page = parse_u64_required(take_string(sub_matches, "page"), "page")?;
+                let page_size =
+                    parse_u64_required(take_string(sub_matches, "page_size"), "page_size")?;
+                let url = take_string(sub_matches, "url").unwrap_or_else(|| DEFAULT_RPC_URL.into());
+                let json = sub_matches.get_flag("json");
+                Ok(EnergyCmd::Slashes {
+                    provider_id,
+                    page,
+                    page_size,
+                    url,
+                    json,
+                })
+            }
             other => Err(format!("unknown subcommand '{other}'")),
         }
     }
@@ -689,6 +738,20 @@ pub fn handle(cmd: EnergyCmd) {
             }
             let payload = json_rpc_request("energy.credits", json_object_from(pairs));
             dispatch(&client, &url, payload).map(|text| print_credits_response(&text, json))
+        }
+        EnergyCmd::Slashes {
+            provider_id,
+            page,
+            page_size,
+            url,
+            json,
+        } => {
+            let mut pairs = vec![("page", json_u64(page)), ("page_size", json_u64(page_size))];
+            if let Some(provider) = provider_id {
+                pairs.push(("provider_id", json_string(provider)));
+            }
+            let payload = json_rpc_request("energy.slashes", json_object_from(pairs));
+            dispatch(&client, &url, payload).map(|text| print_slashes_response(&text, json))
         }
     };
     if let Err(err) = result {
@@ -859,6 +922,28 @@ fn print_receipts_response(body: &str, json: bool) {
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         format!("{seller} -> {buyer} {kwh}kWh price={price} BLOCK")
+    });
+}
+
+fn print_slashes_response(body: &str, json: bool) {
+    print_paginated_list(body, json, "slashes", "energy slash receipts", |slash| {
+        let provider = slash
+            .get("provider_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let meter_hash = slash
+            .get("meter_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-");
+        let reason = slash.get("reason").and_then(|v| v.as_str()).unwrap_or("-");
+        let amount = slash.get("amount").and_then(|v| v.as_u64()).unwrap_or(0);
+        let block_height = slash
+            .get("block_height")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        format!(
+            "{provider} meter={meter_hash} reason={reason} amount={amount} block={block_height}"
+        )
     });
 }
 

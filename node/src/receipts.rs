@@ -19,6 +19,7 @@ pub enum Receipt {
     Storage(StorageReceipt),
     Compute(ComputeReceipt),
     Energy(EnergyReceipt),
+    EnergySlash(EnergySlashReceipt),
     Ad(AdReceipt),
 }
 
@@ -100,6 +101,22 @@ pub struct EnergyReceipt {
     pub signature_nonce: u64,
 }
 
+/// Energy market slashing receipt capturing invalid readings.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct EnergySlashReceipt {
+    /// Provider address (grid operator)
+    pub provider: String,
+    /// Meter reading hash that triggered the slash
+    pub meter_hash: [u8; 32],
+    /// Slashed amount in BLOCK
+    pub slash_amount: u64,
+    /// Reason for the slash (quorum/expiry/conflict)
+    pub reason: String,
+    /// Block height when the slash was recorded
+    pub block_height: u64,
+}
+
 /// Ad market settlement receipt.
 ///
 /// Records when ad campaigns settle, capturing impressions served, spend,
@@ -158,6 +175,7 @@ impl Receipt {
             Receipt::Storage(_) => "storage",
             Receipt::Compute(_) => "compute",
             Receipt::Energy(_) => "energy",
+            Receipt::EnergySlash(_) => "energy_slash",
             Receipt::Ad(_) => "ad",
         }
     }
@@ -168,6 +186,7 @@ impl Receipt {
             Receipt::Storage(r) => r.price,
             Receipt::Compute(r) => r.payment,
             Receipt::Energy(r) => r.price,
+            Receipt::EnergySlash(r) => r.slash_amount,
             Receipt::Ad(r) => r.spend,
         }
     }
@@ -178,6 +197,7 @@ impl Receipt {
             Receipt::Storage(r) => r.block_height,
             Receipt::Compute(r) => r.block_height,
             Receipt::Energy(r) => r.block_height,
+            Receipt::EnergySlash(r) => r.block_height,
             Receipt::Ad(r) => r.block_height,
         }
     }
@@ -239,6 +259,21 @@ mod tests {
         assert_eq!(receipt.market_name(), "energy");
         assert_eq!(receipt.settlement_amount(), 250);
         assert_eq!(receipt.block_height(), 102);
+    }
+
+    #[test]
+    fn energy_slash_receipt_serializes() {
+        let receipt = Receipt::EnergySlash(EnergySlashReceipt {
+            provider: "grid_operator_1".into(),
+            meter_hash: [1u8; 32],
+            slash_amount: 75,
+            reason: "quorum".into(),
+            block_height: 104,
+        });
+
+        assert_eq!(receipt.market_name(), "energy");
+        assert_eq!(receipt.settlement_amount(), 75);
+        assert_eq!(receipt.block_height(), 104);
     }
 
     #[test]

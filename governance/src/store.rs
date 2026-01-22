@@ -44,6 +44,7 @@ const TREASURY_HISTORY_LIMIT: usize = 1024;
 const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
 const TREASURY_INTENT_HISTORY_LIMIT: usize = 512;
 const ENERGY_SETTLEMENT_HISTORY_LIMIT: usize = 256;
+const ENERGY_SLASH_HISTORY_LIMIT: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TreasuryBalances {
@@ -136,6 +137,44 @@ impl BinaryCodec for EnergySettlementChangeRecord {
             quorum_threshold_ppm: u32::decode(reader)?,
             expiry_blocks: u64::decode(reader)?,
             rolled_back_at: Option::<u64>::decode(reader)?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct EnergySlashRecord {
+    pub provider_id: String,
+    pub meter_hash: [u8; 32],
+    pub slash_amount: u64,
+    pub reason: String,
+    pub block_height: u64,
+    pub recorded_at: u64,
+}
+
+impl BinaryCodec for EnergySlashRecord {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.provider_id.encode(writer);
+        writer.write_bytes(&self.meter_hash);
+        self.slash_amount.encode(writer);
+        self.reason.encode(writer);
+        self.block_height.encode(writer);
+        self.recorded_at.encode(writer);
+    }
+
+    fn decode(reader: &mut crate::codec::BinaryReader<'_>) -> CodecResult<Self> {
+        Ok(Self {
+            provider_id: String::decode(reader)?,
+            meter_hash: {
+                let bytes = reader.read_bytes()?;
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(bytes.as_slice());
+                arr
+            },
+            slash_amount: u64::decode(reader)?,
+            reason: String::decode(reader)?,
+            block_height: u64::decode(reader)?,
+            recorded_at: u64::decode(reader)?,
         })
     }
 }
@@ -1393,6 +1432,12 @@ impl GovStore {
         self.db
             .open_tree("energy/settlement_history")
             .unwrap_or_else(|e| panic!("open energy settlement history tree: {e}"))
+    }
+
+    fn energy_slash_history_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("energy/slash_history")
+            .unwrap_or_else(|e| panic!("open energy slash history tree: {e}"))
     }
 
     fn treasury_execution_intent_path(&self) -> PathBuf {
@@ -2800,6 +2845,48 @@ impl GovStore {
                 .energy_settlement_history_tree()
                 .insert(ser(&proposal_id).unwrap(), ser(&record).unwrap());
         }
+    }
+
+    pub fn record_energy_slash(
+        &self,
+        provider_id: &str,
+        meter_hash: &[u8; 32],
+        block_height: u64,
+        slash_amount: u64,
+        reason: &str,
+    ) -> sled::Result<()> {
+        let record = EnergySlashRecord {
+            provider_id: provider_id.to_string(),
+            meter_hash: *meter_hash,
+            slash_amount,
+            reason: reason.to_string(),
+            block_height,
+            recorded_at: unix_now(),
+        };
+        let tree = self.energy_slash_history_tree();
+        let key = (tree.len() as u64 + 1).to_le_bytes();
+        tree.insert(key, ser(&record)?)?;
+        if tree.len() > ENERGY_SLASH_HISTORY_LIMIT {
+            let excess = tree.len().saturating_sub(ENERGY_SLASH_HISTORY_LIMIT);
+            for item in tree.iter().take(excess) {
+                if let Ok((k, _)) = item {
+                    let _ = tree.remove(k);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn energy_slash_history(&self) -> sled::Result<Vec<EnergySlashRecord>> {
+        let tree = self.energy_slash_history_tree();
+        let mut history = Vec::new();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let record: EnergySlashRecord = de(&raw)?;
+            history.push(record);
+        }
+        history.sort_by(|a, b| b.recorded_at.cmp(&a.recorded_at));
+        Ok(history)
     }
 
     pub fn rollback_last(
