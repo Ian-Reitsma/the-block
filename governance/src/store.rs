@@ -2829,10 +2829,8 @@ impl GovStore {
         if tree.len() > ENERGY_SETTLEMENT_HISTORY_LIMIT {
             // keep newest by proposal id; remove smallest keys
             let excess = tree.len().saturating_sub(ENERGY_SETTLEMENT_HISTORY_LIMIT);
-            for item in tree.iter().take(excess) {
-                if let Ok((k, _)) = item {
-                    let _ = tree.remove(k);
-                }
+            for (k, _) in tree.iter().take(excess).flatten() {
+                let _ = tree.remove(k);
             }
         }
         Ok(())
@@ -2868,10 +2866,8 @@ impl GovStore {
         tree.insert(key, ser(&record)?)?;
         if tree.len() > ENERGY_SLASH_HISTORY_LIMIT {
             let excess = tree.len().saturating_sub(ENERGY_SLASH_HISTORY_LIMIT);
-            for item in tree.iter().take(excess) {
-                if let Ok((k, _)) = item {
-                    let _ = tree.remove(k);
-                }
+            for (k, _) in tree.iter().take(excess).flatten() {
+                let _ = tree.remove(k);
             }
         }
         Ok(())

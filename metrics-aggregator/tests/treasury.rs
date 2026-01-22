@@ -213,6 +213,11 @@ fn wrappers_schema_hash_is_stable() {
             String::from_utf8(encoded.clone()).expect("wrappers map utf8 serialization");
         eprintln!("{serialized}");
     }
+    if std::env::var("WRITE_WRAPPERS_SNAPSHOT").as_deref() == Ok("1") {
+        fs::create_dir_all("tests/snapshots").expect("create snapshots directory");
+        fs::write("tests/snapshots/wrappers.json", &encoded)
+            .expect("write aggregator wrappers snapshot");
+    }
     let hash = blake3::hash(&encoded);
     let hash_hex = hash.to_hex().to_string();
     assert_eq!(

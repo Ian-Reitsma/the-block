@@ -5,6 +5,9 @@ use std::net::SocketAddr;
 
 use transport::{self, ConnectionHandle, ListenerHandle};
 
+#[cfg(feature = "telemetry")]
+use super::record_transport_handshake_attempt;
+
 pub use transport::{
     classify_err, CertificateHandle, ConnectError, ConnectionStatsSnapshot, HandshakeError,
     QuinnDisconnect,
@@ -49,6 +52,10 @@ pub async fn connect(
     addr: SocketAddr,
     cert: &CertificateHandle,
 ) -> std::result::Result<ConnectionHandle, ConnectError> {
+    #[cfg(feature = "telemetry")]
+    {
+        record_transport_handshake_attempt("quinn");
+    }
     let adapter = quinn_adapter().map_err(ConnectError::Other)?;
     adapter.connect(addr, cert).await
 }

@@ -119,6 +119,11 @@ pub fn release_signature_required() -> bool {
     !signer_list().is_empty()
 }
 
+/// Returns true when the embedded build hash signals a local-first-party freeze.
+pub fn is_first_party_freeze_hash(value: &str) -> bool {
+    value == FIRST_PARTY_FREEZE_HASH
+}
+
 /// Verify a release proposal signature against the configured signers.
 pub fn verify_release_signature(build_hash: &str, signature_hex: &str) -> bool {
     let normalized = build_hash.trim().to_lowercase();

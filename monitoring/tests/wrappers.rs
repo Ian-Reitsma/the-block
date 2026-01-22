@@ -19,6 +19,10 @@ fn wrappers_snapshot_hash_is_pinned() {
     let mut energy_slash_labels = HashMap::new();
     energy_slash_labels.insert("provider".into(), "energy-0x1".into());
     energy_slash_labels.insert("reason".into(), "quorum".into());
+    let mut handshake_quinn_labels = HashMap::new();
+    handshake_quinn_labels.insert("provider".into(), "quinn".into());
+    let mut handshake_s2n_labels = HashMap::new();
+    handshake_s2n_labels.insert("provider".into(), "s2n-quic".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
@@ -88,6 +92,61 @@ fn wrappers_snapshot_hash_is_pinned() {
                     labels: HashMap::new(),
                     value: 2.0,
                 },
+                WrapperMetricEntry {
+                    metric: "range_boost_forwarder_retry_total".into(),
+                    labels: HashMap::new(),
+                    value: 8.0,
+                },
+                WrapperMetricEntry {
+                    metric: "range_boost_forwarder_drop_total".into(),
+                    labels: HashMap::new(),
+                    value: 2.0,
+                },
+                WrapperMetricEntry {
+                    metric: "range_boost_forwarder_fail_total".into(),
+                    labels: HashMap::new(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "range_boost_enqueue_error_total".into(),
+                    labels: HashMap::new(),
+                    value: 3.0,
+                },
+                WrapperMetricEntry {
+                    metric: "range_boost_queue_depth".into(),
+                    labels: HashMap::new(),
+                    value: 12.0,
+                },
+                WrapperMetricEntry {
+                    metric: "range_boost_queue_oldest_seconds".into(),
+                    labels: HashMap::new(),
+                    value: 34.0,
+                },
+                WrapperMetricEntry {
+                    metric: "localnet_receipt_insert_attempt_total".into(),
+                    labels: HashMap::new(),
+                    value: 15.0,
+                },
+                WrapperMetricEntry {
+                    metric: "localnet_receipt_insert_success_total".into(),
+                    labels: HashMap::new(),
+                    value: 12.0,
+                },
+                WrapperMetricEntry {
+                    metric: "localnet_receipt_insert_failure_total".into(),
+                    labels: HashMap::new(),
+                    value: 3.0,
+                },
+                WrapperMetricEntry {
+                    metric: "transport_handshake_attempt_total".into(),
+                    labels: handshake_quinn_labels.clone(),
+                    value: 18.0,
+                },
+                WrapperMetricEntry {
+                    metric: "transport_handshake_attempt_total".into(),
+                    labels: handshake_s2n_labels.clone(),
+                    value: 5.0,
+                },
             ],
             governance: Some(GovernanceWrapperEntry {
                 treasury_balance: 1_200,
@@ -121,7 +180,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "143e9951fe08ca25169e40b6b26fef6f9fbdbafc0b3446b0c63d60b4782d7e10",
+        "0f705a33985032f353c30feb663f60d3f08526da39adaf406ddace116ace0156",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

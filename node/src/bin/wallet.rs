@@ -7,7 +7,7 @@ use httpd::Method;
 use the_block::http_client;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
-use crate::wallet_discovery::discovery_result_json;
+use the_block::wallet_discovery::discovery_result_json;
 
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 use the_block::storage::placement::NodeCatalog;

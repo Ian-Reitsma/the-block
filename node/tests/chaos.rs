@@ -1,6 +1,6 @@
 #![cfg(feature = "integration-tests")]
 use std::collections::HashMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -44,7 +44,6 @@ struct ChaosArtifacts {
     log_path: PathBuf,
     zip_path: PathBuf,
     log_file: File,
-    test_name: String,
     finalized: bool,
 }
 
@@ -75,7 +74,6 @@ impl ChaosArtifacts {
             log_path,
             zip_path,
             log_file,
-            test_name: test_name.to_string(),
             finalized: false,
         }
     }

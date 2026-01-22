@@ -450,12 +450,15 @@ fn receipt_provider_id(receipt: &Receipt) -> &str {
 }
 
 fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
+    if matches!(receipt, Receipt::ComputeSlash(_) | Receipt::EnergySlash(_)) {
+        return;
+    }
     let preimage = match receipt {
         Receipt::Storage(r) => build_storage_preimage(r),
         Receipt::Compute(r) => build_compute_preimage(r),
         Receipt::Energy(r) => build_energy_preimage(r),
         Receipt::Ad(r) => build_ad_preimage(r),
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => return,
+        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
     };
     let signature = sk.sign(&preimage).to_bytes().to_vec();
     match receipt {
@@ -463,7 +466,7 @@ fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
         Receipt::Compute(r) => r.provider_signature = signature.clone(),
         Receipt::Energy(r) => r.provider_signature = signature.clone(),
         Receipt::Ad(r) => r.publisher_signature = signature,
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => return,
+        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
     }
 }
 

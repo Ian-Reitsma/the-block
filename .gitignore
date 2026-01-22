@@ -304,6 +304,12 @@ node/governance_db/
 node/ledger_db/
 node/state_db/
 
+# Local node runtime state (node-data contains transient RPC/telemetry caches; ignore it)
+node-data/
+
+# Local scratch files generated during runs
+tmp_old.json
+
 # Node snapshots and history
 node/snapshots/
 node/diff_history/

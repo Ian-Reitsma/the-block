@@ -9,6 +9,7 @@ SCRIPT="$MON_DIR/tools/render_foundation_dashboard.py"
 ENDPOINT="${TELEMETRY_ENDPOINT:-http://localhost:9898/metrics}"
 REFRESH_INTERVAL="${REFRESH_INTERVAL:-5}"
 PORT="${FOUNDATION_DASHBOARD_PORT:-8088}"
+SERVER_PID=0
 
 if [[ ! -x "$SCRIPT" ]]; then
   echo "missing dashboard generator: $SCRIPT" >&2

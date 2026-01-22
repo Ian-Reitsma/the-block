@@ -205,6 +205,16 @@ fn with_metric_handle<T, E, F, const N: usize>(
 }
 
 #[cfg(feature = "telemetry")]
+fn record_transport_handshake_attempt(provider: &'static str) {
+    with_metric_handle(
+        "transport_handshake_attempt_total",
+        [provider],
+        TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL.ensure_handle_for_label_values(&[provider]),
+        |handle| handle.inc(),
+    );
+}
+
+#[cfg(feature = "telemetry")]
 fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
     let active = overlay_metric_value(snapshot.active_peers);
     let persisted = overlay_metric_value(snapshot.persisted_peers);
@@ -681,15 +691,12 @@ fn build_transport_callbacks() -> TransportCallbacks {
                 );
             }
         }));
-        let provider_label = transport::ProviderKind::Inhouse.id();
         inhouse.handshake_attempt = Some(Arc::new(move |_addr: SocketAddr| {
             #[cfg(feature = "telemetry")]
-            with_metric_handle(
-                "transport_handshake_attempt_total",
-                [provider_label],
-                TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL.ensure_handle_for_label_values(&[provider_label]),
-                |handle| handle.inc(),
-            );
+            {
+                let provider_label = transport::ProviderKind::Inhouse.id();
+                record_transport_handshake_attempt(provider_label);
+            }
             #[cfg(not(feature = "telemetry"))]
             let _ = _addr;
         }));
@@ -1420,7 +1427,7 @@ pub fn peer_cert_history() -> Vec<PeerCertHistoryEntry> {
 }
 
 #[cfg(test)]
-mod tests {
+mod handshake_metric_tests {
     use super::{
         disk_entries_from_map, sorted_peer_provider_entries, CertSnapshot, PeerCertStore,
         ProviderCertStores,
@@ -1848,164 +1855,172 @@ impl Node {
                 }
             });
         }
-        Ok(thread::spawn(move || loop {
-            if stop.load(Ordering::Relaxed) {
-                break;
-            }
-            match listener.accept() {
-                Ok((mut stream, addr)) => {
-                    #[cfg(feature = "integration-tests")]
-                    {
-                        let now = Instant::now();
-                        let rate = ACCEPT_RATE.get_or_init(|| Mutex::new(HashMap::new()));
-                        let mut guard = rate.lock().unwrap();
-                        let entry = guard.entry(addr).or_insert((now, 0));
-                        if now.duration_since(entry.0) > Duration::from_secs(1) {
-                            *entry = (now, 0);
-                        }
-                        entry.1 = entry.1.saturating_add(1);
-                        // Drop connections exceeding 25/sec from any single address to prevent
-                        // handshake storms from overwhelming the listener.
-                        if entry.1 > 25 {
-                            eprintln!("listener: rate limit exceeded for {}; dropping", addr);
-                            drop(stream);
-                            continue;
-                        }
-                    }
-                    let local = stream.local_addr().ok();
-                    #[cfg(feature = "integration-tests")]
-                    match local {
-                        Some(local) => {
-                            eprintln!(
-                                "listener: ACCEPTED connection local {} from {}",
-                                local, addr
-                            );
-                        }
-                        None => eprintln!("listener: ACCEPTED connection from {}", addr),
-                    }
-                    let peers = peers.clone();
-                    let chain = Arc::clone(&chain);
-                    let task = move || {
-                        let addr = Some(addr);
-                        let mut buf = Vec::new();
-                        // Listener is non-blocking; switch accepted sockets back to blocking mode
-                        // so read_to_end can wait for EOF without spurious WouldBlock errors.
-                        let _ = stream.set_nonblocking(false);
-                        // Avoid blocking indefinitely on peers that never close the socket.
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                        match stream.read_to_end(&mut buf) {
-                            Ok(_) => {
-                                #[cfg(feature = "integration-tests")]
-                                match local {
-                                    Some(local) => eprintln!(
-                                        "listener: READ {} bytes local {} from {:?}",
-                                        buf.len(),
-                                        local,
-                                        addr
-                                    ),
-                                    None => eprintln!(
-                                        "listener: READ {} bytes from {:?}",
-                                        buf.len(),
-                                        addr
-                                    ),
-                                }
-                                #[cfg(feature = "telemetry")]
-                                if crate::telemetry::should_log("p2p") {
-                                    let trace = crate::telemetry::log_context();
-                                    let span =
-                                        crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
-                                    span.in_scope(|| {
-                                        diagnostics::tracing::info!(
-                                            parent: &trace,
-                                            peer = ?addr,
-                                            len = buf.len(),
-                                            "recv_msg"
-                                        );
-                                    });
-                                }
-                                match message::decode(&buf) {
-                                    Ok(msg) => {
-                                        #[cfg(feature = "integration-tests")]
-                                        {
-                                            let payload_name = match &msg.body {
-                                                Payload::Chain(c) => {
-                                                    format!("Chain(len={})", c.len())
-                                                }
-                                                Payload::Handshake(_) => "Handshake".to_string(),
-                                                Payload::Hello(_) => "Hello".to_string(),
-                                                Payload::ChainRequest(_) => {
-                                                    "ChainRequest".to_string()
-                                                }
-                                                _ => "Other".to_string(),
-                                            };
-                                            match local {
-                                                Some(local) => eprintln!(
-                                                    "listener: DECODED {} local {} from {:?}",
-                                                    payload_name, local, addr
-                                                ),
-                                                None => eprintln!(
-                                                    "listener: DECODED {} from {:?}",
-                                                    payload_name, addr
-                                                ),
-                                            }
-                                        }
-                                        peers.handle_message(msg, addr, &chain);
-                                    }
-                                    Err(err) => {
-                                        #[cfg(feature = "integration-tests")]
-                                        eprintln!(
-                                            "listener: DECODE FAILED from {:?}: {:?}",
-                                            addr, err
-                                        );
-                                        diagnostics::tracing::warn!(
-                                            target = "net",
-                                            peer = ?addr,
-                                            reason = ?err,
-                                            "message_decode_failed"
-                                        );
-                                    }
-                                }
+        Ok(thread::spawn(move || {
+            loop {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                match listener.accept() {
+                    Ok((mut stream, addr)) => {
+                        #[cfg(feature = "integration-tests")]
+                        {
+                            let now = Instant::now();
+                            let rate = ACCEPT_RATE.get_or_init(|| Mutex::new(HashMap::new()));
+                            let mut guard = rate.lock().unwrap();
+                            let entry = guard.entry(addr).or_insert((now, 0));
+                            if now.duration_since(entry.0) > Duration::from_secs(1) {
+                                *entry = (now, 0);
                             }
-                            Err(err) => {
-                                #[cfg(feature = "integration-tests")]
-                                match local {
-                                    Some(local) => eprintln!(
-                                        "listener: READ ERROR local {} from {:?}: {}",
-                                        local, addr, err
-                                    ),
-                                    None => {
-                                        eprintln!("listener: READ ERROR from {:?}: {}", addr, err)
-                                    }
-                                }
-                                diagnostics::tracing::warn!(
-                                    target = "net",
-                                    peer = ?addr,
-                                    reason = %err,
-                                    "message_read_failed"
+                            entry.1 = entry.1.saturating_add(1);
+                            // Drop connections exceeding 25/sec from any single address to prevent
+                            // handshake storms from overwhelming the listener.
+                            if entry.1 > 25 {
+                                eprintln!("listener: rate limit exceeded for {}; dropping", addr);
+                                drop(stream);
+                                continue;
+                            }
+                        }
+                        let local = stream.local_addr().ok();
+                        #[cfg(feature = "integration-tests")]
+                        match local {
+                            Some(local) => {
+                                eprintln!(
+                                    "listener: ACCEPTED connection local {} from {}",
+                                    local, addr
                                 );
                             }
+                            None => eprintln!("listener: ACCEPTED connection from {}", addr),
                         }
-                    };
-                    #[cfg(feature = "integration-tests")]
-                    {
-                        std::thread::spawn(task);
+                        let peers = peers.clone();
+                        let chain = Arc::clone(&chain);
+                        let task = move || {
+                            let addr = Some(addr);
+                            let mut buf = Vec::new();
+                            // Listener is non-blocking; switch accepted sockets back to blocking mode
+                            // so read_to_end can wait for EOF without spurious WouldBlock errors.
+                            let _ = stream.set_nonblocking(false);
+                            // Avoid blocking indefinitely on peers that never close the socket.
+                            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                            match stream.read_to_end(&mut buf) {
+                                Ok(_) => {
+                                    #[cfg(feature = "integration-tests")]
+                                    match local {
+                                        Some(local) => eprintln!(
+                                            "listener: READ {} bytes local {} from {:?}",
+                                            buf.len(),
+                                            local,
+                                            addr
+                                        ),
+                                        None => eprintln!(
+                                            "listener: READ {} bytes from {:?}",
+                                            buf.len(),
+                                            addr
+                                        ),
+                                    }
+                                    #[cfg(feature = "telemetry")]
+                                    if crate::telemetry::should_log("p2p") {
+                                        let trace = crate::telemetry::log_context();
+                                        let span = crate::log_context!(
+                                            tx = *blake3::hash(&buf).as_bytes()
+                                        );
+                                        span.in_scope(|| {
+                                            diagnostics::tracing::info!(
+                                                parent: &trace,
+                                                peer = ?addr,
+                                                len = buf.len(),
+                                                "recv_msg"
+                                            );
+                                        });
+                                    }
+                                    match message::decode(&buf) {
+                                        Ok(msg) => {
+                                            #[cfg(feature = "integration-tests")]
+                                            {
+                                                let payload_name = match &msg.body {
+                                                    Payload::Chain(c) => {
+                                                        format!("Chain(len={})", c.len())
+                                                    }
+                                                    Payload::Handshake(_) => {
+                                                        "Handshake".to_string()
+                                                    }
+                                                    Payload::Hello(_) => "Hello".to_string(),
+                                                    Payload::ChainRequest(_) => {
+                                                        "ChainRequest".to_string()
+                                                    }
+                                                    _ => "Other".to_string(),
+                                                };
+                                                match local {
+                                                    Some(local) => eprintln!(
+                                                        "listener: DECODED {} local {} from {:?}",
+                                                        payload_name, local, addr
+                                                    ),
+                                                    None => eprintln!(
+                                                        "listener: DECODED {} from {:?}",
+                                                        payload_name, addr
+                                                    ),
+                                                }
+                                            }
+                                            peers.handle_message(msg, addr, &chain);
+                                        }
+                                        Err(err) => {
+                                            #[cfg(feature = "integration-tests")]
+                                            eprintln!(
+                                                "listener: DECODE FAILED from {:?}: {:?}",
+                                                addr, err
+                                            );
+                                            diagnostics::tracing::warn!(
+                                                target = "net",
+                                                peer = ?addr,
+                                                reason = ?err,
+                                                "message_decode_failed"
+                                            );
+                                        }
+                                    }
+                                }
+                                Err(err) => {
+                                    #[cfg(feature = "integration-tests")]
+                                    match local {
+                                        Some(local) => eprintln!(
+                                            "listener: READ ERROR local {} from {:?}: {}",
+                                            local, addr, err
+                                        ),
+                                        None => {
+                                            eprintln!(
+                                                "listener: READ ERROR from {:?}: {}",
+                                                addr, err
+                                            )
+                                        }
+                                    }
+                                    diagnostics::tracing::warn!(
+                                        target = "net",
+                                        peer = ?addr,
+                                        reason = %err,
+                                        "message_read_failed"
+                                    );
+                                }
+                            }
+                        };
+                        #[cfg(feature = "integration-tests")]
+                        {
+                            std::thread::spawn(task);
+                        }
+                        #[cfg(not(feature = "integration-tests"))]
+                        {
+                            runtime::spawn_blocking(task);
+                        }
                     }
-                    #[cfg(not(feature = "integration-tests"))]
-                    {
-                        runtime::spawn_blocking(task);
+                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(20));
                     }
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) => {
-                    diagnostics::tracing::warn!(
-                        target = "net",
-                        %err,
-                        "gossip_accept_failed"
-                    );
-                    std::thread::sleep(Duration::from_millis(50));
+                    Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(err) => {
+                        diagnostics::tracing::warn!(
+                            target = "net",
+                            %err,
+                            "gossip_accept_failed"
+                        );
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
                 }
             }
         }))
@@ -2316,4 +2331,46 @@ pub fn load_net_key() -> SigningKey {
         );
     }
     sk
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(feature = "telemetry")]
+    use crate::telemetry::TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    #[cfg(feature = "telemetry")]
+    fn metrics_registry_guard() -> MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+    }
+
+    #[cfg(all(test, feature = "telemetry"))]
+    #[test]
+    fn transport_handshake_attempt_counter_tracks_providers() {
+        let _guard = metrics_registry_guard();
+        let quinn_label = transport::ProviderKind::Quinn.id();
+        let quinn_handle = TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
+            .handle_for_label_values(&[quinn_label])
+            .expect("quinn handle");
+        quinn_handle.reset();
+        assert_eq!(quinn_handle.get(), 0);
+        record_transport_handshake_attempt(quinn_label);
+        assert_eq!(quinn_handle.get(), 1);
+        record_transport_handshake_attempt(quinn_label);
+        assert_eq!(quinn_handle.get(), 2);
+
+        let s2n_label = transport::ProviderKind::S2nQuic.id();
+        let s2n_handle = TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
+            .handle_for_label_values(&[s2n_label])
+            .expect("s2n handle");
+        s2n_handle.reset();
+        assert_eq!(s2n_handle.get(), 0);
+        record_transport_handshake_attempt(s2n_label);
+        assert_eq!(s2n_handle.get(), 1);
+    }
 }

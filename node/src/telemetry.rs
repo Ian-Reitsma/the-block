@@ -1090,6 +1090,15 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
                 counter.get() as f64,
             );
         }
+        if let Ok(counter) = TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL.handle_for_label_values(&[provider])
+        {
+            push_metric(
+                &mut metrics,
+                "transport_handshake_attempt_total",
+                &[("provider", provider)],
+                counter.get() as f64,
+            );
+        }
     }
 
     for db in SIMPLEDB_NAMES {
@@ -1249,6 +1258,61 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
     ] {
         push_metric(&mut metrics, name, &[], gauge.get() as f64);
     }
+
+    push_metric(
+        &mut metrics,
+        "range_boost_forwarder_retry_total",
+        &[],
+        RANGE_BOOST_FORWARDER_RETRY_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "range_boost_forwarder_drop_total",
+        &[],
+        RANGE_BOOST_FORWARDER_DROP_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "range_boost_forwarder_fail_total",
+        &[],
+        RANGE_BOOST_FORWARDER_FAIL_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "range_boost_enqueue_error_total",
+        &[],
+        RANGE_BOOST_ENQUEUE_ERROR_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "range_boost_queue_depth",
+        &[],
+        RANGE_BOOST_QUEUE_DEPTH.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "range_boost_queue_oldest_seconds",
+        &[],
+        RANGE_BOOST_QUEUE_OLDEST_SECONDS.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "localnet_receipt_insert_attempt_total",
+        &[],
+        LOCALNET_RECEIPT_INSERT_ATTEMPT_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "localnet_receipt_insert_success_total",
+        &[],
+        LOCALNET_RECEIPT_INSERT_SUCCESS_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "localnet_receipt_insert_failure_total",
+        &[],
+        LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL.get().get() as f64,
+    );
 
     WrapperSummary {
         metrics,
@@ -6396,40 +6460,49 @@ pub static OVERLAY_PEER_PERSISTED_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
     g
 });
 
-pub static OVERLAY_PERSIST_ATTEMPTS_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
-    let g = IntGauge::new(
-        "overlay_persist_attempts_total",
-        "Overlay peer persistence attempts (all retries)",
+pub static OVERLAY_PERSIST_ATTEMPTS_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "overlay_persist_attempts_total",
+            "Overlay peer persistence attempts (all retries)",
+        ),
+        &["backend"],
     )
-    .unwrap_or_else(|e| panic!("gauge overlay persist attempts: {e}"));
+    .unwrap_or_else(|e| panic!("gauge_vec overlay persist attempts: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry overlay persist attempts: {e}"));
-    g.handle()
+    g
 });
 
-pub static OVERLAY_PERSIST_SUCCESS_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
-    let g = IntGauge::new(
-        "overlay_persist_success_total",
-        "Overlay peer persistence operations that succeeded",
+pub static OVERLAY_PERSIST_SUCCESS_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "overlay_persist_success_total",
+            "Overlay peer persistence operations that succeeded",
+        ),
+        &["backend"],
     )
-    .unwrap_or_else(|e| panic!("gauge overlay persist success: {e}"));
+    .unwrap_or_else(|e| panic!("gauge_vec overlay persist success: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry overlay persist success: {e}"));
-    g.handle()
+    g
 });
 
-pub static OVERLAY_PERSIST_FAILURE_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
-    let g = IntGauge::new(
-        "overlay_persist_failure_total",
-        "Overlay peer persistence operations that failed after retries",
+pub static OVERLAY_PERSIST_FAILURE_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    let g = IntGaugeVec::new(
+        Opts::new(
+            "overlay_persist_failure_total",
+            "Overlay peer persistence operations that failed after retries",
+        ),
+        &["backend"],
     )
-    .unwrap_or_else(|e| panic!("gauge overlay persist failure: {e}"));
+    .unwrap_or_else(|e| panic!("gauge_vec overlay persist failure: {e}"));
     REGISTRY
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry overlay persist failure: {e}"));
-    g.handle()
+    g
 });
 
 pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGaugeHandle> = Lazy::new(|| {

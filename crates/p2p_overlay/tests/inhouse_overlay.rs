@@ -3,6 +3,8 @@ use p2p_overlay::inhouse_overlay::{
 };
 use p2p_overlay::{Discovery, OverlayService, StubOverlay};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use sys::tempfile::tempdir;
 
 fn peer(bytes: u8) -> InhousePeerId {
@@ -34,7 +36,13 @@ fn inhouse_overlay_persists_and_loads_peers() {
 fn discovery_nearest_peer_orders_by_distance() {
     let dir = tempdir().expect("tempdir");
     let store = InhouseOverlayStore::new(dir.path().join("dht.json"));
-    let mut discovery = InhouseDiscovery::new(peer(9), store);
+    let mut discovery = InhouseDiscovery::new(
+        peer(9),
+        store,
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+    );
     discovery.add_peer(peer(1), PeerEndpoint::new(addr(9100)));
     discovery.add_peer(peer(255), PeerEndpoint::new(addr(9200)));
     discovery.add_peer(peer(128), PeerEndpoint::new(addr(9300)));

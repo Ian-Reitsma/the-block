@@ -142,7 +142,12 @@ def build_wrapper_sections(
         for metric in metrics:
             name = metric.get("metric", "")
             category = next(
-                (title for title, prefixes in WRAPPER_GROUPS.items() if name.startswith(prefix)),
+                (
+                    title
+                    for title, prefixes in WRAPPER_GROUPS.items()
+                    for prefix in prefixes
+                    if name.startswith(prefix)
+                ),
                 None,
             )
             if category is None:
