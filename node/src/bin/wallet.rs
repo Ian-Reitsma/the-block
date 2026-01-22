@@ -7,6 +7,8 @@ use httpd::Method;
 use the_block::http_client;
 use wallet::{hardware::MockHardwareWallet, remote_signer::RemoteSigner, Wallet, WalletSigner};
 
+use crate::wallet_discovery::discovery_result_json;
+
 use the_block::storage::pipeline::{Provider, StoragePipeline};
 use the_block::storage::placement::NodeCatalog;
 
@@ -524,16 +526,10 @@ fn main() {
             let duration = Duration::from_millis(timeout);
             let signers = RemoteSigner::discover(duration);
             if json {
-                let signers_json = signers
-                    .iter()
-                    .map(|url| Value::String(url.clone()))
-                    .collect::<Vec<Value>>();
-                let mut map = JsonMap::new();
-                map.insert("timeout_ms".into(), Value::Number(Number::from(timeout)));
-                map.insert("signers".into(), Value::Array(signers_json));
+                let discovery_value = discovery_result_json(timeout, &signers);
                 println!(
                     "{}",
-                    json::to_string(&Value::Object(map)).unwrap_or_else(|_| "[]".into())
+                    json::to_string(&discovery_value).unwrap_or_else(|_| "[]".into())
                 );
             } else if signers.is_empty() {
                 println!("No remote signers discovered within {timeout}ms");

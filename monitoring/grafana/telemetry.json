@@ -5198,6 +5198,68 @@
       ],
       "title": "benchmark_ann_soft_intent_verification_seconds_p99",
       "type": "timeseries"
+    },
+    {
+      "id": 277,
+      "title": "Remote Signers",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 278,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "remote_signer_discovery_total"
+        }
+      ],
+      "title": "remote_signer_discovery_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 279,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "remote_signer_discovery_success_total"
+        }
+      ],
+      "title": "remote_signer_discovery_success_total",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 280,
+      "options": {
+        "legend": {
+          "showLegend": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "remote_signer_discovery_success_total / clamp_min(remote_signer_discovery_total, 1)"
+        }
+      ],
+      "title": "remote_signer_discovery_success_ratio",
+      "type": "timeseries"
     }
   ],
   "schemaVersion": 37,

@@ -157,6 +157,7 @@ pub mod logging;
 pub mod provenance;
 #[cfg(feature = "telemetry")]
 pub mod telemetry;
+pub mod wallet_discovery;
 #[cfg(feature = "telemetry")]
 pub use telemetry::{
     ensure_ad_verifier_committee_label, gather_metrics, redact_at_rest,

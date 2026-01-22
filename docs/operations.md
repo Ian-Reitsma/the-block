@@ -28,6 +28,7 @@
 - `remote_signer_discovery_total` increments whenever `wallet discover-signers` runs (default timeout 500 ms selectable via `--timeout`), giving you telemetry you can alert on when operator tooling probes the signer fleet.
 - `remote_signer_discovery_success_total` increments when the discovery call returns at least one endpoint; chart these discovery counters next to `remote_signer_request_total`, `remote_signer_success_total`, and `remote_signer_latency_seconds` so you can tell if failures stem from networking vs. signer outages.
 - `/wrappers` now mirrors the discovery counters; refresh `monitoring/tests/snapshots/wrappers.json` and the Grafana dashboards before merging any CLI or telemetry change so the new series stay comparable to what the aggregator exposes.
+- The `Remote Signers` row that ships inside `monitoring/grafana/telemetry.json` now graphs `remote_signer_discovery_total`, `remote_signer_discovery_success_total`, and `remote_signer_discovery_success_ratio`, so you can visually correlate failed probes, recovered success, and the `/wrappers` hash without building the panel yourself. Re-run `npm ci --prefix monitoring && make monitor` (and capture the refreshed `/wrappers` hash) any time you adjust these metrics or their Grafana panels.
 - Use `wallet discover-signers --json` for automation tooling; it emits `{"timeout_ms":<ms>,"signers":["http://..."]}` so CLI helpers and scripts can read a stable schema instead of parsing human text.
 
 ### P2P Rate Limiting and Chain Sync

@@ -3,11 +3,21 @@ mod support;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, SIGNATURE_LENGTH};
 use httpd::{ServerTlsConfig, StatusCode};
 use ledger::crypto::remote_tag;
-use std::time::Duration;
+use std::{
+    io::ErrorKind,
+    net::UdpSocket,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use sys::tempfile::NamedTempFile;
 use wallet::{remote_signer::RemoteSigner, Wallet, WalletError, WalletSigner};
 
 use support::{HttpSignerMock, TlsWebSocketSignerMock};
+
+const DISCOVERY_PORT: u16 = 7878;
 
 #[testkit::tb_serial]
 fn remote_signer_roundtrip() {
@@ -100,6 +110,42 @@ fn remote_signer_discover_timeout() {
             "discovered signer URI should be HTTP(S), got {signer}"
         );
     }
+}
+
+#[testkit::tb_serial]
+fn remote_signer_discover_replies() {
+    let running = Arc::new(AtomicBool::new(true));
+    let responder_running = running.clone();
+    let handle = std::thread::spawn(move || {
+        let socket = match UdpSocket::bind(("0.0.0.0", DISCOVERY_PORT)) {
+            Ok(socket) => socket,
+            Err(_) => return,
+        };
+        let _ = socket.set_read_timeout(Some(Duration::from_millis(50)));
+        let mut buf = [0u8; 32];
+        while responder_running.load(Ordering::Relaxed) {
+            match socket.recv_from(&mut buf) {
+                Ok((n, src)) => {
+                    if buf[..n] == *b"theblock:signer?" {
+                        let _ = socket.send_to(b"theblock:signer!", src);
+                    }
+                }
+                Err(err) if matches!(err.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
+                Err(_) => break,
+            }
+        }
+    });
+    std::thread::sleep(Duration::from_millis(20));
+    let signers = RemoteSigner::discover(Duration::from_millis(300));
+    running.store(false, Ordering::Relaxed);
+    let _ = handle.join();
+    let port_suffix = format!(":{DISCOVERY_PORT}");
+    assert!(
+        signers
+            .iter()
+            .any(|endpoint| endpoint.starts_with("http://") && endpoint.ends_with(&port_suffix)),
+        "expected discovery responder to emit http://...{port_suffix} but got {signers:?}"
+    );
 }
 
 #[testkit::tb_serial]
