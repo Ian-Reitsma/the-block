@@ -452,6 +452,7 @@ pub fn submit_meter_reading(
                     _ => "other",
                 };
                 energy_metrics::increment_oracle_submission_error(label);
+                energy_metrics::increment_reading_reject(label);
             }
             return Err(err);
         }
@@ -472,10 +473,40 @@ pub fn settle_energy_delivery(
     meter_hash: H256,
 ) -> Result<EnergyReceipt, EnergyMarketError> {
     let mut guard = store();
-    let receipt =
-        guard
-            .market
-            .settle_energy_delivery(buyer, provider_id, kwh_consumed, block, meter_hash)?;
+    let receipt = match guard.market.settle_energy_delivery(
+        buyer,
+        provider_id,
+        kwh_consumed,
+        block,
+        meter_hash,
+    ) {
+        Ok(receipt) => receipt,
+        Err(err) => {
+            #[cfg(feature = "telemetry")]
+            {
+                match &err {
+                    EnergyMarketError::SettlementBelowQuorum { .. } => {
+                        energy_metrics::increment_quorum_shortfall(provider_id.as_str());
+                        energy_metrics::increment_slashing(provider_id.as_str(), "quorum");
+                    }
+                    EnergyMarketError::CreditExpired(hash) => {
+                        let provider_label = guard
+                            .provider_for_hash(hash)
+                            .unwrap_or_else(|| "unknown".into());
+                        energy_metrics::increment_slashing(&provider_label, "expiry");
+                    }
+                    EnergyMarketError::UnknownReading(hash) => {
+                        let provider_label = guard
+                            .provider_for_hash(hash)
+                            .unwrap_or_else(|| "unknown".into());
+                        energy_metrics::increment_slashing(&provider_label, "conflict");
+                    }
+                    _ => {}
+                }
+            }
+            return Err(err);
+        }
+    };
     guard.receipts.push(receipt.clone());
     #[cfg(feature = "telemetry")]
     ENERGY_SETTLEMENT_TOTAL
@@ -701,7 +732,10 @@ fn flag_dispute_inner(
     };
     store.disputes.entries.push(dispute.clone());
     #[cfg(feature = "telemetry")]
-    ENERGY_DISPUTE_OPEN_TOTAL.inc();
+    {
+        energy_metrics::increment_dispute_state("open");
+        ENERGY_DISPUTE_OPEN_TOTAL.inc();
+    }
     Ok(dispute)
 }
 
@@ -726,7 +760,10 @@ fn resolve_dispute_inner(
     entry.resolution_note = resolution_note;
     entry.resolver = Some(resolver);
     #[cfg(feature = "telemetry")]
-    ENERGY_DISPUTE_RESOLVE_TOTAL.inc();
+    {
+        energy_metrics::increment_dispute_state("resolved");
+        ENERGY_DISPUTE_RESOLVE_TOTAL.inc();
+    }
     Ok(entry.clone())
 }
 

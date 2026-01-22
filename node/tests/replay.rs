@@ -6,15 +6,15 @@ use sys::tempfile::tempdir;
 use the_block::{
     block_binary,
     governance::{
+        controller,
         treasury::{
             canonical_dependencies, validate_dependencies, DisbursementDetails,
             DisbursementPayload, DisbursementProposalMetadata, DisbursementStatus,
         },
-        controller, GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote,
-        VoteChoice,
+        GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
     },
     receipts::StorageReceipt,
-    Account, Blockchain, Block, Receipt, TokenBalance,
+    Account, Block, Blockchain, Receipt, TokenBalance,
 };
 
 type TestResult<T> = Result<T, Box<dyn Error>>;
@@ -158,7 +158,10 @@ fn replay_persists_dependency_dag_across_restart() -> TestResult<()> {
 
     assert_eq!(canonical_dependencies(&child), vec![root.id]);
     assert_eq!(canonical_dependencies(&leaf), vec![child.id]);
-    assert!(matches!(child.status, DisbursementStatus::RolledBack { .. }));
+    assert!(matches!(
+        child.status,
+        DisbursementStatus::RolledBack { .. }
+    ));
 
     // Dependency validation after restart should still surface the rollback.
     let leaf_payload = DisbursementPayload {
@@ -178,7 +181,8 @@ fn replay_persists_dependency_dag_across_restart() -> TestResult<()> {
         .expect_err("rolled back dependency should block execution");
     match error {
         the_block::governance::treasury::DisbursementError::DependencyFailed {
-            dependency_id, ..
+            dependency_id,
+            ..
         } => assert_eq!(dependency_id, child.id),
         other => panic!("unexpected dependency error: {other:?}"),
     }
@@ -340,11 +344,13 @@ fn replay_executor_restart_persists_dependency_policy_and_lease() -> TestResult<
 
     // Final state: both disbursements executed and dependency policy intact.
     let final_state = reopened.disbursements()?;
-    assert!(final_state
-        .iter()
-        .filter(|d| matches!(d.status, DisbursementStatus::Executed { .. }))
-        .count()
-        == 2);
+    assert!(
+        final_state
+            .iter()
+            .filter(|d| matches!(d.status, DisbursementStatus::Executed { .. }))
+            .count()
+            == 2
+    );
 
     Ok(())
 }

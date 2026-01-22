@@ -1,8 +1,8 @@
+use crypto_suite::hashing::blake3;
 use explorer::{
     build_executor_report, router, Explorer, ExplorerHttpState, TreasuryDisbursementFilter,
     TreasuryDisbursementStatusFilter, TreasuryTimelineEntry, TreasuryTimelineFilter,
 };
-use crypto_suite::hashing::blake3;
 use foundation_serialization::json;
 use httpd::StatusCode;
 use std::sync::Arc;
@@ -143,10 +143,7 @@ fn treasury_dependency_limits_clamp_explorer_payloads() {
         .expect("memo disbursement present");
     assert_eq!(memo_row.deps.len(), MAX_DEPENDENCIES);
     assert!(memo_row.memo.starts_with("depends_on="));
-    assert_eq!(
-        memo_row.deps[MAX_DEPENDENCIES - 1],
-        MAX_DEPENDENCIES as u64
-    );
+    assert_eq!(memo_row.deps[MAX_DEPENDENCIES - 1], MAX_DEPENDENCIES as u64);
 }
 
 #[test]
@@ -281,9 +278,7 @@ fn treasury_http_dep_limit_and_schema_hash_guard() {
             .expect("treasury http response");
         assert_eq!(response.status(), StatusCode::OK);
         let payload: json::Value = json::from_slice(response.body()).expect("decode payload");
-        let entries = payload["disbursements"]
-            .as_array()
-            .expect("entries array");
+        let entries = payload["disbursements"].as_array().expect("entries array");
         assert_eq!(entries.len(), 1);
         let deps = entries[0]["deps"]
             .as_array()

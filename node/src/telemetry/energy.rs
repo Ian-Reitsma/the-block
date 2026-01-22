@@ -53,6 +53,26 @@ fn sanitize_dispute_outcome_label(outcome: &str) -> &'static str {
     }
 }
 
+/// Normalize dispute states for telemetry labels.
+fn sanitize_dispute_state_label(state: &str) -> &'static str {
+    match state {
+        "open" => dispute_state::OPEN,
+        "resolved" => dispute_state::RESOLVED,
+        "slashed" => dispute_state::SLASHED,
+        _ => "other",
+    }
+}
+
+/// Validate and sanitize a slash reason label
+fn sanitize_slash_reason_label(reason: &str) -> &'static str {
+    match reason {
+        r if r.contains("quorum") => slash_reason::QUORUM,
+        r if r.contains("expire") || r.contains("expiry") => slash_reason::EXPIRY,
+        r if r.contains("conflict") || r.contains("hash") => slash_reason::CONFLICT,
+        _ => slash_reason::OTHER,
+    }
+}
+
 // ========================================
 // ORACLE SUBMISSION METRICS
 // ========================================
@@ -166,6 +186,46 @@ static ENERGY_DISPUTE_RESOLUTION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     )
 });
 
+/// Quorum shortfall counts (reason = provider)
+#[cfg(feature = "telemetry")]
+static ENERGY_QUORUM_SHORTFALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
+        "energy_quorum_shortfall_total",
+        "Settlements rejected because quorum thresholds were not met",
+        &["provider"],
+    )
+});
+
+/// Reading rejections by reason (e.g., invalid_reading, stale_timestamp)
+#[cfg(feature = "telemetry")]
+static ENERGY_READING_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
+        "energy_reading_reject_total",
+        "Oracle readings rejected before creating credits",
+        &["reason"],
+    )
+});
+
+/// Slashing counts tagged by provider + reason
+#[cfg(feature = "telemetry")]
+static ENERGY_SLASHING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
+        "energy_slashing_total",
+        "Energy slashing events recorded when quorum, expiry, or conflicts occur",
+        &["provider", "reason"],
+    )
+});
+
+/// Dispute lifecycle counts keyed by state (open/resolved/slashed)
+#[cfg(feature = "telemetry")]
+static ENERGY_DISPUTE_STATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_counter_vec(
+        "energy_dispute_total",
+        "Energy dispute counts by lifecycle state",
+        &["state"],
+    )
+});
+
 // ========================================
 // PUBLIC API
 // ========================================
@@ -262,6 +322,52 @@ pub fn observe_dispute_resolution_time(seconds: f64) {
 #[cfg(not(feature = "telemetry"))]
 pub fn observe_dispute_resolution_time(_seconds: f64) {}
 
+/// Record a rejected reading reason.
+#[cfg(feature = "telemetry")]
+pub fn increment_reading_reject(reason: &str) {
+    let label = sanitize_oracle_error_label(reason);
+    ENERGY_READING_REJECT_TOTAL
+        .with_label_values(&[label])
+        .inc();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn increment_reading_reject(_reason: &str) {}
+
+/// Record a quorum shortfall event tagged by provider.
+#[cfg(feature = "telemetry")]
+pub fn increment_quorum_shortfall(provider: &str) {
+    let label = provider;
+    ENERGY_QUORUM_SHORTFALL_TOTAL
+        .with_label_values(&[label])
+        .inc();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn increment_quorum_shortfall(_provider: &str) {}
+
+/// Record the current dispute state for telemetry tracking.
+#[cfg(feature = "telemetry")]
+pub fn increment_dispute_state(state: &str) {
+    let label = sanitize_dispute_state_label(state);
+    ENERGY_DISPUTE_STATE_TOTAL.with_label_values(&[label]).inc();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn increment_dispute_state(_state: &str) {}
+
+/// Record each slashing event (quorum shortfall, expiry, conflicts).
+#[cfg(feature = "telemetry")]
+pub fn increment_slashing(provider: &str, reason: &str) {
+    let label = sanitize_slash_reason_label(reason);
+    ENERGY_SLASHING_TOTAL
+        .with_label_values(&[provider, label])
+        .inc();
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn increment_slashing(_provider: &str, _reason: &str) {}
+
 // ========================================
 // ERROR REASON CONSTANTS
 // ========================================
@@ -283,6 +389,19 @@ pub mod dispute_outcome {
     pub const RESOLVED: &str = "resolved";
     pub const ESCALATED: &str = "escalated";
     pub const SLASHED: &str = "slashed";
+}
+
+pub mod dispute_state {
+    pub const OPEN: &str = "open";
+    pub const RESOLVED: &str = "resolved";
+    pub const SLASHED: &str = "slashed";
+}
+
+pub mod slash_reason {
+    pub const QUORUM: &str = "quorum";
+    pub const EXPIRY: &str = "expiry";
+    pub const CONFLICT: &str = "conflict";
+    pub const OTHER: &str = "other";
 }
 
 #[cfg(all(test, feature = "telemetry"))]

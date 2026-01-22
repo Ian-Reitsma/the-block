@@ -5,9 +5,9 @@ use super::{
         json_to_bytes, param_key_from_string, param_key_to_string, BinaryCodec, BinaryReader,
         BinaryWriter, Result as CodecResult,
     },
-    registry, ApprovedRelease, EnergySettlementChangePayload, EnergySettlementMode, ParamKey, Params,
-    Proposal, ProposalStatus, ReleaseBallot, ReleaseVote, RewardClaimApproval, Runtime, Vote,
-    VoteChoice,
+    registry, ApprovedRelease, EnergySettlementChangePayload, EnergySettlementMode, ParamKey,
+    Params, Proposal, ProposalStatus, ReleaseBallot, ReleaseVote, RewardClaimApproval, Runtime,
+    Vote, VoteChoice,
 };
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{

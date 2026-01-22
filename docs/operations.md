@@ -88,6 +88,7 @@
 - Auth and rate checks happen before parsing business parameters, so rate spikes on unauthenticated traffic show up as `energy_signature_verification_failures_total` and the aggregator summary’s energy section.
 - Aggregator `/wrappers` now includes `energy.rate_limit_rps` so dashboards can display the configured limit alongside dispute/settlement health.
 - Keep these values in sync with downstream dashboards: the aggregator exposes `energy_*` counters in `/wrappers` and the Grafana energy board charts dispute counts, settlement backlog (`energy_pending_credits_total`), and signature failures.
+- The energy dashboards also surface the new `energy_quorum_shortfall_total`, `energy_reading_reject_total{reason}`, and `energy_dispute_total{state}` counters so operators can correlate rejected readings, quorum shortfalls, and dispute lifecycle movements with the aggregator summary and Prometheus alerts.
 
 ## Treasury Stuck
 

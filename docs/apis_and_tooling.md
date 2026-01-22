@@ -54,6 +54,7 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 - Main entry in `cli/src/main.rs`. Subcommands include: `node`, `gov`, `wallet`, `bridge`, `dex`, `compute`, `storage`, `gateway`, `mesh`, `light`, `telemetry`, `probe`, `diagnostics`, `service-badge`, `remediation`, `ai`, `ann`, `identity`.
 - `contract-cli energy` wraps the `energy.*` RPCs (`register`, `market`, `receipts`, `credits`, `settle`, `submit-reading`, `disputes`, `flag-dispute`, `resolve-dispute`). It prints friendly tables by default and supports `--verbose`/`--format json` when you need machine-readable payloads or to export providers/receipts/disputes for explorer ingestion. See `docs/testnet/ENERGY_QUICKSTART.md` for scripted walkthroughs and dispute drills.
 - Provider trust roots live in `config/default.toml` under `energy.provider_keys`. Reloads hot-swap the verifier registry, so keep this file in sync with the public keys your adapters sign with; unlisted providers remain in shadow mode and their readings will be rejected once keys are registered.
+- The `/wrappers` energy section now exposes `energy_quorum_shortfall_total`, `energy_reading_reject_total{reason}`, and `energy_dispute_total{state}` so CLI diagnostics and alerts can point operators to the exact condition that triggered a rejection or a dispute lifecycle update.
 - Use `contract-cli --help` or `contract-cli <cmd> --help`. Structured output via `--format json` for automation.
 - CLI shares foundation crates (serialization, HTTP client, TLS) with the node, so responses stay type-aligned.
 

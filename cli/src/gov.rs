@@ -198,7 +198,11 @@ fn call_rpc(rpc: &str, method: &'static str, params: Value) -> io::Result<Value>
     } else if let Some(error) = envelope.error {
         Err(io::Error::new(
             io::ErrorKind::Other,
-            format!("rpc {method} error {code}: {message}", code = error.code, message = error.message),
+            format!(
+                "rpc {method} error {code}: {message}",
+                code = error.code,
+                message = error.message
+            ),
         ))
     } else {
         Err(io::Error::new(
@@ -1666,8 +1670,11 @@ pub fn handle(cmd: GovCmd) {
             payload.insert("proposer".into(), Value::String(proposer));
             let payload_value = Value::Object(payload.clone());
             if timeline {
-                match call_rpc(&rpc, "gov.energy_settlement_history", Value::Object(json::Map::new()))
-                {
+                match call_rpc(
+                    &rpc,
+                    "gov.energy_settlement_history",
+                    Value::Object(json::Map::new()),
+                ) {
                     Ok(resp) => {
                         let pretty =
                             json::to_string_pretty(&resp).unwrap_or_else(|_| resp.to_string());

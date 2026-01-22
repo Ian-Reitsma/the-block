@@ -8,14 +8,62 @@ use std::fs;
 #[test]
 fn wrappers_snapshot_hash_is_pinned() {
     let mut map: BTreeMap<String, WrapperSummaryEntry> = BTreeMap::new();
+    let mut energy_shortfall_labels = HashMap::new();
+    energy_shortfall_labels.insert("provider".into(), "energy-0x1".into());
+    let mut energy_reject_labels = HashMap::new();
+    energy_reject_labels.insert("reason".into(), "invalid_reading".into());
+    let mut energy_dispute_open = HashMap::new();
+    energy_dispute_open.insert("state".into(), "open".into());
+    let mut energy_dispute_resolved = HashMap::new();
+    energy_dispute_resolved.insert("state".into(), "resolved".into());
+    let mut energy_slash_labels = HashMap::new();
+    energy_slash_labels.insert("provider".into(), "energy-0x1".into());
+    energy_slash_labels.insert("reason".into(), "quorum".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
-            metrics: vec![WrapperMetricEntry {
-                metric: "governance.treasury.executor.last_submitted_nonce".into(),
-                labels: HashMap::new(),
-                value: 7.0,
-            }],
+            metrics: vec![
+                WrapperMetricEntry {
+                    metric: "governance.treasury.executor.last_submitted_nonce".into(),
+                    labels: HashMap::new(),
+                    value: 7.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_quorum_shortfall_total".into(),
+                    labels: energy_shortfall_labels,
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_reading_reject_total".into(),
+                    labels: energy_reject_labels,
+                    value: 4.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_dispute_total".into(),
+                    labels: energy_dispute_open,
+                    value: 3.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_dispute_total".into(),
+                    labels: energy_dispute_resolved,
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_settlement_mode".into(),
+                    labels: HashMap::new(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_settlement_rollback_total".into(),
+                    labels: HashMap::new(),
+                    value: 2.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_slashing_total".into(),
+                    labels: energy_slash_labels,
+                    value: 1.0,
+                },
+            ],
             governance: Some(GovernanceWrapperEntry {
                 treasury_balance: 1_200,
                 disbursements_total: 3,
@@ -48,7 +96,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "ed8e176654d4d57e208984a0291e1fa743463ebeda81d1d2b1e701e09f39a3fe",
+        "21515f5461a9c2d529232973b948639569035689b0e3598910285e4f4495b11c",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

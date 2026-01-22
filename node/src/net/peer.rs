@@ -1105,18 +1105,116 @@ impl PeerSet {
                 if let Ok(peer_id) = crate::net::overlay_peer_from_bytes(&peer_key) {
                     crate::net::register_shard_peer(shard, peer_id);
                 }
-                let mut bc = chain.guard();
-                if (block.index as usize) == bc.chain.len() {
-                    let prev = bc.chain.last().map(|b| b.hash.clone()).unwrap_or_default();
-                    if block.index == 0 || block.previous_hash == prev {
-                        let mut new_chain = bc.chain.clone();
-                        new_chain.push(block.clone());
-                        if bc.import_chain(new_chain.clone()).is_ok() {
-                            drop(bc);
-                            self.schedule_chain_broadcast(new_chain);
+                loop {
+                    let (chain_snapshot, current_len, params_snapshot, expected_prev) = {
+                        let bc = chain.guard();
+                        (
+                            bc.chain.clone(),
+                            bc.chain.len(),
+                            bc.params.clone(),
+                            bc.chain.last().map(|b| b.hash.clone()),
+                        )
+                    };
+                    if block.index as usize != current_len {
+                        return;
+                    }
+                    if block.index > 0 {
+                        if let Some(prev) = &expected_prev {
+                            if block.previous_hash != *prev {
+                                return;
+                            }
+                        } else {
                             return;
                         }
                     }
+                    let mut new_chain = chain_snapshot.clone();
+                    new_chain.push(block.clone());
+                    let replayed = match crate::Blockchain::validate_chain_with_params(
+                        &new_chain,
+                        &params_snapshot,
+                    ) {
+                        Ok(state) => state,
+                        Err(reason) => {
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason,
+                                "chain_validation_failed"
+                            );
+                            return;
+                        }
+                    };
+                    let import_state = match crate::Blockchain::build_chain_import_state(
+                        new_chain,
+                        &params_snapshot,
+                        &replayed,
+                    ) {
+                        Ok(state) => state,
+                        Err(err) => {
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason = %err,
+                                "chain_import_state_failed"
+                            );
+                            return;
+                        }
+                    };
+                    let mut bc = chain.guard();
+                    if bc.chain.len() != current_len {
+                        drop(bc);
+                        continue;
+                    }
+                    if block.index > 0 {
+                        let current_prev = bc.chain.last().map(|b| b.hash.clone());
+                        if current_prev != expected_prev {
+                            drop(bc);
+                            continue;
+                        }
+                    } else if !bc.chain.is_empty() {
+                        drop(bc);
+                        continue;
+                    }
+                    if bc.params != params_snapshot {
+                        drop(bc);
+                        continue;
+                    }
+                    let lca = bc
+                        .chain
+                        .iter()
+                        .zip(&import_state.chain)
+                        .take_while(|(a, b)| a.hash == b.hash)
+                        .count();
+                    let depth = bc.chain.len().saturating_sub(lca);
+                    let rollback_indices = bc
+                        .chain
+                        .iter()
+                        .rev()
+                        .take(depth)
+                        .map(|b| b.index)
+                        .collect::<Vec<_>>();
+                    #[cfg(feature = "telemetry")]
+                    let start = Instant::now();
+                    let broadcast_chain = import_state.chain.clone();
+                    let applied = bc.apply_import_state(import_state, replayed, &rollback_indices);
+                    #[cfg(feature = "telemetry")]
+                    observer::observe_convergence(start);
+                    match applied {
+                        Ok(()) => {
+                            drop(bc);
+                            self.schedule_chain_broadcast(broadcast_chain);
+                        }
+                        Err(err) => {
+                            drop(bc);
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason = %err,
+                                "chain_apply_failed"
+                            );
+                        }
+                    }
+                    return;
                 }
             }
             Payload::Chain(new_chain) => {
@@ -2596,7 +2694,7 @@ pub fn export_all_peer_stats(
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 "peer list changed",
-                            ))
+                            ));
                         }
                     }
                 };
@@ -2711,7 +2809,7 @@ pub fn export_all_peer_stats(
                             return Err(std::io::Error::new(
                                 std::io::ErrorKind::Other,
                                 "peer list changed",
-                            ))
+                            ));
                         }
                     }
                 };

@@ -211,7 +211,11 @@ fn treasury_rpc_method_names_track_auth_tokens() {
         METHOD_TREASURY_EXECUTE, METHOD_TREASURY_QUEUE, METHOD_TREASURY_ROLLBACK,
     };
 
-    for method in [METHOD_TREASURY_QUEUE, METHOD_TREASURY_EXECUTE, METHOD_TREASURY_ROLLBACK] {
+    for method in [
+        METHOD_TREASURY_QUEUE,
+        METHOD_TREASURY_EXECUTE,
+        METHOD_TREASURY_ROLLBACK,
+    ] {
         assert!(
             method.starts_with("gov.treasury."),
             "treasury RPC methods should remain under gov.treasury.*"

@@ -1754,6 +1754,32 @@ impl AppState {
         snapshot
     }
 
+    fn dispute_state_from_key(key: &str) -> Option<String> {
+        if key == "energy_dispute_total" {
+            return Some("total".into());
+        }
+        if let Some(rest) = key.strip_prefix("energy_dispute_total_") {
+            if !rest.is_empty() {
+                return Some(rest.to_string());
+            }
+        }
+        if key.starts_with("energy_dispute_total{") {
+            if let Some(end) = key.find('}') {
+                let inside = &key["energy_dispute_total{".len()..end];
+                for part in inside.split(',') {
+                    let trimmed = part.trim();
+                    if let Some(value) = trimmed.strip_prefix("state=") {
+                        let val = value.trim_matches('"');
+                        if !val.is_empty() {
+                            return Some(val.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn energy_summary_snapshot(&self) -> EnergySummarySnapshot {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1793,6 +1819,22 @@ impl AppState {
                 }
                 if let Some(v) = number_from_value(obj.get("energy_settlement_rollback_total")) {
                     summary.merge_settlement_rollbacks(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_quorum_shortfall_total")) {
+                    summary.merge_quorum_shortfall(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_reading_reject_total")) {
+                    summary.merge_reading_reject(v);
+                }
+                if let Some(v) = number_from_value(obj.get("energy_slashing_total")) {
+                    summary.merge_slashing_total(v);
+                }
+                for (key, value) in obj {
+                    if let Some(state) = dispute_state_from_key(key) {
+                        if let Some(v) = number_from_value(Some(value)) {
+                            summary.merge_dispute_state(state, v);
+                        }
+                    }
                 }
             }
         }
@@ -8986,6 +9028,10 @@ struct EnergySummarySnapshot {
     treasury_fee_total: Option<u64>,
     settlement_mode: Option<u64>,
     settlement_rollbacks: Option<u64>,
+    quorum_shortfall_total: Option<u64>,
+    reading_reject_total: Option<u64>,
+    slashing_total: Option<u64>,
+    dispute_state_totals: HashMap<String, u64>,
 }
 
 impl EnergySummarySnapshot {
@@ -9009,6 +9055,24 @@ impl EnergySummarySnapshot {
     }
     fn merge_settlement_rollbacks(&mut self, value: u64) {
         self.settlement_rollbacks = Some(self.settlement_rollbacks.map_or(value, |v| v.max(value)));
+    }
+
+    fn merge_quorum_shortfall(&mut self, value: u64) {
+        self.quorum_shortfall_total =
+            Some(self.quorum_shortfall_total.map_or(value, |v| v.max(value)));
+    }
+
+    fn merge_reading_reject(&mut self, value: u64) {
+        self.reading_reject_total = Some(self.reading_reject_total.map_or(value, |v| v.max(value)));
+    }
+
+    fn merge_slashing_total(&mut self, value: u64) {
+        self.slashing_total = Some(self.slashing_total.map_or(value, |v| v.max(value)));
+    }
+
+    fn merge_dispute_state(&mut self, state: String, value: u64) {
+        let entry = self.dispute_state_totals.entry(state).or_insert(0);
+        *entry = (*entry).max(value);
     }
 
     fn to_value(&self) -> Value {
@@ -9062,6 +9126,31 @@ impl EnergySummarySnapshot {
                 .map(Value::from)
                 .unwrap_or(Value::Null),
         );
+        map.insert(
+            "energy_quorum_shortfall_total".into(),
+            self.quorum_shortfall_total
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "energy_reading_reject_total".into(),
+            self.reading_reject_total
+                .map(Value::from)
+                .unwrap_or(Value::Null),
+        );
+        map.insert(
+            "energy_slashing_total".into(),
+            self.slashing_total.map(Value::from).unwrap_or(Value::Null),
+        );
+        let mut state_keys: Vec<_> = self.dispute_state_totals.keys().cloned().collect();
+        state_keys.sort();
+        let mut state_map = Map::new();
+        for key in state_keys {
+            if let Some(value) = self.dispute_state_totals.get(&key) {
+                state_map.insert(key.clone(), Value::from(*value));
+            }
+        }
+        map.insert("energy_dispute_states".into(), Value::Object(state_map));
         Value::Object(map)
     }
 }
@@ -9413,10 +9502,8 @@ mod tests {
                 .unwrap();
             assert_eq!(metrics_resp.status(), StatusCode::OK);
             let body = String::from_utf8(metrics_resp.body().to_vec()).expect("metrics body");
-            let overlay_provider_b =
-                "chaos_site_readiness{module=\"overlay\",scenario=\"overlay-soak\",site=\"provider-b\",provider=\"partner\"";
-            let overlay_provider_a =
-                "chaos_site_readiness{module=\"overlay\",scenario=\"overlay-soak\",site=\"provider-a\",provider=\"foundation\"";
+            let overlay_provider_b = "chaos_site_readiness{module=\"overlay\",scenario=\"overlay-soak\",site=\"provider-b\",provider=\"partner\"";
+            let overlay_provider_a = "chaos_site_readiness{module=\"overlay\",scenario=\"overlay-soak\",site=\"provider-a\",provider=\"foundation\"";
             assert!(body.contains(overlay_provider_b));
             assert!(!body.contains(overlay_provider_a));
             assert!(body.contains(overlay_provider_b));
