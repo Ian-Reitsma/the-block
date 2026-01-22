@@ -647,6 +647,7 @@ name = "p2p_overlay"
 version = "0.1.0"
 dependencies = [
  "crypto_suite",
+ "diagnostics",
  "foundation_serde",
  "foundation_serialization",
  "sys",

@@ -1,9 +1,12 @@
 #![cfg(feature = "integration-tests")]
 use std::collections::HashMap;
+use std::fs::OpenOptions;
+use std::io::{self, Write};
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sys::tempfile::tempdir;
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
@@ -37,7 +40,101 @@ fn free_addr() -> SocketAddr {
         .unwrap()
 }
 
-fn init_env() -> sys::tempfile::TempDir {
+struct ChaosArtifacts {
+    log_path: PathBuf,
+    zip_path: PathBuf,
+    log_file: File,
+    test_name: String,
+    finalized: bool,
+}
+
+impl ChaosArtifacts {
+    fn artifact_root() -> PathBuf {
+        std::env::var("TB_CHAOS_ARTIFACT_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("target/chaos_artifacts"))
+    }
+
+    fn new(test_name: &str) -> Self {
+        let root = Self::artifact_root();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let dir = root.join(format!("{test_name}-{timestamp}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log_path = dir.join("log.txt");
+        let log_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&log_path)
+            .unwrap();
+        let zip_path = dir.join(format!("{test_name}.zip"));
+        Self {
+            log_path,
+            zip_path,
+            log_file,
+            test_name: test_name.to_string(),
+            finalized: false,
+        }
+    }
+
+    fn event(&mut self, label: &str, detail: impl AsRef<str>) {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let line = format!("[{ts}] {label}: {}\n", detail.as_ref());
+        let _ = self.log_file.write_all(line.as_bytes());
+        let _ = self.log_file.flush();
+    }
+
+    fn finalize(&mut self) -> io::Result<PathBuf> {
+        if self.finalized {
+            return Ok(self.zip_path.clone());
+        }
+        self.log_file.flush()?;
+        match Command::new("zip")
+            .arg("-j")
+            .arg(&self.zip_path)
+            .arg(&self.log_path)
+            .status()
+        {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("zip command failed: {}", status),
+                ));
+            }
+            Err(err) => {
+                eprintln!(
+                    "zip command unavailable ({}); copying log text instead",
+                    err
+                );
+                std::fs::copy(&self.log_path, &self.zip_path)?;
+            }
+        }
+        self.finalized = true;
+        Ok(self.zip_path.clone())
+    }
+}
+
+impl Drop for ChaosArtifacts {
+    fn drop(&mut self) {
+        match self.finalize() {
+            Ok(path) => eprintln!("chaos artifact: {}", path.display()),
+            Err(err) => eprintln!("chaos artifact creation failed: {err:?}"),
+        }
+    }
+}
+
+struct ChaosRun {
+    _temp_dir: sys::tempfile::TempDir,
+    artifacts: ChaosArtifacts,
+}
+fn init_env(test_name: &str) -> ChaosRun {
     cleanup_env();
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
@@ -53,11 +150,17 @@ fn init_env() -> sys::tempfile::TempDir {
     // Light chaos defaults (overridable via env for targeted debugging)
     let loss = std::env::var("TB_NET_PACKET_LOSS").unwrap_or_else(|_| "0.005".into());
     let jitter = std::env::var("TB_NET_JITTER_MS").unwrap_or_else(|_| "25".into());
-    std::env::set_var("TB_NET_PACKET_LOSS", loss);
-    std::env::set_var("TB_NET_JITTER_MS", jitter);
+    std::env::set_var("TB_NET_PACKET_LOSS", loss.clone());
+    std::env::set_var("TB_NET_JITTER_MS", jitter.clone());
     std::env::set_var("TB_PEER_DB_PATH", dir.path().join("peers_default"));
     std::fs::write(dir.path().join("seed"), b"chaos").unwrap();
-    dir
+    let mut artifacts = ChaosArtifacts::new(test_name);
+    artifacts.event("net.packet_loss", &loss);
+    artifacts.event("net.jitter_ms", &jitter);
+    ChaosRun {
+        _temp_dir: dir,
+        artifacts,
+    }
 }
 
 fn timeout_factor() -> u64 {
@@ -256,7 +359,7 @@ impl TestNode {
 #[testkit::tb_serial]
 fn converges_under_loss() {
     runtime::block_on(async {
-        let _env = init_env();
+        let mut run = init_env("converges_under_loss");
         let addr1 = free_addr();
         let addr2 = free_addr();
         let addr3 = free_addr();
@@ -275,6 +378,8 @@ fn converges_under_loss() {
         node3.node.add_peer(addr1);
         node3.node.add_peer(addr2);
         the_block::sleep(Duration::from_millis(500)).await;
+        run.artifacts
+            .event("mesh_ready", "three nodes exchanged addresses");
 
         // Mine blocks on node1
         let mut ts = 1u64;
@@ -295,6 +400,10 @@ fn converges_under_loss() {
         .await;
         assert!(ok, "convergence timed out");
 
+        let h = node1.node.blockchain().block_height;
+        run.artifacts
+            .event("final_height", format!("final height {h}"));
+        assert_eq!(h, 12, "Expected 12 blocks");
         node1.shutdown();
         node2.shutdown();
         node3.shutdown();
@@ -305,7 +414,7 @@ fn converges_under_loss() {
 #[testkit::tb_serial]
 fn kill_node_recovers() {
     runtime::block_on(async {
-        let _e = init_env();
+        let mut run = init_env("kill_node_recovers");
         let mut nodes: Vec<TestNode> = Vec::new();
         let node_count = 3usize;
         for _ in 0..node_count {
@@ -348,12 +457,18 @@ fn kill_node_recovers() {
             wait_until_converged(&nodes.iter().map(|n| &n.node).collect::<Vec<_>>(), max).await,
             "initial convergence failed"
         );
+        run.artifacts.event(
+            "pre_kill_height",
+            format!("height {}", nodes[0].node.blockchain().block_height),
+        );
 
         // Kill node 2
         nodes[2].flag.trigger();
         if let Some(handle) = nodes[2].handle.take() {
             let _ = handle.join();
         }
+        run.artifacts
+            .event("node_killed", format!("node2 {} killed", nodes[2].addr));
 
         // Wait for socket to be fully released
         the_block::sleep(Duration::from_millis(500)).await;
@@ -433,6 +548,8 @@ fn kill_node_recovers() {
         );
 
         let h = nodes[0].node.blockchain().block_height;
+        run.artifacts
+            .event("post_recovery_height", format!("height {h}"));
         assert_eq!(h, 12, "Expected 12 blocks");
         for n in nodes.iter_mut() {
             n.shutdown();
@@ -444,7 +561,7 @@ fn kill_node_recovers() {
 #[testkit::tb_serial]
 fn partition_heals_to_majority() {
     runtime::block_on(async {
-        let _e = init_env();
+        let mut run = init_env("partition_heals_to_majority");
         let node_count = 3usize;
         let mut nodes: Vec<TestNode> = Vec::new();
         for _ in 0..node_count {
@@ -498,6 +615,10 @@ fn partition_heals_to_majority() {
                 n.node.remove_peer(nodes[iso].addr);
             }
         }
+        run.artifacts.event(
+            "partition_start",
+            format!("isolated node {}", nodes[iso].addr),
+        );
 
         // Main partition mines 6 blocks
         for _ in 0..6 {
@@ -578,6 +699,8 @@ fn partition_heals_to_majority() {
         );
 
         let h = nodes[0].node.blockchain().block_height;
+        run.artifacts
+            .event("partition_heal_height", format!("height {h}"));
         assert_eq!(
             h, 9,
             "Expected majority chain (9 blocks: 3 pre-partition + 6 during) to win"

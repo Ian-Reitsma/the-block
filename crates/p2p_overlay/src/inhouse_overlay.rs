@@ -4,6 +4,7 @@ use crate::{
     OverlayStore, PeerId, UptimeHandle, UptimeMetrics,
 };
 use crypto_suite::hashing::blake3::hash;
+use diagnostics::log;
 use foundation_serialization::{
     base58,
     json::{self, Map, Value},
@@ -14,11 +15,16 @@ use std::fmt;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const PEER_ID_LEN: usize = 32;
 const CHECKSUM_LEN: usize = 4;
+const OVERLAY_PERSIST_RETRY_LIMIT: usize = 3;
+const OVERLAY_PERSIST_RETRY_DELAY_MS: u64 = 25;
 
 #[derive(Debug)]
 enum InhouseOverlayError {
@@ -252,13 +258,22 @@ where
     local: InhousePeerId,
     peers: HashMap<InhousePeerId, PeerEndpoint>,
     store: S,
+    persist_attempts: Arc<AtomicU64>,
+    persist_successes: Arc<AtomicU64>,
+    persist_failures: Arc<AtomicU64>,
 }
 
 impl<S> InhouseDiscovery<S>
 where
     S: OverlayStore<InhousePeerId, PeerEndpoint>,
 {
-    pub fn new(local: InhousePeerId, store: S) -> Self {
+    pub fn new(
+        local: InhousePeerId,
+        store: S,
+        persist_attempts: Arc<AtomicU64>,
+        persist_successes: Arc<AtomicU64>,
+        persist_failures: Arc<AtomicU64>,
+    ) -> Self {
         let mut peers = HashMap::new();
         if let Ok(entries) = store.load() {
             for (peer, endpoint) in entries {
@@ -269,6 +284,9 @@ where
             local,
             peers,
             store,
+            persist_attempts,
+            persist_successes,
+            persist_failures,
         }
     }
 
@@ -306,7 +324,30 @@ where
             .iter()
             .map(|(peer, endpoint)| (peer.clone(), endpoint.clone()))
             .collect();
-        let _ = self.store.persist(&entries);
+        if let Err(err) = self.persist_with_retry(&entries) {
+            log::warn!("overlay_persist_final_failed: err={:?}", err);
+        }
+    }
+
+    fn persist_with_retry(&self, entries: &[(InhousePeerId, PeerEndpoint)]) -> OverlayResult<()> {
+        for attempt in 1..=OVERLAY_PERSIST_RETRY_LIMIT {
+            self.persist_attempts.fetch_add(1, Ordering::Relaxed);
+            match self.store.persist(entries) {
+                Ok(_) => {
+                    self.persist_successes.fetch_add(1, Ordering::Relaxed);
+                    return Ok(());
+                }
+                Err(err) if attempt == OVERLAY_PERSIST_RETRY_LIMIT => {
+                    self.persist_failures.fetch_add(1, Ordering::Relaxed);
+                    return Err(err);
+                }
+                Err(err) => {
+                    log::warn!("overlay_persist_retry: attempt={} err={:?}", attempt, err);
+                    thread::sleep(Duration::from_millis(OVERLAY_PERSIST_RETRY_DELAY_MS));
+                }
+            }
+        }
+        unreachable!("persist_with_retry exited loop without returning")
     }
 }
 
@@ -342,6 +383,9 @@ where
     store: S,
     uptime: Arc<UptimeTracker<InhousePeerId, InMemoryUptimeStore<InhousePeerId>, M>>,
     database_path: Option<PathBuf>,
+    persist_attempts: Arc<AtomicU64>,
+    persist_successes: Arc<AtomicU64>,
+    persist_failures: Arc<AtomicU64>,
 }
 
 impl InhouseOverlay<InhouseOverlayStore, NoopMetrics> {
@@ -373,6 +417,9 @@ where
             store,
             uptime: tracker,
             database_path,
+            persist_attempts: Arc::new(AtomicU64::new(0)),
+            persist_successes: Arc::new(AtomicU64::new(0)),
+            persist_failures: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -397,7 +444,13 @@ where
         &self,
         local: Self::Peer,
     ) -> Box<dyn Discovery<Peer = Self::Peer, Address = Self::Address> + Send> {
-        Box::new(InhouseDiscovery::new(local, self.store.clone()))
+        Box::new(InhouseDiscovery::new(
+            local,
+            self.store.clone(),
+            Arc::clone(&self.persist_attempts),
+            Arc::clone(&self.persist_successes),
+            Arc::clone(&self.persist_failures),
+        ))
     }
 
     fn uptime(&self) -> Arc<dyn UptimeHandle<Peer = Self::Peer>> {
@@ -411,6 +464,9 @@ where
             active_peers: self.uptime.tracked_peers(),
             persisted_peers: persisted,
             database_path: self.database_path.clone(),
+            persist_attempts: self.persist_attempts.load(Ordering::Relaxed),
+            persist_successes: self.persist_successes.load(Ordering::Relaxed),
+            persist_failures: self.persist_failures.load(Ordering::Relaxed),
         })
     }
 }

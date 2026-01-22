@@ -249,6 +249,7 @@ pub struct QuinnCallbacks;
 pub struct InhouseCallbacks {
     pub handshake_success: Option<Arc<dyn Fn(SocketAddr) + Send + Sync + 'static>>,
     pub handshake_failure: Option<Arc<dyn Fn(SocketAddr, &str) + Send + Sync + 'static>>,
+    pub handshake_attempt: Option<Arc<dyn Fn(SocketAddr) + Send + Sync + 'static>>,
     pub provider_connect: Option<Arc<dyn Fn(&'static str) + Send + Sync + 'static>>,
 }
 

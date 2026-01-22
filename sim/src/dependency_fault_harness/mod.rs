@@ -980,6 +980,9 @@ impl SimulatedOverlay {
             active_peers: self.peers.len(),
             persisted_peers: self.peers.len(),
             database_path: None,
+            persist_attempts: 0,
+            persist_successes: 0,
+            persist_failures: 0,
         })
     }
 
@@ -1117,6 +1120,9 @@ impl OverlayService for MockOverlayService {
             active_peers: 0,
             persisted_peers: 0,
             database_path: None,
+            persist_attempts: 0,
+            persist_successes: 0,
+            persist_failures: 0,
         })
     }
 }

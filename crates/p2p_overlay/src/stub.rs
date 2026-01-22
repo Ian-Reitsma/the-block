@@ -132,6 +132,9 @@ where
             active_peers: self.uptime.tracked_peers(),
             persisted_peers: self.store.snapshot().len(),
             database_path: None,
+            persist_attempts: 0,
+            persist_successes: 0,
+            persist_failures: 0,
         }
     }
 }

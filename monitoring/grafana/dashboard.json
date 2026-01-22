@@ -5,11 +5,11 @@
       "title": "DEX",
       "type": "row"
     },
-    {
-      "datasource": {
-        "type": "foundation-telemetry",
-        "uid": "foundation"
-      },
+        {
+          "datasource": {
+            "type": "foundation-telemetry",
+            "uid": "foundation"
+          },
       "id": 2,
       "options": {
         "legend": {
@@ -703,14 +703,129 @@
         {
           "expr": "range_boost_queue_oldest_seconds"
         }
-      ],
-      "title": "RangeBoost queue oldest age (seconds)",
-      "type": "timeseries"
-    },
-    {
-      "id": 40,
-      "title": "Block Payouts",
-      "type": "row"
+          ],
+          "title": "RangeBoost queue oldest age (seconds)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "foundation-telemetry",
+            "uid": "foundation"
+          },
+          "description": "RangeBoost forwarder retries observed while forwarding bundles",
+          "id": 300,
+          "options": {
+            "legend": {
+              "showLegend": true
+            }
+          },
+          "targets": [
+            {
+              "expr": "increase(range_boost_forwarder_retry_total[5m])",
+              "legendFormat": "{{__name__}}"
+            }
+          ],
+          "title": "RangeBoost forwarder retries (5m delta)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "foundation-telemetry",
+            "uid": "foundation"
+          },
+          "description": "Bundles dropped after the RangeBoost retry budget is exhausted",
+          "id": 301,
+          "options": {
+            "legend": {
+              "showLegend": true
+            }
+          },
+          "targets": [
+            {
+              "expr": "increase(range_boost_forwarder_drop_total[5m])",
+              "legendFormat": "{{__name__}}"
+            }
+          ],
+          "title": "RangeBoost forwarder drops (5m delta)",
+          "type": "timeseries"
+        },
+        {
+          "id": 302,
+          "title": "Transport handshake",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "foundation-telemetry",
+            "uid": "foundation"
+          },
+          "description": "Transport handshake attempts for every provider",
+          "id": 303,
+          "options": {
+            "legend": {
+              "showLegend": true
+            }
+          },
+          "targets": [
+            {
+              "expr": "increase(transport_handshake_attempt_total[5m])",
+              "legendFormat": "{{provider}}"
+            }
+          ],
+          "title": "Transport handshake attempts (5m delta)",
+          "type": "timeseries"
+        },
+        {
+          "id": 304,
+          "title": "Overlay persistence",
+          "type": "row"
+        },
+        {
+          "datasource": {
+            "type": "foundation-telemetry",
+            "uid": "foundation"
+          },
+          "description": "Overlay persistence attempts (gauge)",
+          "id": 305,
+          "options": {
+            "legend": {
+              "showLegend": true
+            }
+          },
+          "targets": [
+            {
+              "expr": "overlay_persist_attempts_total",
+              "legendFormat": "{{__name__}}"
+            }
+          ],
+          "title": "Overlay persist attempts",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "foundation-telemetry",
+            "uid": "foundation"
+          },
+          "description": "Overlay persistence failures after retries",
+          "id": 306,
+          "options": {
+            "legend": {
+              "showLegend": true
+            }
+          },
+          "targets": [
+            {
+              "expr": "overlay_persist_failure_total",
+              "legendFormat": "{{__name__}}"
+            }
+          ],
+          "title": "Overlay persist failures",
+          "type": "timeseries"
+        },
+        {
+          "id": 40,
+          "title": "Block Payouts",
+          "type": "row"
     },
     {
       "datasource": {

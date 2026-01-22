@@ -8,7 +8,7 @@ edition = "2021"
 crypto_suite = { path = "../crypto_suite" }
 foundation_serialization = { path = "../foundation_serialization" }
 serde = { workspace = true, default-features = false }
+diagnostics = { path = "../diagnostics" }
 
 [dev-dependencies]
 sys = { path = "../sys" }
-

@@ -162,6 +162,9 @@ impl Adapter {
         let mut attempts = 0usize;
         loop {
             attempts += 1;
+            if let Some(cb) = &self.inner.callbacks.handshake_attempt {
+                cb(addr);
+            }
             match attempt_handshake(addr, cert, self.inner.handshake_timeout).await {
                 Ok(handshake) => {
                     let outcome = ConnectOutcome {

@@ -96,6 +96,9 @@ pub struct OverlayDiagnostics {
     pub active_peers: usize,
     pub persisted_peers: usize,
     pub database_path: Option<PathBuf>,
+    pub persist_attempts: u64,
+    pub persist_successes: u64,
+    pub persist_failures: u64,
 }
 
 pub mod inhouse_overlay;

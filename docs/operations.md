@@ -90,6 +90,27 @@
   - CI pins the governance treasury wrapper summary hash (`e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595`) and the explorer/CLI treasury timeline schema hash (`c48f401c3792195c9010024b8ba0269b0efd56c227be9cb5dd1ddba793b2cbd1`); update the expected values only when intentionally changing the telemetry or response shape and refresh Grafana alongside.
   - `monitoring/grafana_treasury_dashboard.json` is snapshot-checked in CI with hash `e9d9dc350aeedbe1167c6120b8f5600f7f079b3e2ffe9ab7542917de021a61a0`; regenerate with `make -C monitoring dashboard` and update snapshots/hash when panels change, and include refreshed screenshots in review notes.
 
+### Range Boost + LocalNet Observability
+
+- `range_boost_forwarder_retry_total` records every store-and-forward retry triggered by the Range Boost forwarder, and `range_boost_forwarder_drop_total` flags when bundles hit the deterministic retry limit and are dropped. Those counters sit alongside the existing `range_boost_forwarder_fail_total`, `range_boost_enqueue_error_total`, and queue-depth gauges inside the **Range Boost** row of `monitoring/grafana/dashboard.json` (and the mirrored `telemetry.json`, `dev.json`, `operator.json` exports). The panels plot the 5m delta for retries/drops so you can tell whether failures resolve on retry or linger.
+- Entries from LocalNet receipts now surface `localnet_receipt_insert_attempt_total`, `localnet_receipt_insert_success_total`, and `localnet_receipt_insert_failure_total`, giving you observability into the bounded sled insert loop that retries on disk contention. Pair these counters with the queue-health panels above to spot whether the mesh is failing to persist attestations under load.
+- `/wrappers` now mirrors `range_boost_*` and `localnet_receipt_*` counters; refresh both `monitoring/tests/snapshots/wrappers.json` and `metrics-aggregator/tests/snapshots/wrappers.json` (see the respective `WRITE_WRAPPERS_SNAPSHOT=1` helper commands) whenever you change their shape so dashboards and downstream tooling never see a drifted hash.
+
+### Transport handshake watchdog
+
+- Dial attempts for every transport provider emit `transport_handshake_attempt_total{provider="<provider>"}` when the bounded handshake routine begins, whether it later succeeds or exhausts retries. This counter, combined with the existing `transport_provider_connect_total`, surfaces the “telescoping” behavior operators need to watch when retries back-pressure QUIC lanes. Add a panel next to the Range Boost row that charts the 5m delta of `transport_handshake_attempt_total`, and describe the metric inside the new `transport` row of `monitoring/grafana/dashboard.json`/`telemetry.json`.
+- The same counter plus its “goal completion” sample appear in `/wrappers` so the aggregator can surface retry rates directly to the `render_foundation_dashboard.py` summary. Capture the refreshed `/wrappers` hash after you update the telemetry surface so Grafana snapshots and alerts align.
+
+### Overlay persistence telemetry
+
+- Overlay peer persistence now enforces a deterministic retry budget (`overlay_persist_attempts_total`) with success/failure counters (`overlay_persist_success_total`, `overlay_persist_failure_total`). Prime the overlay diagnostics panel in `monitoring/grafana/dashboard.json`/`telemetry.json` with these metrics so every restart shows whether the persisted peer store was able to survive write contention or if it dropped entries after the retry budget expired.
+- `/wrappers` now contains the same persistence counters, giving you a ready-made signal for dashboards, probes, and runbooks that depend on stable discovery stores.
+
+### Chaos drill artifacts
+
+- Every chaos drill run inside `node/tests/chaos.rs` now writes a persistent artifact bundle (`log.txt` + metadata) plus a zipped archive under `target/chaos_artifacts/<test-name>-<timestamp>.zip` (override with `TB_CHAOS_ARTIFACT_ROOT`). The files capture loss/jitter knobs, convergence events, partition heal handoffs, and transport + Range Boost telemetry counters recorded during the drill. Share the zip path printed in the test logs when you triage failures so replays can start from the exact scenario that produced the alert.
+- Replay drills should cite the artifact hash along with the Grafana panels mentioned above; when you rerun `npm ci --prefix monitoring && make monitor --native-monitor`, make sure the refreshed dashboards continue referencing the new panels so operators know which metric to inspect when an artifact is published.
+
 ### Energy RPC Guardrails
 
 - RPC calls enforce optional auth (`TB_ENERGY_RPC_TOKEN`) and a sliding-window rate limit (`TB_ENERGY_RPC_RPS`, default 50rps). Missing/incorrect tokens return `-33009`, while limits return `-33010`.

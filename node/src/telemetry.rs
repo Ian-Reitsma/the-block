@@ -1971,6 +1971,21 @@ pub static TRANSPORT_PROVIDER_CONNECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| 
     c
 });
 
+pub static TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "transport_handshake_attempt_total",
+            "Handshake attempts observed by transport providers",
+        ),
+        &["provider"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec transport_handshake_attempt_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry transport_handshake_attempt_total: {e}"));
+    c
+});
+
 pub static CODING_ALGORITHM_INFO: Lazy<IntGaugeVec> = Lazy::new(|| {
     let g = IntGaugeVec::new(
         Opts::new(
@@ -6237,6 +6252,66 @@ pub static RANGE_BOOST_TOGGLE_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
     h
 });
 
+pub static RANGE_BOOST_FORWARDER_RETRY_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "range_boost_forwarder_retry_total",
+        "RangeBoost forwarder retry attempts observed",
+    )
+    .unwrap_or_else(|e| panic!("counter range boost forwarder retry: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost forwarder retry: {e}"));
+    c.handle()
+});
+
+pub static RANGE_BOOST_FORWARDER_DROP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "range_boost_forwarder_drop_total",
+        "RangeBoost bundles dropped after retry budget exhausted",
+    )
+    .unwrap_or_else(|e| panic!("counter range boost forwarder drop: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry range boost forwarder drop: {e}"));
+    c.handle()
+});
+
+pub static LOCALNET_RECEIPT_INSERT_ATTEMPT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "localnet_receipt_insert_attempt_total",
+        "LocalNet presence receipt insert retries attempted",
+    )
+    .unwrap_or_else(|e| panic!("counter localnet receipt insert attempt: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry localnet receipt insert attempt: {e}"));
+    c.handle()
+});
+
+pub static LOCALNET_RECEIPT_INSERT_SUCCESS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "localnet_receipt_insert_success_total",
+        "LocalNet presence receipts persisted successfully",
+    )
+    .unwrap_or_else(|e| panic!("counter localnet receipt insert success: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry localnet receipt insert success: {e}"));
+    c.handle()
+});
+
+pub static LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "localnet_receipt_insert_failure_total",
+        "LocalNet presence receipts that failed after the retry budget",
+    )
+    .unwrap_or_else(|e| panic!("counter localnet receipt insert failure: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry localnet receipt insert failure: {e}"));
+    c.handle()
+});
+
 pub static P2P_REQUEST_LIMIT_HITS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     let c = IntCounterVec::new(
         Opts::new(
@@ -6319,6 +6394,42 @@ pub static OVERLAY_PEER_PERSISTED_TOTAL: Lazy<IntGaugeVec> = Lazy::new(|| {
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry overlay_peer_persisted_total: {e}"));
     g
+});
+
+pub static OVERLAY_PERSIST_ATTEMPTS_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "overlay_persist_attempts_total",
+        "Overlay peer persistence attempts (all retries)",
+    )
+    .unwrap_or_else(|e| panic!("gauge overlay persist attempts: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry overlay persist attempts: {e}"));
+    g.handle()
+});
+
+pub static OVERLAY_PERSIST_SUCCESS_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "overlay_persist_success_total",
+        "Overlay peer persistence operations that succeeded",
+    )
+    .unwrap_or_else(|e| panic!("gauge overlay persist success: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry overlay persist success: {e}"));
+    g.handle()
+});
+
+pub static OVERLAY_PERSIST_FAILURE_TOTAL: Lazy<IntGaugeHandle> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "overlay_persist_failure_total",
+        "Overlay peer persistence operations that failed after retries",
+    )
+    .unwrap_or_else(|e| panic!("gauge overlay persist failure: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry overlay persist failure: {e}"));
+    g.handle()
 });
 
 pub static PEER_METRICS_SUBSCRIBERS: Lazy<IntGaugeHandle> = Lazy::new(|| {

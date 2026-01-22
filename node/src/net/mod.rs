@@ -103,7 +103,11 @@ use crate::telemetry::{
     QUIC_RETRANSMIT_TOTAL,
 };
 #[cfg(feature = "telemetry")]
-use crate::telemetry::{OVERLAY_BACKEND_ACTIVE, OVERLAY_PEER_PERSISTED_TOTAL, OVERLAY_PEER_TOTAL};
+use crate::telemetry::{
+    OVERLAY_BACKEND_ACTIVE, OVERLAY_PEER_PERSISTED_TOTAL, OVERLAY_PEER_TOTAL,
+    OVERLAY_PERSIST_ATTEMPTS_TOTAL, OVERLAY_PERSIST_FAILURE_TOTAL, OVERLAY_PERSIST_SUCCESS_TOTAL,
+    TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL,
+};
 #[cfg(feature = "quinn")]
 use transport::QuinnDisconnect;
 #[cfg(feature = "quic")]
@@ -253,6 +257,25 @@ fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
             |handle| handle.set(persisted),
         );
     }
+
+    with_metric_handle(
+        "overlay_persist_attempts_total",
+        [snapshot.label],
+        OVERLAY_PERSIST_ATTEMPTS_TOTAL.ensure_handle_for_label_values(&[snapshot.label]),
+        |handle| handle.set(snapshot.persist_attempts as i64),
+    );
+    with_metric_handle(
+        "overlay_persist_success_total",
+        [snapshot.label],
+        OVERLAY_PERSIST_SUCCESS_TOTAL.ensure_handle_for_label_values(&[snapshot.label]),
+        |handle| handle.set(snapshot.persist_successes as i64),
+    );
+    with_metric_handle(
+        "overlay_persist_failure_total",
+        [snapshot.label],
+        OVERLAY_PERSIST_FAILURE_TOTAL.ensure_handle_for_label_values(&[snapshot.label]),
+        |handle| handle.set(snapshot.persist_failures as i64),
+    );
 }
 
 #[cfg(feature = "telemetry")]
@@ -657,6 +680,18 @@ fn build_transport_callbacks() -> TransportCallbacks {
                     |handle| handle.inc(),
                 );
             }
+        }));
+        let provider_label = transport::ProviderKind::Inhouse.id();
+        inhouse.handshake_attempt = Some(Arc::new(move |_addr: SocketAddr| {
+            #[cfg(feature = "telemetry")]
+            with_metric_handle(
+                "transport_handshake_attempt_total",
+                [provider_label],
+                TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL.ensure_handle_for_label_values(&[provider_label]),
+                |handle| handle.inc(),
+            );
+            #[cfg(not(feature = "telemetry"))]
+            let _ = _addr;
         }));
     }
 

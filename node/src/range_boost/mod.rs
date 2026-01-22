@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     MESH_PEER_CONNECTED_TOTAL, MESH_PEER_LATENCY_MS, RANGE_BOOST_ENQUEUE_ERROR_TOTAL,
-    RANGE_BOOST_FORWARDER_FAIL_TOTAL, RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
+    RANGE_BOOST_FORWARDER_DROP_TOTAL, RANGE_BOOST_FORWARDER_FAIL_TOTAL,
+    RANGE_BOOST_FORWARDER_RETRY_TOTAL, RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,6 +39,7 @@ pub struct QueueEntry {
     bundle: Bundle,
     #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     enqueued_at: Instant,
+    retry_attempts: u8,
 }
 
 impl Deref for QueueEntry {
@@ -190,15 +192,30 @@ fn forwarder_loop(shutdown: Arc<AtomicBool>, weak_queue: Weak<Mutex<RangeBoost>>
             guard.dequeue()
         };
         match entry {
-            Some(entry) => match forward_bundle(&entry.bundle) {
+            Some(mut entry) => match forward_bundle(&entry.bundle) {
                 Ok(()) => {}
                 Err(err) => {
+                    let drop_due_to_budget = entry.retry_attempts >= MAX_FORWARD_RETRIES;
                     {
                         let mut guard = queue.lock().unwrap();
-                        guard.requeue_front(entry);
+                        if !drop_due_to_budget {
+                            entry.retry_attempts = entry.retry_attempts.saturating_add(1);
+                            entry.enqueued_at = Instant::now();
+                            guard.requeue_front(entry);
+                        }
                     }
                     #[cfg(feature = "telemetry")]
-                    RANGE_BOOST_FORWARDER_FAIL_TOTAL.inc();
+                    {
+                        RANGE_BOOST_FORWARDER_FAIL_TOTAL.inc();
+                        if drop_due_to_budget {
+                            RANGE_BOOST_FORWARDER_DROP_TOTAL.inc();
+                        } else {
+                            RANGE_BOOST_FORWARDER_RETRY_TOTAL.inc();
+                        }
+                    }
+                    if drop_due_to_budget {
+                        diagnostics::log::warn!("range_boost_forwarder_retry_budget_exceeded");
+                    }
                     match &err {
                         ForwardError::Disabled => sleep_with_shutdown(&shutdown, DISABLED_SLEEP),
                         ForwardError::NoPeers => sleep_with_shutdown(&shutdown, RETRY_SLEEP),
@@ -451,6 +468,7 @@ impl RangeBoost {
                 proofs: vec![],
             },
             enqueued_at: Instant::now(),
+            retry_attempts: 0,
         });
         record_queue_metrics(&self.queue);
     }
@@ -489,6 +507,7 @@ enum ForwardError {
 const IDLE_SLEEP: Duration = Duration::from_millis(200);
 const RETRY_SLEEP: Duration = Duration::from_millis(250);
 const DISABLED_SLEEP: Duration = Duration::from_millis(1000);
+const MAX_FORWARD_RETRIES: u8 = 4;
 
 fn forward_bundle(bundle: &Bundle) -> Result<(), ForwardError> {
     match current_fault_mode() {

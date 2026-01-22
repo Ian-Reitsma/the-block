@@ -11,11 +11,21 @@
 
 use ad_market::{PresenceBucketRef, PresenceKind};
 use crypto_suite::hashing::blake3;
+use diagnostics::log;
 use foundation_serialization::{json, Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{
+    LOCALNET_RECEIPT_INSERT_ATTEMPT_TOTAL, LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL,
+    LOCALNET_RECEIPT_INSERT_SUCCESS_TOTAL,
+};
 
 const PRESENCE_TREE_NAME: &str = "presence_receipts";
+const LOCALNET_INSERT_RETRY_LIMIT: usize = 3;
+const LOCALNET_INSERT_RETRY_DELAY_MS: u64 = 25;
 
 /// A presence receipt representing proof of physical presence at a location.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -191,7 +201,14 @@ impl PresenceCache {
         let value = json::to_vec(receipt)
             .map_err(|e| sled::Error::Io(format!("serialization error: {e}")))?;
 
-        self.tree.insert(key.as_bytes(), value)?;
+        if let Err(err) = self.insert_with_retry(key.as_bytes(), &value) {
+            log::warn!(
+                "presence_cache_insert_retry_failed: key={}, err={:?}",
+                key,
+                err
+            );
+            return Err(err);
+        }
 
         // Prune if over capacity
         if self.tree.len() > self.config.max_entries {
@@ -199,6 +216,29 @@ impl PresenceCache {
         }
 
         Ok(())
+    }
+
+    fn insert_with_retry(&self, key: &[u8], value: &[u8]) -> sled::Result<Option<sled::IVec>> {
+        for attempt in 1..=LOCALNET_INSERT_RETRY_LIMIT {
+            #[cfg(feature = "telemetry")]
+            LOCALNET_RECEIPT_INSERT_ATTEMPT_TOTAL.inc();
+            match self.tree.insert(key, value) {
+                Ok(result) => {
+                    #[cfg(feature = "telemetry")]
+                    LOCALNET_RECEIPT_INSERT_SUCCESS_TOTAL.inc();
+                    return Ok(result);
+                }
+                Err(err) if attempt == LOCALNET_INSERT_RETRY_LIMIT => {
+                    #[cfg(feature = "telemetry")]
+                    LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL.inc();
+                    return Err(err);
+                }
+                Err(_) => {
+                    thread::sleep(Duration::from_millis(LOCALNET_INSERT_RETRY_DELAY_MS));
+                }
+            }
+        }
+        unreachable!("insert_with_retry should return before exhausting loop");
     }
 
     /// Get a presence receipt by its cache key.
