@@ -176,6 +176,14 @@ impl ReceiptId {
                 hasher.update(&r.block_height.to_le_bytes());
                 hasher.update(&r.signature_nonce.to_le_bytes());
             }
+            Receipt::ComputeSlash(r) => {
+                hasher.update(b"compute_slash");
+                hasher.update(r.provider.as_bytes());
+                hasher.update(r.job_id.as_bytes());
+                hasher.update(&r.burned.to_le_bytes());
+                hasher.update(r.reason.as_bytes());
+                hasher.update(&r.block_height.to_le_bytes());
+            }
             Receipt::Energy(r) => {
                 hasher.update(b"energy");
                 hasher.update(r.provider.as_bytes());
@@ -244,6 +252,7 @@ fn receipt_provider_and_nonce(receipt: &Receipt) -> (&str, u64) {
     match receipt {
         Receipt::Storage(r) => (r.provider.as_str(), r.signature_nonce),
         Receipt::Compute(r) => (r.provider.as_str(), r.signature_nonce),
+        Receipt::ComputeSlash(r) => (r.provider.as_str(), 0),
         Receipt::Energy(r) => (r.provider.as_str(), r.signature_nonce),
         Receipt::EnergySlash(r) => (r.provider.as_str(), 0),
         Receipt::Ad(r) => (r.publisher.as_str(), r.signature_nonce),
@@ -257,7 +266,7 @@ pub fn validate_receipt(
     provider_registry: &ProviderRegistry,
     nonce_tracker: &mut NonceTracker,
 ) -> Result<(), ValidationError> {
-    if matches!(receipt, Receipt::EnergySlash(_)) {
+    if matches!(receipt, Receipt::EnergySlash(_) | Receipt::ComputeSlash(_)) {
         return Ok(());
     }
     let (provider_id, nonce) = receipt_provider_and_nonce(receipt);
@@ -332,6 +341,16 @@ pub fn validate_receipt(
         Receipt::EnergySlash(r) => {
             validate_string_field("provider", &r.provider)?;
             validate_string_field("reason", &r.reason)?;
+        }
+        Receipt::ComputeSlash(r) => {
+            validate_string_field("job_id", &r.job_id)?;
+            validate_string_field("provider", &r.provider)?;
+            validate_string_field("reason", &r.reason)?;
+            if r.burned == 0 {
+                return Err(ValidationError::ZeroValue {
+                    field: "burned".to_string(),
+                });
+            }
         }
         Receipt::Ad(r) => {
             validate_string_field("campaign_id", &r.campaign_id)?;
@@ -481,6 +500,9 @@ pub fn receipt_verify_units(receipt: &Receipt) -> u64 {
         Receipt::Energy(_) => {
             units += 3;
         }
+        Receipt::ComputeSlash(_) => {
+            units += 2;
+        }
         Receipt::EnergySlash(_) => {
             units += 2;
         }
@@ -510,6 +532,7 @@ fn signature_bytes_for_receipt(receipt: &Receipt) -> &[u8] {
         Receipt::Storage(r) => r.provider_signature.as_slice(),
         Receipt::Compute(r) => r.provider_signature.as_slice(),
         Receipt::Energy(r) => r.provider_signature.as_slice(),
+        Receipt::ComputeSlash(_) => &[],
         Receipt::EnergySlash(_) => &[],
         Receipt::Ad(r) => r.publisher_signature.as_slice(),
     }
@@ -609,6 +632,7 @@ pub fn derive_receipt_header(
             Receipt::Compute(r) => (r.provider.as_str(), None, None),
             Receipt::Energy(r) => (r.provider.as_str(), None, None),
             Receipt::EnergySlash(r) => (r.provider.as_str(), None, None),
+            Receipt::ComputeSlash(r) => (r.provider.as_str(), None, None),
             Receipt::Ad(r) => (r.publisher.as_str(), None, None),
         };
         let record = registry.get_provider_record(id);
@@ -776,6 +800,7 @@ pub fn shard_for_receipt(receipt: &Receipt, shard_count: u16) -> u16 {
         Receipt::Compute(r) => hasher.update(r.provider.as_bytes()),
         Receipt::Energy(r) => hasher.update(r.provider.as_bytes()),
         Receipt::EnergySlash(r) => hasher.update(r.provider.as_bytes()),
+        Receipt::ComputeSlash(r) => hasher.update(r.provider.as_bytes()),
         Receipt::Ad(r) => hasher.update(r.publisher.as_bytes()),
     }
     let hash = hasher.finalize();
@@ -805,6 +830,15 @@ pub fn receipt_leaf_hash(receipt: &Receipt) -> [u8; 32] {
             hasher.update(&r.compute_units.to_le_bytes());
             hasher.update(&r.payment.to_le_bytes());
             hasher.update(&[u8::from(r.verified)]);
+        }
+        Receipt::ComputeSlash(r) => {
+            hasher.update(r.provider.as_bytes());
+            hasher.update(r.job_id.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.burned.to_le_bytes());
+            hasher.update(r.reason.as_bytes());
+            hasher.update(&r.deadline.to_le_bytes());
+            hasher.update(&r.resolved_at.to_le_bytes());
         }
         Receipt::Energy(r) => {
             hasher.update(r.provider.as_bytes());

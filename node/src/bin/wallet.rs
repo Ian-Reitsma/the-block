@@ -16,6 +16,8 @@ use cli_core::{
     parse::Matches,
 };
 
+use std::time::Duration;
+
 mod cli_support;
 use cli_support::{collect_args, parse_matches, print_root_help};
 
@@ -53,6 +55,8 @@ enum Commands {
     },
     /// Sign a message using a mock hardware wallet.
     SignHw { message: String },
+    /// Discover remote signers over the local LAN.
+    RemoteDiscover { timeout: u64, json: bool },
     /// Stake BLOCK for a service role. Remote signers submit `signers[]` plus a
     /// `threshold` field so the staking RPC can validate multi-party
     /// approvals.
@@ -149,6 +153,23 @@ fn build_command() -> CliCommand {
                         .default("1"),
                 ))
                 .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("wallet.remote_discover"),
+                "discover-signers",
+                "Discover remote signer endpoints on the LAN",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("timeout", "timeout", "Discovery timeout in milliseconds")
+                    .default("500"),
+            ))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit discovery results as JSON",
+            )))
+            .build(),
         )
         .subcommand(
             CommandBuilder::new(
@@ -310,6 +331,15 @@ fn build_cli(matches: Matches) -> Result<Cli, String> {
         "sign" => parse_sign(sub_matches)?,
         "sign-hw" => Commands::SignHw {
             message: require_positional(sub_matches, "message")?,
+        },
+        "discover-signers" => Commands::RemoteDiscover {
+            timeout: parse_u64(
+                &sub_matches
+                    .get_string("timeout")
+                    .unwrap_or_else(|| "500".to_string()),
+                "timeout",
+            )?,
+            json: sub_matches.get_flag("json"),
         },
         "stake-role" => parse_stake_role(sub_matches)?,
         "escrow-balance" => Commands::EscrowBalance {
@@ -488,6 +518,30 @@ fn main() {
                 let wallet = Wallet::from_seed(&seed_arr);
                 let sig = wallet.sign(message.as_bytes()).expect("sign");
                 println!("{}", encode(sig.to_bytes()));
+            }
+        }
+        Commands::RemoteDiscover { timeout, json } => {
+            let duration = Duration::from_millis(timeout);
+            let signers = RemoteSigner::discover(duration);
+            if json {
+                let signers_json = signers
+                    .iter()
+                    .map(|url| Value::String(url.clone()))
+                    .collect::<Vec<Value>>();
+                let mut map = JsonMap::new();
+                map.insert("timeout_ms".into(), Value::Number(Number::from(timeout)));
+                map.insert("signers".into(), Value::Array(signers_json));
+                println!(
+                    "{}",
+                    json::to_string(&Value::Object(map)).unwrap_or_else(|_| "[]".into())
+                );
+            } else if signers.is_empty() {
+                println!("No remote signers discovered within {timeout}ms");
+            } else {
+                println!("Discovered {} remote signer(s):", signers.len());
+                for endpoint in signers {
+                    println!("  {endpoint}");
+                }
             }
         }
         Commands::SignHw { message } => {

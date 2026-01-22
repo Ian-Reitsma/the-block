@@ -305,6 +305,11 @@
             "refId": "B"
           },
           {
+            "expr": "receipts_compute_slash_total",
+            "legendFormat": "Compute Slash Total",
+            "refId": "E"
+          },
+          {
             "expr": "receipts_energy_total",
             "legendFormat": "Energy Total",
             "refId": "C"
@@ -335,6 +340,11 @@
             "expr": "receipt_settlement_compute",
             "legendFormat": "Compute",
             "refId": "B"
+          },
+          {
+            "expr": "receipt_settlement_compute_slash",
+            "legendFormat": "Compute Slash (BLOCK)",
+            "refId": "E"
           },
           {
             "expr": "receipt_settlement_energy",
@@ -383,6 +393,43 @@
           {"format": "short", "label": "Receipts/min"},
           {"format": "short"}
         ]
+      },
+      {
+        "id": 11,
+        "title": "Compute SLA Slashes per Block",
+        "type": "stat",
+        "gridPos": {"x": 0, "y": 28, "w": 12, "h": 4},
+        "targets": [
+          {
+            "expr": "receipts_compute_slash_per_block",
+            "legendFormat": "",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 10, "color": "yellow"}
+              ]
+            },
+            "unit": "short"
+          }
+        }
       }
     ],
     "templating": {

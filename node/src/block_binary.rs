@@ -8,8 +8,8 @@ use crate::transaction::binary as tx_binary;
 use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{
-    AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, EnergyReceipt, EnergySlashReceipt,
-    Receipt, SignedTransaction, StorageReceipt, TokenAmount,
+    AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, ComputeSlashReceipt, EnergyReceipt,
+    EnergySlashReceipt, Receipt, SignedTransaction, StorageReceipt, TokenAmount,
 };
 
 /// Encode a [`Block`] into the canonical binary layout.
@@ -430,6 +430,17 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 });
                 struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
+            Receipt::ComputeSlash(r) => {
+                struct_writer.field_string("type", "compute_slash");
+                struct_writer.field_string("job_id", &r.job_id);
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_string("buyer", &r.buyer);
+                struct_writer.field_u64("burned", r.burned);
+                struct_writer.field_string("reason", &r.reason);
+                struct_writer.field_u64("deadline", r.deadline);
+                struct_writer.field_u64("resolved_at", r.resolved_at);
+                struct_writer.field_u64("block_height", r.block_height);
+            }
             Receipt::Energy(r) => {
                 struct_writer.field_string("type", "energy");
                 struct_writer.field_string("contract_id", &r.contract_id);
@@ -535,6 +546,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut creative_id = None;
         let mut provider = None;
         let mut publisher = None;
+        let mut buyer = None;
         let mut bytes = None;
         let mut compute_units = None;
         let mut energy_units = None;
@@ -548,6 +560,9 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut proof_hash = None;
         let mut meter_hash = None;
         let mut slash_amount = None;
+        let mut burned = None;
+        let mut deadline = None;
+        let mut resolved_at = None;
         let mut reason = None;
         let mut conversions = None;
         let mut claim_routes: Option<HashMap<String, String>> = None;
@@ -565,6 +580,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "creative_id" => assign_once(&mut creative_id, reader.read_string()?, "creative_id"),
             "provider" => assign_once(&mut provider, reader.read_string()?, "provider"),
             "publisher" => assign_once(&mut publisher, reader.read_string()?, "publisher"),
+            "buyer" => assign_once(&mut buyer, reader.read_string()?, "buyer"),
             "bytes" => assign_once(&mut bytes, reader.read_u64()?, "bytes"),
             "compute_units" => assign_once(&mut compute_units, reader.read_u64()?, "compute_units"),
             "energy_units" => assign_once(&mut energy_units, reader.read_u64()?, "energy_units"),
@@ -580,7 +596,10 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "proof_hash" => assign_once(&mut proof_hash, read_fixed(reader)?, "proof_hash"),
             "meter_hash" => assign_once(&mut meter_hash, read_fixed(reader)?, "meter_hash"),
             "slash_amount" => assign_once(&mut slash_amount, reader.read_u64()?, "slash_amount"),
+            "burned" => assign_once(&mut burned, reader.read_u64()?, "burned"),
             "reason" => assign_once(&mut reason, reader.read_string()?, "reason"),
+            "deadline" => assign_once(&mut deadline, reader.read_u64()?, "deadline"),
+            "resolved_at" => assign_once(&mut resolved_at, reader.read_u64()?, "resolved_at"),
             "conversions" => assign_once(&mut conversions, reader.read_u64()?, "conversions"),
             "claim_routes" => {
                 let routes = read_vec(reader, |reader| {
@@ -705,6 +724,16 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                     .ok_or(DecodeError::MissingField("provider_signature"))?,
                 signature_nonce: signature_nonce
                     .ok_or(DecodeError::MissingField("signature_nonce"))?,
+            })),
+            "compute_slash" => Ok(Receipt::ComputeSlash(ComputeSlashReceipt {
+                job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                buyer: buyer.ok_or(DecodeError::MissingField("buyer"))?,
+                burned: burned.ok_or(DecodeError::MissingField("burned"))?,
+                reason: reason.ok_or(DecodeError::MissingField("reason"))?,
+                deadline: deadline.ok_or(DecodeError::MissingField("deadline"))?,
+                resolved_at: resolved_at.ok_or(DecodeError::MissingField("resolved_at"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
             })),
             "energy" => Ok(Receipt::Energy(EnergyReceipt {
                 contract_id: contract_id.ok_or(DecodeError::MissingField("contract_id"))?,

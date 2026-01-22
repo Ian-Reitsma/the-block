@@ -18,6 +18,7 @@ use foundation_serialization::{Deserialize, Serialize};
 pub enum Receipt {
     Storage(StorageReceipt),
     Compute(ComputeReceipt),
+    ComputeSlash(ComputeSlashReceipt),
     Energy(EnergyReceipt),
     EnergySlash(EnergySlashReceipt),
     Ad(AdReceipt),
@@ -117,6 +118,28 @@ pub struct EnergySlashReceipt {
     pub block_height: u64,
 }
 
+/// Compute SLA slash receipt.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ComputeSlashReceipt {
+    /// Job identifier for the SLA violation.
+    pub job_id: String,
+    /// Provider address that was slashed.
+    pub provider: String,
+    /// Buyer account associated with the job.
+    pub buyer: String,
+    /// Burned amount in BLOCK.
+    pub burned: u64,
+    /// Reason for the slash (deadline_missed, provider_fault, etc.).
+    pub reason: String,
+    /// SLA deadline for the job.
+    pub deadline: u64,
+    /// Timestamp when the SLA was resolved (seconds since epoch).
+    pub resolved_at: u64,
+    /// Block height when the slash receipt is included.
+    pub block_height: u64,
+}
+
 /// Ad market settlement receipt.
 ///
 /// Records when ad campaigns settle, capturing impressions served, spend,
@@ -174,8 +197,9 @@ impl Receipt {
         match self {
             Receipt::Storage(_) => "storage",
             Receipt::Compute(_) => "compute",
+            Receipt::ComputeSlash(_) => "compute_slash",
             Receipt::Energy(_) => "energy",
-            Receipt::EnergySlash(_) => "energy_slash",
+            Receipt::EnergySlash(_) => "energy",
             Receipt::Ad(_) => "ad",
         }
     }
@@ -185,6 +209,7 @@ impl Receipt {
         match self {
             Receipt::Storage(r) => r.price,
             Receipt::Compute(r) => r.payment,
+            Receipt::ComputeSlash(r) => r.burned,
             Receipt::Energy(r) => r.price,
             Receipt::EnergySlash(r) => r.slash_amount,
             Receipt::Ad(r) => r.spend,
@@ -196,6 +221,7 @@ impl Receipt {
         match self {
             Receipt::Storage(r) => r.block_height,
             Receipt::Compute(r) => r.block_height,
+            Receipt::ComputeSlash(r) => r.block_height,
             Receipt::Energy(r) => r.block_height,
             Receipt::EnergySlash(r) => r.block_height,
             Receipt::Ad(r) => r.block_height,

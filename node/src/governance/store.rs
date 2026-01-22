@@ -2269,6 +2269,10 @@ impl GovStore {
             EnergySettlementMode::Batch => 0,
             EnergySettlementMode::RealTime => 1,
         };
+        let vote_deadline_epoch = payload.activation_epoch.max(current_epoch + 1);
+        let activation_epoch = payload
+            .activation_epoch
+            .max(current_epoch + ACTIVATION_DELAY);
         let proposal = Proposal {
             id: 0,
             key: ParamKey::EnergySettlementMode,
@@ -2277,14 +2281,8 @@ impl GovStore {
             max: 1,
             proposer,
             created_epoch: current_epoch,
-            vote_deadline_epoch: payload
-                .activation_epoch
-                .max(current_epoch + ACTIVATION_DELAY),
-            activation_epoch: Some(
-                payload
-                    .activation_epoch
-                    .max(current_epoch + ACTIVATION_DELAY),
-            ),
+            vote_deadline_epoch,
+            activation_epoch: Some(activation_epoch),
             status: ProposalStatus::Open,
             deps: payload.deps.clone(),
         };

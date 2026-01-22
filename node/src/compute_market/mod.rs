@@ -837,6 +837,11 @@ pub fn drain_compute_receipts() -> Vec<crate::ComputeReceipt> {
     receipts
 }
 
+/// Drain compute SLA slash receipts for inclusion in block receipts.
+pub fn drain_compute_slash_receipts(block_height: u64) -> Vec<crate::ComputeSlashReceipt> {
+    settlement::Settlement::drain_slash_receipts(block_height)
+}
+
 fn prefer_gpu_backend(capability: &scheduler::Capability) -> bool {
     capability
         .gpu

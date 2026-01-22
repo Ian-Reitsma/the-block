@@ -650,7 +650,7 @@ Dashboards must be refreshed (per `docs/operations.md#telemetry-wiring`) wheneve
 
 ## Wallet APIs
 - CLI supports multisig, hardware signers, remote signers, and escrow-hash configuration: see `cli/src/wallet.rs` and `node/src/bin/wallet.rs`.
-- Commands include wallet creation/import, address derivation, signing, broadcast, and governance voting (where applicable). Use `--format json` for automation.
+- Commands include wallet creation/import, address derivation, signing, broadcast, and governance voting (where applicable). Use `--format json` for automation and run `wallet discover-signers --timeout <ms> [--json]` to probe local signer endpoints (`--json` emits `{"timeout_ms":<ms>,"signers":[]}` for automation hooks).
 - Remote signer workflows emit telemetry and enforce multisig signer-set policies documented in `docs/security_and_privacy.md#remote-signers-and-key-management`.
 
 ## Schemas and Reference Files

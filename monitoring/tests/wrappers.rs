@@ -63,6 +63,31 @@ fn wrappers_snapshot_hash_is_pinned() {
                     labels: energy_slash_labels,
                     value: 1.0,
                 },
+                WrapperMetricEntry {
+                    metric: "receipts_compute_slash_total".into(),
+                    labels: HashMap::new(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "receipts_compute_slash_per_block".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "receipt_settlement_compute_slash".into(),
+                    labels: HashMap::new(),
+                    value: 42.0,
+                },
+                WrapperMetricEntry {
+                    metric: "remote_signer_discovery_total".into(),
+                    labels: HashMap::new(),
+                    value: 5.0,
+                },
+                WrapperMetricEntry {
+                    metric: "remote_signer_discovery_success_total".into(),
+                    labels: HashMap::new(),
+                    value: 2.0,
+                },
             ],
             governance: Some(GovernanceWrapperEntry {
                 treasury_balance: 1_200,
@@ -96,7 +121,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "21515f5461a9c2d529232973b948639569035689b0e3598910285e4f4495b11c",
+        "143e9951fe08ca25169e40b6b26fef6f9fbdbafc0b3446b0c63d60b4782d7e10",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

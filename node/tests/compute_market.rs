@@ -7,6 +7,7 @@ use settlement_util::SettlementCtx;
 use sys::tempfile::tempdir;
 use the_block::compute_market::courier_store::ReceiptStore;
 use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LaneSeed};
+use the_block::compute_market::settlement::{self, SlaOutcome};
 use the_block::compute_market::{price_board::PriceBoard, scheduler, ExecutionReceipt, *};
 use the_block::transaction::FeeLane;
 
@@ -91,6 +92,36 @@ fn market_job_flow_and_finalize() {
     let payout = market.submit_slice("job1", proof).unwrap();
     assert_eq!(payout, 5);
     assert!(market.finalize_job("job1").is_some());
+}
+
+#[testkit::tb_serial]
+fn compute_slash_receipt_round_trip() {
+    let _ctx = SettlementCtx::new();
+    let job_id = "slash-test-job";
+    let provider = "prov";
+    let buyer = "buyer";
+    let provider_bond = 123;
+    settlement::Settlement::accrue(provider, "prefund", provider_bond);
+    settlement::Settlement::track_sla(job_id, provider, buyer, provider_bond, 0, 0);
+    let resolution = settlement::Settlement::resolve_sla(
+        job_id,
+        SlaOutcome::Violated {
+            reason: "deadline_missed",
+            automated: false,
+        },
+    )
+    .expect("resolution");
+    assert_eq!(resolution.burned, provider_bond);
+    let receipts = settlement::Settlement::drain_slash_receipts(321);
+    assert_eq!(receipts.len(), 1);
+    let slash = &receipts[0];
+    assert_eq!(slash.job_id, job_id);
+    assert_eq!(slash.provider, provider);
+    assert_eq!(slash.buyer, buyer);
+    assert_eq!(slash.burned, provider_bond);
+    assert_eq!(slash.reason, "deadline_missed");
+    assert_eq!(slash.block_height, 321);
+    assert!(settlement::Settlement::drain_slash_receipts(321).is_empty());
 }
 
 #[test]

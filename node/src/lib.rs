@@ -82,7 +82,8 @@ use crate::receipt_crypto::{NonceTracker, ProviderRegistry};
 use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use receipts::{
-    AdReceipt, ComputeReceipt, EnergyReceipt, EnergySlashReceipt, Receipt, StorageReceipt,
+    AdReceipt, ComputeReceipt, ComputeSlashReceipt, EnergyReceipt, EnergySlashReceipt, Receipt,
+    StorageReceipt,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1056,7 +1057,7 @@ impl Default for Blockchain {
         let params = Params::default();
         let fee_floor_window = params.fee_floor_window.max(1) as usize;
         let fee_floor_percentile = params.fee_floor_percentile.clamp(0, 100) as u32;
-        Self {
+        let bc = Self {
             chain: Vec::new(),
             accounts: HashMap::new(),
             shard_roots: HashMap::new(),
@@ -1179,7 +1180,14 @@ impl Default for Blockchain {
             economics_baseline_tx_count: 100, // Default from NetworkIssuanceParams
             economics_baseline_tx_volume: 10_000,
             economics_baseline_miners: 10,
-        }
+        };
+
+        crate::compute_market::settlement::Settlement::init(
+            "",
+            crate::compute_market::settlement::SettleMode::DryRun,
+        );
+
+        bc
     }
 }
 
@@ -1313,6 +1321,7 @@ impl Blockchain {
                     match receipt {
                         Receipt::Storage(_) => has_storage_receipts = true,
                         Receipt::Compute(_) => has_compute_receipts = true,
+                        Receipt::ComputeSlash(_) => {}
                         Receipt::Energy(_) => has_energy_receipts = true,
                         Receipt::EnergySlash(_) => {}
                         Receipt::Ad(_) => has_ad_receipts = true,
@@ -4833,6 +4842,9 @@ impl Blockchain {
         for receipt in crate::compute_market::drain_compute_receipts() {
             block_receipts.push(Receipt::Compute(receipt));
         }
+        for slash in crate::compute_market::drain_compute_slash_receipts(index) {
+            block_receipts.push(Receipt::ComputeSlash(slash));
+        }
 
         // Validate receipt count and size (DoS protection)
         if let Err(e) = crate::receipts_validation::validate_receipt_count(block_receipts.len()) {
@@ -7027,6 +7039,7 @@ mod market_metric_tests {
             anchored_receipts: Vec::new(),
             credits: Vec::new(),
             disputes: Vec::new(),
+            slashes: Vec::new(),
             governance: crate::energy::GovernanceEnergyParams::default(),
         };
 

@@ -92,6 +92,17 @@ fn remote_signer_timeout() {
 }
 
 #[testkit::tb_serial]
+fn remote_signer_discover_timeout() {
+    let signers = RemoteSigner::discover(Duration::from_millis(1));
+    for signer in signers {
+        assert!(
+            signer.starts_with("http://") || signer.starts_with("https://"),
+            "discovered signer URI should be HTTP(S), got {signer}"
+        );
+    }
+}
+
+#[testkit::tb_serial]
 fn remote_signer_mtls_ws() {
     use base64_fp::encode_standard;
     use foundation_time::{Duration as TimeDuration, UtcDateTime};

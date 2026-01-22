@@ -748,6 +748,18 @@ impl MetricsRecorder for NodeMetricsRecorder {
                     REMOTE_SIGNER_KEY_ROTATION_TOTAL.inc_by(delta);
                 }
             }
+            "remote_signer_discovery_total" => {
+                let delta = counter_delta(value);
+                if delta > 0 {
+                    REMOTE_SIGNER_DISCOVERY_TOTAL.inc_by(delta);
+                }
+            }
+            "remote_signer_discovery_success_total" => {
+                let delta = counter_delta(value);
+                if delta > 0 {
+                    REMOTE_SIGNER_DISCOVERY_SUCCESS_TOTAL.inc_by(delta);
+                }
+            }
             "snapshot_restore_fail_total" => {
                 let delta = counter_delta(value);
                 if delta > 0 {
@@ -6963,6 +6975,28 @@ pub static REMOTE_SIGNER_KEY_ROTATION_TOTAL: Lazy<IntCounterHandle> = Lazy::new(
     let c = IntCounter::new(
         "remote_signer_key_rotation_total",
         "Remote signer key rotations",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c.handle()
+});
+pub static REMOTE_SIGNER_DISCOVERY_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "remote_signer_discovery_total",
+        "Remote signer discovery attempts",
+    )
+    .unwrap_or_else(|e| panic!("counter: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c.handle()
+});
+pub static REMOTE_SIGNER_DISCOVERY_SUCCESS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "remote_signer_discovery_success_total",
+        "Successful remote signer discovery runs",
     )
     .unwrap_or_else(|e| panic!("counter: {e}"));
     REGISTRY

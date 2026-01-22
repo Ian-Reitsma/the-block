@@ -23,6 +23,13 @@
 - **BSD note:** On kqueue platforms we run level-triggered mode (no `EV_CLEAR`); if wakeups are missed, increase the backoff and ensure `update_interest()` instrumentation is present.
 - **Env vars:** `TB_REACTOR_IDLE_POLL_MS`, `TB_IO_READ_BACKOFF_MS`, and `TB_IO_WRITE_BACKOFF_MS` map to the same knobs; config reloads apply without restart.
 
+### Remote Signer Observability
+
+- `remote_signer_discovery_total` increments whenever `wallet discover-signers` runs (default timeout 500 ms selectable via `--timeout`), giving you telemetry you can alert on when operator tooling probes the signer fleet.
+- `remote_signer_discovery_success_total` increments when the discovery call returns at least one endpoint; chart these discovery counters next to `remote_signer_request_total`, `remote_signer_success_total`, and `remote_signer_latency_seconds` so you can tell if failures stem from networking vs. signer outages.
+- `/wrappers` now mirrors the discovery counters; refresh `monitoring/tests/snapshots/wrappers.json` and the Grafana dashboards before merging any CLI or telemetry change so the new series stay comparable to what the aggregator exposes.
+- Use `wallet discover-signers --json` for automation tooling; it emits `{"timeout_ms":<ms>,"signers":["http://..."]}` so CLI helpers and scripts can read a stable schema instead of parsing human text.
+
 ### P2P Rate Limiting and Chain Sync
 
 | Knob | Default | Description |

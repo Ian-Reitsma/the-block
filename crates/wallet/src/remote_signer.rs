@@ -348,6 +348,7 @@ fn handshake_accept(key: &str) -> io::Result<String> {
 impl RemoteSigner {
     /// Discover remote signers on the local network using a UDP broadcast.
     pub fn discover(timeout: Duration) -> Vec<String> {
+        foundation_metrics::increment_counter!("remote_signer_discovery_total");
         let socket = match UdpSocket::bind("0.0.0.0:0") {
             Ok(s) => s,
             Err(_) => return Vec::new(),
@@ -369,6 +370,9 @@ impl RemoteSigner {
                     _ => break,
                 },
             }
+        }
+        if !out.is_empty() {
+            foundation_metrics::increment_counter!("remote_signer_discovery_success_total");
         }
         out
     }

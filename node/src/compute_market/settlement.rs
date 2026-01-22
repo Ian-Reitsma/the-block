@@ -35,6 +35,7 @@ const KEY_ROOTS: &str = "recent_roots";
 const KEY_NEXT_SEQ: &str = "next_seq";
 const KEY_SLA_QUEUE: &str = "sla_queue";
 const KEY_SLA_HISTORY: &str = "sla_history";
+const KEY_SLA_SLASHES: &str = "sla_slash_queue";
 const SLA_HISTORY_LIMIT: usize = 256;
 const SLA_PROOF_LIMIT: usize = 16;
 
@@ -108,6 +109,18 @@ pub enum SlaResolutionKind {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct ComputeSlashRecord {
+    pub job_id: String,
+    pub provider: String,
+    pub buyer: String,
+    pub burned: u64,
+    pub reason: String,
+    pub deadline: u64,
+    pub resolved_at: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct SlaResolution {
     pub job_id: String,
     pub provider: String,
@@ -148,6 +161,7 @@ struct SettlementState {
     next_seq: u64,
     sla: Vec<SlaRecord>,
     sla_history: VecDeque<SlaResolution>,
+    sla_slashes: Vec<ComputeSlashRecord>,
 }
 
 impl SettlementState {
@@ -176,6 +190,8 @@ impl SettlementState {
         let sla = load_or_default::<Vec<SlaRecord>, _>(&db, KEY_SLA_QUEUE, Vec::new);
         let sla_history =
             load_or_default::<VecDeque<SlaResolution>, _>(&db, KEY_SLA_HISTORY, VecDeque::new);
+        let sla_slashes =
+            load_or_default::<Vec<ComputeSlashRecord>, _>(&db, KEY_SLA_SLASHES, Vec::new);
         Self {
             base,
             db_path,
@@ -189,6 +205,7 @@ impl SettlementState {
             next_seq,
             sla,
             sla_history,
+            sla_slashes,
         }
     }
 
@@ -278,6 +295,7 @@ impl SettlementState {
                 enqueue_value(&mut batch, KEY_NEXT_SEQ, &self.next_seq)?;
                 enqueue_value(&mut batch, KEY_SLA_QUEUE, &self.sla)?;
                 enqueue_value(&mut batch, KEY_SLA_HISTORY, &self.sla_history)?;
+                enqueue_value(&mut batch, KEY_SLA_SLASHES, &self.sla_slashes)?;
                 Ok(())
             };
 
@@ -385,10 +403,22 @@ impl SettlementState {
         self.sla_history.push_back(resolution);
     }
 
+    fn record_slash(&mut self, slash: ComputeSlashRecord) {
+        if self.sla_slashes.len() >= SLA_HISTORY_LIMIT {
+            self.sla_slashes.remove(0);
+        }
+        self.sla_slashes.push(slash);
+    }
+
+    fn drain_slash_records(&mut self) -> Vec<ComputeSlashRecord> {
+        std::mem::take(&mut self.sla_slashes)
+    }
+
     fn apply_outcome(&mut self, record: SlaRecord, outcome: SlaOutcome<'_>) -> SlaResolution {
         let resolved_at = now_ts();
         let mut burned = 0;
         let mut refunded = 0;
+        let mut slash_event: Option<(u64, String)> = None;
         let outcome_kind = match outcome {
             SlaOutcome::Completed => {
                 self.record_event(&record.provider, "sla_completed", 0);
@@ -422,6 +452,7 @@ impl SettlementState {
                                 COMPUTE_SLA_AUTOMATED_SLASH_TOTAL.inc();
                             }
                         }
+                        slash_event = Some((burned, reason.to_string()));
                     }
                     Err(_) => {
                         #[cfg(feature = "telemetry")]
@@ -451,17 +482,35 @@ impl SettlementState {
                 }
             }
         };
+        let job_id = record.job_id.clone();
+        let provider = record.provider.clone();
+        let buyer = record.buyer.clone();
+        let deadline = record.deadline;
+        let proofs = record.proofs;
         let resolution = SlaResolution {
-            job_id: record.job_id,
-            provider: record.provider,
-            buyer: record.buyer,
+            job_id: job_id.clone(),
+            provider: provider.clone(),
+            buyer: buyer.clone(),
             outcome: outcome_kind,
             burned,
             refunded,
-            deadline: record.deadline,
+            deadline,
             resolved_at,
-            proofs: record.proofs,
+            proofs,
         };
+        if let Some((burned_amount, reason)) = slash_event {
+            if burned_amount > 0 {
+                self.record_slash(ComputeSlashRecord {
+                    job_id,
+                    provider,
+                    buyer,
+                    burned: burned_amount,
+                    reason,
+                    deadline: resolution.deadline,
+                    resolved_at: resolution.resolved_at,
+                });
+            }
+        }
         self.push_resolution(resolution.clone());
         resolution
     }
@@ -712,6 +761,30 @@ impl Settlement {
             let resolution = state.apply_outcome(record, outcome);
             state.persist_all();
             Some(resolution)
+        })
+    }
+
+    pub fn drain_slash_receipts(block_height: u64) -> Vec<crate::ComputeSlashReceipt> {
+        with_state_mut(|state| {
+            let slashes = state.drain_slash_records();
+            if slashes.is_empty() {
+                return Vec::new();
+            }
+            let receipts = slashes
+                .into_iter()
+                .map(|slash| crate::ComputeSlashReceipt {
+                    job_id: slash.job_id,
+                    provider: slash.provider,
+                    buyer: slash.buyer,
+                    burned: slash.burned,
+                    reason: slash.reason,
+                    deadline: slash.deadline,
+                    resolved_at: slash.resolved_at,
+                    block_height,
+                })
+                .collect();
+            state.persist_all();
+            receipts
         })
     }
 

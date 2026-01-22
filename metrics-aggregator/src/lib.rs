@@ -1830,7 +1830,7 @@ impl AppState {
                     summary.merge_slashing_total(v);
                 }
                 for (key, value) in obj {
-                    if let Some(state) = dispute_state_from_key(key) {
+                    if let Some(state) = Self::dispute_state_from_key(key) {
                         if let Some(v) = number_from_value(Some(value)) {
                             summary.merge_dispute_state(state, v);
                         }

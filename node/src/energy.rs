@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::governance::NODE_GOV_STORE;
-use crate::simple_db::{SimpleDb, names};
+use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::energy as energy_metrics;
 #[cfg(feature = "telemetry")]
@@ -16,9 +16,9 @@ use crypto_suite::hex;
 use diagnostics::tracing::{info, warn};
 use energy_market::{
     AccountId, EnergyCredit, EnergyMarket, EnergyMarketConfig, EnergyMarketError, EnergyProvider,
-    EnergyReceipt, H256, MeterReading, ProviderId, SettlementMode, SignatureScheme,
+    EnergyReceipt, MeterReading, ProviderId, SettlementMode, SignatureScheme, H256,
 };
-use foundation_serialization::{Deserialize, Serialize, binary};
+use foundation_serialization::{binary, Deserialize, Serialize};
 use governance_spec::{EnergySettlementMode, EnergySettlementPayload};
 use std::io;
 use std::sync::{Mutex, MutexGuard};
