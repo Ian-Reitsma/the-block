@@ -56,6 +56,7 @@ llvm-profdata merge -sparse $profraws -o fuzz/coverage.profdata
 bins=()
 for p in $profraws; do
   dir=$(dirname "$p")
+  # Include the new energy_receipt fuzz target (produces energy_receipt-*.profraw).
   name=$(basename "$p" | cut -d- -f1)
   bin=""
   if [ -d "$dir/target" ]; then

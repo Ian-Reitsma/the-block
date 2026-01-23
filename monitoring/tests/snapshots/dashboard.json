@@ -5201,6 +5201,120 @@
       ],
       "title": "benchmark_ann_soft_intent_verification_seconds_p99",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 278,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_auction_top_bid_usd_micros"
+        }
+      ],
+      "title": "ad_auction_top_bid_usd_micros",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 279,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_auction_win_rate"
+        }
+      ],
+      "title": "ad_auction_win_rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 280,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_bid_shading_factor_bps"
+        }
+      ],
+      "title": "ad_bid_shading_factor_bps",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 281,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_privacy_budget_utilization_ratio"
+        }
+      ],
+      "title": "ad_privacy_budget_utilization_ratio",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 282,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_bidding_latency_micros"
+        }
+      ],
+      "title": "ad_bidding_latency_micros",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "foundation-telemetry",
+        "uid": "foundation"
+      },
+      "id": 283,
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "targets": [
+        {
+          "expr": "ad_conversion_value_total"
+        }
+      ],
+      "title": "ad_conversion_value_total",
+      "type": "timeseries"
     }
   ],
   "schemaVersion": 37,

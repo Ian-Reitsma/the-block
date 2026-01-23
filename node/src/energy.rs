@@ -18,9 +18,13 @@ use energy_market::{
     AccountId, EnergyCredit, EnergyMarket, EnergyMarketConfig, EnergyMarketError, EnergyProvider,
     EnergyReceipt, MeterReading, ProviderId, SettlementMode, SignatureScheme, H256,
 };
+use foundation_serialization::json::{Map, Number, Value};
 use foundation_serialization::{binary, Deserialize, Serialize};
-use governance_spec::{EnergySettlementMode, EnergySettlementPayload};
+use governance_spec::{
+    EnergySettlementMode, EnergySettlementPayload, EnergyTimelineEntry, EnergyTimelineEvent,
+};
 use std::io;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::{Mutex, MutexGuard};
 use thiserror::Error;
 
@@ -589,6 +593,13 @@ pub fn settle_energy_delivery(
         }
     };
     guard.receipts.push(receipt.clone());
+    record_energy_timeline_event(
+        EnergyTimelineEvent::Receipt,
+        provider_id.as_str(),
+        &receipt.meter_reading_hash,
+        receipt.block_settled,
+        timeline_details_for_receipt(&receipt),
+    );
     #[cfg(feature = "telemetry")]
     ENERGY_SETTLEMENT_TOTAL
         .with_label_values(&[provider_id.as_str()])
@@ -704,6 +715,119 @@ fn record_slash_event(
     ) {
         warn!(?err, "failed to persist energy slash record");
     }
+    record_energy_timeline_event(
+        EnergyTimelineEvent::Slash,
+        &provider_id,
+        &slash.meter_hash,
+        slash.block_height,
+        timeline_details_for_slash(&slash, reason),
+    );
+}
+
+fn energy_timeline_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn record_energy_timeline_event(
+    event_type: EnergyTimelineEvent,
+    provider_id: &str,
+    meter_hash: &H256,
+    block_height: u64,
+    details: Value,
+) {
+    let entry = EnergyTimelineEntry {
+        event_id: 0,
+        event_type,
+        provider_id: provider_id.to_string(),
+        meter_hash: *meter_hash,
+        block_height,
+        recorded_at: energy_timeline_now(),
+        details,
+    };
+    if let Err(err) = NODE_GOV_STORE.record_energy_timeline_entry(entry) {
+        warn!(?err, "failed to record energy timeline entry");
+    }
+}
+
+fn timeline_details_for_receipt(receipt: &EnergyReceipt) -> Value {
+    let mut map = Map::new();
+    map.insert("buyer".into(), Value::String(receipt.buyer.clone()));
+    map.insert(
+        "kwh_delivered".into(),
+        Value::Number(Number::from(receipt.kwh_delivered)),
+    );
+    map.insert(
+        "price_paid".into(),
+        Value::Number(Number::from(receipt.price_paid)),
+    );
+    map.insert(
+        "treasury_fee".into(),
+        Value::Number(Number::from(receipt.treasury_fee)),
+    );
+    map.insert(
+        "slash_applied".into(),
+        Value::Number(Number::from(receipt.slash_applied)),
+    );
+    map.insert(
+        "meter_hash".into(),
+        Value::String(hex::encode(receipt.meter_reading_hash)),
+    );
+    Value::Object(map)
+}
+
+fn timeline_details_for_dispute(dispute: &EnergyDispute) -> Value {
+    let mut map = Map::new();
+    map.insert("dispute_id".into(), Value::Number(Number::from(dispute.id)));
+    map.insert("reason".into(), Value::String(dispute.reason.clone()));
+    map.insert("reporter".into(), Value::String(dispute.reporter.clone()));
+    map.insert(
+        "opened_at".into(),
+        Value::Number(Number::from(dispute.opened_at)),
+    );
+    map.insert(
+        "meter_hash".into(),
+        Value::String(hex::encode(dispute.meter_hash)),
+    );
+    Value::Object(map)
+}
+
+fn timeline_details_for_dispute_resolution(dispute: &EnergyDispute) -> Value {
+    let mut map = Map::new();
+    map.insert("dispute_id".into(), Value::Number(Number::from(dispute.id)));
+    if let Some(resolver) = &dispute.resolver {
+        map.insert("resolver".into(), Value::String(resolver.clone()));
+    }
+    if let Some(resolved_at) = dispute.resolved_at {
+        map.insert(
+            "resolved_at".into(),
+            Value::Number(Number::from(resolved_at)),
+        );
+    }
+    if let Some(note) = &dispute.resolution_note {
+        map.insert("resolution_note".into(), Value::String(note.clone()));
+    }
+    map.insert(
+        "meter_hash".into(),
+        Value::String(hex::encode(dispute.meter_hash)),
+    );
+    Value::Object(map)
+}
+
+fn timeline_details_for_slash(slash: &EnergySlash, reason: &'static str) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "slash_amount".into(),
+        Value::Number(Number::from(slash.amount)),
+    );
+    map.insert("reason".into(), Value::String(reason.into()));
+    map.insert(
+        "meter_hash".into(),
+        Value::String(hex::encode(slash.meter_hash)),
+    );
+    Value::Object(map)
 }
 
 pub fn disputes_page<'a>(
@@ -891,6 +1015,13 @@ fn flag_dispute_inner(
         energy_metrics::increment_dispute_state("open");
         ENERGY_DISPUTE_OPEN_TOTAL.inc();
     }
+    record_energy_timeline_event(
+        EnergyTimelineEvent::DisputeOpened,
+        &dispute.provider_id,
+        &dispute.meter_hash,
+        block,
+        timeline_details_for_dispute(&dispute),
+    );
     Ok(dispute)
 }
 
@@ -919,6 +1050,13 @@ fn resolve_dispute_inner(
         energy_metrics::increment_dispute_state("resolved");
         ENERGY_DISPUTE_RESOLVE_TOTAL.inc();
     }
+    record_energy_timeline_event(
+        EnergyTimelineEvent::DisputeResolved,
+        &entry.provider_id,
+        &entry.meter_hash,
+        block,
+        timeline_details_for_dispute_resolution(&entry),
+    );
     Ok(entry.clone())
 }
 

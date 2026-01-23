@@ -128,6 +128,9 @@ pub mod consensus_instrumentation;
 pub mod consensus_integration;
 pub mod consensus_metrics;
 pub mod energy;
+
+#[cfg(feature = "telemetry")]
+pub use energy::*;
 pub mod metrics;
 pub mod receipts;
 pub mod summary;
@@ -1324,6 +1327,104 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL.get().get() as f64,
     );
 
+    // Energy market metrics (guards, disputes, and aggregator spans).
+    push_metric(
+        &mut metrics,
+        "energy_provider_total",
+        &[],
+        ENERGY_PROVIDER_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_pending_credits_total",
+        &[],
+        ENERGY_PENDING_CREDITS.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_receipt_total",
+        &[],
+        ENERGY_TOTAL_RECEIPTS.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_active_disputes_total",
+        &[],
+        ENERGY_ACTIVE_DISPUTES.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_disputes_pending",
+        &[],
+        ENERGY_DISPUTES_PENDING.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_provider_register_total",
+        &[],
+        ENERGY_PROVIDER_REGISTER_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_treasury_fee_total",
+        &[],
+        ENERGY_TREASURY_FEE_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_dispute_open_total",
+        &[],
+        ENERGY_DISPUTE_OPEN_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_dispute_resolve_total",
+        &[],
+        ENERGY_DISPUTE_RESOLVE_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_settlement_mode",
+        &[],
+        ENERGY_SETTLEMENT_MODE.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "energy_settlement_rollback_total",
+        &[],
+        ENERGY_SETTLEMENT_ROLLBACK_TOTAL.get().get() as f64,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "energy_meter_reading_total",
+        &*ENERGY_METER_READING_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "energy_settlement_total",
+        &*ENERGY_SETTLEMENT_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "energy_quorum_shortfall_total",
+        &*ENERGY_QUORUM_SHORTFALL_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "energy_reading_reject_total",
+        &*ENERGY_READING_REJECT_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "energy_slashing_total",
+        &*ENERGY_SLASHING_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "energy_dispute_total",
+        &*ENERGY_DISPUTE_STATE_TOTAL,
+    );
+
     for sample in Collector::collect(&*GATEWAY_DOH_STATUS_TOTAL).samples {
         if let Some(value) = metric_sample_value_to_f64(&sample.value) {
             let label_refs: Vec<(&str, &str)> = sample
@@ -1335,9 +1436,74 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         }
     }
 
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_segment_ready_total",
+        &*AD_SEGMENT_READY_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_auction_top_bid_usd_micros",
+        &*AD_AUCTION_TOP_BID_USD,
+    );
+    collect_wrapper_metric_samples(&mut metrics, "ad_auction_win_rate", &*AD_AUCTION_WIN_RATE);
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_bid_shading_factor_bps",
+        &*AD_BID_SHADING_FACTOR_BPS,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_privacy_budget_utilization_ratio",
+        &*AD_PRIVACY_BUDGET_UTILIZATION_RATIO,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_bidding_latency_micros",
+        &*AD_BIDDING_LATENCY_MICROS,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_conversion_value_total",
+        &*AD_CONVERSION_VALUE_TOTAL,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_market_utilization_observed_ppm",
+        &*AD_MARKET_UTILIZATION_OBSERVED,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_market_utilization_target_ppm",
+        &*AD_MARKET_UTILIZATION_TARGET,
+    );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "ad_market_utilization_delta_ppm",
+        &*AD_MARKET_UTILIZATION_DELTA,
+    );
+
     WrapperSummary {
         metrics,
         governance: governance_wrapper_snapshot(),
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn collect_wrapper_metric_samples<C: Collector>(
+    metrics: &mut Vec<WrapperMetricSample>,
+    metric_name: &str,
+    collector: &C,
+) {
+    for sample in collector.collect().samples {
+        if let Some(value) = metric_sample_value_to_f64(&sample.value) {
+            let label_refs: Vec<(&str, &str)> = sample
+                .labels
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            push_metric(metrics, metric_name, &label_refs, value);
+        }
     }
 }
 

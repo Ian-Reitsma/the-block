@@ -157,7 +157,7 @@ static ORACLE_ACTIVE_COUNT: Lazy<Gauge> = Lazy::new(|| {
 
 /// Number of pending disputes waiting resolution
 #[cfg(feature = "telemetry")]
-static ENERGY_DISPUTES_PENDING: Lazy<Gauge> = Lazy::new(|| {
+pub(crate) static ENERGY_DISPUTES_PENDING: Lazy<Gauge> = Lazy::new(|| {
     register_gauge(
         "energy_disputes_pending",
         "Number of disputes awaiting resolution",
@@ -188,7 +188,7 @@ static ENERGY_DISPUTE_RESOLUTION_SECONDS: Lazy<Histogram> = Lazy::new(|| {
 
 /// Quorum shortfall counts (reason = provider)
 #[cfg(feature = "telemetry")]
-static ENERGY_QUORUM_SHORTFALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub(crate) static ENERGY_QUORUM_SHORTFALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     register_counter_vec(
         "energy_quorum_shortfall_total",
         "Settlements rejected because quorum thresholds were not met",
@@ -198,7 +198,7 @@ static ENERGY_QUORUM_SHORTFALL_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 /// Reading rejections by reason (e.g., invalid_reading, stale_timestamp)
 #[cfg(feature = "telemetry")]
-static ENERGY_READING_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub(crate) static ENERGY_READING_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     register_counter_vec(
         "energy_reading_reject_total",
         "Oracle readings rejected before creating credits",
@@ -208,7 +208,7 @@ static ENERGY_READING_REJECT_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 /// Slashing counts tagged by provider + reason
 #[cfg(feature = "telemetry")]
-static ENERGY_SLASHING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub(crate) static ENERGY_SLASHING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     register_counter_vec(
         "energy_slashing_total",
         "Energy slashing events recorded when quorum, expiry, or conflicts occur",
@@ -218,7 +218,7 @@ static ENERGY_SLASHING_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
 
 /// Dispute lifecycle counts keyed by state (open/resolved/slashed)
 #[cfg(feature = "telemetry")]
-static ENERGY_DISPUTE_STATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+pub(crate) static ENERGY_DISPUTE_STATE_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     register_counter_vec(
         "energy_dispute_total",
         "Energy dispute counts by lifecycle state",

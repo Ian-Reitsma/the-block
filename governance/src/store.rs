@@ -5,8 +5,8 @@ use super::{
 use crate::codec::{
     balance_history_from_json, balance_history_to_json, decode_binary,
     disbursements_from_json_array, disbursements_to_json_array, encode_binary, json_from_bytes,
-    json_to_bytes, param_key_from_string, param_key_to_string, BinaryCodec, BinaryWriter,
-    Result as CodecResult,
+    json_to_bytes, param_key_from_string, param_key_to_string, BinaryCodec, BinaryReader,
+    BinaryWriter, Result as CodecResult,
 };
 use crate::params::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
@@ -19,7 +19,7 @@ use crate::treasury::{
 };
 use crate::{EnergySettlementChangePayload, EnergySettlementMode};
 use foundation_lazy::sync::Lazy;
-use foundation_serialization::json::{Map, Number, Value};
+use foundation_serialization::json::{self, Map, Number, Value};
 use foundation_serialization::{Deserialize, Serialize};
 use sled::Config;
 use std::collections::HashMap;
@@ -45,6 +45,7 @@ const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
 const TREASURY_INTENT_HISTORY_LIMIT: usize = 512;
 const ENERGY_SETTLEMENT_HISTORY_LIMIT: usize = 256;
 const ENERGY_SLASH_HISTORY_LIMIT: usize = 512;
+const ENERGY_TIMELINE_LIMIT: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TreasuryBalances {
@@ -176,6 +177,128 @@ impl BinaryCodec for EnergySlashRecord {
             block_height: u64::decode(reader)?,
             recorded_at: u64::decode(reader)?,
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", crate = "foundation_serialization::serde")]
+pub enum EnergyTimelineEvent {
+    Receipt,
+    DisputeOpened,
+    DisputeResolved,
+    Slash,
+}
+
+impl EnergyTimelineEvent {
+    fn to_u8(self) -> u8 {
+        match self {
+            EnergyTimelineEvent::Receipt => 0,
+            EnergyTimelineEvent::DisputeOpened => 1,
+            EnergyTimelineEvent::DisputeResolved => 2,
+            EnergyTimelineEvent::Slash => 3,
+        }
+    }
+
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(EnergyTimelineEvent::Receipt),
+            1 => Some(EnergyTimelineEvent::DisputeOpened),
+            2 => Some(EnergyTimelineEvent::DisputeResolved),
+            3 => Some(EnergyTimelineEvent::Slash),
+            _ => None,
+        }
+    }
+}
+
+impl BinaryCodec for EnergyTimelineEvent {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        writer.write_u8(self.to_u8());
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        let value = reader.read_u8()?;
+        EnergyTimelineEvent::from_u8(value)
+            .ok_or_else(|| sled::Error::Unsupported("invalid energy timeline event".into()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct EnergyTimelineEntry {
+    pub event_id: u64,
+    pub event_type: EnergyTimelineEvent,
+    pub provider_id: String,
+    pub meter_hash: [u8; 32],
+    pub block_height: u64,
+    pub recorded_at: u64,
+    pub details: Value,
+}
+
+impl BinaryCodec for EnergyTimelineEntry {
+    fn encode(&self, writer: &mut BinaryWriter) {
+        self.event_id.encode(writer);
+        self.event_type.encode(writer);
+        self.provider_id.encode(writer);
+        writer.write_bytes(&self.meter_hash);
+        self.block_height.encode(writer);
+        self.recorded_at.encode(writer);
+        let serialized = json::to_string_value(&self.details);
+        serialized.encode(writer);
+    }
+
+    fn decode(reader: &mut BinaryReader<'_>) -> CodecResult<Self> {
+        let event_id = u64::decode(reader)?;
+        let event_type = EnergyTimelineEvent::decode(reader)?;
+        let provider_id = String::decode(reader)?;
+        let bytes = reader.read_bytes()?;
+        if bytes.len() != 32 {
+            return Err(sled::Error::Unsupported(
+                "energy timeline entry: meter_hash length mismatch".into(),
+            ));
+        }
+        let mut meter_hash = [0u8; 32];
+        meter_hash.copy_from_slice(bytes.as_slice());
+        let block_height = u64::decode(reader)?;
+        let recorded_at = u64::decode(reader)?;
+        let details_json = String::decode(reader)?;
+        let details = json::from_str(&details_json).unwrap_or(Value::Null);
+        Ok(Self {
+            event_id,
+            event_type,
+            provider_id,
+            meter_hash,
+            block_height,
+            recorded_at,
+            details,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EnergyTimelineFilter {
+    pub provider_id: Option<String>,
+    pub event_type: Option<EnergyTimelineEvent>,
+    pub meter_hash: Option<[u8; 32]>,
+}
+
+impl EnergyTimelineFilter {
+    pub fn matches(&self, entry: &EnergyTimelineEntry) -> bool {
+        if let Some(event_type) = self.event_type {
+            if entry.event_type != event_type {
+                return false;
+            }
+        }
+        if let Some(ref provider) = self.provider_id {
+            if &entry.provider_id != provider {
+                return false;
+            }
+        }
+        if let Some(hash) = &self.meter_hash {
+            if entry.meter_hash != *hash {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -2882,6 +3005,47 @@ impl GovStore {
             history.push(record);
         }
         history.sort_by(|a, b| b.recorded_at.cmp(&a.recorded_at));
+        Ok(history)
+    }
+
+    fn energy_timeline_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("energy/timeline")
+            .unwrap_or_else(|e| panic!("open energy timeline tree: {e}"))
+    }
+
+    pub fn record_energy_timeline_entry(&self, mut entry: EnergyTimelineEntry) -> sled::Result<()> {
+        let tree = self.energy_timeline_tree();
+        let id = tree.len() as u64 + 1;
+        entry.event_id = id;
+        tree.insert(id.to_le_bytes(), ser(&entry)?)?;
+        if tree.len() > ENERGY_TIMELINE_LIMIT {
+            let excess = tree.len().saturating_sub(ENERGY_TIMELINE_LIMIT);
+            for (key, _) in tree.iter().take(excess).flatten() {
+                let _ = tree.remove(key);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn energy_timeline(
+        &self,
+        filter: EnergyTimelineFilter,
+    ) -> sled::Result<Vec<EnergyTimelineEntry>> {
+        let tree = self.energy_timeline_tree();
+        let mut history = Vec::new();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let entry: EnergyTimelineEntry = de(&raw)?;
+            if filter.matches(&entry) {
+                history.push(entry);
+            }
+        }
+        history.sort_by(|a, b| {
+            b.recorded_at
+                .cmp(&a.recorded_at)
+                .then_with(|| b.event_id.cmp(&a.event_id))
+        });
         Ok(history)
     }
 

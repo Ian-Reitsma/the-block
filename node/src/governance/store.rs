@@ -25,7 +25,7 @@ use governance_spec::treasury::{
 };
 use governance_spec::{
     decode_runtime_backend_policy, decode_storage_engine_policy, decode_transport_provider_policy,
-    CircuitBreaker,
+    CircuitBreaker, EnergyTimelineEntry, EnergyTimelineEvent, EnergyTimelineFilter,
 };
 use sled::Config;
 use std::collections::HashMap;
@@ -51,6 +51,7 @@ const TREASURY_BALANCE_HISTORY_LIMIT: usize = 2048;
 const TREASURY_INTENT_HISTORY_LIMIT: usize = 512;
 const ENERGY_SETTLEMENT_HISTORY_LIMIT: usize = 256;
 const ENERGY_SLASH_HISTORY_LIMIT: usize = 512;
+const ENERGY_TIMELINE_LIMIT: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TreasuryBalances {
@@ -1625,6 +1626,50 @@ impl GovStore {
             history.push(record);
         }
         history.sort_by(|a, b| b.recorded_at.cmp(&a.recorded_at));
+        Ok(history)
+    }
+
+    fn energy_timeline_tree(&self) -> sled::Tree {
+        self.db
+            .open_tree("energy/timeline")
+            .unwrap_or_else(|e| panic!("open energy timeline tree: {e}"))
+    }
+
+    pub fn record_energy_timeline_entry(
+        &self,
+        mut entry: EnergyTimelineEntry,
+    ) -> sled::Result<()> {
+        let tree = self.energy_timeline_tree();
+        let id = tree.len() as u64 + 1;
+        entry.event_id = id;
+        tree.insert(id.to_le_bytes(), ser(&entry)?)?;
+        if tree.len() > ENERGY_TIMELINE_LIMIT {
+            let excess = tree.len().saturating_sub(ENERGY_TIMELINE_LIMIT);
+            for (key, _) in tree.iter().take(excess).flatten() {
+                let _ = tree.remove(key);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn energy_timeline(
+        &self,
+        filter: EnergyTimelineFilter,
+    ) -> sled::Result<Vec<EnergyTimelineEntry>> {
+        let tree = self.energy_timeline_tree();
+        let mut history = Vec::new();
+        for item in tree.iter() {
+            let (_, raw) = item?;
+            let entry: EnergyTimelineEntry = de(&raw)?;
+            if filter.matches(&entry) {
+                history.push(entry);
+            }
+        }
+        history.sort_by(|a, b| {
+            b.recorded_at
+                .cmp(&a.recorded_at)
+                .then_with(|| b.event_id.cmp(&a.event_id))
+        });
         Ok(history)
     }
 

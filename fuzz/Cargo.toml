@@ -50,3 +50,8 @@ test = false
 name = "quic_frame"
 path = "fuzz_targets/quic_frame.rs"
 test = false
+
+[[bin]]
+name = "energy_receipt"
+path = "fuzz_targets/energy_receipt.rs"
+test = false

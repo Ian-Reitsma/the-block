@@ -301,292 +301,22 @@ where
     }
 }
 
-/// Helper for deserializing enum from a string.
-struct StrDeserializer<'a, E> {
-    value: &'a str,
+/// Helper for deserializing enum from a string via owned `String`.
+struct StringEnumDeserializer<E> {
+    value: String,
     marker: std::marker::PhantomData<E>,
 }
 
-impl<'a, E> StrDeserializer<'a, E> {
-    fn new(value: &'a str) -> Self {
-        StrDeserializer {
+impl<E> StringEnumDeserializer<E> {
+    fn new(value: String) -> Self {
+        StringEnumDeserializer {
             value,
             marker: std::marker::PhantomData,
         }
     }
 }
 
-impl<'de, E> Deserializer<'de> for StrDeserializer<'_, E>
-where
-    E: Error,
-{
-    type Error = E;
-
-    fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_str(self.value)
-    }
-
-    fn deserialize_enum<V>(
-        self,
-        _name: &'static str,
-        _variants: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_enum(UnitOnlyVariantAccess {
-            value: self.value,
-            marker: std::marker::PhantomData,
-        })
-    }
-
-    // Forward all other methods
-    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_i128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_u128<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_usize<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_isize<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_f32<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_f64<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_char<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_str(self.value)
-    }
-
-    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_str(visitor)
-    }
-
-    fn deserialize_bytes<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_byte_buf<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_unit<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_unit_struct<V>(
-        self,
-        _name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_newtype_struct<V>(
-        self,
-        _name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        visitor.visit_newtype_struct(self)
-    }
-
-    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_tuple_struct<V>(
-        self,
-        _name: &'static str,
-        _len: usize,
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_struct<V>(
-        self,
-        _name: &'static str,
-        _fields: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-
-    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_str(visitor)
-    }
-
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
-    where
-        V: Visitor<'de>,
-    {
-        self.deserialize_any(visitor)
-    }
-}
-
-struct UnitOnlyVariantAccess<'a, E> {
-    value: &'a str,
-    marker: std::marker::PhantomData<E>,
-}
-
-impl<'de, E> super::EnumAccess<'de> for UnitOnlyVariantAccess<'_, E>
+impl<'de, E> super::EnumAccess<'de> for StringEnumDeserializer<E>
 where
     E: Error,
 {
@@ -597,7 +327,7 @@ where
     where
         V: super::DeserializeSeed<'de>,
     {
-        let de = StrDeserializer::new(self.value);
+        let de = StringDeserializer::new(self.value);
         let value = seed.deserialize(de)?;
         Ok((
             value,
@@ -645,42 +375,6 @@ where
         V: Visitor<'de>,
     {
         Err(Error::custom("expected unit variant"))
-    }
-}
-
-struct StringEnumDeserializer<E> {
-    value: String,
-    marker: std::marker::PhantomData<E>,
-}
-
-impl<E> StringEnumDeserializer<E> {
-    fn new(value: String) -> Self {
-        StringEnumDeserializer {
-            value,
-            marker: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<'de, E> super::EnumAccess<'de> for StringEnumDeserializer<E>
-where
-    E: Error,
-{
-    type Error = E;
-    type Variant = UnitOnly<E>;
-
-    fn variant_seed<V>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error>
-    where
-        V: super::DeserializeSeed<'de>,
-    {
-        let de = StringDeserializer::new(self.value);
-        let value = seed.deserialize(de)?;
-        Ok((
-            value,
-            UnitOnly {
-                marker: std::marker::PhantomData,
-            },
-        ))
     }
 }
 

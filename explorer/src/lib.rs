@@ -29,8 +29,8 @@ use the_block::{
     dex::order_book::OrderBook,
     energy::{self, DisputeStatus},
     governance::{
-        self, DisbursementStatus, GovStore, Params, SignedExecutionIntent, TreasuryDisbursement,
-        TreasuryExecutorSnapshot,
+        self, DisbursementStatus, EnergyTimelineEvent, EnergyTimelineFilter, GovStore, Params,
+        SignedExecutionIntent, TreasuryDisbursement, TreasuryExecutorSnapshot,
     },
     identity::{DidRecord, DidRegistry},
     transaction::SignedTransaction,
@@ -116,6 +116,7 @@ pub fn router(state: ExplorerHttpState) -> Router<ExplorerHttpState> {
             energy_settlement_history,
         )
         .get("/governance/energy/slashes", energy_slash_history)
+        .get("/governance/energy/timeline", energy_timeline)
         .get("/governance/treasury/executor", treasury_executor_status)
         .get("/energy/providers", energy_providers)
         .get("/energy/disputes", energy_disputes)
@@ -962,6 +963,85 @@ async fn energy_disputes(request: Request<ExplorerHttpState>) -> Result<Response
     );
     map.insert("disputes".into(), json::Value::Array(disputes));
     Ok(Response::new(StatusCode::OK).json(&json::Value::Object(map))?)
+}
+
+async fn energy_timeline(request: Request<ExplorerHttpState>) -> Result<Response, HttpError> {
+    let provider_id = request.query_param("provider_id").map(str::to_string);
+    let event_type = request
+        .query_param("event_type")
+        .map(|value| parse_energy_timeline_event(value))
+        .transpose()?;
+    let meter_hash = parse_meter_hash_param(request.query_param("meter_hash"))?;
+    let page = request
+        .query_param("page")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page' query parameter".into()))?
+        .unwrap_or(0);
+    let page_size = request
+        .query_param("page_size")
+        .map(|value| value.parse::<usize>())
+        .transpose()
+        .map_err(|_| HttpError::Handler("invalid 'page_size' query parameter".into()))?
+        .unwrap_or(25);
+    let filter = EnergyTimelineFilter {
+        provider_id,
+        event_type,
+        meter_hash,
+    };
+    let explorer = explorer_from(&request);
+    let store = GovStore::open(&explorer.gov_db_path);
+    let entries = store.energy_timeline(filter)?;
+    let total = entries.len();
+    let size = page_size.max(1);
+    let start = page.saturating_mul(size);
+    let end = (start + size).min(total);
+    let sliced = if start >= total {
+        Vec::new()
+    } else {
+        entries[start..end].to_vec()
+    };
+    let payload: Vec<_> = sliced
+        .iter()
+        .filter_map(|entry| json::to_value(entry).ok())
+        .collect();
+    let mut map = json::Map::new();
+    map.insert("status".into(), json::Value::String("ok".into()));
+    map.insert(
+        "page".into(),
+        json::Value::Number(json::Number::from(page as u64)),
+    );
+    map.insert(
+        "page_size".into(),
+        json::Value::Number(json::Number::from(size as u64)),
+    );
+    map.insert(
+        "total".into(),
+        json::Value::Number(json::Number::from(total as u64)),
+    );
+    map.insert("entries".into(), json::Value::Array(payload));
+    map.insert(
+        "refreshed_at".into(),
+        json::Value::Number(json::Number::from(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        )),
+    );
+    Ok(Response::new(StatusCode::OK).json(&json::Value::Object(map))?)
+}
+
+fn parse_energy_timeline_event(value: &str) -> Result<EnergyTimelineEvent, HttpError> {
+    match value.to_ascii_lowercase().as_str() {
+        "receipt" => Ok(EnergyTimelineEvent::Receipt),
+        "dispute_opened" | "dispute_open" => Ok(EnergyTimelineEvent::DisputeOpened),
+        "dispute_resolved" | "dispute_closed" => Ok(EnergyTimelineEvent::DisputeResolved),
+        "slash" | "slashed" => Ok(EnergyTimelineEvent::Slash),
+        other => Err(HttpError::Handler(format!(
+            "invalid event_type '{other}' (expected receipt|dispute_opened|dispute_resolved|slash)"
+        ))),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]

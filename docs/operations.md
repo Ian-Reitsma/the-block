@@ -86,7 +86,9 @@
   - `ad_gate_ready_ppm{tier}` and `ad_gate_streak_windows{tier}` confirm contextual vs presence readiness streaks before apply.
   - Use `tb-cli governor status` to confirm the matching `ad_contextual`/`ad_presence` gate streaks and snapshot hashes.
 - **Dashboards and wrappers**
-  - Update `monitoring/ad_market_dashboard.json` and `metrics-aggregator` `/wrappers` snapshots whenever these series change; include refreshed panel screenshots (`npm ci --prefix monitoring && make monitor`) in reviews.
+  - Expand the `Ad Market Readiness` row with selector-level panels (`ad_auction_top_bid_usd_micros`, `ad_auction_win_rate`, `ad_bid_shading_factor_bps`, `ad_privacy_budget_utilization_ratio`, `ad_bidding_latency_micros`, `ad_conversion_value_total`) and refresh `monitoring/grafana/dashboard.json`, `monitoring/tests/snapshots/dashboard.json`, and the `/wrappers` hash after running `npm ci --prefix monitoring && make monitor`.
+  - `/wrappers` now mirrors selector counters and the existing readiness/utilization gauges; keep `monitoring/tests/snapshots/wrappers.json` and `metrics-aggregator/tests/snapshots/wrappers.json` updated whenever the selector metrics change so the aggregated hash matches the dashboard export.
+  - The explorer timeline surfaced by `ad_market.policy_snapshot` should log both the `CohortKeyV2` hash + `selectors_version` and the legacy `cohort_v1` tuple so operators can audit reversible migrations; record any timeline/schema tweaks in `docs/apis_and_tooling.md` and `docs/system_reference.md` before updating the corresponding explorer/CLI surfaces.
   - CI pins the governance treasury wrapper summary hash (`e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595`) and the explorer/CLI treasury timeline schema hash (`c48f401c3792195c9010024b8ba0269b0efd56c227be9cb5dd1ddba793b2cbd1`); update the expected values only when intentionally changing the telemetry or response shape and refresh Grafana alongside.
   - `monitoring/grafana_treasury_dashboard.json` is snapshot-checked in CI with hash `e9d9dc350aeedbe1167c6120b8f5600f7f079b3e2ffe9ab7542917de021a61a0`; regenerate with `make -C monitoring dashboard` and update snapshots/hash when panels change, and include refreshed screenshots in review notes.
 
@@ -120,6 +122,13 @@
 - Aggregator `/wrappers` now includes `energy.rate_limit_rps` so dashboards can display the configured limit alongside dispute/settlement health.
 - Keep these values in sync with downstream dashboards: the aggregator exposes `energy_*` counters in `/wrappers` and the Grafana energy board charts dispute counts, settlement backlog (`energy_pending_credits_total`), and signature failures.
 - The energy dashboards also surface the new `energy_quorum_shortfall_total`, `energy_reading_reject_total{reason}`, and `energy_dispute_total{state}` counters so operators can correlate rejected readings, quorum shortfalls, and dispute lifecycle movements with the aggregator summary and Prometheus alerts.
+- When you harden energy receipts/disputes (quorum/expiry updates, new slash rules, explorer timeline wiring), document the rollout via:
+  1. Publishing the current `governance/energy/settlement/history` entry for the change plus any rollback record (`contract-cli gov energy-settlement --timeline`).
+  2. Capturing the refreshed `/wrappers` hash and listing the new `energy_pending_credits_total`, `energy_active_disputes_total`, and `energy_slashing_total` gauges so downstream tooling (alert rules, dashboards) can pin the update.
+     - The canonical `/wrappers` hash for this metric set is `21ba9ccb7807b26a0696181f1fcef54a35accf1cd4064e6d6ed38d4a36e197cb`; regenerate it with `WRITE_WRAPPERS_SNAPSHOT=1 cargo test --manifest-path monitoring/Cargo.toml --test wrappers` and cite that hash when closing the story.
+  3. Updating the Grafana energy board screenshots (new Active Disputes and Cumulative Slashes gauges) and noting whether operators should expect new explorer timelines (`/governance/energy/slashes`, `/governance/energy/settlement/history`) before/after the change.
+     - Capture the refreshed panel(s) by visiting `monitoring/output/index.html` (produced via `make monitor -- --native-monitor`) and keeping the screenshot next to the rollout notes so reviewers can compare against the archived panels.
+- Operators now have a `/governance/energy/timeline` endpoint (queryable by `provider_id`, `event_type`, and `meter_hash`) that surfaces `receipt`, `dispute_opened`, `dispute_resolved`, and `slash` events along with the recorded block/metadata so they can trace meter-to-receipt flows before digging into disputes or slashes.
 
 ## Gateway Service Runbook
 

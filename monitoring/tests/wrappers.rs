@@ -34,7 +34,7 @@ fn wrappers_snapshot_hash_is_pinned() {
                 },
                 WrapperMetricEntry {
                     metric: "energy_quorum_shortfall_total".into(),
-                    labels: energy_shortfall_labels,
+                    labels: energy_shortfall_labels.clone(),
                     value: 1.0,
                 },
                 WrapperMetricEntry {
@@ -66,6 +66,66 @@ fn wrappers_snapshot_hash_is_pinned() {
                     metric: "energy_slashing_total".into(),
                     labels: energy_slash_labels,
                     value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_provider_total".into(),
+                    labels: HashMap::new(),
+                    value: 5.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_pending_credits_total".into(),
+                    labels: HashMap::new(),
+                    value: 12.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_receipt_total".into(),
+                    labels: HashMap::new(),
+                    value: 7.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_active_disputes_total".into(),
+                    labels: HashMap::new(),
+                    value: 3.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_disputes_pending".into(),
+                    labels: HashMap::new(),
+                    value: 2.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_provider_register_total".into(),
+                    labels: HashMap::new(),
+                    value: 4.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_treasury_fee_total".into(),
+                    labels: HashMap::new(),
+                    value: 20.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_dispute_open_total".into(),
+                    labels: HashMap::new(),
+                    value: 3.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_dispute_resolve_total".into(),
+                    labels: HashMap::new(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_settlement_mode".into(),
+                    labels: HashMap::new(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_settlement_rollback_total".into(),
+                    labels: HashMap::new(),
+                    value: 2.0,
+                },
+                WrapperMetricEntry {
+                    metric: "energy_meter_reading_total".into(),
+                    labels: energy_shortfall_labels.clone(),
+                    value: 13.0,
                 },
                 WrapperMetricEntry {
                     metric: "receipts_compute_slash_total".into(),
@@ -180,7 +240,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "0f705a33985032f353c30feb663f60d3f08526da39adaf406ddace116ace0156",
+        "21ba9ccb7807b26a0696181f1fcef54a35accf1cd4064e6d6ed38d4a36e197cb",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

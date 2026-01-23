@@ -10,6 +10,7 @@
 //! Two nodes that see the same blocks will see the same receipts and compute
 //! identical market metrics deterministically.
 
+use foundation_serialization::binary;
 use foundation_serialization::{Deserialize, Serialize};
 
 /// Market settlement receipt variants.
@@ -285,6 +286,25 @@ mod tests {
         assert_eq!(receipt.market_name(), "energy");
         assert_eq!(receipt.settlement_amount(), 250);
         assert_eq!(receipt.block_height(), 102);
+    }
+
+    #[test]
+    fn energy_receipt_roundtrip_binary() {
+        let original = EnergyReceipt {
+            contract_id: "ec_rt".into(),
+            provider: "grid_operator_rt".into(),
+            energy_units: 2500,
+            price: 125,
+            block_height: 123,
+            proof_hash: [7u8; 32],
+            provider_signature: vec![1u8; 64],
+            signature_nonce: 42,
+        };
+        let encoded =
+            binary::encode(&original).expect("energy receipt should encode without panicking");
+        let decoded =
+            binary::decode::<EnergyReceipt>(&encoded).expect("decoding should return the receipt");
+        assert_eq!(original, decoded);
     }
 
     #[test]

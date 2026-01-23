@@ -1,7 +1,7 @@
 #![cfg(feature = "gateway")]
 
 use foundation_serialization::json::{self, Value as JsonValue};
-use httpd::{Method, StatusCode, client::ClientResponse};
+use httpd::{client::ClientResponse, Method, StatusCode};
 use runtime::{self, sync::mpsc};
 use std::{
     collections::HashSet,
@@ -10,8 +10,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use the_block::{
-    ReadAck, http_client, net,
+    http_client, net,
     web::gateway::{self, ResolverConfig, StakeTable},
+    ReadAck,
 };
 
 #[test]
@@ -93,12 +94,11 @@ fn gateway_dns_resolver_returns_status3_until_staked() {
         assert_eq!(response.status().as_u16(), 403);
         let body = parse_status(&response).expect("parse json");
         assert_eq!(body.get("Status").and_then(|v| v.as_u64()), Some(3));
-        assert!(
-            body.get("Answer")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.is_empty())
-                .unwrap_or(false)
-        );
+        assert!(body
+            .get("Answer")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.is_empty())
+            .unwrap_or(false));
 
         stake_table.allow("example.block");
         let response = client
@@ -109,12 +109,11 @@ fn gateway_dns_resolver_returns_status3_until_staked() {
         assert_eq!(response.status().as_u16(), 404);
         let body = parse_status(&response).expect("parse json");
         assert_eq!(body.get("Status").and_then(|v| v.as_u64()), Some(3));
-        assert!(
-            body.get("Answer")
-                .and_then(|v| v.as_array())
-                .map(|arr| arr.is_empty())
-                .unwrap_or(false)
-        );
+        assert!(body
+            .get("Answer")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.is_empty())
+            .unwrap_or(false));
 
         server_handle.abort();
         let _ = server_handle.await;
