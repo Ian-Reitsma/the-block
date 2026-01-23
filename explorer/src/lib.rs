@@ -991,7 +991,9 @@ async fn energy_timeline(request: Request<ExplorerHttpState>) -> Result<Response
     };
     let explorer = explorer_from(&request);
     let store = GovStore::open(&explorer.gov_db_path);
-    let entries = store.energy_timeline(filter)?;
+    let entries = store
+        .energy_timeline(filter)
+        .map_err(|err| HttpError::Handler(format!("energy timeline failed: {err}")))?;
     let total = entries.len();
     let size = page_size.max(1);
     let start = page.saturating_mul(size);

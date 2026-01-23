@@ -32,6 +32,7 @@ pub use governance_spec::{
 pub use governance_spec::{
     EnergySettlementChangePayload, EnergySettlementMode, EnergySettlementPayload,
 };
+pub use governance_spec::{EnergyTimelineEntry, EnergyTimelineEvent, EnergyTimelineFilter};
 // Circuit breaker pattern for executor resilience
 pub use governance_spec::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
 pub use params::{registry, retune_multipliers, ParamSpec, Params, Runtime, Utilization};

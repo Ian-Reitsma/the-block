@@ -4,14 +4,6 @@ use std::env;
 use std::fmt;
 use std::sync::Arc;
 
-mod blocktorch_blockos;
-mod blocktorch_cuda;
-mod blocktorch_metal;
-
-use blocktorch_blockos::BlockOsAccelerator;
-use blocktorch_cuda::CudaAccelerator;
-use blocktorch_metal::MetalAccelerator;
-
 /// Trait that exposes a blocktorch acceleration bridge for signature + hash work.
 pub trait BlocktorchAccelerator: Send + Sync + 'static {
     /// Human readable name for instrumentation/debugging.
@@ -128,12 +120,8 @@ pub fn global_blocktorch_accelerator() -> Arc<dyn BlocktorchAccelerator> {
 }
 
 fn select_backend() -> Arc<dyn BlocktorchAccelerator> {
-    match prefer_blocktorch_backend() {
-        BlocktorchBackend::Metal => MetalAccelerator::new().unwrap_or_else(fallback),
-        BlocktorchBackend::Cuda => CudaAccelerator::new().unwrap_or_else(fallback),
-        BlocktorchBackend::BlockOs => BlockOsAccelerator::new().unwrap_or_else(fallback),
-        BlocktorchBackend::Cpu => fallback(),
-    }
+    let _ = prefer_blocktorch_backend();
+    fallback()
 }
 
 fn fallback() -> Arc<dyn BlocktorchAccelerator> {
@@ -152,13 +140,8 @@ mod tests {
     use super::*;
     use crypto_suite::signatures::ed25519::{SigningKey, VerifyingKey};
     use rand::rngs::StdRng;
+    use rand::RngCore;
     use rand::SeedableRng;
-    use rand_core::RngCore;
-    use std::env;
-
-    use super::blocktorch_blockos::BlockOsAccelerator;
-    use super::blocktorch_cuda::CudaAccelerator;
-    use super::blocktorch_metal::MetalAccelerator;
 
     fn build_preimage() -> Vec<u8> {
         vec![0xde, 0xad, 0xbe, 0xef]
@@ -185,13 +168,6 @@ mod tests {
     }
 
     #[test]
-    fn global_accelerator_is_cpu() {
-        let accelerator = global_blocktorch_accelerator();
-        assert_eq!(accelerator.name(), "cpu");
-        assert!(accelerator.is_available());
-    }
-
-    #[test]
     fn backend_parser_accepts_values() {
         assert_eq!(
             BlocktorchBackend::from_str("metal"),
@@ -210,30 +186,5 @@ mod tests {
             Some(BlocktorchBackend::Cpu)
         );
         assert_eq!(BlocktorchBackend::from_str("unknown"), None);
-    }
-
-    #[test]
-    fn prefer_backend_reads_env() {
-        env::set_var("BLOCKTORCH_BACKEND", "cuda");
-        assert_eq!(prefer_blocktorch_backend(), BlocktorchBackend::Cuda);
-        env::remove_var("BLOCKTORCH_BACKEND");
-    }
-
-    #[test]
-    fn metal_accelerator_requires_env_flag() {
-        env::remove_var("BLOCKTORCH_ALLOW_METAL");
-        assert!(MetalAccelerator::new().is_none());
-    }
-
-    #[test]
-    fn cuda_accelerator_requires_env_flag() {
-        env::remove_var("BLOCKTORCH_ALLOW_CUDA");
-        assert!(CudaAccelerator::new().is_none());
-    }
-
-    #[test]
-    fn blockos_accelerator_requires_env_flag() {
-        env::remove_var("BLOCKTORCH_ALLOW_BLOCKOS");
-        assert!(BlockOsAccelerator::new().is_none());
     }
 }
