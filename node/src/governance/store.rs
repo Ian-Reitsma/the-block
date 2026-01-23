@@ -1635,10 +1635,7 @@ impl GovStore {
             .unwrap_or_else(|e| panic!("open energy timeline tree: {e}"))
     }
 
-    pub fn record_energy_timeline_entry(
-        &self,
-        mut entry: EnergyTimelineEntry,
-    ) -> sled::Result<()> {
+    pub fn record_energy_timeline_entry(&self, mut entry: EnergyTimelineEntry) -> sled::Result<()> {
         let tree = self.energy_timeline_tree();
         let id = tree.len() as u64 + 1;
         entry.event_id = id;

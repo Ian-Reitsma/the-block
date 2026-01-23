@@ -1,7 +1,7 @@
-# World OS Specification — Overview
+# Block OS Specification — Overview
 
 ## Intent
-World OS layers civic-scale services on top of the existing The-Block kernel. The spec consolidates the code already in this repository—`node/`, `ledger/`, `storage_market/`, `compute_market/`, `governance/`, `metrics-aggregator/`, and their supporting crates—plus the new physical-resource vertical and testnet plan requested here.
+Block OS layers civic-scale services on top of the existing The-Block kernel. The spec consolidates the code already in this repository—`node/`, `ledger/`, `storage_market/`, `compute_market/`, `governance/`, `metrics-aggregator/`, and their supporting crates—plus the new physical-resource vertical and testnet plan requested here.
 
 ## Document Map
 | File | Summary |
@@ -13,7 +13,7 @@ World OS layers civic-scale services on top of the existing The-Block kernel. Th
 | `04-markets.md` | Ad/ANN market, compute/storage offer surfaces, telemetry, and CLI flows. |
 | `05-jurisdiction-packs.md` | Regional policy packs from `crates/jurisdiction` and their enforcement path in RPC and CLI. |
 | `06-physical-resource-layer.md` | Energy/bandwidth/hardware credit architecture and oracle adaptation instructions. |
-| `ROADMAP.md` | Sequence for shipping the World OS public testnet. |
+| `ROADMAP.md` | Sequence for shipping the Block OS public testnet. |
 
 ## Architecture Snapshot
 - **Execution surface** — `node/src/consensus`, `node/src/blockchain`, `node/src/transaction`, and `ledger/` remain the canonical block/state machines. The PoH tick generator (`node/src/poh.rs`) feeds the fork-choice logic in `node/src/blockchain/process.rs`.
@@ -21,7 +21,7 @@ World OS layers civic-scale services on top of the existing The-Block kernel. Th
 - **Markets** — `storage_market/` persists replica incentives via the sled-backed engine, `node/src/compute_market/*` orchestrates lane-aware job matching, and `crates/ad_market` exposes ANN/ad slots across CLI/RPC.
 - **Governance** — `governance/` hosts the sled-backed `GovStore`. RPC endpoints live in `node/src/rpc/governance.rs` and propagate to CLI subcommands under `cli/src/governance.rs`. Treasury distribution uses the executor in `node/src/treasury_executor.rs` and ledger coinbase helpers in `ledger/`.
 - **Telemetry** — The metrics stack wires `foundation_metrics` gauges inside each subsystem and publishes dashboards through `metrics-aggregator/` and `monitoring/`. Every new surface (energy, oracle) must export counters via the same registry.
-- **Docs** — Architecture, economics, and developer workflows stay in `docs/`. This World OS spec links each component back to the canonical code, providing a landing zone for the physical-resource roadmap.
+- **Docs** — Architecture, economics, and developer workflows stay in `docs/`. This Block OS spec links each component back to the canonical code, providing a landing zone for the physical-resource roadmap.
 
 ## Expectations
 1. Every behavior described here must map to code or configuration checked into this repository. If the doc references a missing switch, patch the code or open an issue before diverging from AGENTS.md.

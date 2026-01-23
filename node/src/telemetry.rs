@@ -42,6 +42,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "telemetry")]
 use sys::process;
 
+#[cfg(feature = "telemetry")]
+use foundation_serialization::json;
 use foundation_serialization::Serialize;
 use tls_warning::WarningOrigin;
 #[cfg(feature = "telemetry")]
@@ -407,6 +409,58 @@ pub struct WrapperSummary {
     #[cfg(feature = "telemetry")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub governance: Option<foundation_telemetry::GovernanceWrapperEntry>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BlockTorchMetadata {
+    pub kernel_digest: Option<String>,
+    pub benchmark_commit: Option<String>,
+    pub proof_latency_ms: Option<f64>,
+    pub aggregator_trace: Option<String>,
+}
+
+impl BlockTorchMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.kernel_digest.is_none()
+            && self.benchmark_commit.is_none()
+            && self.proof_latency_ms.is_none()
+            && self.aggregator_trace.is_none()
+    }
+}
+
+#[cfg(feature = "telemetry")]
+static BLOCKTORCH_METADATA: Lazy<Mutex<BlockTorchMetadata>> =
+    Lazy::new(|| Mutex::new(BlockTorchMetadata::default()));
+
+#[cfg(feature = "telemetry")]
+fn blocktorch_update_metadata(mutator: impl FnOnce(&mut BlockTorchMetadata)) {
+    if let Ok(mut guard) = BLOCKTORCH_METADATA.lock() {
+        mutator(&mut guard);
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn blocktorch_metadata_snapshot() -> BlockTorchMetadata {
+    let mut guard = BLOCKTORCH_METADATA
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if guard.kernel_digest.is_none() {
+        guard.kernel_digest = std::env::var("TB_BLOCKTORCH_KERNEL_VARIANT_DIGEST").ok();
+    }
+    if guard.benchmark_commit.is_none() {
+        guard.benchmark_commit = std::env::var("TB_BLOCKTORCH_BENCHMARK_COMMIT").ok();
+    }
+    guard.clone()
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn blocktorch_metadata_snapshot() -> BlockTorchMetadata {
+    BlockTorchMetadata::default()
+}
+
+#[cfg(feature = "telemetry")]
+fn blocktorch_set_aggregator_trace(hash: String) {
+    blocktorch_update_metadata(|meta| meta.aggregator_trace = Some(hash));
 }
 
 #[cfg(feature = "telemetry")]
@@ -1482,10 +1536,46 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         "ad_market_utilization_delta_ppm",
         &*AD_MARKET_UTILIZATION_DELTA,
     );
+    let blocktorch_meta = blocktorch_metadata_snapshot();
+    if let Some(digest) = &blocktorch_meta.kernel_digest {
+        push_metric(
+            &mut metrics,
+            "blocktorch_kernel_variant_digest",
+            &[("digest", digest.as_str())],
+            1.0,
+        );
+    }
+    if let Some(commit) = &blocktorch_meta.benchmark_commit {
+        push_metric(
+            &mut metrics,
+            "blocktorch_benchmark_commit",
+            &[("commit", commit.as_str())],
+            1.0,
+        );
+    }
+    if let Some(latency) = blocktorch_meta.proof_latency_ms {
+        push_metric(&mut metrics, "blocktorch_proof_latency_ms", &[], latency);
+    }
+
+    let governance = governance_wrapper_snapshot();
+    let summary_for_hash = WrapperSummary {
+        metrics: metrics.clone(),
+        governance: governance.clone(),
+    };
+    if let Ok(encoded) = json::to_vec(&summary_for_hash) {
+        let hash = blake3::hash(&encoded).to_hex().to_string();
+        blocktorch_set_aggregator_trace(hash.clone());
+        push_metric(
+            &mut metrics,
+            "blocktorch_aggregator_trace",
+            &[("hash", hash.as_str()), ("source", "wrappers")],
+            1.0,
+        );
+    }
 
     WrapperSummary {
         metrics,
-        governance: governance_wrapper_snapshot(),
+        governance,
     }
 }
 

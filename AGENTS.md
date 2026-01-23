@@ -657,7 +657,7 @@ The following items block mainnet readiness and should be prioritized. Each task
 
 These steps translate `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md` Part XII into a delivery checklist. Complete them in order and keep the referenced sections aligned.
 
-1. **Finalize naming + scope** — Confirm the BlockTorch rebrand scope, keep `metal-backend/` as the canonical code path, and align README/handbook wording with the spec (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#122-the-blocktorch-vision-becoming-the-cuda-of-blockchain-compute`).
+1. **Finalize naming + scope** — Confirm the BlockTorch rebrand scope, keep `blocktorch/` as the canonical code path, and align README/handbook wording with the spec (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#122-the-blocktorch-vision-becoming-the-cuda-of-blockchain-compute`).
 2. **Publish the spec bundle** — Kernel signatures, determinism rules, gradient wire format, SNARK circuit spec, and marketplace job protocol (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#126-the-industry-standard-play`).
 3. **Ship the coordinator** — Build the distributed training coordinator that posts compute jobs, selects bidders, and aggregates gradients (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#124-distributed-training-architecture-for-the-compute-marketplace`).
 4. **Lock determinism** — Define the deterministic op subset, ordered reductions, fixed-point/rounding rules, and RNG seeding across backends (`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#124-distributed-training-architecture-for-the-compute-marketplace`).

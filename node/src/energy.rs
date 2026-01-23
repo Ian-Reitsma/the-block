@@ -24,8 +24,8 @@ use governance_spec::{
     EnergySettlementMode, EnergySettlementPayload, EnergyTimelineEntry, EnergyTimelineEvent,
 };
 use std::io;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 const KEY_STATE: &str = "state";

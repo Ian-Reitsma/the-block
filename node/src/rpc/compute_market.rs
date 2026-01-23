@@ -16,6 +16,19 @@ use std::time::UNIX_EPOCH;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct BlockTorchStats {
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub kernel_digest: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub benchmark_commit: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub proof_latency_ms: Option<f64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub aggregator_trace: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ComputeMarketStatsResponse {
     pub industrial_backlog: u64,
     pub industrial_utilization: u64,
@@ -30,6 +43,8 @@ pub struct ComputeMarketStatsResponse {
     pub lane_starvation: Vec<ComputeLaneWarning>,
     pub recent_matches: BTreeMap<String, Vec<ComputeRecentMatch>>,
     pub settlement_engine: SettlementEngineInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocktorch: Option<BlockTorchStats>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -360,6 +375,20 @@ fn audit_record_to_value(record: &AuditRecord) -> Value {
     Value::Object(map)
 }
 
+fn blocktorch_stats() -> Option<BlockTorchStats> {
+    let meta = crate::telemetry::blocktorch_metadata_snapshot();
+    if meta.is_empty() {
+        None
+    } else {
+        Some(BlockTorchStats {
+            kernel_digest: meta.kernel_digest,
+            benchmark_commit: meta.benchmark_commit,
+            proof_latency_ms: meta.proof_latency_ms,
+            aggregator_trace: meta.aggregator_trace,
+        })
+    }
+}
+
 /// Return compute market backlog and utilisation metrics.
 pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> ComputeMarketStatsResponse {
     let (backlog, util) = price_board::backlog_utilization();
@@ -400,6 +429,7 @@ pub fn stats(_accel: Option<crate::compute_market::Accelerator>) -> ComputeMarke
         lane_starvation: warnings,
         recent_matches: recent,
         settlement_engine,
+        blocktorch: blocktorch_stats(),
     }
 }
 

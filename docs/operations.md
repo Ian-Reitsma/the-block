@@ -8,6 +8,29 @@
 
 ## Telemetry Wiring
 
+### BlockTorch receipt telemetry & plan enforcement
+
+- **Objective**: `docs/blocktorch_compute_integration_plan.md`, `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii`, and this runbook form the triad for wiring BlockTorch receipts into observability. Treat the plan as your authoritative “what to do first” list; every telemetry change or governor gate must cite it in the PR summary and the runbook entry.
+- **Hard requirements**:
+  1. Add new metrics from the plan (`receipt_drain_depth`, `proof_verification_latency`, `kernel_variant.digest`, `benchmark_commit`, `orchard_alloc_free_delta`, `snark_prover_latency_seconds`) inside `node/src/telemetry.rs` and `node/src/telemetry/receipts.rs`.
+  2. Guard them behind the `telemetry` cargo feature and sink the allocator logs from `blocktorch/metal/runtime/Allocator.h` (parse `/tmp/orchard_tensor_profile.log` lines into labelled histograms with `job_id` + `device`).
+  3. Export these metrics via `metrics-aggregator/telemetry.yaml` so `/wrappers` includes the new series, update `monitoring/tests/snapshots/wrappers.json`, and document the refreshed hash in your PR description.
+  4. This change wires the basic gauges/histograms (`receipt_drain_depth`, `proof_verification_latency_ms`, `sla_breach_depth`, `orchard_alloc_free_delta`) into `node/src/telemetry/receipts.rs` and refreshes the `/wrappers` hash (`e1c21b717bd804e816ee7ab9f6876c0832f9813d9d982444cfa13c1186381756`); the remaining plan steps (kernel metadata, CLI/governor outputs, dashboards) still need follow-up wiring.
+  4. Refresh `monitoring/` dashboards (`npm ci --prefix monitoring && make monitor`) so panels show proof latency per lane + lane slashing, allocator deltas, kernel digests, and benchmark commits. Capture the new JSON + screenshot references for reviewers.
+  5. Log the telemetry exposure here (fields + panel IDs + `/wrappers` hash) and link back to `docs/blocktorch_compute_integration_plan.md` for future reference.
+
+- **Begin wiring instructions** (1% dev action list):
+  1. Extend `node/src/telemetry.rs` to emit the listed metrics with receipt metadata, ensure each metric has stable labels for aggregator joining, and add unit tests verifying the metrics decode the `kernel_variant.digest`.
+  2. Update `metrics-aggregator/telemetry.yaml` to declare the new gauges/histograms, rerun the wrappers snapshot helper (`WRITE_WRAPPERS_SNAPSHOT=1 cargo test -p metrics-aggregator --test wrappers`), and commit the updated snapshot plus the new hash.
+  3. Rebuild Grafana dashboards, include the kernel hash + benchmark panels in `monitoring/` JSON, and refresh `monitoring/tests/snapshots/wrappers.json`. Document the new screenshot names and `make monitor` logs in the PR notes.
+  4. Add CLI/governor visibility by extending `cli/src/compute.rs` and `cli/src/governor.rs` to print the kernel hash, benchmark commit, proof latency histogram, and aggregator `/wrappers` hash in their status outputs. Match the format described in the plan (with deterministic field order).
+	  4.a. Operators can seed or override the metadata emitted by the node using `TB_BLOCKTORCH_KERNEL_VARIANT_DIGEST` and `TB_BLOCKTORCH_BENCHMARK_COMMIT`. Those knobs back the CLI/governor timeline when the BlockTorch artifacts are not emitted automatically, and the aggregated trace hash surfaces as `blocktorch_aggregator_trace` so you can validate the telemetry bucket you just inspected.
+	  4.b. After wiring the timeline, lock its formatting with `cargo test -p contract-cli --features telemetry formatted_blocktorch_timeline`. The test mirrors the CLI/governor order (header → kernel digest → benchmark commit → proof latency → aggregator trace) and fails whenever the helper drifts or the RPC payload drops a field; rerun the test, inspect `node/src/telemetry.rs` + `/wrappers`, and replay the CLI surfaces with `TB_BLOCKTORCH_*` overrides before landing the change.
+	  5. Update `docs/system_reference.md`, `docs/overview.md`, and this runbook to mention the updated CLI/governor outputs plus the `TB_BLOCKTORCH_*` knobs (see the plan). Reference the plan when describing how to read the new fields.
+  6. After wiring, run the mandated command suite (`just lint`, `just fmt`, `just test-fast`, `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, `scripts/fuzz_coverage.sh`) plus `npm ci --prefix monitoring && make monitor`. Attach logs and the `metrics-aggregator` wrapper hash to the PR, and mention the runbook cross-checks (kernel hash diff, aggregator hash, CLI status sample).
+
+- **Operator note**: During incidents, query `tb-cli governor status --rpc <endpoint>` (the `telemetry gauges (ppm)` section now includes BlockTorch metrics). Correlate `proof_verification_latency` with the Grafana panel `blocktorch-proofs-latency` and the aggregator trace ID recorded in `/wrappers`.
+
 ### Runtime Reactor
 
 - `runtime_read_without_ready_total` increments when reads succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.

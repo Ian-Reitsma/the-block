@@ -5,6 +5,8 @@ use crate::gateway::dns;
 use crate::governance::Runtime;
 use crate::governor_snapshot;
 use crate::simple_db::{names, SimpleDb};
+#[cfg(feature = "telemetry")]
+use crate::telemetry;
 use crate::Blockchain;
 use crypto_suite::hex;
 use foundation_serialization::json::{
@@ -213,6 +215,19 @@ pub struct GateSnapshot {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct BlockTorchStatus {
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub kernel_digest: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub benchmark_commit: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub proof_latency_ms: Option<f64>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub aggregator_trace: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct GovernorStatus {
     pub enabled: bool,
     pub epoch: u64,
@@ -227,6 +242,8 @@ pub struct GovernorStatus {
     pub last_economics_snapshot_hash: Option<String>,
     #[serde(default)]
     pub shadow_only: bool,
+    #[serde(default)]
+    pub blocktorch: Option<BlockTorchStatus>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -637,6 +654,7 @@ impl SharedState {
             schema_version: self.schema_version(),
             last_economics_snapshot_hash: self.last_snapshot_hash(),
             shadow_only: self.shadow_only,
+            blocktorch: blocktorch_status_snapshot(),
         }
     }
 
@@ -761,6 +779,26 @@ impl SharedState {
                 last_eval: eval.clone(),
             });
     }
+}
+
+#[cfg(feature = "telemetry")]
+fn blocktorch_status_snapshot() -> Option<BlockTorchStatus> {
+    let meta = crate::telemetry::blocktorch_metadata_snapshot();
+    if meta.is_empty() {
+        None
+    } else {
+        Some(BlockTorchStatus {
+            kernel_digest: meta.kernel_digest,
+            benchmark_commit: meta.benchmark_commit,
+            proof_latency_ms: meta.proof_latency_ms,
+            aggregator_trace: meta.aggregator_trace,
+        })
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn blocktorch_status_snapshot() -> Option<BlockTorchStatus> {
+    None
 }
 
 pub fn spawn(chain: Arc<Mutex<Blockchain>>, config: GovernorConfig) -> Option<GovernorHandle> {

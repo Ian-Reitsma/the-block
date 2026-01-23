@@ -131,6 +131,7 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | Path | Description |
 | --- | --- |
 | `node/src/compute_market/` | Offers, matcher, courier, settlement, SNARK proving, SLA slashing plumbing. Lane health telemetry and slash receipts live here. |
+| `blocktorch/` | BlockTorch compute backend (Metal tensor runtime, profiling + allocator logs, experimental FlashAttention/CUDA harnesses, and benchmark orchestration for receipt metadata). |
 | `node/src/storage/`, `storage_market/`, `state/` | Blob storage pipeline, erasure coding, proofs-of-retrievability, rent accounting, sled snapshots. |
 | `node/src/simple_db/` | SimpleDb snapshot layer used across subsystems (energy market, storage, governance). Implements fsync + atomic rename semantics and cross-platform safeguards. |
 | `node/src/treasury_executor.rs` | BLOCK ledger hooks that convert compute/storage receipts and treasury disbursements into coinbase outputs. |
@@ -143,7 +144,7 @@ The `node/` crate is densely packed. This index spells out every module so that 
 | --- | --- |
 | `node/src/energy.rs` | Wraps `crates/energy-market`: provider registry, credit persistence, settlement logic, governance hooks, and health checks. |
 | `node/src/rpc/energy.rs`, `cli/src/energy.rs` | JSON-RPC handlers plus CLI surfaces for registering providers, submitting readings, and settling receipts. |
-| `services/mock-energy-oracle/` | Dev/testnet oracle shim for World OS drills. |
+| `services/mock-energy-oracle/` | Dev/testnet oracle shim for Block OS drills. |
 
 ### Governance, Treasury, and Badges
 

@@ -466,12 +466,16 @@ pub fn verify(bundle: &ProofBundle, wasm: &[u8], output: &[u8]) -> Result<bool, 
         return Ok(false);
     }
     let proof = proof_from_bundle(bundle);
-    Groth16Bn256::verify(
+    #[cfg(feature = "telemetry")]
+    let start = Instant::now();
+    let verify_result = Groth16Bn256::verify(
         &compiled.verifier,
         &proof,
         &[inputs.program_fe.clone(), inputs.output_fe.clone()],
-    )
-    .map_err(SnarkError::from)
+    );
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::receipts::record_proof_verification_latency(start.elapsed());
+    verify_result.map_err(SnarkError::from)
 }
 
 fn run_prover(

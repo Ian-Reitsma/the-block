@@ -1,0 +1,25 @@
+metrics:
+  - name: blocktorch_kernel_variant_digest
+    type: gauge
+    labels:
+      - digest
+    description: |
+      Tracks the BlockTorch kernel fingerprint (SHA256 over the variant bundle) so dashboards and CLI/governor outputs mention which kernel set powered the job.
+  - name: blocktorch_benchmark_commit
+    type: gauge
+    labels:
+      - commit
+    description: |
+      Emits the benchmark commit/benchmarks.json path for the last profiled job, letting operators correlate proof latency deltas with the harness output.
+  - name: blocktorch_proof_latency_ms
+    type: gauge
+    labels: []
+    description: |
+      Mirrors the most recent SNARK proof verification latency (milliseconds) observed during BlockTorch job validation, matching the /wrappers proof latency panel.
+  - name: blocktorch_aggregator_trace
+    type: gauge
+    labels:
+      - hash
+      - source
+    description: |
+      Packs the current /wrappers snapshot hash so dashboards and CLI/governor outputs can prove the telemetry bucket that produced the BlockTorch metrics.

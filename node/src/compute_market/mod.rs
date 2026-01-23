@@ -318,6 +318,8 @@ impl Market {
 
     /// Drain pending compute settlement receipts for block inclusion
     pub fn drain_receipts(&mut self) -> Vec<crate::ComputeReceipt> {
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::receipts::set_receipt_drain_depth(self.pending_receipts.len());
         std::mem::take(&mut self.pending_receipts)
     }
 

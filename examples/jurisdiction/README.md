@@ -71,6 +71,6 @@ These examples show simplified configs. Full policy packs in `crates/jurisdictio
 
 ## Related Documentation
 
-- [Jurisdiction Packs Spec](../../docs/world-os-spec/05-jurisdiction-packs.md)
+- [Jurisdiction Packs Spec](../../docs/block_os-spec/05-jurisdiction-packs.md)
 - [KYC and Compliance](../../docs/security_and_privacy.md#kyc-jurisdiction-and-compliance)
 - [RPC Jurisdiction Methods](../../docs/apis_and_tooling.md#json-rpc)

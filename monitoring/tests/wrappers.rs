@@ -23,6 +23,13 @@ fn wrappers_snapshot_hash_is_pinned() {
     handshake_quinn_labels.insert("provider".into(), "quinn".into());
     let mut handshake_s2n_labels = HashMap::new();
     handshake_s2n_labels.insert("provider".into(), "s2n-quic".into());
+    let mut blocktorch_kernel_labels = HashMap::new();
+    blocktorch_kernel_labels.insert("digest".into(), "abc123-kernel".into());
+    let mut blocktorch_benchmark_labels = HashMap::new();
+    blocktorch_benchmark_labels.insert("commit".into(), "bench-abc123".into());
+    let mut blocktorch_trace_labels = HashMap::new();
+    blocktorch_trace_labels.insert("hash".into(), "trace-hash-xyz".into());
+    blocktorch_trace_labels.insert("source".into(), "wrappers".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
@@ -198,6 +205,46 @@ fn wrappers_snapshot_hash_is_pinned() {
                     value: 3.0,
                 },
                 WrapperMetricEntry {
+                    metric: "blocktorch_kernel_variant_digest".into(),
+                    labels: blocktorch_kernel_labels.clone(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "blocktorch_benchmark_commit".into(),
+                    labels: blocktorch_benchmark_labels.clone(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "blocktorch_proof_latency_ms".into(),
+                    labels: HashMap::new(),
+                    value: 42.5,
+                },
+                WrapperMetricEntry {
+                    metric: "blocktorch_aggregator_trace".into(),
+                    labels: blocktorch_trace_labels.clone(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "receipt_drain_depth".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "proof_verification_latency_ms".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "sla_breach_depth".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "orchard_alloc_free_delta".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
                     metric: "transport_handshake_attempt_total".into(),
                     labels: handshake_quinn_labels.clone(),
                     value: 18.0,
@@ -240,7 +287,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "21ba9ccb7807b26a0696181f1fcef54a35accf1cd4064e6d6ed38d4a36e197cb",
+        "5948fdf91fa8b7f47ea70607eaab03ec00f66b25caf717ec86a34cec1cc200ba",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

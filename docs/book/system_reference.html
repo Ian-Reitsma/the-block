@@ -618,7 +618,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 <li><strong>Oracle adapter + mock service</strong> (<code>crates/oracle-adapter</code>, <code>services/mock-energy-oracle</code>):</li>
 <li>Adapter defines <code>SignatureVerifier</code>; the default (<code>Ed25519SignatureVerifier</code>) enforces signatures for every provider with a registered key. <code>MeterReadingPayload</code> implements <code>MeterReading</code> and exposes the canonical <code>signing_bytes()</code> digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.
 <ul>
-<li>Mock service (in-house <code>httpd</code> router) listens on <code>MOCK_ENERGY_ORACLE_ADDR</code> (default <code>127.0.0.1:8080</code>), exposes <code>/meter/:id/reading</code> (increments totals by 250 kWh, updates timestamp, returns payload) and <code>/meter/:id/submit</code> (accepts posted readings). Used by <code>scripts/deploy-worldos-testnet.sh</code>.</li>
+<li>Mock service (in-house <code>httpd</code> router) listens on <code>MOCK_ENERGY_ORACLE_ADDR</code> (default <code>127.0.0.1:8080</code>), exposes <code>/meter/:id/reading</code> (increments totals by 250 kWh, updates timestamp, returns payload) and <code>/meter/:id/submit</code> (accepts posted readings). Used by <code>scripts/deploy-block_os-testnet.sh</code>.</li>
 </ul>
 </li>
 <li><strong>Telemetry</strong>:
@@ -635,7 +635,7 @@ Any entry whose <code>now - timestamp_millis &gt; tx_ttl * 1000</code> is droppe
 </li>
 <li><strong>Snapshot/restore</strong>:
 <ul>
-<li>Use <code>TB_ENERGY_MARKET_DIR</code> to relocate the sled DB, snapshot it alongside other SimpleDb stores (§5.5), and restore during drills. <code>docs/testnet/ENERGY_QUICKSTART.md</code> and <code>scripts/deploy-worldos-testnet.sh</code> document the canonical register ➜ submit ➜ settle ➜ dispute workflow until dedicated dispute RPCs land.</li>
+<li>Use <code>TB_ENERGY_MARKET_DIR</code> to relocate the sled DB, snapshot it alongside other SimpleDb stores (§5.5), and restore during drills. <code>docs/testnet/ENERGY_QUICKSTART.md</code> and <code>scripts/deploy-block_os-testnet.sh</code> document the canonical register ➜ submit ➜ settle ➜ dispute workflow until dedicated dispute RPCs land.</li>
 </ul>
 </li>
 </ul>

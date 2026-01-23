@@ -30,6 +30,7 @@ use crate::fee_estimator::RollingMedianEstimator;
 
 mod ad_market;
 mod ai;
+mod blocktorch_timeline;
 mod bridge;
 mod codec_helpers;
 mod compute;

@@ -408,6 +408,8 @@ impl SettlementState {
             self.sla_slashes.remove(0);
         }
         self.sla_slashes.push(slash);
+        #[cfg(feature = "telemetry")]
+        crate::telemetry::receipts::set_sla_breach_depth(self.sla_slashes.len());
     }
 
     fn drain_slash_records(&mut self) -> Vec<ComputeSlashRecord> {

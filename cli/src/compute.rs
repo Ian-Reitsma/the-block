@@ -1,3 +1,4 @@
+use crate::blocktorch_timeline::formatted_blocktorch_timeline;
 use crate::{
     codec_helpers::json_from_str,
     json_helpers::{
@@ -296,8 +297,24 @@ pub fn write_stats_from_str(text: &str, out: &mut dyn Write) -> io::Result<()> {
                     )?;
                 }
             }
+            write_blocktorch_info(res, out)?;
         } else {
             writeln!(out, "{}", text)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_blocktorch_info(res: &JsonValue, out: &mut dyn Write) -> io::Result<()> {
+    if let Some(blocktorch) = res.get("blocktorch").and_then(|v| v.as_object()) {
+        let kernel = blocktorch.get("kernel_digest").and_then(|v| v.as_str());
+        let benchmark = blocktorch.get("benchmark_commit").and_then(|v| v.as_str());
+        let trace = blocktorch.get("aggregator_trace").and_then(|v| v.as_str());
+        let latency = blocktorch.get("proof_latency_ms").and_then(|v| v.as_f64());
+        if let Some(lines) = formatted_blocktorch_timeline(kernel, benchmark, latency, trace) {
+            for line in lines {
+                writeln!(out, "{line}")?;
+            }
         }
     }
     Ok(())
@@ -645,4 +662,58 @@ fn cancel_log_path() -> std::path::PathBuf {
                 .join(".the_block")
                 .join("cancellations.log")
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_blocktorch_info;
+    use foundation_serialization::json::{Map as JsonMap, Number, Value as JsonValue};
+
+    fn blocktorch_payload() -> JsonValue {
+        let mut blocktorch = JsonMap::new();
+        blocktorch.insert(
+            "kernel_digest".to_string(),
+            JsonValue::String("digest-123".to_string()),
+        );
+        blocktorch.insert(
+            "benchmark_commit".to_string(),
+            JsonValue::String("bench-abc".to_string()),
+        );
+        blocktorch.insert(
+            "proof_latency_ms".to_string(),
+            JsonValue::Number(Number::from_f64(42.5).unwrap()),
+        );
+        blocktorch.insert(
+            "aggregator_trace".to_string(),
+            JsonValue::String("trace-xyz".to_string()),
+        );
+
+        let mut root = JsonMap::new();
+        root.insert("blocktorch".to_string(), JsonValue::Object(blocktorch));
+        JsonValue::Object(root)
+    }
+
+    #[test]
+    fn write_blocktorch_info_outputs_timeline_when_present() {
+        let res = blocktorch_payload();
+        let mut buffer = Vec::new();
+        write_blocktorch_info(&res, &mut buffer).unwrap();
+        let output = String::from_utf8(buffer).expect("valid utf8");
+        let expected = concat!(
+            "BlockTorch job timeline:\n",
+            "  kernel digest: digest-123\n",
+            "  benchmark commit: bench-abc\n",
+            "  proof latency (ms, last measurement): 42.50\n",
+            "  aggregator trace: trace-xyz\n"
+        );
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn write_blocktorch_info_noops_when_absent() {
+        let res = JsonValue::Object(JsonMap::new());
+        let mut buffer = Vec::new();
+        write_blocktorch_info(&res, &mut buffer).unwrap();
+        assert!(buffer.is_empty());
+    }
 }

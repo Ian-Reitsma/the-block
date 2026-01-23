@@ -1,5 +1,6 @@
 extern crate foundation_serialization as serde;
 
+use crate::blocktorch_timeline::formatted_blocktorch_timeline;
 use crate::{
     codec_helpers::{json_to_string, json_to_string_pretty},
     parse_utils::{parse_u64, take_string},
@@ -258,6 +259,18 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
             }
         }
     }
+    if let Some(blocktorch) = &view.blocktorch {
+        if let Some(lines) = formatted_blocktorch_timeline(
+            blocktorch.kernel_digest.as_deref(),
+            blocktorch.benchmark_commit.as_deref(),
+            blocktorch.proof_latency_ms,
+            blocktorch.aggregator_trace.as_deref(),
+        ) {
+            for line in lines {
+                println!("{line}");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -278,6 +291,8 @@ struct GovernorStatusView {
     last_economics_snapshot_hash: Option<String>,
     #[serde(default)]
     shadow_only: bool,
+    #[serde(default)]
+    blocktorch: Option<BlockTorchView>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,6 +341,18 @@ struct EconomicsPrevMetricView {
     market: String,
     utilization_ppm: i64,
     provider_margin_ppm: i64,
+}
+
+#[derive(Debug, Deserialize)]
+struct BlockTorchView {
+    #[serde(default)]
+    kernel_digest: Option<String>,
+    #[serde(default)]
+    benchmark_commit: Option<String>,
+    #[serde(default)]
+    proof_latency_ms: Option<f64>,
+    #[serde(default)]
+    aggregator_trace: Option<String>,
 }
 
 #[allow(dead_code)]

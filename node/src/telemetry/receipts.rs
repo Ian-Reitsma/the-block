@@ -5,8 +5,8 @@
 
 #[cfg(feature = "telemetry")]
 use super::{
-    register_counter, register_gauge, register_histogram, register_int_gauge,
-    register_int_gauge_vec,
+    blocktorch_update_metadata, register_counter, register_gauge, register_histogram,
+    register_int_gauge, register_int_gauge_vec,
 };
 use crate::receipts::Receipt;
 use crate::receipts_validation::ReceiptBlockUsage;
@@ -16,6 +16,8 @@ use concurrency::Lazy;
 use runtime::telemetry::IntGaugeVec;
 #[cfg(feature = "telemetry")]
 use runtime::telemetry::{Gauge, Histogram, IntCounter, IntGauge};
+#[cfg(feature = "telemetry")]
+use std::time::Duration;
 
 /// Receipt count by market type (telemetry)
 #[cfg(feature = "telemetry")]
@@ -193,6 +195,38 @@ pub static RECEIPT_ENCODING_FAILURES_TOTAL: Lazy<IntCounter> = Lazy::new(|| {
     register_counter(
         "receipt_encoding_failures_total",
         "Total receipt encoding failures (CRITICAL - indicates data corruption risk)",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_DRAIN_DEPTH: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge(
+        "receipt_drain_depth",
+        "Number of pending compute receipts drained for the current block",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static SLA_BREACH_DEPTH: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge(
+        "sla_breach_depth",
+        "Outstanding compute SLA breach entries awaiting settlement",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static ORCHARD_ALLOC_FREE_DELTA: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge(
+        "orchard_alloc_free_delta",
+        "Difference between allocator alloc/free pairs observed in ORCHARD_TENSOR_PROFILE",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static PROOF_VERIFICATION_LATENCY_MS: Lazy<Histogram> = Lazy::new(|| {
+    register_histogram(
+        "proof_verification_latency_ms",
+        "Latency to verify a SNARK proof (milliseconds)",
     )
 });
 
@@ -418,6 +452,29 @@ pub fn record_shard_usage(shard: u16, usage: &ReceiptBlockUsage) {
 
 #[cfg(not(feature = "telemetry"))]
 pub fn record_shard_usage(_shard: u16, _usage: &ReceiptBlockUsage) {}
+
+#[cfg(feature = "telemetry")]
+pub fn set_receipt_drain_depth(value: usize) {
+    RECEIPT_DRAIN_DEPTH.set(value as f64);
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_sla_breach_depth(value: usize) {
+    SLA_BREACH_DEPTH.set(value as f64);
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_orchard_alloc_free_delta(delta: i64) {
+    ORCHARD_ALLOC_FREE_DELTA.set(delta as f64);
+}
+
+#[cfg(feature = "telemetry")]
+pub fn record_proof_verification_latency(duration: Duration) {
+    PROOF_VERIFICATION_LATENCY_MS.observe(duration.as_secs_f64() * 1000.0);
+    blocktorch_update_metadata(|meta| {
+        meta.proof_latency_ms = Some(duration.as_secs_f64() * 1000.0)
+    });
+}
 
 /// Record metrics derivation time
 #[cfg(feature = "telemetry")]

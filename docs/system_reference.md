@@ -372,7 +372,15 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - `scheduler.stats` returns a richer struct (`SchedulerStats`): outcome counters (`success`, `capability_mismatch`, `reputation_failure`), queue depths per priority (`queued_high/normal/low`), pending jobs with effective priority, and preemption counters.
 - Together with `compute_market.stats` these RPCs explain why a job failed to match (e.g., reputation failure vs lack of capability) without scraping node logs.
 
-### 6.7 Energy market (providers, credits, receipts)
+### 6.7 BlockTorch job timeline
+
+- `tb-cli compute stats` now prints a `BlockTorch job timeline` block that lists the kernel digest, benchmark commit, most recent proof latency, and aggregator trace hash so you can tie telemetry snapshots to the ledger job that generated them.
+- `tb-cli governor status` surfaces the same timeline, giving you the kernel metadata that the governor gate saw plus the `/wrappers` hash it audited before applying economics or ad-targeting intents.
+- Override the emitted metadata with `TB_BLOCKTORCH_KERNEL_VARIANT_DIGEST` and `TB_BLOCKTORCH_BENCHMARK_COMMIT` when the instrumentation cannot capture the artifacts automatically; both CLI surfaces respect these knobs and report the values alongside the `blocktorch_aggregator_trace` hash so you can compare with the metrics-aggregator snapshot before trusting a gate.
+- Confirm the formatting never drifts by running `cargo test -p contract-cli --features telemetry formatted_blocktorch_timeline`. The helper exercised by this test enforces the header plus the kernel digest, benchmark commit, proof latency, and aggregator trace lines in that exact order (latency stays formatted to two decimals). When the test fails, check the helper, the RPC payload that supplies the `blocktorch` object, and the `TB_BLOCKTORCH_*` overrides you can set to emit fallback metadata.
+- If either CLI surface stops printing the timeline, rerun the helper test, then replay `contract-cli compute stats`/`tb-cli governor status` with `TB_BLOCKTORCH_KERNEL_VARIANT_DIGEST` set to a known value and the aggregator hash recorded from `/wrappers`. This reproduces the gating path so you can trace which field became `None`, fix the telemetry taps in `node/src/telemetry.rs`, and re-run the test before merging.
+
+### 6.8 Energy market (providers, credits, receipts)
 
 - **Core structs** (`crates/energy-market/src/lib.rs`):
   - `EnergyProvider { provider_id, owner, location, capacity_kwh, available_kwh, price_per_kwh, reputation_score, meter_address, total_delivered_kwh, staked_balance, last_fulfillment_latency_ms, last_meter_value, last_meter_timestamp }`.
@@ -391,7 +399,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - All tooling (oracle adapters, explorer, dashboards) reuse the schema documented in `docs/apis_and_tooling.md#energy-rpc-payloads-auth-and-error-contracts` so meter hashes/receipts stay byte-identical everywhere.
 - **Oracle adapter + mock service** (`crates/oracle-adapter`, `services/mock-energy-oracle`):
 - Adapter defines `SignatureVerifier`; the default (`Ed25519SignatureVerifier`) enforces signatures for every provider with a registered key. `MeterReadingPayload` implements `MeterReading` and exposes the canonical `signing_bytes()` digest (BLAKE3 of provider, meter, total kWh, timestamp) so verifiers can sign/verify consistently.
-  - Mock service (in-house `httpd` router) listens on `MOCK_ENERGY_ORACLE_ADDR` (default `127.0.0.1:8080`), exposes `/meter/:id/reading` (increments totals by 250 kWh, updates timestamp, returns payload) and `/meter/:id/submit` (accepts posted readings). Used by `scripts/deploy-worldos-testnet.sh`.
+  - Mock service (in-house `httpd` router) listens on `MOCK_ENERGY_ORACLE_ADDR` (default `127.0.0.1:8080`), exposes `/meter/:id/reading` (increments totals by 250 kWh, updates timestamp, returns payload) and `/meter/:id/submit` (accepts posted readings). Used by `scripts/deploy-block_os-testnet.sh`.
 - **Telemetry**:
   - Gauges: `energy_providers_count`, `energy_avg_price`. Counters: `energy_kwh_traded_total`, `energy_settlements_total{provider}`, `energy_signature_failure_total{provider,reason}`. Histograms: `energy_provider_fulfillment_ms`, `oracle_reading_latency_seconds`.
   - Logs: `node::energy::check_energy_market_health` warns on backlog spikes and settlement stalls. Metrics aggregator wiring (`/wrappers`, `/telemetry/summary`) plus Grafana panels (provider counts, pending credits, slash totals, settlement rates) are tracked in `docs/architecture.md#energy-governance-and-rpc-next-tasks`.
@@ -399,7 +407,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - `ParamKey::{EnergyMinStake, EnergyOracleTimeoutBlocks, EnergySlashingRateBps}` live in `governance/src/{lib.rs,codec.rs,params.rs}`. Runtime hooks clamp values before writing to `Params` and call `node::energy::set_governance_params`.
   - `node/tests/gov_param_wiring.rs` covers these round-trips; update it plus explorer/CLI timelines when adding new energy parameters (batch vs real-time settlement toggles, dependency graph validation, etc.).
 - **Snapshot/restore**:
-  - Use `TB_ENERGY_MARKET_DIR` to relocate the sled DB, snapshot it alongside other SimpleDb stores (§5.5), and restore during drills. `docs/testnet/ENERGY_QUICKSTART.md` and `scripts/deploy-worldos-testnet.sh` document the canonical register ➜ submit ➜ settle ➜ dispute workflow until dedicated dispute RPCs land.
+  - Use `TB_ENERGY_MARKET_DIR` to relocate the sled DB, snapshot it alongside other SimpleDb stores (§5.5), and restore during drills. `docs/testnet/ENERGY_QUICKSTART.md` and `scripts/deploy-block_os-testnet.sh` document the canonical register ➜ submit ➜ settle ➜ dispute workflow until dedicated dispute RPCs land.
 
 ---
 

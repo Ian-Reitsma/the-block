@@ -61,7 +61,7 @@ impl ChainSpec {
     }
 }
 
-pub fn worldos_testnet_config() -> ChainSpec {
+pub fn block_os_testnet_config() -> ChainSpec {
     let validators = vec![
         "energy-validator-0001".to_string(),
         "energy-validator-0002".to_string(),
@@ -84,14 +84,14 @@ pub fn worldos_testnet_config() -> ChainSpec {
     let mut config = NodeConfig::default();
     config.compute_market.settle_mode = SettleMode::Real;
     ChainSpec::from_genesis(
-        "World OS Testnet - Energy",
-        "worldos_energy_v1",
+        "Block OS Testnet - Energy",
+        "block_os_energy_v1",
         ChainType::Live,
         validators,
         energy_providers,
         jurisdiction_packs,
         config,
-        Some("wss://telemetry.worldos.network/submit".to_string()),
-        Some("worldos-energy".to_string()),
+        Some("wss://telemetry.block_os.network/submit".to_string()),
+        Some("block_os-energy".to_string()),
     )
 }

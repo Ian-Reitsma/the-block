@@ -1,6 +1,6 @@
 # Metal Orchard
 
-`metal-orchard` (the `metal-backend/` tree in The Block) is the incubation ground for Tensor v0, a deterministic tensor runtime and kernel stack engineered for Apple Silicon and the Metal application programming interface. This stack is the core of the BlockTorch compute framework described in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](../docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy), and it underpins verified ML compute workloads in the marketplace. The repository hosts every source file, test, and document required to construct the project; no external submodules are referenced.
+`metal-orchard` (the `blocktorch/` tree in The Block) is the incubation ground for Tensor v0, a deterministic tensor runtime and kernel stack engineered for Apple Silicon and the Metal application programming interface. This stack is the core of the BlockTorch compute framework described in [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](../docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii-blocktorch--the-compute-framework-strategy), and it underpins verified ML compute workloads in the marketplace. The repository hosts every source file, test, and document required to construct the project; no external submodules are referenced.
 
 ## Getting Started
 1. Install Xcode 15+, the Metal 4 SDK, and the command line tools so the build system can locate compilers and headers.

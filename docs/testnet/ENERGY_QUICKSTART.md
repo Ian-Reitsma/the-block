@@ -1,4 +1,4 @@
-# World OS Energy Testnet Quickstart
+# Block OS Energy Testnet Quickstart
 
 This drill mirrors the production energy-market stack: the same governance parameters, signature verification logic, and dynamic fee formulas described in `docs/economics_and_governance.md` run here, just with mock oracle inputs and relaxed RPC auth. Launch Governor still manages readiness gates (operational + naming today, future energy gate under `AGENTS.md §15`), so treat this testnet as a staging ground for autopilot changes—shadow mode first, then apply once telemetry looks healthy. Watch the new `economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, `economics_epoch_treasury_inflow_block`, and `economics_block_reward_per_block` gauges; they are the same inputs the governor uses before flipping the testnet/mainnet economics gate.
 
@@ -12,10 +12,10 @@ Use this flow to exercise the end-to-end energy market: registering providers, s
 
 ## 1. Build, Launch, and Tail Logs
 ```bash
-./scripts/deploy-worldos-testnet.sh
+./scripts/deploy-block_os-testnet.sh
 journalctl -fu the-block-node.service | rg --line-buffered energy
 ```
-The script compiles the node with the `worldos-testnet` feature, starts the bootstrap validator, launches the mock oracle on `127.0.0.1:8080`, and (when Docker is present) spins up Grafana/Prometheus. Tail the logs to watch meter submissions and settlements flow in real time.
+The script compiles the node with the `block_os-testnet` feature, starts the bootstrap validator, launches the mock oracle on `127.0.0.1:8080`, and (when Docker is present) spins up Grafana/Prometheus. Tail the logs to watch meter submissions and settlements flow in real time.
 
 ## 2. Register as Provider
 ```bash
@@ -114,7 +114,7 @@ prometheus_query 'energy_dispute_total'
 - **QUIC + transport chaos** — While the testnet node is live, run the WAN-scale drill (`scripts/chaos_quic.sh`) to fault oracle transport providers, rotate mutual-TLS fingerprints, and confirm `quic_failover_total`/`transport_capability_mismatch_total` stay within expectations. Capture Grafana screenshots and attach them to the drill log so operators can rehearse failure recovery before production changes.
 
 ## 9. Feedback Loop
-Open GitHub Discussions tagged `worldos/energy` or the `#world-os-energy` Discord channel to report issues. Include:
+Open GitHub Discussions tagged `block_os/energy` or the `#block_os-energy` Discord channel to report issues. Include:
 - The JSON returned by `contract-cli energy market --verbose`.
 - IDs from `contract-cli energy disputes --status open` (and any resolution notes you recorded).
 - Relevant Grafana screenshots + `/telemetry/summary` output.

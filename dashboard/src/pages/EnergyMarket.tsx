@@ -46,7 +46,7 @@ export function EnergyMarket({
 }: EnergyMarketProps) {
   return (
     <div className="energy-market">
-      <h1>World OS – Energy Market</h1>
+      <h1>Block OS – Energy Market</h1>
       <div className="metric-grid">
         <MetricCard title="Total Energy Traded" value={totalKwh} unit="kWh" />
         <MetricCard title="Active Providers" value={providerCount} />
