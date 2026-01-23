@@ -30,6 +30,8 @@ fn wrappers_snapshot_hash_is_pinned() {
     let mut blocktorch_trace_labels = HashMap::new();
     blocktorch_trace_labels.insert("hash".into(), "trace-hash-xyz".into());
     blocktorch_trace_labels.insert("source".into(), "wrappers".into());
+    let mut snark_labels = HashMap::new();
+    snark_labels.insert("backend".into(), "cpu".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
@@ -205,6 +207,11 @@ fn wrappers_snapshot_hash_is_pinned() {
                     value: 3.0,
                 },
                 WrapperMetricEntry {
+                    metric: "snark_prover_latency_seconds".into(),
+                    labels: snark_labels.clone(),
+                    value: 0.42,
+                },
+                WrapperMetricEntry {
                     metric: "blocktorch_kernel_variant_digest".into(),
                     labels: blocktorch_kernel_labels.clone(),
                     value: 1.0,
@@ -287,7 +294,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "5948fdf91fa8b7f47ea70607eaab03ec00f66b25caf717ec86a34cec1cc200ba",
+        "67a08532b243a0ce72f77db18c073981b7e68b931a0711e3b194ae0132fa8120",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

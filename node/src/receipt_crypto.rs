@@ -3,6 +3,7 @@
 // This module handles Ed25519 signature verification for market receipts,
 // preventing forged settlements and building confidence in economic metrics.
 
+use crate::blocktorch_accelerator::global_blocktorch_accelerator;
 use crate::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
 use crypto_suite::hashing::blake3;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
@@ -373,9 +374,10 @@ pub fn verify_receipt_signature(
             })?;
     let signature = Signature::from_bytes(&signature_array);
 
-    // Verify signature
-    verifying_key
-        .verify(&preimage, &signature)
+    // Verify signature via the configurable accelerator bridge.
+    let accelerator = global_blocktorch_accelerator();
+    accelerator
+        .verify_signature(&preimage, &verifying_key, &signature)
         .map_err(|e| CryptoError::InvalidSignature {
             reason: e.to_string(),
         })

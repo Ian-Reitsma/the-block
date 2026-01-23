@@ -1536,6 +1536,11 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         "ad_market_utilization_delta_ppm",
         &*AD_MARKET_UTILIZATION_DELTA,
     );
+    collect_wrapper_metric_samples(
+        &mut metrics,
+        "snark_prover_latency_seconds",
+        &*SNARK_PROVER_LATENCY_SECONDS,
+    );
     let blocktorch_meta = blocktorch_metadata_snapshot();
     if let Some(digest) = &blocktorch_meta.kernel_digest {
         push_metric(

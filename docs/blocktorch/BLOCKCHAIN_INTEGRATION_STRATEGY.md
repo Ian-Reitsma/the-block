@@ -376,6 +376,8 @@ pub fn create_accelerator(prefer_gpu: bool) -> Arc<dyn GpuAccelerator> {
 }
 ```
 
+Implementation note: the trait above is currently mirrored in `node/src/blocktorch_accelerator.rs`, where a CPU fallback is ready and the Blocktorch FFI will plug in through the same interface once the new kernel bridge lands.
+
 #### Rust ↔ C++ FFI Bridge
 
 Orchard will be linked as a static library; use `bindgen` + Rust FFI to call Metal kernels.

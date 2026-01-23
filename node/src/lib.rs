@@ -78,6 +78,8 @@ pub mod receipt_crypto;
 pub mod receipts;
 pub mod receipts_validation;
 pub mod simple_db;
+mod blockloading;
+pub mod blocktorch_accelerator;
 use crate::receipt_crypto::{NonceTracker, ProviderRegistry};
 use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};

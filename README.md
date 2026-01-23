@@ -200,6 +200,7 @@ That's it! You're running a local blockchain. See [`docs/operations.md`](docs/op
 | [`docs/developer_handbook.md`](docs/developer_handbook.md) | Environment setup, coding standards, testing/fuzzing, simulation, dependency policy, WASM/contracts, contribution flow. |
 | [`docs/apis_and_tooling.md`](docs/apis_and_tooling.md) | JSON-RPC, CLI, gateway HTTP & DNS, explorer, light-client streaming, storage APIs, probe CLI, metrics schemas. |
 | [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`](docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md) | Deep-dive analysis of economic architecture, governance, and the BlockTorch compute framework strategy. |
+| [`docs/blocktorch_compute_integration_plan.md`](docs/blocktorch_compute_integration_plan.md) | Integration checklist for BlockTorch compute artifacts, telemetry wiring, CLI/governor visibility, and governor traceability before landing compute-market changes. |
 
 Everything is kept in sync with `mdbook`; CI blocks merges if documentation drifts from the implementation.
 
