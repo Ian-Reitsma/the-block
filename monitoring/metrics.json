@@ -36,6 +36,12 @@
     },
     {
       "deprecated": false,
+      "description": "Gateway DoH resolver status=3 responses observed by the aggregator",
+      "labels": [],
+      "name": "aggregator_doh_resolver_failure_total"
+    },
+    {
+      "deprecated": false,
       "description": "TLS environment configuration warnings grouped by prefix and code",
       "labels": [
         "prefix",

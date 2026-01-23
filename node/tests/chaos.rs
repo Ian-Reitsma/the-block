@@ -354,6 +354,12 @@ impl TestNode {
     }
 }
 
+impl Drop for TestNode {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
 #[testkit::tb_serial]
 fn converges_under_loss() {
     runtime::block_on(async {
@@ -391,12 +397,25 @@ fn converges_under_loss() {
             the_block::sleep(Duration::from_millis(100)).await;
         }
 
-        let ok = wait_until_converged(
-            &[&node1.node, &node2.node, &node3.node],
-            Duration::from_secs(10 * timeout_factor()),
-        )
-        .await;
-        assert!(ok, "convergence timed out");
+        let max = Duration::from_secs(10 * timeout_factor());
+        assert!(
+            wait_until_converged(&[&node1.node, &node2.node, &node3.node], max).await,
+            "initial convergence timed out"
+        );
+
+        for _ in 0..9 {
+            {
+                let mut bc = node1.node.blockchain();
+                bc.mine_block_at("miner", ts).unwrap();
+                ts += 1;
+            }
+            node1.node.broadcast_chain();
+            the_block::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(
+            wait_until_converged(&[&node1.node, &node2.node, &node3.node], max).await,
+            "final convergence timed out"
+        );
 
         let h = node1.node.blockchain().block_height;
         run.artifacts

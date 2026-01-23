@@ -26,9 +26,9 @@ use httpd::{BlockingClient, Method};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
-    self, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle, HistogramOpts, HistogramVec,
-    IntCounter, IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle, IntGaugeVec, Opts,
-    Registry, TextEncoder,
+    self, Collector, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle, HistogramOpts,
+    HistogramVec, IntCounter, IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle,
+    IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -631,6 +631,16 @@ fn push_metric(
         labels: map,
         value,
     });
+}
+
+#[cfg(feature = "telemetry")]
+fn metric_sample_value_to_f64(value: &MetricSampleValue) -> Option<f64> {
+    match value {
+        MetricSampleValue::Counter(counter) => Some(*counter as f64),
+        MetricSampleValue::Gauge(gauge) => Some(*gauge),
+        MetricSampleValue::IntGauge(gauge) => Some(*gauge as f64),
+        MetricSampleValue::Histogram { sum, .. } => Some(*sum),
+    }
 }
 
 #[cfg(feature = "telemetry")]
@@ -1313,6 +1323,17 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         &[],
         LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL.get().get() as f64,
     );
+
+    for sample in Collector::collect(&*GATEWAY_DOH_STATUS_TOTAL).samples {
+        if let Some(value) = metric_sample_value_to_f64(&sample.value) {
+            let label_refs: Vec<(&str, &str)> = sample
+                .labels
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect();
+            push_metric(&mut metrics, "gateway_doh_status_total", &label_refs, value);
+        }
+    }
 
     WrapperSummary {
         metrics,
@@ -6919,6 +6940,21 @@ pub static GATEWAY_DNS_LOOKUP_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
         Opts::new(
             "gateway_dns_lookup_total",
             "Gateway DNS verification attempts grouped by status",
+        ),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("counter_vec: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry: {e}"));
+    c
+});
+
+pub static GATEWAY_DOH_STATUS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "gateway_doh_status_total",
+            "Gateway DoH resolver responses grouped by status",
         ),
         &["status"],
     )

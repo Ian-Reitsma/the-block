@@ -11,26 +11,32 @@ use ad_market::{
     ann, BadgeSoftIntentContext, DeliveryChannel, DeviceContext, GeoContext, ImpressionContext,
     MarketplaceHandle, MeshContext, ReservationKey,
 };
+use base64_fp::decode_standard;
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3::{self, Hasher};
 use crypto_suite::hex;
 use std::fs;
 use std::{
     collections::HashMap,
+    env,
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex, RwLock},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use sys::signals::{Signals, SIGHUP};
 
+use crate::gateway::dns;
 use crate::web::rate_limit::RateLimitFilter;
 use crate::{
-    ad_quality, ad_readiness::AdReadinessHandle, net, range_boost, range_boost::RangeBoost,
+    ad_quality, ad_readiness::AdReadinessHandle, drive, net, range_boost, range_boost::RangeBoost,
     service_badge, storage::pipeline, vm::wasm, ReadAck,
 };
-use foundation_serialization::{binary, json};
+use foundation_serialization::{
+    binary,
+    json::{self, Map as JsonMap, Number, Value as JsonValue},
+};
 use httpd::{
-    serve, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
+    serve, serve_tls, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
     WebSocketRequest, WebSocketResponse,
 };
 use runtime::sync::mpsc;
@@ -66,6 +72,337 @@ struct GatewayState {
     filter: Arc<Mutex<RateLimitFilter>>,
     readiness: Option<AdReadinessHandle>,
     mesh_queue: Arc<Mutex<RangeBoost>>,
+    resolver: ResolverConfig,
+    drive: Arc<drive::DriveStore>,
+}
+
+#[derive(Clone)]
+pub struct ResolverConfig {
+    addresses: Vec<IpAddr>,
+    ttl_secs: u32,
+    cname_target: Option<String>,
+}
+
+impl ResolverConfig {
+    pub fn from_env() -> Self {
+        let addresses = env::var("TB_GATEWAY_RESOLVER_ADDRS")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .filter_map(|entry| entry.trim().parse::<IpAddr>().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let ttl_secs = env::var("TB_GATEWAY_RESOLVER_TTL")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(60);
+        let cname_target = env::var("TB_GATEWAY_RESOLVER_CNAME").ok();
+        Self {
+            addresses,
+            ttl_secs,
+            cname_target,
+        }
+    }
+
+    pub fn with_addresses(
+        addresses: Vec<IpAddr>,
+        ttl_secs: u32,
+        cname_target: Option<String>,
+    ) -> Self {
+        Self {
+            addresses,
+            ttl_secs,
+            cname_target,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            addresses: Vec::new(),
+            ttl_secs: 60,
+            cname_target: None,
+        }
+    }
+
+    pub fn ttl(&self) -> u32 {
+        self.ttl_secs
+    }
+
+    pub fn cname(&self) -> Option<&str> {
+        self.cname_target.as_deref()
+    }
+
+    pub fn addresses(&self) -> &[IpAddr] {
+        &self.addresses
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordType {
+    A,
+    Aaaa,
+    Txt,
+    Cname,
+}
+
+impl RecordType {
+    fn as_u16(self) -> u16 {
+        match self {
+            RecordType::A => 1,
+            RecordType::Aaaa => 28,
+            RecordType::Txt => 16,
+            RecordType::Cname => 5,
+        }
+    }
+
+    fn matches_ip(self, addr: &IpAddr) -> bool {
+        match self {
+            RecordType::A => matches!(addr, IpAddr::V4(_)),
+            RecordType::Aaaa => matches!(addr, IpAddr::V6(_)),
+            _ => false,
+        }
+    }
+
+    fn from_u16(value: u16) -> Option<Self> {
+        match value {
+            1 => Some(RecordType::A),
+            28 => Some(RecordType::Aaaa),
+            16 => Some(RecordType::Txt),
+            5 => Some(RecordType::Cname),
+            _ => None,
+        }
+    }
+
+    fn from_str(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "a" | "1" => Some(RecordType::A),
+            "aaaa" | "28" => Some(RecordType::Aaaa),
+            "txt" | "16" => Some(RecordType::Txt),
+            "cname" | "5" => Some(RecordType::Cname),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DnsQuestion {
+    name: String,
+    record_type: RecordType,
+}
+
+#[derive(Debug)]
+struct DnsAnswer {
+    name: String,
+    record_type: RecordType,
+    ttl: u32,
+    data: JsonValue,
+}
+
+impl DnsAnswer {
+    fn to_json(&self) -> JsonValue {
+        let mut map = JsonMap::new();
+        map.insert("name".into(), JsonValue::String(self.name.clone()));
+        map.insert(
+            "type".into(),
+            JsonValue::Number(Number::from(self.record_type.as_u16() as u64)),
+        );
+        map.insert(
+            "TTL".into(),
+            JsonValue::Number(Number::from(self.ttl as u64)),
+        );
+        map.insert("data".into(), self.data.clone());
+        JsonValue::Object(map)
+    }
+}
+
+fn question_to_json(question: &DnsQuestion) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert("name".into(), JsonValue::String(question.name.clone()));
+    map.insert(
+        "type".into(),
+        JsonValue::Number(Number::from(question.record_type.as_u16() as u64)),
+    );
+    JsonValue::Object(map)
+}
+
+fn build_dns_payload(question: &DnsQuestion, answers: &[DnsAnswer], status: u16) -> JsonValue {
+    let mut map = JsonMap::new();
+    map.insert(
+        "Status".into(),
+        JsonValue::Number(Number::from(status as u64)),
+    );
+    map.insert("TC".into(), JsonValue::Bool(false));
+    map.insert("RD".into(), JsonValue::Bool(true));
+    map.insert("RA".into(), JsonValue::Bool(true));
+    map.insert("AD".into(), JsonValue::Bool(false));
+    map.insert("CD".into(), JsonValue::Bool(false));
+    map.insert(
+        "Question".into(),
+        JsonValue::Array(vec![question_to_json(question)]),
+    );
+    map.insert(
+        "Answer".into(),
+        JsonValue::Array(answers.iter().map(DnsAnswer::to_json).collect()),
+    );
+    JsonValue::Object(map)
+}
+
+fn fetch_gateway_txt(domain: &str) -> Option<String> {
+    let mut params = JsonMap::new();
+    params.insert("domain".into(), JsonValue::String(domain.to_string()));
+    let response = dns::gateway_policy(&JsonValue::Object(params));
+    if let JsonValue::Object(map) = response {
+        if let Some(JsonValue::String(record)) = map.get("record") {
+            return Some(record.clone());
+        }
+    }
+    None
+}
+
+fn answers_for_question(resolver: &ResolverConfig, question: &DnsQuestion) -> Vec<DnsAnswer> {
+    let mut answers = Vec::new();
+    let ttl = resolver.ttl();
+    match question.record_type {
+        RecordType::A | RecordType::Aaaa => {
+            for addr in resolver.addresses() {
+                if question.record_type.matches_ip(addr) {
+                    answers.push(DnsAnswer {
+                        name: question.name.clone(),
+                        record_type: question.record_type,
+                        ttl,
+                        data: JsonValue::String(addr.to_string()),
+                    });
+                }
+            }
+            if answers.is_empty() {
+                if let Some(target) = resolver.cname() {
+                    answers.push(DnsAnswer {
+                        name: question.name.clone(),
+                        record_type: RecordType::Cname,
+                        ttl,
+                        data: JsonValue::String(target.to_string()),
+                    });
+                }
+            }
+        }
+        RecordType::Cname => {
+            if let Some(target) = resolver.cname() {
+                answers.push(DnsAnswer {
+                    name: question.name.clone(),
+                    record_type: RecordType::Cname,
+                    ttl,
+                    data: JsonValue::String(target.to_string()),
+                });
+            }
+        }
+        RecordType::Txt => {
+            if let Some(record) = fetch_gateway_txt(&question.name) {
+                answers.push(DnsAnswer {
+                    name: question.name.clone(),
+                    record_type: RecordType::Txt,
+                    ttl,
+                    data: JsonValue::String(record),
+                });
+            }
+        }
+    }
+    answers
+}
+
+fn parse_dns_request(req: &Request<GatewayState>) -> Result<DnsQuestion, Response> {
+    if let Some(encoded) = req.query_param("dns") {
+        let bytes = match decode_standard(encoded) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return Err(Response::new(StatusCode::BAD_REQUEST)
+                    .with_body(b"invalid dns parameter".to_vec()));
+            }
+        };
+        return parse_dns_packet(&bytes).ok_or_else(|| {
+            Response::new(StatusCode::BAD_REQUEST).with_body(b"malformed dns payload".to_vec())
+        });
+    }
+
+    if let Some(name) = req.query_param("name") {
+        let normalized = normalize_domain(name).ok_or_else(|| {
+            Response::new(StatusCode::BAD_REQUEST).with_body(b"invalid domain".to_vec())
+        })?;
+        let record_type = req
+            .query_param("type")
+            .and_then(RecordType::from_str)
+            .unwrap_or(RecordType::A);
+        return Ok(DnsQuestion {
+            name: normalized,
+            record_type,
+        });
+    }
+
+    Err(Response::new(StatusCode::BAD_REQUEST)
+        .with_body(b"name or dns parameter required".to_vec()))
+}
+
+fn parse_dns_packet(bytes: &[u8]) -> Option<DnsQuestion> {
+    if bytes.len() < 12 {
+        return None;
+    }
+    let qdcount = u16::from_be_bytes([bytes[4], bytes[5]]);
+    if qdcount == 0 {
+        return None;
+    }
+    let mut index = 12;
+    let mut labels = Vec::new();
+    loop {
+        if index >= bytes.len() {
+            return None;
+        }
+        let len = bytes[index] as usize;
+        index += 1;
+        if len == 0 {
+            break;
+        }
+        if index + len > bytes.len() {
+            return None;
+        }
+        let label = &bytes[index..index + len];
+        if label.iter().any(|byte| *byte == 0) {
+            return None;
+        }
+        let label = std::str::from_utf8(label).ok()?;
+        labels.push(label);
+        index += len;
+    }
+    if index + 4 > bytes.len() {
+        return None;
+    }
+    let record_type = u16::from_be_bytes([bytes[index], bytes[index + 1]]);
+    let record_class = u16::from_be_bytes([bytes[index + 2], bytes[index + 3]]);
+    if record_class != 1 {
+        return None;
+    }
+    let question = DnsQuestion {
+        name: normalize_domain(&labels.join(".")).unwrap_or_default(),
+        record_type: RecordType::from_u16(record_type)?,
+    };
+    if question.name.is_empty() {
+        return None;
+    }
+    Some(question)
+}
+
+fn normalize_domain(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let trimmed = trimmed.trim_end_matches('.');
+    let normalized = trimmed.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 #[derive(Clone)]
@@ -856,14 +1193,34 @@ impl GatewayState {
         if !self.check_bucket(&ip) {
             return Err(Response::new(StatusCode::TOO_MANY_REQUESTS).close());
         }
-        let host = req.header("host").unwrap_or("").to_string();
-        if !self.stake.has_stake(&host) {
+        let host_header = req.header("host").unwrap_or("");
+        let host = canonical_host(host_header);
+        if host.is_empty() || !self.stake.has_stake(host) {
             return Err(
                 Response::new(StatusCode::FORBIDDEN).with_body(b"domain stake required".to_vec())
             );
         }
-        Ok(host)
+        Ok(host.to_string())
     }
+}
+
+fn canonical_host(value: &str) -> &str {
+    let host = value.trim();
+    if host.starts_with('[') {
+        if let Some(end) = host.find(']') {
+            if end > 1 {
+                return &host[1..end];
+            }
+            return host.trim_start_matches('[');
+        }
+        return host.trim_start_matches('[');
+    }
+    if let Some(idx) = host.rfind(':') {
+        if !host[..idx].contains(':') {
+            return &host[..idx];
+        }
+    }
+    host
 }
 
 /// Runs the gateway server on the given address.
@@ -876,8 +1233,23 @@ pub async fn run(
 ) -> diagnostics::anyhow::Result<()> {
     let listener =
         net::listener::bind_runtime("gateway", "gateway_listener_bind_failed", addr).await?;
+    let resolver = ResolverConfig::from_env();
+    run_listener(listener, stake, read_tx, market, readiness, None, resolver).await
+}
+
+/// Runs the gateway server on the provided listener.
+pub async fn run_listener(
+    listener: runtime::net::TcpListener,
+    stake: Arc<dyn StakeTable + Send + Sync>,
+    read_tx: mpsc::Sender<ReadAck>,
+    market: Option<MarketplaceHandle>,
+    readiness: Option<AdReadinessHandle>,
+    tls: Option<httpd::ServerTlsConfig>,
+    resolver: ResolverConfig,
+) -> diagnostics::anyhow::Result<()> {
     let mesh_queue = Arc::new(Mutex::new(RangeBoost::new()));
     range_boost::spawn_forwarder(&mesh_queue);
+    let drive_store = Arc::new(drive::DriveStore::from_env());
     let state = GatewayState {
         stake,
         read_tx,
@@ -886,13 +1258,22 @@ pub async fn run(
         market,
         readiness,
         mesh_queue,
+        resolver,
+        drive: drive_store,
     };
     let router = Router::new(state)
         .upgrade("/ws/peer_metrics", ws_peer_metrics)
+        .route(Method::Get, "/dns/resolve", handle_dns_resolve)
         .route(Method::Get, "/api/*tail", handle_api)
         .route(Method::Post, "/api/*tail", handle_api)
+        .route(Method::Get, "/drive/:object_id", handle_drive_fetch)
         .route(Method::Get, "/*path", handle_static);
-    serve(listener, router, ServerConfig::default()).await?;
+    let config = ServerConfig::default();
+    if let Some(tls_cfg) = tls {
+        serve_tls(listener, router, config, tls_cfg).await?;
+    } else {
+        serve(listener, router, config).await?;
+    }
     Ok(())
 }
 
@@ -988,6 +1369,76 @@ async fn ws_peer_metrics(
     }))
 }
 
+async fn handle_dns_resolve(req: Request<GatewayState>) -> Result<Response, HttpError> {
+    let state = req.state().clone();
+    let question = match parse_dns_request(&req) {
+        Ok(question) => question,
+        Err(response) => return Ok(response),
+    };
+    if !question.name.ends_with(".block") {
+        return Ok(Response::new(StatusCode::BAD_REQUEST)
+            .with_body(b"only .block domains are resolvable".to_vec()));
+    }
+    let has_stake = state.stake.has_stake(&question.name);
+    let answers = if has_stake {
+        answers_for_question(&state.resolver, &question)
+    } else {
+        Vec::new()
+    };
+    let status_value = if has_stake && !answers.is_empty() {
+        0
+    } else {
+        3
+    };
+    let status_code = if has_stake {
+        if answers.is_empty() {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::OK
+        }
+    } else {
+        StatusCode::FORBIDDEN
+    };
+    let status_label = status_value.to_string();
+    #[cfg(feature = "telemetry")]
+    {
+        crate::telemetry::GATEWAY_DOH_STATUS_TOTAL
+            .with_label_values(&[status_label.as_str()])
+            .inc();
+    }
+    let payload = build_dns_payload(&question, &answers, status_value);
+    let cache_control = if status_value == 3 {
+        "max-age=0".to_string()
+    } else {
+        format!("max-age={}", state.resolver.ttl())
+    };
+    let response = Response::new(status_code)
+        .json(&payload)?
+        .with_header("content-type", "application/dns-json")
+        .with_header("cache-control", cache_control)
+        .with_header("x-block-resolver", "doh");
+    Ok(response)
+}
+
+async fn handle_drive_fetch(req: Request<GatewayState>) -> Result<Response, HttpError> {
+    let state = req.state().clone();
+    if let Err(response) = state.authorize(&req) {
+        return Ok(response);
+    }
+    let object_id = req.param("object_id").unwrap_or("").trim();
+    if object_id.is_empty() {
+        return Ok(Response::new(StatusCode::BAD_REQUEST).with_body(b"missing object id".to_vec()));
+    }
+    if let Some(bytes) = state.drive.fetch(object_id) {
+        Ok(Response::new(StatusCode::OK)
+            .with_header("content-type", "application/octet-stream")
+            .with_header("content-length", bytes.len().to_string())
+            .with_body(bytes))
+    } else {
+        Ok(Response::new(StatusCode::NOT_FOUND))
+    }
+}
+
 async fn handle_static(req: Request<GatewayState>) -> Result<Response, HttpError> {
     let state = req.state().clone();
     let domain = match state.authorize(&req) {
@@ -1063,7 +1514,10 @@ mod tests {
         SelectionCandidateTrace, SelectionCohortTrace, SelectionReceipt, TokenOracle,
         MICROS_PER_DOLLAR,
     };
+    use base64_fp::encode_standard;
     use foundation_serialization::binary;
+    use foundation_serialization::json;
+    use foundation_serialization::json::Value as JsonValue;
     use httpd::{Method, Router, StatusCode};
     use runtime::sync::mpsc;
     use std::collections::{BTreeSet, HashMap, HashSet};
@@ -1108,9 +1562,96 @@ mod tests {
                 market,
                 readiness,
                 mesh_queue: Arc::new(Mutex::new(RangeBoost::new())),
+                resolver: ResolverConfig::empty(),
+                drive: Arc::new(drive::DriveStore::from_env()),
             },
             rx,
         )
+    }
+
+    fn build_dns_query(name: &str, record_type: RecordType) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(64);
+        buf.extend(&[0x00, 0x00]); // ID
+        buf.extend(&[0x01, 0x00]); // Flags (recursion desired)
+        buf.extend(&[0x00, 0x01]); // QDCOUNT
+        buf.extend(&[0x00, 0x00]); // ANCOUNT
+        buf.extend(&[0x00, 0x00]); // NSCOUNT
+        buf.extend(&[0x00, 0x00]); // ARCOUNT
+        for label in name.split('.') {
+            if label.is_empty() {
+                continue;
+            }
+            buf.push(label.len() as u8);
+            buf.extend(label.as_bytes());
+        }
+        buf.push(0);
+        buf.extend(&record_type.as_u16().to_be_bytes());
+        buf.extend(&1u16.to_be_bytes()); // IN class
+        buf
+    }
+
+    #[test]
+    fn doh_requires_stake_for_domain() {
+        let (state, _) = state_with_domains(&["allowed.block"]);
+        let router =
+            Router::new(state.clone()).route(Method::Get, "/dns/resolve", handle_dns_resolve);
+        let request = router
+            .request_builder()
+            .path("/dns/resolve")
+            .query_param("name", "missing.block")
+            .query_param("type", "A")
+            .build();
+        let response = runtime::block_on(router.handle(request)).unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn doh_returns_answer_for_resolved_domain() {
+        let (mut state, _) = state_with_domains(&["allowed.block"]);
+        state.resolver = ResolverConfig::with_addresses(vec!["1.2.3.4".parse().unwrap()], 37, None);
+        let router = Router::new(state).route(Method::Get, "/dns/resolve", handle_dns_resolve);
+        let request = router
+            .request_builder()
+            .path("/dns/resolve")
+            .query_param("name", "allowed.block")
+            .query_param("type", "A")
+            .build();
+        let response = runtime::block_on(router.handle(request)).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: JsonValue = json::from_slice(response.body()).unwrap();
+        let answers = body
+            .get("Answer")
+            .and_then(|value| value.as_array())
+            .unwrap_or(&Vec::new())
+            .clone();
+        assert!(!answers.is_empty());
+        let first = answers[0].as_object().unwrap();
+        assert_eq!(first.get("data").and_then(|v| v.as_str()), Some("1.2.3.4"));
+        assert_eq!(response.header("cache-control"), Some("max-age=37"));
+    }
+
+    #[test]
+    fn doh_handles_dns_payload_parameter() {
+        let (mut state, _) = state_with_domains(&["allowed.block"]);
+        state.resolver = ResolverConfig::with_addresses(vec!["5.6.7.8".parse().unwrap()], 45, None);
+        let router = Router::new(state).route(Method::Get, "/dns/resolve", handle_dns_resolve);
+        let query = build_dns_query("allowed.block", RecordType::A);
+        let encoded = encode_standard(&query);
+        let request = router
+            .request_builder()
+            .path("/dns/resolve")
+            .query_param("dns", encoded)
+            .build();
+        let response = runtime::block_on(router.handle(request)).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: JsonValue = json::from_slice(response.body()).unwrap();
+        let answers = body
+            .get("Answer")
+            .and_then(|value| value.as_array())
+            .unwrap_or(&Vec::new())
+            .clone();
+        let first = answers[0].as_object().unwrap();
+        assert_eq!(first.get("data").and_then(|v| v.as_str()), Some("5.6.7.8"));
     }
 
     struct StubMarketplace {

@@ -3,8 +3,8 @@ use p2p_overlay::inhouse_overlay::{
 };
 use p2p_overlay::{Discovery, OverlayService, StubOverlay};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use sys::tempfile::tempdir;
 
 fn peer(bytes: u8) -> InhousePeerId {

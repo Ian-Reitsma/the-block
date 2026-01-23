@@ -141,6 +141,7 @@ pub mod localnet;
 pub mod net;
 pub mod partition_recover;
 pub use net::peer_metrics_store;
+pub mod drive;
 pub mod p2p;
 pub mod parallel;
 pub mod poh;

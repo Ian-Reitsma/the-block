@@ -2355,7 +2355,7 @@ mod tests {
         let _guard = metrics_registry_guard();
         let quinn_label = transport::ProviderKind::Quinn.id();
         let quinn_handle = TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
-            .handle_for_label_values(&[quinn_label])
+            .ensure_handle_for_label_values(&[quinn_label])
             .expect("quinn handle");
         quinn_handle.reset();
         assert_eq!(quinn_handle.get(), 0);
@@ -2366,7 +2366,7 @@ mod tests {
 
         let s2n_label = transport::ProviderKind::S2nQuic.id();
         let s2n_handle = TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
-            .handle_for_label_values(&[s2n_label])
+            .ensure_handle_for_label_values(&[s2n_label])
             .expect("s2n handle");
         s2n_handle.reset();
         assert_eq!(s2n_handle.get(), 0);

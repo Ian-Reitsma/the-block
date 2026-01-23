@@ -198,6 +198,7 @@ const METRIC_TELEMETRY_INGEST_TOTAL: &str = "aggregator_telemetry_ingest_total";
 const METRIC_TELEMETRY_SCHEMA_ERROR_TOTAL: &str = "aggregator_telemetry_schema_error_total";
 const METRIC_TLS_ENV_WARNING_TOTAL: &str = "tls_env_warning_total";
 const METRIC_TLS_ENV_WARNING_EVENTS_TOTAL: &str = "tls_env_warning_events_total";
+const METRIC_DOH_RESOLVER_FAILURE_TOTAL: &str = "aggregator_doh_resolver_failure_total";
 const METRIC_TLS_ENV_WARNING_LAST_SEEN: &str = "tls_env_warning_last_seen_seconds";
 const METRIC_TLS_ENV_WARNING_RETENTION_SECONDS: &str = "tls_env_warning_retention_seconds";
 const METRIC_TLS_ENV_WARNING_ACTIVE_SNAPSHOTS: &str = "tls_env_warning_active_snapshots";
@@ -1473,6 +1474,50 @@ impl AppState {
         spawn_log_dump(record.clone());
     }
 
+    fn record_doh_resolver_failures(&self, node_id: &str, metrics: &[WrapperMetricEntry]) {
+        const METRIC_NAME: &str = "gateway_doh_status_total";
+        for metric in metrics {
+            if metric.metric != METRIC_NAME {
+                continue;
+            }
+            let status = match metric.labels.get("status").map(String::as_str) {
+                Some(value) => value,
+                None => continue,
+            };
+            if status != "3" {
+                continue;
+            }
+            if !metric.value.is_finite() {
+                continue;
+            }
+            let cache_key = (
+                node_id.to_string(),
+                format!("{METRIC_NAME}#status={status}"),
+            );
+            let delta = {
+                let mut cache = self.last_metric_values.lock().unwrap();
+                let previous = cache.insert(cache_key, metric.value);
+                previous.and_then(|prev| Self::metric_delta(prev, metric.value))
+            };
+            if let Some(delta) = delta {
+                aggregator_metrics()
+                    .doh_resolver_failure_total
+                    .inc_by(delta);
+            }
+        }
+    }
+
+    fn metric_delta(previous: f64, current: f64) -> Option<u64> {
+        if !previous.is_finite() || !current.is_finite() {
+            return None;
+        }
+        let diff = current - previous;
+        if !diff.is_finite() || diff <= 0.0 {
+            return None;
+        }
+        Some(diff.round() as u64)
+    }
+
     fn record_tls_warning_samples(&self, peer_id: &str, metrics: &Value) {
         let counter_samples = extract_tls_warning_counters(metrics);
         let gauge_samples = extract_tls_warning_last_seen(metrics);
@@ -1604,6 +1649,7 @@ impl AppState {
     }
     fn record_telemetry(&self, entry: TelemetrySummary) {
         aggregator_metrics().record_ad_readiness(entry.ad_readiness.as_ref());
+        self.record_doh_resolver_failures(&entry.node_id, &entry.wrappers.metrics);
         if let Ok(mut map) = self.telemetry.lock() {
             let deque = map
                 .entry(entry.node_id.clone())
@@ -2049,6 +2095,7 @@ struct AggregatorMetrics {
     tls_env_warning_variables_fingerprint: IntGaugeVec,
     tls_env_warning_detail_fingerprint_total: CounterVec,
     tls_env_warning_variables_fingerprint_total: CounterVec,
+    doh_resolver_failure_total: Counter,
     tls_env_warning_detail_unique_fingerprints: IntGaugeVec,
     tls_env_warning_variables_unique_fingerprints: IntGaugeVec,
     treasury_disbursement_count: GaugeVec,
@@ -3592,6 +3639,12 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
             tls_env_warning_variables_fingerprint_total.clone(),
         ))
         .expect("register tls_env_warning_variables_fingerprint_total");
+    let doh_resolver_failure_total = registry
+        .register_counter(
+            METRIC_DOH_RESOLVER_FAILURE_TOTAL,
+            "Detects DoH resolver status=3 increments",
+        )
+        .expect("register aggregator_doh_resolver_failure_total");
     let _bridge_anomaly_total = registry
         .register_counter(
             METRIC_BRIDGE_ANOMALY_TOTAL,
@@ -4084,6 +4137,7 @@ static METRICS: Lazy<AggregatorMetrics> = Lazy::new(|| {
         tls_env_warning_variables_fingerprint,
         tls_env_warning_detail_fingerprint_total,
         tls_env_warning_variables_fingerprint_total,
+        doh_resolver_failure_total,
         tls_env_warning_detail_unique_fingerprints,
         tls_env_warning_variables_unique_fingerprints,
         treasury_disbursement_count,
@@ -10425,6 +10479,40 @@ mod tests {
         assert_eq!(metrics.ad_readiness_price_usd_micros.get(), 0.0);
         assert_eq!(metrics.ad_readiness_market_price_usd_micros.get(), 0.0);
         assert_eq!(metrics.utilization_label_count(), 0);
+    }
+
+    #[test]
+    fn telemetry_records_doh_failure_counter() {
+        let metrics = aggregator_metrics();
+        metrics.doh_resolver_failure_total.reset();
+        let dir = tempfile::tempdir().unwrap();
+        let state = AppState::new("node-doh".into(), dir.path().join("doh.json"), 60);
+        let mut summary = TelemetrySummary {
+            node_id: "node-doh".into(),
+            seq: 1,
+            timestamp: 1_000,
+            sample_rate_ppm: 1_000,
+            compaction_secs: 30,
+            memory: HashMap::new(),
+            wrappers: WrapperSummaryEntry {
+                metrics: vec![WrapperMetricEntry {
+                    metric: "gateway_doh_status_total".into(),
+                    labels: HashMap::from([("status".into(), "3".into())]),
+                    value: 2.0,
+                }],
+                governance: None,
+            },
+            ad_readiness: None,
+        };
+        state.record_telemetry(summary.clone());
+        assert_eq!(metrics.doh_resolver_failure_total.get(), 0);
+
+        summary.seq = 2;
+        summary.timestamp = 2_000;
+        summary.wrappers.metrics[0].value = 5.0;
+        state.record_telemetry(summary);
+        assert_eq!(metrics.doh_resolver_failure_total.get(), 3);
+        metrics.doh_resolver_failure_total.reset();
     }
 
     #[test]

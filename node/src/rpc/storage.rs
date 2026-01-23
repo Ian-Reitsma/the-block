@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+use base64_fp::decode_standard;
 use concurrency::Lazy;
 use foundation_serialization::json::{Map, Number, Value};
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use storage_market::{
     ProofOutcome, ProofRecord, ReplicaIncentive, StorageMarket, StorageMarketError,
 };
 
+use crate::drive::DriveStore;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
@@ -583,6 +585,23 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
         ("policy", policy),
         ("manifests", Value::Array(entries)),
     ])
+}
+
+/// Storage drive upload endpoint for `contract-cli storage put`.
+pub fn drive_put(encoded: &str) -> Value {
+    let bytes = match decode_standard(encoded) {
+        Ok(bytes) => bytes,
+        Err(err) => return error_value(format!("invalid base64 payload: {err}")),
+    };
+    let store = DriveStore::from_env();
+    match store.store(&bytes) {
+        Ok(object_id) => json_object(vec![
+            ("object_id", Value::String(object_id.clone())),
+            ("size", Value::Number(Number::from(bytes.len() as u64))),
+            ("share_url", Value::String(store.share_url(&object_id))),
+        ]),
+        Err(err) => error_value(err),
+    }
 }
 
 /// Drain pending storage market receipts for block inclusion.

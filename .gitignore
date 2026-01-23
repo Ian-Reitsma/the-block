@@ -304,11 +304,24 @@ node/governance_db/
 node/ledger_db/
 node/state_db/
 
+# Node runtime metadata artifacts
+node/**/manifest.json
+node/**/race.json
+node/energy_market/manifest.json
+node/state/race.json
+
+# Node runtime directories
+node/energy_market/
+node/state/
+
 # Local node runtime state (node-data contains transient RPC/telemetry caches; ignore it)
 node-data/
 
 # Local scratch files generated during runs
 tmp_old.json
+
+# Drive cache produced by `contract-cli storage put`
+blobstore/
 
 # Node snapshots and history
 node/snapshots/

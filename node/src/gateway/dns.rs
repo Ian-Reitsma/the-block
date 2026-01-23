@@ -441,6 +441,20 @@ pub fn total_locked_stake() -> u64 {
     total
 }
 
+pub fn domain_has_stake(domain: &str) -> bool {
+    let db = DNS_DB.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(bytes) = db.get(&ownership_key(domain)) {
+        if let Ok(record) = decode_ownership(&bytes) {
+            if let Some(stake_reference) = record.owner_stake.as_ref() {
+                if let Ok(Some(stake_record)) = load_stake(&db, stake_reference) {
+                    return stake_record.amount > 0;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[derive(Clone, Debug)]
 struct DnsMetricEvent {
     ts: u64,

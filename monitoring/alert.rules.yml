@@ -96,6 +96,14 @@ groups:
           severity: warn
         annotations:
           summary: "TLS warning snapshots stale beyond retention ({{ printf \"%.0f\" $value }} affected)"
+      - alert: DnsResolverStatus3Detected
+        expr: increase(aggregator_doh_resolver_failure_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Gateway DoH resolver returning Status=3 responses"
+          description: "aggregator_doh_resolver_failure_total increased; check TB_GATEWAY_RESOLVER_ADDRS, vault stake tables, and DNS answers to ensure the resolver has valid answers."
       - alert: SelectionProofSnarkFallback
         expr: increase(ad_selection_attestation_total{kind="tee",result="fallback"}[10m]) > 0
         for: 10m

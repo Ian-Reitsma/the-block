@@ -209,6 +209,12 @@ required-features = ["cli"]
 test = false
 
 [[bin]]
+name = "gateway"
+path = "src/bin/gateway.rs"
+required-features = ["cli", "gateway"]
+test = false
+
+[[bin]]
 name = "migrate_overlay_store"
 path = "../scripts/migrate_overlay_store.rs"
 test = false

@@ -2,6 +2,7 @@ use crate::parse_utils::{
     parse_bool, parse_positional_u32, parse_positional_u64, parse_usize, require_positional,
     take_string,
 };
+use base64_fp::encode_standard;
 use cli_core::{
     arg::{ArgSpec, FlagSpec, OptionSpec, PositionalSpec},
     command::{Command, CommandBuilder, CommandId},
@@ -37,6 +38,11 @@ pub enum StorageCmd {
         shares: u16,
         price: u64,
         retention: u64,
+    },
+    /// Upload a real file through the drive endpoint
+    Put {
+        file: String,
+        deterministic_fixture: Option<String>,
     },
     /// Challenge a storage provider
     Challenge {
@@ -624,6 +630,23 @@ impl StorageCmd {
             )
             .subcommand(
                 CommandBuilder::new(
+                    CommandId("storage.put"),
+                    "put",
+                    "Upload a file through the drive cache",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "file",
+                    "File path to upload",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "deterministic-fixture",
+                    "deterministic-fixture",
+                    "Use deterministic fixture payload instead of the supplied file",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
                     CommandId("storage.challenge"),
                     "challenge",
                     "Challenge a storage provider",
@@ -767,6 +790,14 @@ impl StorageCmd {
                     shares,
                     price,
                     retention,
+                })
+            }
+            "put" => {
+                let file = require_positional(sub_matches, "file")?;
+                let deterministic_fixture = take_string(sub_matches, "deterministic-fixture");
+                Ok(StorageCmd::Put {
+                    file,
+                    deterministic_fixture,
                 })
             }
             "challenge" => {
@@ -1004,6 +1035,47 @@ pub fn handle(cmd: StorageCmd) {
             let resp = rpc::storage::upload(contract, vec![offer]);
             println!("{}", resp);
             println!("reserved {} BLOCK", total);
+        }
+        StorageCmd::Put {
+            file,
+            deterministic_fixture,
+        } => {
+            let data = if let Some(fixture) = deterministic_fixture.as_deref() {
+                deterministic_chunks(fixture, 4)
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            } else {
+                match fs::read(&file) {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        eprintln!("failed to read {}: {err}", file);
+                        process::exit(1);
+                    }
+                }
+            };
+            let payload = encode_standard(&data);
+            let resp = rpc::storage::drive_put(&payload);
+            let object_id = resp
+                .get("object_id")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            if object_id.is_empty() {
+                eprintln!("drive upload failed: {resp}");
+                process::exit(1);
+            }
+            let size = resp
+                .get("size")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(data.len() as u64);
+            println!("drive object id: {object_id}");
+            println!("size: {size} bytes");
+            if let Some(link) = resp.get("share_url").and_then(|value| value.as_str()) {
+                println!("share link: {link}");
+            }
+            if let Some(fixture) = deterministic_fixture {
+                println!("deterministic fixture: {fixture}");
+            }
         }
         StorageCmd::Challenge {
             object_id,

@@ -121,6 +121,45 @@
 - Keep these values in sync with downstream dashboards: the aggregator exposes `energy_*` counters in `/wrappers` and the Grafana energy board charts dispute counts, settlement backlog (`energy_pending_credits_total`), and signature failures.
 - The energy dashboards also surface the new `energy_quorum_shortfall_total`, `energy_reading_reject_total{reason}`, and `energy_dispute_total{state}` counters so operators can correlate rejected readings, quorum shortfalls, and dispute lifecycle movements with the aggregator summary and Prometheus alerts.
 
+## Gateway Service Runbook
+
+- **Service binary & unit** – `deploy/systemd/gateway.service` now points at the first-class `gateway` binary (`node/src/bin/gateway.rs`). The service executes `gateway --listen 0.0.0.0:9000` (change the `--listen` flag or `--config-dir` path for non-default clusters) and reloads TLS artifacts from `/etc/the-block/tls/gateway` via the existing staging hooks.
+- **TLS wiring** – TLS is configured either through the CLI flags `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-client-ca-optional`, or by setting the matching env vars `TB_GATEWAY_TLS_CERT`, `TB_GATEWAY_TLS_KEY`, `TB_GATEWAY_TLS_CLIENT_CA`, and `TB_GATEWAY_TLS_CLIENT_CA_OPTIONAL`. The gateway respects the `http_env` naming pattern so anything that already stages `TB_*_TLS` for RPC or aggregator can be reused.
+- **Stake gating** – HTTP requests must include a `Host` header that resolves to a domain with a stake deposit. The gateway ignores any port suffix (so `Host: example.block:9000` still maps to `example.block`) before checking the DNS ownership store (`node/src/gateway/dns.rs`) and verifying that `dns_ownership/<domain>` points to a `dns_stake/<reference>` record with positive escrowed BLOCK—the helper `domain_has_stake` enforces this check before any content is served. Use the DNS auction/stake CLI (see the same file) to mint the domain and deposit the stake.
+- **Static blobs** – Static files live under `pipeline/gateway/static/<domain>/<path>`. The request path is sanitized (`pipeline::sanitized_path`), so populate the matching directory tree within `pipeline/gateway/static` and the gateway will serve it directly (see `node/src/storage/pipeline.rs:fetch_blob`).
+- **Smoke test** – When you deploy a gateway, verify the stake gate with `curl http://localhost:9000/ -H "Host: some.block"`: expect `403 domain stake required` before the domain entry is funded, then `200 OK` once `dns_ownership/some.block` includes an `owner_stake`. The integration test at `node/tests/gateway_service.rs` exercises this exact flow.
+
+### `.block` DNS resolver (DoH)
+
+- **Purpose** – The gateway now speaks DNS-over-HTTPS at `/dns/resolve`. The endpoint returns `application/dns-json` payloads with `Status`, TTL, and `Answer` arrays, only responds to `.block` domains, and reuses the same stake table that gates static hosts. The behavior is driven by three knobs:
+  - `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses the resolver should advertise (default: empty, must be populated for useful answers).
+  - `TB_GATEWAY_RESOLVER_TTL`: cache TTL in seconds (default `60`). The gateway echoes this value in the JSON `Answer` entries and the HTTP `Cache-Control` header.
+  - `TB_GATEWAY_RESOLVER_CNAME`: optional CNAME target emitted when the address list is empty (for example `gateway.example.block` pointing back into the mesh).
+
+- **Device setup** – Android users can configure “Private DNS” or “Custom DoH” and point it to `https://<gateway>/dns/resolve?name=%s&type=%t` with a wrapped hostname such as `gateway.example.block`. iOS/macOS clients can use the DNS settings in `Settings → Wi-Fi → Configure DNS → Manual` with a third-party DoH profile (e.g., NextDNS) that lets you specify the same URL template; browsers accept the same string via their DoH settings. Desktop apps that understand the DoH JSON format will simply call `GET /dns/resolve?name=foo.block&type=A`.
+- **Smoke test** – Run `curl -v https://gateway.example.block/dns/resolve?name=foo.block&type=A`. If the domain has stake, you should see HTTP `200`, `Status=0` in the JSON, at least one `Answer` entry, and a `Cache-Control` header matching the TTL. Removing the stake record should flip the HTTP status to `403 domain stake required` while the JSON body still emits `Status=3`.
+- **Failure handling** – Stake shortages and unanswered questions both emit HTTP `Status=3` payloads so aggregator counters stay aligned; a 403 response still includes an empty JSON `Answer` array (and `cache-control: max-age=0`), which keeps `aggregator_doh_resolver_failure_total` ticking even when the request was rejected before serving DNS data.
+- **Chaos drill** – Simulate resolver drift by temporarily blanking `TB_GATEWAY_RESOLVER_ADDRS` or pointing it at a non-routable IP. Confirm clients fail fast or fall back to a cached `TB_GATEWAY_URL` share link, then re-apply the previous settings and ensure the same JSON output returns within one TTL so the failure window is captured in the incident log.
+- **Telemetry & alerts** – Each `Status=3` response bumps `aggregator_doh_resolver_failure_total` in `/wrappers`, and the `DnsResolverStatus3Detected` alert in `monitoring/alert.rules.yml` reacts to the 5m delta so you know when resolver answers disappear. The `monitoring/grafana/telemetry.json` dashboard now exposes a panel for `aggregator_doh_resolver_failure_total` so you can correlate resolver failures with stake-table/gateway changes; capture a new panel screenshot and `/wrappers` hash whenever you touch this surface.
+
+### Drive-lite file loop
+
+- **Purpose** – `contract-cli storage put <file>` now uploads real bytes, prints the object ID, and emits a shareable URL (`TB_GATEWAY_URL/drive/<object_id>`). The gateway exposes `/drive/:object_id`, which serves cached bytes from `blobstore/drive` and optionally fetches missing IDs from trusted peers (`TB_DRIVE_PEERS`). Two machines can share a file by setting one node’s `TB_DRIVE_PEERS` to the other’s gateway URL while retaining determinism and replay integrity.
+- **Configuration**
+  - `TB_DRIVE_BASE_DIR`: where the gateway caches objects (default `blobstore/drive`). Ensure the path exists and is mirrored by your `.gitignore`.
+  - `TB_DRIVE_PEERS`: comma-separated fallback URLs (e.g., `https://gateway2.example.block`). When a requested ID is missing locally, the gateway sequentially queries these peers before returning `404`.
+  - `TB_DRIVE_ALLOW_PEER_FETCH`: enable remote fetching (default `1`). Use `0` for air-gapped or single-node deployments.
+  - `TB_DRIVE_FETCH_TIMEOUT_MS`: HTTP timeout for peer fetches (default `3000` ms).
+  - `TB_GATEWAY_URL`: base URL (default `http://localhost:9000`) used by the CLI when printing the share link and by metrics that expose the drive endpoint.
+  - Stake gating still applies: the `Host` header must point at a domain with `domain_has_stake`, so `/drive/<id>` reuses the same deposit you already maintain for static assets.
+- **Workflow**
+  1. Run `contract-cli storage put /path/to/file`. The CLI prints the object ID and the share link, and honors `--deterministic-fixture` for reproducible testdata.
+  2. Retrieve the object locally with `curl --fail https://yourgateway/drive/<object_id>`. Expect `Content-Type: application/octet-stream` and `Content-Length` equal to the file size.
+  3. For cross-node reads, configure the secondary node with `TB_DRIVE_PEERS=https://primary.gateway/block` and `TB_DRIVE_ALLOW_PEER_FETCH=1`. The secondary portal will fetch the bytes over HTTPS, cache them under its own `blobstore/drive`, and serve them for subsequent requests.
+  4. Share the `TB_GATEWAY_URL` link (e.g., https://gateway.example.block/drive/<object_id>) in release notes or DoH TXT records so mobile browsers can open the resource directly.
+- **Smoke test** – Upload a sample file, fetch it from the same gateway, then switch to another node with `TB_DRIVE_PEERS` pointing at the uploader and confirm `curl` succeeds there too. Log the `contract-cli` output and the `curl` response (match the hashes) before and after toggling `TB_DRIVE_ALLOW_PEER_FETCH` to prove the fallback path works.
+- **Chaos drill** – Stop the peer that holds the file while the secondary node is fetching; the request should fail with a `404` or `504` depending on timeout. Capture the failure and rerun the upload + fetch sequence once the peer rejoins so you can compare the drive cache timestamps and confirm the recovery path behaves deterministically.
+
 ## Treasury Stuck
 
 Payload alignment and telemetry:
