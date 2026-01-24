@@ -134,6 +134,7 @@ pub enum ParamKey {
     BridgeFailureSlash,
     BridgeChallengeSlash,
     BridgeDutyWindowSecs,
+    ProofVerificationBudgetMs,
     AdUsePercentileThresholds,
     AdViewerPercentile,
     AdHostPercentile,

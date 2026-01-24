@@ -22,27 +22,26 @@ fn modulus() -> &'static BigUint {
     &MODULUS
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub struct FieldElement(BigUint);
 
 impl FieldElement {
     pub fn zero() -> Self {
-        Self(BigUint::zero())
+        Self::from_with_action(BigUint::zero(), "FieldElement::zero")
     }
 
     pub fn one() -> Self {
-        Self(BigUint::one())
+        Self::from_with_action(BigUint::one(), "FieldElement::one")
     }
 
     pub fn from_u64(value: u64) -> Self {
-        Self(BigUint::from(value)).reduce()
+        Self::from_with_action(BigUint::from(value), "FieldElement::from_u64")
     }
 
     pub fn from_decimal_str(value: &str) -> Result<Self, Groth16Error> {
         BigUint::parse_bytes(value.as_bytes(), 10)
             .ok_or_else(|| Groth16Error::FieldConversion(format!("invalid field element: {value}")))
-            .map(Self)
-            .map(Self::reduce_inner)
+            .map(|value| Self::from_with_action(value, "FieldElement::from_decimal_str"))
     }
 
     pub fn inner(&self) -> &BigUint {
@@ -53,14 +52,23 @@ impl FieldElement {
         self.0.clone()
     }
 
-    fn reduce(self) -> Self {
-        Self::reduce_inner(self)
-    }
-
     fn reduce_inner(value: Self) -> Self {
         let modulus = modulus();
         let reduced = value.0 % modulus;
         Self(reduced)
+    }
+
+    fn from_with_action(value: BigUint, action: &str) -> Self {
+        Self::reduce_inner(Self(value)).trace(action)
+    }
+
+    fn trace(self, action: &str) -> Self {
+        self.log_state(action);
+        self
+    }
+
+    fn log_state(&self, action: &str) {
+        self.0.log_digits(action);
     }
 }
 
@@ -80,7 +88,13 @@ impl FromStr for FieldElement {
 
 impl From<BigUint> for FieldElement {
     fn from(value: BigUint) -> Self {
-        Self(value).reduce()
+        Self::from_with_action(value, "FieldElement::from(BigUint)")
+    }
+}
+
+impl Clone for FieldElement {
+    fn clone(&self) -> Self {
+        Self(self.0.clone()).trace("FieldElement::clone")
     }
 }
 
@@ -97,7 +111,7 @@ impl Add for FieldElement {
         let modulus = modulus();
         let mut sum = self.0 + rhs.0;
         sum %= modulus;
-        FieldElement(sum)
+        FieldElement::from_with_action(sum, "FieldElement::add")
     }
 }
 
@@ -107,9 +121,9 @@ impl Sub for FieldElement {
     fn sub(self, rhs: Self) -> Self::Output {
         let modulus = modulus();
         if self.0 >= rhs.0 {
-            FieldElement(self.0 - rhs.0)
+            FieldElement::from_with_action(self.0 - rhs.0, "FieldElement::sub")
         } else {
-            FieldElement(&self.0 + modulus - rhs.0)
+            FieldElement::from_with_action(&self.0 + modulus - rhs.0, "FieldElement::sub")
         }
     }
 }
@@ -119,7 +133,7 @@ impl Mul for FieldElement {
 
     fn mul(self, rhs: Self) -> Self::Output {
         let modulus = modulus();
-        FieldElement((self.0 * rhs.0) % modulus)
+        FieldElement::from_with_action((self.0 * rhs.0) % modulus, "FieldElement::mul")
     }
 }
 

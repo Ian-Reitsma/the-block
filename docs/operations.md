@@ -29,6 +29,7 @@
 	  5. Update `docs/system_reference.md`, `docs/overview.md`, and this runbook to mention the updated CLI/governor outputs plus the `TB_BLOCKTORCH_*` knobs (see the plan). Reference the plan when describing how to read the new fields.
   6. After wiring, run the mandated command suite (`just lint`, `just fmt`, `just test-fast`, `just test-full`, `cargo test -p the_block --test replay`, `cargo test -p the_block --test settlement_audit --release`, `scripts/fuzz_coverage.sh`) plus `npm ci --prefix monitoring && make monitor`. Attach logs and the `metrics-aggregator` wrapper hash to the PR, and mention the runbook cross-checks (kernel hash diff, aggregator hash, CLI status sample).
 
+- **New gate**: The BlockTorch governor now manages `proof_verification_budget_ms` (default 100 ms). Settlement inspects the recorded `ProofBundle::latency_ms` values in `SlaRecord::proofs` and flips `SlaOutcome::Completed` into `SlaOutcome::Violated { reason: "proof_latency_budget" }` whenever the max latency breaches the budget, triggering the normal slash/refund/telemetry flow. Reference `docs/system_reference.md#6.3`, cite the BlockTorch timeline (`tb-cli compute stats` / `tb-cli governor status`), and record any manual budget tweaks (or rollback steps) in this runbook.
 - **Operator note**: During incidents, query `tb-cli governor status --rpc <endpoint>` (the `telemetry gauges (ppm)` section now includes BlockTorch metrics). Correlate `proof_verification_latency` with the Grafana panel `blocktorch-proofs-latency` and the aggregator trace ID recorded in `/wrappers`.
 
 ### Runtime Reactor
@@ -162,6 +163,8 @@
 - **Smoke test** – When you deploy a gateway, verify the stake gate with `curl http://localhost:9000/ -H "Host: some.block"`: expect `403 domain stake required` before the domain entry is funded, then `200 OK` once `dns_ownership/some.block` includes an `owner_stake`. The integration test at `node/tests/gateway_service.rs` exercises this exact flow.
 
 ### `.block` DNS resolver (DoH)
+
+- See [`docs/gateway_mobile_resolution.md`](docs/gateway_mobile_resolution.md) for the phone-specific DoH/DNS runbook, TLS knobs, and verification steps referenced below.
 
 - **Purpose** – The gateway now speaks DNS-over-HTTPS at `/dns/resolve`. The endpoint returns `application/dns-json` payloads with `Status`, TTL, and `Answer` arrays, only responds to `.block` domains, and reuses the same stake table that gates static hosts. The behavior is driven by three knobs:
   - `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses the resolver should advertise (default: empty, must be populated for useful answers).

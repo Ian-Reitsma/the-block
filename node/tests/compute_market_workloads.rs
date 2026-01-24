@@ -13,12 +13,8 @@ fn inference_workload(input: Vec<u8>) -> Workload {
 }
 
 fn expected_inference_output(data: &[u8]) -> [u8; 32] {
-    let artifact_hash = workloads::hash_bytes(data);
-    let mut h = blake3::Hasher::new();
-    h.update(&artifact_hash);
-    h.update(data);
-    h.update(&(data.len() as u64).to_le_bytes());
-    *h.finalize().as_bytes()
+    let payload = BlockTorchInference::new(data.to_vec(), data.to_vec());
+    workloads::inference::cpu_fallback_hash(&payload)
 }
 
 tb_prop_test!(transcode_hash_matches, |runner| {

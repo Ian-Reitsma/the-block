@@ -129,6 +129,7 @@ pub trait RuntimeAdapter {
     fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
     fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
     fn set_storage_engine_policy(&mut self, _allowed: &[String]) {}
+    fn set_proof_verification_budget_ms(&mut self, _v: u64) {}
     fn set_energy_min_stake(&mut self, _v: u64) {}
     fn set_energy_oracle_timeout_blocks(&mut self, _v: u64) {}
     fn set_energy_slashing_rate_bps(&mut self, _v: u64) {}
@@ -235,6 +236,10 @@ impl<'a> Runtime<'a> {
 
     pub fn set_storage_engine_policy(&mut self, allowed: &[String]) {
         self.adapter.set_storage_engine_policy(allowed);
+    }
+
+    pub fn set_proof_verification_budget_ms(&mut self, v: u64) {
+        self.adapter.set_proof_verification_budget_ms(v);
     }
 
     pub fn set_energy_min_stake(&mut self, value: u64) {
@@ -662,6 +667,8 @@ pub struct Params {
     pub treasury_percent: i64,
     #[serde(default = "default_proof_rebate_limit")]
     pub proof_rebate_limit: i64,
+    #[serde(default = "default_proof_verification_budget_ms")]
+    pub proof_verification_budget_ms: i64,
     pub rent_rate_per_byte: i64,
     pub kill_switch_subsidy_reduction: i64,
     pub miner_reward_logistic_target: i64,
@@ -831,6 +838,7 @@ impl Default for Params {
             energy_settlement_expiry_blocks: default_energy_settlement_expiry_blocks(),
             treasury_percent: 0,
             proof_rebate_limit: default_proof_rebate_limit(),
+            proof_verification_budget_ms: default_proof_verification_budget_ms(),
             rent_rate_per_byte: 0,
             kill_switch_subsidy_reduction: 0,
             miner_reward_logistic_target: 100,
@@ -1083,6 +1091,10 @@ impl Params {
             Value::Number(self.proof_rebate_limit.into()),
         );
         map.insert(
+            "proof_verification_budget_ms".into(),
+            Value::Number(self.proof_verification_budget_ms.into()),
+        );
+        map.insert(
             "rent_rate_per_byte".into(),
             Value::Number(self.rent_rate_per_byte.into()),
         );
@@ -1320,6 +1332,7 @@ impl Params {
                 .unwrap_or_else(default_energy_settlement_expiry_blocks),
             treasury_percent: take_i64("treasury_percent")?,
             proof_rebate_limit: take_i64("proof_rebate_limit")?,
+            proof_verification_budget_ms: take_i64("proof_verification_budget_ms")?,
             rent_rate_per_byte: take_i64("rent_rate_per_byte")?,
             kill_switch_subsidy_reduction: take_i64("kill_switch_subsidy_reduction")?,
             miner_reward_logistic_target: take_i64("miner_reward_logistic_target")?,
@@ -1515,6 +1528,10 @@ impl Params {
 
 const fn default_proof_rebate_limit() -> i64 {
     1
+}
+
+const fn default_proof_verification_budget_ms() -> i64 {
+    100
 }
 
 const fn default_runtime_backend_policy() -> i64 {
@@ -1732,6 +1749,14 @@ fn apply_proof_rebate_limit(v: i64, p: &mut Params) -> Result<(), ()> {
         return Err(());
     }
     p.proof_rebate_limit = v;
+    Ok(())
+}
+
+fn apply_proof_verification_budget_ms(v: i64, p: &mut Params) -> Result<(), ()> {
+    if v < 0 || v > 10_000 {
+        return Err(());
+    }
+    p.proof_verification_budget_ms = v;
     Ok(())
 }
 
@@ -2362,6 +2387,19 @@ pub fn registry() -> &'static [ParamSpec] {
             timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
             apply: apply_proof_rebate_limit,
             apply_runtime: |_v, _rt| Ok(()),
+        },
+        ParamSpec {
+            key: ParamKey::ProofVerificationBudgetMs,
+            default: default_proof_verification_budget_ms(),
+            min: 0,
+            max: 10_000,
+            unit: "milliseconds",
+            timelock_epochs: DEFAULT_TIMELOCK_EPOCHS,
+            apply: apply_proof_verification_budget_ms,
+            apply_runtime: |v, rt| {
+                rt.set_proof_verification_budget_ms(v.max(0) as u64);
+                Ok(())
+            },
         },
         ParamSpec {
             key: ParamKey::RentRatePerByte,

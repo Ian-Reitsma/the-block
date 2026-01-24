@@ -88,8 +88,18 @@ BlockTorch is the deterministic tensor/autograd layer that powers verified ML co
 
 ## Debugging and Diagnostics
 - Enable `RUST_LOG=trace` plus the diagnostics subscriber when chasing runtime issues; `diagnostics::tracing` is wired everywhere.
+- Trace FieldElement/BigUint allocations by exporting `THE_BLOCK_BIGINT_TRACE=1`. The new instrumentation prints each digits buffer pointer/length when a `FieldElement` or `BigUint` is created or cloned, helping correlate allocator events with sanitiser reports during prover/constraint evaluation work.
 - `cli/src/debug_cli.rs` and `contract-cli diagnostics …` provide structured dumps for mempool, scheduler, gossip, mesh, TLS, and telemetry state.
 - Use `docs/operations.md#probe-cli-and-diagnostics` for probe commands.
+
+To validate the release SNARK bench under AddressSanitizer, preload `librustc-nightly_rt.asan.dylib` (so malloc/free interceptors run before the allocator is initialized) and build with `-Z sanitizer=address`. For example on macOS:
+```bash
+DYLD_INSERT_LIBRARIES="$(rustc +nightly --print target-libdir)/librustc-nightly_rt.asan.dylib" \
+THE_BLOCK_BIGINT_TRACE=1 \
+RUSTFLAGS="-Z sanitizer=address" \
+cargo +nightly test -p node prover_cache_benefits_repeated_runs --release
+```
+On Linux swap `DYLD_INSERT_LIBRARIES` → `LD_PRELOAD`. Once ASan pinpoints the corrupt write/free, adjust `AssignmentCS` or FieldElement cloning as needed and rerun the same command to confirm `prover_cache_benefits_repeated_runs` completes cleanly.
 
 ## Performance and Benchmarks
 - Bench harnesses sit under `benches/`, `monitoring/build`, and `node/benches`. Publish results through the metrics exporter by setting `TB_BENCH_PROM_PATH`.

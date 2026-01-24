@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::compute_market::snark::ProofBundle;
@@ -38,6 +39,19 @@ const KEY_SLA_HISTORY: &str = "sla_history";
 const KEY_SLA_SLASHES: &str = "sla_slash_queue";
 const SLA_HISTORY_LIMIT: usize = 256;
 const SLA_PROOF_LIMIT: usize = 16;
+const DEFAULT_PROOF_VERIFICATION_BUDGET_MS: u64 = 100;
+
+static PROOF_VERIFICATION_BUDGET_MS: AtomicU64 =
+    AtomicU64::new(DEFAULT_PROOF_VERIFICATION_BUDGET_MS);
+
+/// Update the active proof verification budget (ms) from governance.
+pub fn set_proof_verification_budget_ms(value_ms: u64) {
+    PROOF_VERIFICATION_BUDGET_MS.store(value_ms, Ordering::Relaxed);
+}
+
+fn proof_verification_budget_ms() -> u64 {
+    PROOF_VERIFICATION_BUDGET_MS.load(Ordering::Relaxed)
+}
 
 fn json_map(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
@@ -421,7 +435,19 @@ impl SettlementState {
         let mut burned = 0;
         let mut refunded = 0;
         let mut slash_event: Option<(u64, String)> = None;
-        let outcome_kind = match outcome {
+        let mut enforced_outcome = outcome;
+        if matches!(&enforced_outcome, SlaOutcome::Completed) {
+            if let Some(latency) = record.proofs.iter().map(|proof| proof.latency_ms).max() {
+                let budget = proof_verification_budget_ms();
+                if budget > 0 && latency > budget {
+                    enforced_outcome = SlaOutcome::Violated {
+                        reason: "proof_latency_budget",
+                        automated: true,
+                    };
+                }
+            }
+        }
+        let outcome_kind = match enforced_outcome {
             SlaOutcome::Completed => {
                 self.record_event(&record.provider, "sla_completed", 0);
                 self.metadata.last_sla_violation = None;

@@ -25,6 +25,7 @@ pub mod price_board;
 pub mod receipt;
 pub mod scheduler;
 pub mod settlement;
+mod tensor_profile;
 pub mod workload;
 
 #[cfg(doctest)]
@@ -374,6 +375,19 @@ impl Market {
                         } else {
                             state.proof_latency_sum_ms / state.proof_latency_count
                         };
+                        if let Some(snapshot) = tensor_profile::capture_tensor_profile_snapshot() {
+                            #[cfg(feature = "telemetry")]
+                            {
+                                telemetry::receipts::set_orchard_alloc_free_delta(snapshot.delta);
+                                telemetry::receipts::set_blocktorch_tensor_profile_epoch(Some(
+                                    &snapshot.epoch,
+                                ));
+                            }
+                            if let Some(meta) = state.blocktorch_metadata.as_mut() {
+                                meta.tensor_profile_epoch = Some(snapshot.epoch.clone());
+                            }
+                        }
+
                         let blocktorch = state.blocktorch_metadata.as_ref().map(|meta| {
                             BlockTorchReceiptMetadata {
                                 kernel_variant_digest: meta.kernel_digest,

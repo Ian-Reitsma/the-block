@@ -343,6 +343,7 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - `SlaResolution { outcome: Completed | Cancelled { reason } | Violated { reason }, burned, refunded, proofs }`.
 - Automation:
 - Violations call `SlaOutcome::Violated { reason, automated }`, burn the lesser of the bond and configured slash amount (`COMPUTE_SLA_AUTOMATED_SLASH_TOTAL`, `SLASHING_BURN_TOTAL`).
+  - A governor-controlled `proof_verification_budget_ms` knob (default 100 ms) now backs this rule. Settlement checks the latencies recorded in `SlaRecord::proofs` before emitting the SLA outcome; if the max latency exceeds the budget the job is reclassified as `SlaOutcome::Violated { reason: "proof_latency_budget" }` and follows the same slash/refund/telemetry path, keeping the BlockTorch timeline (`tb-cli compute stats` / `tb-cli governor status`) and `/wrappers` hash aligned with the budget gate.
   - Dashboards plot `COMPUTE_SLA_PENDING_TOTAL`, `COMPUTE_SLA_VIOLATIONS_TOTAL`, and `COMPUTE_SLA_NEXT_DEADLINE_TS`.
 - Operator workflow:
   1. Arm settlement via `compute_arm_real` RPC, wait for the `activate_at` block height, then advance to `SettleMode::Real`.
@@ -383,8 +384,11 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 #### BlockTorch inference job format & receipts
 
 - `Workload::Inference` payloads now encode a BlockTorch job: the `artifact` bytes describe the compiled model/kernels, `input` is the tensor encoding the inference request, `benchmark_commit` links to the `/tmp/bench/<commit>/benchmarks.json` trace, and `tensor_profile_epoch` points to the `ORCHARD_TENSOR_PROFILE` log bucket that observed the allocations.
+- Runtime execution currently relies on the deterministic CPU fallback; orchard or CUDA runtimes will land behind this hook once the shared library integration is ready. The `kernel_variant_digest` now includes the Metal kernel bundle, build flags, and the runtime version stamp from `blocktorch/metal-tensor/runtime_version.txt`.
+- Kernel provenance derives from the Metal kernel bundle and build flags (CMake cache + root CMake) rather than the raw inference payload, matching the `kernel_variant_digest` semantics documented in `docs/architecture.md`.
 - Each inference slice still publishes an expected output hash inside `Job::slices`; compute matches must reproduce that hash to complete the proof loop. The `WorkloadRunner` now mixes the artifact + input deterministically (CPU fallback today, Metal once enabled) so identical metadata yields identical outputs.
 - The settlement receipt now carries the `blocktorch` struct (`node/src/receipts.rs`) containing `kernel_variant_digest`, `benchmark_commit`, `tensor_profile_epoch`, and the averaged `proof_latency_ms`. This is the canonical on-chain proof of which artifact produced the block, the benchmark that validated the commit, the tensor-profile epoch pointer that documents allocator churn, and the SNARK latency that bounded verifier budgets. See [`docs/architecture.md#receipt-types-and-schema`](docs/architecture.md#receipt-types-and-schema) for the exact field list.
+- `tensor_profile_epoch` hashes `/tmp/orchard_tensor_profile.log` (plus alloc/free counts); we parse the log after every compute job so the resulting `epoch` string and `orchard_alloc_free_delta` gauge give operators a quick check that allocations/free counts matched the logged hardware profile.
 - Receipts feed explorer/CLI timelines plus telemetry (`proof_verification_latency`, `orchard_alloc_free_delta`, `blocktorch_benchmark_commit`, `blocktorch_kernel_variant_digest`) so operators can trace every job from submission through `tensor_profile_epoch` to governor intent.
 
 ### 6.8 Energy market (providers, credits, receipts)

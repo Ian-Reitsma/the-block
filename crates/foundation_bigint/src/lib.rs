@@ -6,6 +6,7 @@ use core::ops::{
     Add, AddAssign, Mul, MulAssign, Rem, RemAssign, Shl, ShlAssign, Shr, ShrAssign, Sub, SubAssign,
 };
 use foundation_math::numbers::{One, Zero};
+use std::sync::OnceLock;
 
 const LIMB_BITS: u32 = 32;
 const LIMB_BASE: u64 = 1u64 << LIMB_BITS;
@@ -18,12 +19,42 @@ pub mod traits {
 
 /// Unsigned arbitrary-precision integer backed by base-2^32 limbs stored in
 /// little-endian order (least-significant limb first).
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Default, Eq, PartialEq)]
 pub struct BigUint {
     digits: Vec<u32>,
 }
 
+fn instrumentation_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("THE_BLOCK_BIGINT_TRACE").is_ok())
+}
+
+fn maybe_log_digits(action: &str, digits: &Vec<u32>) {
+    if instrumentation_enabled() {
+        eprintln!(
+            "[bigint] {} ptr={:p} len={} cap={}",
+            action,
+            digits.as_ptr(),
+            digits.len(),
+            digits.capacity()
+        );
+    }
+}
+
+impl Clone for BigUint {
+    fn clone(&self) -> Self {
+        let digits = self.digits.clone();
+        let cloned = Self { digits };
+        cloned.log_digits("BigUint::clone");
+        cloned
+    }
+}
+
 impl BigUint {
+    pub fn log_digits(&self, action: &str) {
+        maybe_log_digits(action, &self.digits);
+    }
+
     /// Construct zero.
     #[must_use]
     pub fn zero() -> Self {

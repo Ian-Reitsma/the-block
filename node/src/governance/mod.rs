@@ -86,6 +86,7 @@ pub enum ParamKey {
     AdReadinessMinProviderCount,
     TreasuryPercent,
     ProofRebateLimit,
+    ProofVerificationBudgetMs,
     RentRatePerByte,
     KillSwitchSubsidyReduction,
     MinerRewardLogisticTarget,

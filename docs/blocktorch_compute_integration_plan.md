@@ -92,6 +92,7 @@ This plan is explicitly connected to [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_A
 - **Actions**:
   1. BlockTorch backend: capture telemetry hooks, ensure `ORCHARD_TENSOR_PROFILE` instrumentation is stable (log at `/tmp/orchard_tensor_profile.log`), snapshot `metal-tensor/metal/kernels` versions + GPU driver metadata, and tie job reproducibility steps into `node/src/telemetry` via `receipt_metadata`.
      - Propagate allocator logs from `metal-tensor/metal/runtime/Allocator.h` (alloc/free pairs, device label) into `node/src/telemetry`. The plan must describe how aggregator panels parse the `/tmp/orchard_tensor_profile.log` lines and correlate them with receipt IDs.
+     - Kernel provenance now hashes the Metal kernel bundle (`metal-tensor/metal/kernels`), the CMake cache, the root CMake configuration, and the runtime version stamp file (`metal-tensor/runtime_version.txt`) so receipts carry the true runtime variant digest.
   2. CUDA backend: design API (compute kernels, verification budgets, deterministic scheduler, proof export) in the BlockTorch repo; produce matching metadata (kernel file list, driver version, commit hash) and push via `ReceiptStore`.
      - Mirror MetalContext/queue semantics from `metal-tensor/metal/runtime/MetalContext.*` when designing CUDA contexts so command queue pooling + profiling behave similarly.
   3. SDK plugin: design plugin trait for new fabrics (abstract compute device, deterministic scheduler, proof emitter, cost/performance hints, `probe`s) inside `node/src/compute/mod.rs`; document plugin lifecycle (init, run, proof emit, cleanup) referencing `blocktorch/metal-tensor/runtime/` for device management.
@@ -119,6 +120,7 @@ This plan is explicitly connected to [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_A
 - **Goal**: Make the proof loop visible end-to-end and connect `ORCHARD_TENSOR_PROFILE` to Prometheus.
 - **Actions**:
   1. Add metrics in `node/src/telemetry` for BlockTorch job lifecycle (`proof_verification_latency`, `sla_breach_count`, `receipt_drain_depth`, `orchard_alloc_free_delta`).
+     - Parse `/tmp/orchard_tensor_profile.log` after each compute job so the allocator alloc/free delta and log hash can travel through `tensor_profile_epoch` plus the `orchard_alloc_free_delta` gauge.
   2. Wire new metrics through `metrics-aggregator` and refresh Grafana dashboards in `monitoring`; ensure the JSON includes `ORCHARD_TENSOR_PROFILE` log paths and kernel hashes as labels.
   3. Document telemetry expectations in `docs/operations.md#telemetry-wiring` (list new metrics + panel IDs) and update aggregator `/wrappers` docs with their export names.
   4. Extend `blocktorch/metal/common/Profiling.h` to expose labels consumed by the aggregator or duplicate them through `node/src/telemetry` hooks.
@@ -193,7 +195,7 @@ This plan is explicitly connected to [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_A
 
 ### 5.c Definitions & Key Terms
 - **Metal Tensor + BlockTorch Kernel Hash** — metadata bundle (SHA256) covering the set of Metal or CUDA shader source files used by a job; exported in receipts under `kernel_variant.digest` and referenced by aggregator metrics/dashboards.
-- **Proof verification budget** — the 100 ms upper bound for `snark_prover_latency_seconds` (reported per lane) measured from receipt emission to ledger settlement; failure triggers SLA slashing and a governor intent event.
+- **Proof verification budget** — the 100 ms upper bound for `snark_prover_latency_seconds` (reported per lane) measured from receipt emission to ledger settlement; failure triggers SLA slashing and a governor intent event. Settlement compares the recorded `ProofBundle::latency_ms` samples before applying `SlaOutcome::Completed`, warns if the max latency exceeds the budget and emits `SlaOutcome::Violated { reason: "proof_latency_budget" }`, so operators can monitor `tb-cli governor status`, `tb-cli compute stats`, and the `/wrappers` hash before touching the knob.
 - **Allocator log epoch** — sequential record from `/tmp/orchard_tensor_profile.log` capturing `alloc/free` pairs with labels like `Tensor::fromData`, `runtime::metal_fill`, etc.; aggregator `orchard_alloc_free_delta` histogram calculates discrepancy per job.
 - **Determinism lab log** — reproducibility artifact (structured JSON) combining the BlockTorch backend commit hash, `benchmarks/run.py` output path, kernel hash set, `ORCHARD_TENSOR_PROFILE` path, and driver/OS metadata; attached to each PR and stored as part of the DoD.
 - **Gov shadow/apply** — each new parameter flows through a governor gate with two modes (shadow record only vs apply + state change); documented transitions appear in `docs/operations.md#telemetry-wiring` via table (Gate name, metric, prerequisites, rollback steps).
