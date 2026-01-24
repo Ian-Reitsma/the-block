@@ -6,6 +6,7 @@ use super::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy, Sto
 use crate::compute_market::settlement::Settlement;
 use crate::simple_db::{names, SimpleDb};
 use crate::storage::manifest_binary::{decode_manifest, encode_manifest, encode_store_receipt};
+use crate::storage::marketplace::SearchOptions;
 use crate::storage::settings;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -487,6 +488,20 @@ impl StoragePipeline {
                 })
             })
             .collect()
+    }
+
+    /// Build marketplace search options backed by the provider snapshots.
+    pub fn marketplace_search_options(&self, object_size: u64, shares: u16) -> SearchOptions {
+        let ready = self.provider_profile_snapshots().len();
+        let limit = ready.max(5).min(100);
+        SearchOptions {
+            object_size,
+            shares: shares.max(1),
+            region: env::var("TB_GATEWAY_REGION").ok(),
+            limit,
+            max_price_per_block: None,
+            min_success_rate_ppm: Some(900_000),
+        }
     }
 
     pub fn set_provider_maintenance(

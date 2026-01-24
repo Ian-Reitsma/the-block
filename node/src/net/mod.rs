@@ -2341,8 +2341,7 @@ mod tests {
         with_metric_handle(
             "transport_handshake_attempt_total",
             [provider_label],
-            TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
-                .ensure_handle_for_label_values(&[provider_label]),
+            TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL.ensure_handle_for_label_values(&[provider_label]),
             |handle| handle.inc(),
         );
     }

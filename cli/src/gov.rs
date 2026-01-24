@@ -33,6 +33,8 @@ use the_block::rpc::treasury::{
 };
 use the_block::{governance::release::ReleaseAttestation as NodeReleaseAttestation, provenance};
 
+const DISBURSEMENT_SCHEMA: &str = include_str!("../../docs/spec/disbursement.schema.json");
+
 struct CliReleaseVerifier;
 
 impl ReleaseVerifier for CliReleaseVerifier {
@@ -457,12 +459,20 @@ pub enum GovParamCmd {
 }
 
 pub enum GovDisbursementCmd {
-    /// Validate and preview a disbursement JSON payload
-    Preview { json_path: String },
+    /// Validate and preview a disbursement JSON payload or dump the schema
+    Preview {
+        json_path: Option<String>,
+        schema: bool,
+        check: bool,
+    },
     /// Create a disbursement JSON template
     Create { output: String },
     /// Submit a disbursement proposal via RPC
-    Submit { json_path: String, rpc: String },
+    Submit {
+        json_path: String,
+        rpc: String,
+        check: bool,
+    },
     /// Show a specific disbursement by ID via RPC
     Show { id: u64, rpc: String },
     /// Advance a disbursement through the governance state machine via RPC
@@ -1410,8 +1420,7 @@ impl GovDisbursementCmd {
                 "Create a disbursement JSON template",
             )
             .arg(ArgSpec::Option(
-                OptionSpec::new("output", "output", "Output file path")
-                    .default("disbursement.json"),
+                OptionSpec::new("json", "json", "Output file path").default("disbursement.json"),
             ))
             .build(),
         )
@@ -1421,9 +1430,20 @@ impl GovDisbursementCmd {
                 "preview",
                 "Validate and preview a disbursement JSON payload",
             )
-            .arg(ArgSpec::Positional(PositionalSpec::new(
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "json",
                 "json",
                 "Path to disbursement JSON file",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "schema",
+                "schema",
+                "Print the disbursement JSON schema",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "check",
+                "check",
+                "Fail if validation errors are detected",
             )))
             .build(),
         )
@@ -1433,9 +1453,15 @@ impl GovDisbursementCmd {
                 "submit",
                 "Submit a disbursement proposal via RPC",
             )
-            .arg(ArgSpec::Positional(PositionalSpec::new(
+            .arg(ArgSpec::Option(OptionSpec::new(
+                "json",
                 "json",
                 "Path to disbursement JSON file",
+            )))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "check",
+                "check",
+                "Validate the payload without sending",
             )))
             .arg(ArgSpec::Option(
                 OptionSpec::new("rpc", "rpc", "RPC endpoint").default("http://127.0.0.1:26658"),
@@ -1530,19 +1556,34 @@ impl GovDisbursementCmd {
 
         match name {
             "create" => {
-                let output = take_string(sub_matches, "output")
+                let output = take_string(sub_matches, "json")
                     .unwrap_or_else(|| "disbursement.json".to_string());
                 Ok(GovDisbursementCmd::Create { output })
             }
             "preview" => {
-                let json_path = require_positional(sub_matches, "json")?;
-                Ok(GovDisbursementCmd::Preview { json_path })
+                let schema = sub_matches.get_flag("schema");
+                let check = sub_matches.get_flag("check");
+                let json_path = take_string(sub_matches, "json");
+                if !schema && json_path.is_none() {
+                    return Err("missing --json when --schema is not provided".to_string());
+                }
+                Ok(GovDisbursementCmd::Preview {
+                    json_path,
+                    schema,
+                    check,
+                })
             }
             "submit" => {
-                let json_path = require_positional(sub_matches, "json")?;
+                let json_path =
+                    take_string(sub_matches, "json").ok_or_else(|| "missing --json".to_string())?;
                 let rpc = take_string(sub_matches, "rpc")
                     .unwrap_or_else(|| "http://127.0.0.1:26658".to_string());
-                Ok(GovDisbursementCmd::Submit { json_path, rpc })
+                let check = sub_matches.get_flag("check");
+                Ok(GovDisbursementCmd::Submit {
+                    json_path,
+                    rpc,
+                    check,
+                })
             }
             "show" => {
                 let id = parse_positional_u64(sub_matches, "id")?;
@@ -2469,17 +2510,22 @@ fn handle_treasury(action: GovTreasuryCmd, out: &mut dyn Write) -> io::Result<()
 
 fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Result<()> {
     match action {
-        GovDisbursementCmd::Preview { json_path } => {
-            let content = std::fs::read_to_string(&json_path).map_err(|err| {
+        GovDisbursementCmd::Preview {
+            json_path,
+            schema,
+            check,
+        } => {
+            if schema {
+                writeln!(out, "{DISBURSEMENT_SCHEMA}")?;
+                return Ok(());
+            }
+            let path = json_path.ok_or_else(|| {
                 io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to read {json_path}: {err}"),
+                    io::ErrorKind::InvalidInput,
+                    "--json is required when --schema is not provided",
                 )
             })?;
-            let payload: governance::DisbursementPayload =
-                foundation_serialization::json::from_str(&content).map_err(|err| {
-                    io::Error::new(io::ErrorKind::Other, format!("failed to parse JSON: {err}"))
-                })?;
+            let payload = read_disbursement_payload(&path)?;
             match governance::validate_disbursement_payload(&payload) {
                 Ok(()) => {
                     writeln!(out, "Validation: PASSED")?;
@@ -2496,6 +2542,12 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
                 Err(err) => {
                     writeln!(out, "Validation: FAILED")?;
                     writeln!(out, "Error: {err:?}")?;
+                    if check {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "disbursement validation failed",
+                        ));
+                    }
                 }
             }
         }
@@ -2535,17 +2587,30 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
             })?;
             writeln!(out, "Template written to {output}")?;
         }
-        GovDisbursementCmd::Submit { json_path, rpc } => {
-            let content = std::fs::read_to_string(&json_path).map_err(|err| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to read {json_path}: {err}"),
-                )
-            })?;
-            let payload: governance::DisbursementPayload =
-                foundation_serialization::json::from_str(&content).map_err(|err| {
-                    io::Error::new(io::ErrorKind::Other, format!("failed to parse JSON: {err}"))
-                })?;
+        GovDisbursementCmd::Submit {
+            json_path,
+            rpc,
+            check,
+        } => {
+            let payload = read_disbursement_payload(&json_path)?;
+            match governance::validate_disbursement_payload(&payload) {
+                Ok(()) => {
+                    writeln!(out, "Validation: PASSED")?;
+                }
+                Err(err) => {
+                    writeln!(out, "Validation: FAILED")?;
+                    writeln!(out, "Error: {err:?}")?;
+                    if check {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "disbursement validation failed",
+                        ));
+                    }
+                }
+            }
+            if check {
+                return Ok(());
+            }
 
             #[derive(Serialize)]
             #[serde(crate = "foundation_serialization::serde")]
@@ -2728,4 +2793,15 @@ fn handle_disburse(action: GovDisbursementCmd, out: &mut dyn Write) -> io::Resul
         }
     }
     Ok(())
+}
+
+fn read_disbursement_payload(path: &str) -> io::Result<governance::DisbursementPayload> {
+    let content = std::fs::read_to_string(path).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to read {path}: {err}"),
+        )
+    })?;
+    foundation_serialization::json::from_str(&content)
+        .map_err(|err| io::Error::new(io::ErrorKind::Other, format!("failed to parse JSON: {err}")))
 }

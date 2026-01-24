@@ -236,7 +236,10 @@ Reference for every public surface: RPC, CLI, gateway, DNS, explorer, telemetry,
 
 ## Storage and Blob APIs
 - CLI: `contract-cli storage put|get|manifest|repair`, `contract-cli blob summarize`, `contract-cli storage providers`.
-- RPC: `storage.put_blob`, `storage.get_manifest`, `storage.list_providers`.
+- CLI: `contract-cli storage register-provider` writes the same `storage_market::ProviderProfile` metadata as `storage.register_provider` (capacity, escrow deposit, latency hint, tags) and `contract-cli storage discover-providers` replays the `storage.discover_providers` response so operator tooling and RPC clients stay in lockstep. Both commands support `--format json` for automation.
+- RPC: `storage.put_blob`, `storage.get_manifest`, `storage.list_providers`, `storage.register_provider`, `storage.discover_providers`.
+- `storage.register_provider` writes the DHT catalog (`storage_market::ProviderProfile`) with capacity, escrow/deposit, latency, tags, and proof counters; round-trip coverage lives in `storage_market::codec::{serialize_provider_profile, deserialize_provider_profile}` tests so CLI, gateway, RPC, and the metrics aggregator emit the same JSON schema, guarding the wrapper hash used by `monitoring/tests/wrappers.rs` + `monitoring/tests/snapshots/wrappers.json`.
+- `storage.discover_providers` runs `storage_market::DiscoveryRequest` logic (object size, shares, optional region or max price) and returns the cheapest, most recent providers that satisfy the DHT guardrails; the same flow powers `node/src/storage/marketplace.rs` and `node/src/storage/pipeline.rs`, which bias uploads via `StoragePipeline::marketplace_search_options`, and it increments the `storage_discovery_requests_total`/`storage_discovery_results_total` counters documented in `metrics-aggregator/telemetry.yaml` so dashboards compare the wrapper hash before/after schema changes.
 - Blob manifests follow the binary schema in `node/src/storage/manifest_binary.rs`; object receipts encode `StoreReceipt` structs consumed by the ledger.
 
 ## Compute, Energy, and Ad Market APIs

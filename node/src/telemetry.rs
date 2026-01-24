@@ -4306,6 +4306,33 @@ pub static STORAGE_CONTRACT_CREATED_TOTAL: Lazy<IntCounterHandle> = Lazy::new(||
     c.handle()
 });
 
+pub static STORAGE_DISCOVERY_REQUEST_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_discovery_requests_total",
+        "Total storage distributor discovery invocations",
+    )
+    .unwrap_or_else(|e| panic!("counter storage_discovery_requests_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_discovery_requests_total: {e}"));
+    c.handle()
+});
+
+pub static STORAGE_DISCOVERY_RESULTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "storage_discovery_results_total",
+            "Storage discovery outcomes grouped by status (success/error)",
+        ),
+        &["status"],
+    )
+    .unwrap_or_else(|e| panic!("counter storage_discovery_results_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_discovery_results_total: {e}"));
+    c
+});
+
 pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "retrieval_failure_total",

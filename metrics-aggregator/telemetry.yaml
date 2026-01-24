@@ -35,3 +35,14 @@ metrics:
       - source
     description: |
       Packs the current /wrappers snapshot hash so dashboards and CLI/governor outputs can prove the telemetry bucket that produced the BlockTorch metrics.
+  - name: storage_discovery_requests_total
+    type: counter
+    labels: []
+    description: |
+      Counts every storage marketplace discovery request emitted by the CLI/RPC gateway so dashboards can alert on rising DHT query volumes.
+  - name: storage_discovery_results_total
+    type: counter
+    labels:
+      - status
+    description: |
+      Breaks the discovery flow outcomes into `success`/`error` so the dashboards and aggregator dashboards can chart reliability.

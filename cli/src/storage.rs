@@ -1,6 +1,6 @@
 use crate::parse_utils::{
-    parse_bool, parse_positional_u32, parse_positional_u64, parse_usize, require_positional,
-    take_string,
+    parse_bool, parse_positional_u32, parse_positional_u64, parse_u64, parse_u64_required,
+    parse_usize, require_positional, take_string,
 };
 use base64_fp::encode_standard;
 use cli_core::{
@@ -52,6 +52,26 @@ pub enum StorageCmd {
     },
     /// List provider quotas and recent upload metrics
     Providers { json: bool },
+    /// Register or update a provider in the DHT catalog
+    RegisterProvider {
+        provider_id: String,
+        region: Option<String>,
+        max_capacity_bytes: u64,
+        price_per_block: u64,
+        escrow_deposit: u64,
+        latency_ms: Option<u32>,
+        tags: Vec<String>,
+    },
+    /// Query the DHT marketplace for providers
+    DiscoverProviders {
+        object_size: u64,
+        shares: u16,
+        limit: Option<usize>,
+        region: Option<String>,
+        max_price_per_block: Option<u64>,
+        min_success_rate_ppm: Option<u64>,
+        json: bool,
+    },
     /// Toggle maintenance mode for a provider
     Maintenance {
         provider_id: String,
@@ -680,6 +700,101 @@ impl StorageCmd {
             )
             .subcommand(
                 CommandBuilder::new(
+                    CommandId("storage.register_provider"),
+                    "register-provider",
+                    "Register or refresh a provider profile in the storage marketplace",
+                )
+                .arg(ArgSpec::Positional(PositionalSpec::new(
+                    "provider_id",
+                    "Storage provider identifier",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "region",
+                    "region",
+                    "Optional region hint",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "max-capacity-bytes",
+                        "max-capacity-bytes",
+                        "Maximum chunk capacity advertised by the provider",
+                    )
+                    .required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "price-per-block",
+                        "price-per-block",
+                        "Price per BLOCK to charge per block",
+                    )
+                    .required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "escrow-deposit",
+                        "escrow-deposit",
+                        "Escrow deposit (in BLOCK) to cover retention guarantees",
+                    )
+                    .required(true),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "latency-ms",
+                    "latency-ms",
+                    "Optional latency in milliseconds",
+                )))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("tag", "tag", "Attach an arbitrary provider tag")
+                        .multiple(true),
+                ))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
+                    CommandId("storage.discover_providers"),
+                    "discover-providers",
+                    "Run the storage DHT marketplace discovery flow",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "object-size",
+                        "object-size",
+                        "Size of the object to store (bytes)",
+                    )
+                    .required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("shares", "shares", "Number of shares (minimum 1)")
+                        .required(true),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "limit",
+                    "limit",
+                    "Maximum providers to return",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "region",
+                    "region",
+                    "Optional region filter",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "max-price-per-block",
+                    "max-price-per-block",
+                    "Upper bound for price per block",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "min-success-rate-ppm",
+                    "min-success-rate-ppm",
+                    "Minimum success rate (in ppm) required",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
                     CommandId("storage.maintenance"),
                     "maintenance",
                     "Toggle maintenance mode for a provider",
@@ -813,6 +928,59 @@ impl StorageCmd {
             "providers" => Ok(StorageCmd::Providers {
                 json: sub_matches.get_flag("json"),
             }),
+            "register-provider" => {
+                let provider_id = require_positional(sub_matches, "provider_id")?;
+                let region = take_string(sub_matches, "region");
+                let max_capacity = parse_u64_required(
+                    take_string(sub_matches, "max-capacity-bytes"),
+                    "max-capacity-bytes",
+                )?;
+                let price_per_block = parse_u64_required(
+                    take_string(sub_matches, "price-per-block"),
+                    "price-per-block",
+                )?;
+                let escrow_deposit = parse_u64_required(
+                    take_string(sub_matches, "escrow-deposit"),
+                    "escrow-deposit",
+                )?;
+                let latency = parse_u64(take_string(sub_matches, "latency-ms"), "latency-ms")?
+                    .map(|value| value.min(u32::MAX as u64) as u32);
+                let tags = sub_matches.get_strings("tag");
+                Ok(StorageCmd::RegisterProvider {
+                    provider_id,
+                    region,
+                    max_capacity_bytes: max_capacity,
+                    price_per_block,
+                    escrow_deposit,
+                    latency_ms: latency,
+                    tags,
+                })
+            }
+            "discover-providers" => {
+                let object_size =
+                    parse_u64_required(take_string(sub_matches, "object-size"), "object-size")?;
+                let shares_raw = parse_u64_required(take_string(sub_matches, "shares"), "shares")?;
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?;
+                let region = take_string(sub_matches, "region");
+                let max_price_per_block = parse_u64(
+                    take_string(sub_matches, "max-price-per-block"),
+                    "max-price-per-block",
+                )?;
+                let min_success_rate_ppm = parse_u64(
+                    take_string(sub_matches, "min-success-rate-ppm"),
+                    "min-success-rate-ppm",
+                )?;
+                let json = sub_matches.get_flag("json");
+                Ok(StorageCmd::DiscoverProviders {
+                    object_size,
+                    shares: shares_raw.min(u16::MAX as u64) as u16,
+                    limit,
+                    region,
+                    max_price_per_block,
+                    min_success_rate_ppm,
+                    json,
+                })
+            }
             "maintenance" => {
                 let provider_id = require_positional(sub_matches, "provider_id")?;
                 let maintenance =
@@ -1161,6 +1329,95 @@ pub fn handle(cmd: StorageCmd) {
                         loss,
                         rtt,
                         if maintenance { "yes" } else { "no" }
+                    );
+                }
+            } else {
+                println!("{}", resp);
+            }
+        }
+        StorageCmd::RegisterProvider {
+            provider_id,
+            region,
+            max_capacity_bytes,
+            price_per_block,
+            escrow_deposit,
+            latency_ms,
+            tags,
+        } => {
+            let resp = rpc::storage::register_provider(
+                &provider_id,
+                region.as_deref(),
+                max_capacity_bytes,
+                price_per_block,
+                escrow_deposit,
+                latency_ms,
+                tags,
+            );
+            println!("{}", resp);
+        }
+        StorageCmd::DiscoverProviders {
+            object_size,
+            shares,
+            limit,
+            region,
+            max_price_per_block,
+            min_success_rate_ppm,
+            json,
+        } => {
+            let resp = rpc::storage::discover_providers(
+                object_size,
+                shares,
+                limit,
+                region.as_deref(),
+                max_price_per_block,
+                min_success_rate_ppm,
+            );
+            if json {
+                println!("{}", resp);
+            } else if let Some(list) = resp.get("providers").and_then(|v| v.as_array()) {
+                println!(
+                    "{:>20} {:>10} {:>10} {:>12} {:>10} {:>8} {:<}",
+                    "provider", "region", "price", "capacity", "success%", "latency", "tags"
+                );
+                for entry in list {
+                    let provider = entry
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("-");
+                    let region = entry.get("region").and_then(|v| v.as_str()).unwrap_or("-");
+                    let price = entry
+                        .get("price_per_block")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let capacity = entry
+                        .get("capacity_bytes")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let success_ppm = entry
+                        .get("success_rate_ppm")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let success_pct = success_ppm as f64 / 10000.0;
+                    let latency = entry
+                        .get("latency_ms")
+                        .and_then(|v| v.as_u64())
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "-".into());
+                    let tags_str = entry
+                        .get("tags")
+                        .and_then(|v| v.as_array())
+                        .map(|values| {
+                            values
+                                .iter()
+                                .filter_map(|value| value.as_str())
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        })
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or_else(|| "-".into());
+                    println!(
+                        "{:>20} {:>10} {:>10} {:>12} {:>10.2} {:>8} {:<}",
+                        provider, region, price, capacity, success_pct, latency, tags_str
                     );
                 }
             } else {

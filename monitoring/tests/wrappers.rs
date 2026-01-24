@@ -36,6 +36,10 @@ fn wrappers_snapshot_hash_is_pinned() {
     blocktorch_output_labels.insert("digest".into(), "output-789".into());
     let mut snark_labels = HashMap::new();
     snark_labels.insert("backend".into(), "cpu".into());
+    let mut storage_success_labels = HashMap::new();
+    storage_success_labels.insert("status".into(), "success".into());
+    let mut storage_error_labels = HashMap::new();
+    storage_error_labels.insert("status".into(), "error".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
@@ -139,6 +143,21 @@ fn wrappers_snapshot_hash_is_pinned() {
                     metric: "energy_meter_reading_total".into(),
                     labels: energy_shortfall_labels.clone(),
                     value: 13.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_discovery_requests_total".into(),
+                    labels: HashMap::new(),
+                    value: 12.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_discovery_results_total".into(),
+                    labels: storage_success_labels.clone(),
+                    value: 9.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_discovery_results_total".into(),
+                    labels: storage_error_labels.clone(),
+                    value: 3.0,
                 },
                 WrapperMetricEntry {
                     metric: "receipts_compute_slash_total".into(),
@@ -308,7 +327,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "67a08532b243a0ce72f77db18c073981b7e68b931a0711e3b194ae0132fa8120",
+        "5b1ae521870e1edbc2c51640bdbae2abfb3b825194dc9d447c45cde8bb40f90a",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

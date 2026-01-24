@@ -6,10 +6,11 @@ use foundation_serialization::json::{Map, Number, Value};
 use std::sync::Arc;
 use storage::{contract::ContractError, merkle_proof::MerkleProof, StorageContract, StorageOffer};
 use storage_market::{
-    ProofOutcome, ProofRecord, ReplicaIncentive, StorageMarket, StorageMarketError,
+    ProofOutcome, ProofRecord, ProviderProfile, ReplicaIncentive, StorageMarket, StorageMarketError,
 };
 
 use crate::drive::DriveStore;
+use crate::storage::marketplace::SearchOptions;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
@@ -161,6 +162,73 @@ fn replica_value(object_id: &str, contract: &StorageContract, replica: &ReplicaI
     Value::Object(map)
 }
 
+fn provider_profile_value(profile: &ProviderProfile) -> Value {
+    let mut map = Map::new();
+    map.insert(
+        "provider".into(),
+        Value::String(profile.provider_id.clone()),
+    );
+    map.insert(
+        "region".into(),
+        profile
+            .region
+            .as_ref()
+            .map(|region| Value::String(region.clone()))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "capacity_bytes".into(),
+        Value::Number(Number::from(profile.max_capacity_bytes)),
+    );
+    map.insert(
+        "price_per_block".into(),
+        Value::Number(Number::from(profile.price_per_block)),
+    );
+    map.insert(
+        "escrow_deposit".into(),
+        Value::Number(Number::from(profile.escrow_deposit)),
+    );
+    map.insert(
+        "latency_ms".into(),
+        profile
+            .latency_ms
+            .map(Number::from)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        "tags".into(),
+        Value::Array(
+            profile
+                .tags
+                .iter()
+                .map(|tag| Value::String(tag.clone()))
+                .collect(),
+        ),
+    );
+    map.insert(
+        "success_rate_ppm".into(),
+        Value::Number(Number::from(profile.success_rate_ppm())),
+    );
+    map.insert(
+        "proof_successes".into(),
+        Value::Number(Number::from(profile.proof_successes)),
+    );
+    map.insert(
+        "proof_failures".into(),
+        Value::Number(Number::from(profile.proof_failures)),
+    );
+    map.insert(
+        "last_seen_block".into(),
+        profile
+            .last_seen_block
+            .map(Number::from)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+    );
+    Value::Object(map)
+}
+
 fn compute_price_distribution(
     total_price: u64,
     allocation: &[(String, u16)],
@@ -259,7 +327,12 @@ pub fn upload(
                 ),
             ])
         }
-        Err(err) => market_error_value(err),
+        Err(err) => {
+            crate::telemetry::STORAGE_DISCOVERY_RESULTS_TOTAL
+                .with_label_values(&["error"])
+                .inc();
+            market_error_value(err)
+        }
     }
 }
 
@@ -387,6 +460,89 @@ pub fn provider_profiles() -> foundation_serialization::json::Value {
         ("profiles", Value::Array(profiles)),
         ("engine", Value::Object(engine_map)),
     ])
+}
+
+pub fn register_provider(
+    provider_id: &str,
+    region: Option<&str>,
+    max_capacity_bytes: u64,
+    price_per_block: u64,
+    escrow_deposit: u64,
+    latency_ms: Option<u32>,
+    tags: Vec<String>,
+) -> foundation_serialization::json::Value {
+    let mut profile = ProviderProfile::new(
+        provider_id.to_string(),
+        max_capacity_bytes,
+        price_per_block,
+        escrow_deposit,
+    );
+    profile.region = region.map(|value| value.to_string());
+    profile.latency_ms = latency_ms;
+    profile.tags = tags;
+    match MARKET.guard().register_provider_profile(profile) {
+        Ok(saved) => json_object(vec![
+            ("status", Value::String("ok".to_string())),
+            ("provider", provider_profile_value(&saved)),
+        ]),
+        Err(err) => market_error_value(err),
+    }
+}
+
+pub fn discover_providers(
+    object_size: u64,
+    shares: u16,
+    limit: Option<usize>,
+    region: Option<&str>,
+    max_price_per_block: Option<u64>,
+    min_success_rate_ppm: Option<u64>,
+) -> foundation_serialization::json::Value {
+    #[cfg(feature = "telemetry")]
+    crate::telemetry::STORAGE_DISCOVERY_REQUEST_TOTAL.inc();
+    let pipeline = StoragePipeline::open(&pipeline_path());
+    let mut options = pipeline.marketplace_search_options(object_size, shares);
+    options.limit = limit
+        .map(SearchOptions::clamp_limit)
+        .unwrap_or(options.limit);
+    if let Some(region) = region {
+        options.region = Some(region.to_string());
+    }
+    if let Some(max_price) = max_price_per_block {
+        options.max_price_per_block = Some(max_price);
+    }
+    if let Some(min_ppm) = min_success_rate_ppm {
+        options.min_success_rate_ppm = Some(min_ppm);
+    }
+    match MARKET
+        .guard()
+        .discover_providers(options.discovery_request())
+    {
+        Ok(providers) => {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::STORAGE_DISCOVERY_RESULTS_TOTAL
+                .with_label_values(&["success"])
+                .inc();
+            json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                (
+                    "providers",
+                    Value::Array(
+                        providers
+                            .iter()
+                            .map(provider_profile_value)
+                            .collect::<Vec<_>>(),
+                    ),
+                ),
+            ])
+        }
+        Err(err) => {
+            #[cfg(feature = "telemetry")]
+            crate::telemetry::STORAGE_DISCOVERY_RESULTS_TOTAL
+                .with_label_values(&["error"])
+                .inc();
+            market_error_value(err)
+        }
+    }
 }
 
 /// Return recent storage repair log entries.

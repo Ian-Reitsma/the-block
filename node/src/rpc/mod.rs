@@ -792,6 +792,8 @@ const PUBLIC_METHODS: &[&str] = &[
     "storage.repair_history",
     "storage.repair_run",
     "storage.repair_chunk",
+    "storage.register_provider",
+    "storage.discover_providers",
     "storage.manifests",
     "pow.submit",
     "inflation.params",
@@ -3105,6 +3107,89 @@ fn dispatch(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             storage::set_provider_maintenance(provider, maintenance)
+        }
+        "storage.register_provider" => {
+            let provider = req
+                .params
+                .get("provider_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let region = req.params.get("region").and_then(|v| v.as_str());
+            let max_capacity = req
+                .params
+                .get("max_capacity_bytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let price = req
+                .params
+                .get("price_per_block")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let deposit = req
+                .params
+                .get("escrow_deposit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let latency = req
+                .params
+                .get("latency_ms")
+                .and_then(|v| v.as_u64())
+                .map(|value| value.min(u32::MAX as u64) as u32);
+            let tags = req
+                .params
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|entry| entry.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            storage::register_provider(
+                provider,
+                region,
+                max_capacity,
+                price,
+                deposit,
+                latency,
+                tags,
+            )
+        }
+        "storage.discover_providers" => {
+            let object_size = req
+                .params
+                .get("object_size")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let shares = req
+                .params
+                .get("shares")
+                .and_then(|v| v.as_u64())
+                .map(|value| value.min(u16::MAX as u64) as u16)
+                .unwrap_or(1);
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|value| value as usize);
+            let region = req.params.get("region").and_then(|v| v.as_str());
+            let max_price = req
+                .params
+                .get("max_price_per_block")
+                .and_then(|v| v.as_u64());
+            let min_success_rate_ppm = req
+                .params
+                .get("min_success_rate_ppm")
+                .and_then(|v| v.as_u64());
+            storage::discover_providers(
+                object_size,
+                shares,
+                limit,
+                region,
+                max_price,
+                min_success_rate_ppm,
+            )
         }
         "storage_incentives" => storage::incentives_snapshot(),
         "gov.energy_settlement" => {

@@ -116,6 +116,10 @@ jobs:
         run: make doc-ci
         env:
           LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
+      - name: validate treasury disbursement schema
+        run: cargo run -p contract-cli --features telemetry -- gov disburse preview --json examples/governance/disbursement_example.json --check
+        env:
+          LD_LIBRARY_PATH: ${{ env.LIBPYTHON_PATH }}
       - name: install windows cross-target
         run: rustup target add x86_64-pc-windows-gnu
       - name: windows target check (sys/runtime)

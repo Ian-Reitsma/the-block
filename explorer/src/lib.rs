@@ -2669,9 +2669,9 @@ pub struct Explorer {
 fn ensure_receipt_columns(conn: &Connection) -> DbResult<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(receipts)")?;
     let mut existing: HashSet<String> = HashSet::new();
-    let mut rows = stmt.query([])?;
-    while let Some(row) = rows.next()? {
-        existing.insert(row.get::<_, String>(1)?);
+    let rows = stmt.query_map(params![], |row| row.get::<_, String>(1))?;
+    for row in rows {
+        existing.insert(row?);
     }
     for (name, kind) in [
         ("kernel_digest", "TEXT"),
@@ -2681,7 +2681,7 @@ fn ensure_receipt_columns(conn: &Connection) -> DbResult<()> {
         ("tensor_profile_epoch", "TEXT"),
         ("proof_latency_ms", "INTEGER"),
     ] {
-        if !existing.contains(*name) {
+        if !existing.contains(name) {
             conn.execute(
                 &format!("ALTER TABLE receipts ADD COLUMN {name} {kind}"),
                 params![],
@@ -2689,6 +2689,16 @@ fn ensure_receipt_columns(conn: &Connection) -> DbResult<()> {
         }
     }
     Ok(())
+}
+
+fn optional_sql_string(value: Option<&str>) -> SqlValue {
+    value.map(SqlValue::from).unwrap_or(SqlValue::Null)
+}
+
+fn optional_sql_integer_u64(value: Option<u64>) -> SqlValue {
+    value
+        .map(|num| SqlValue::from(num as i64))
+        .unwrap_or(SqlValue::Null)
 }
 
 impl Explorer {
@@ -4038,37 +4048,18 @@ impl Explorer {
                     if let Ok(bytes) = std::fs::read(ent.path()) {
                         if let Ok(list) = binary::decode::<Vec<ComputeReceipt>>(&bytes) {
                             for r in list {
-                                let (
-                                    kernel_digest,
-                                    descriptor_digest,
-                                    output_digest,
-                                    benchmark_commit,
-                                    tensor_profile_epoch,
-                                    proof_latency_ms,
-                                ) = if let Some(meta) = &r.blocktorch {
-                                    (
-                                        Some(hex_encode(meta.kernel_variant_digest)),
-                                        Some(hex_encode(meta.descriptor_digest)),
-                                        Some(hex_encode(meta.output_digest)),
-                                        meta.benchmark_commit.clone(),
-                                        meta.tensor_profile_epoch.clone(),
-                                        Some(meta.proof_latency_ms),
-                                    )
-                                } else {
-                                    (None, None, None, None, None, None)
-                                };
                                 let rec = ReceiptRecord {
-                                    key: hex_encode(r.idempotency_key),
+                                    key: hex_encode(&r.idempotency_key),
                                     epoch,
                                     provider: r.provider.clone(),
                                     buyer: r.buyer.clone(),
                                     amount: r.quote_price,
-                                    kernel_digest,
-                                    descriptor_digest,
-                                    output_digest,
-                                    benchmark_commit,
-                                    tensor_profile_epoch,
-                                    proof_latency_ms,
+                                    kernel_digest: None,
+                                    descriptor_digest: None,
+                                    output_digest: None,
+                                    benchmark_commit: None,
+                                    tensor_profile_epoch: None,
+                                    proof_latency_ms: None,
                                 };
                                 let _ = self.index_receipt(&rec);
                             }
@@ -4090,12 +4081,12 @@ impl Explorer {
                 &rec.provider,
                 &rec.buyer,
                 rec.amount,
-                rec.kernel_digest.as_deref(),
-                rec.descriptor_digest.as_deref(),
-                rec.output_digest.as_deref(),
-                rec.benchmark_commit.as_deref(),
-                rec.tensor_profile_epoch.as_deref(),
-                rec.proof_latency_ms
+                optional_sql_string(rec.kernel_digest.as_deref()),
+                optional_sql_string(rec.descriptor_digest.as_deref()),
+                optional_sql_string(rec.output_digest.as_deref()),
+                optional_sql_string(rec.benchmark_commit.as_deref()),
+                optional_sql_string(rec.tensor_profile_epoch.as_deref()),
+                optional_sql_integer_u64(rec.proof_latency_ms)
             ],
         )?;
         Ok(())

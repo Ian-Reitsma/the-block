@@ -181,6 +181,10 @@ fn treasury_metrics_accept_legacy_string_fields() {
 #[test]
 fn wrappers_schema_hash_is_stable() {
     let mut map: BTreeMap<String, WrapperSummaryEntry> = BTreeMap::new();
+    let mut storage_success_labels = HashMap::new();
+    storage_success_labels.insert("status".into(), "success".into());
+    let mut storage_error_labels = HashMap::new();
+    storage_error_labels.insert("status".into(), "error".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
@@ -189,6 +193,28 @@ fn wrappers_schema_hash_is_stable() {
                 labels: HashMap::new(),
                 value: 7.0,
             }],
+            metrics: vec![
+                WrapperMetricEntry {
+                    metric: "governance.treasury.executor.last_submitted_nonce".into(),
+                    labels: HashMap::new(),
+                    value: 7.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_discovery_requests_total".into(),
+                    labels: HashMap::new(),
+                    value: 12.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_discovery_results_total".into(),
+                    labels: storage_success_labels.clone(),
+                    value: 9.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_discovery_results_total".into(),
+                    labels: storage_error_labels.clone(),
+                    value: 3.0,
+                },
+            ],
             governance: Some(GovernanceWrapperEntry {
                 treasury_balance: 1_200,
                 disbursements_total: 3,

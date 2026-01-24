@@ -2,7 +2,7 @@
 
 use foundation_serialization::json::{self, Map, Number, Value};
 
-use crate::{ContractRecord, ProofOutcome, ReplicaIncentive, StorageMarketError};
+use crate::{ContractRecord, ProofOutcome, ProviderProfile, ReplicaIncentive, StorageMarketError};
 use storage::{merkle_proof::MerkleRoot, StorageContract};
 
 const CONTRACT_KEY: &str = "contract";
@@ -21,6 +21,94 @@ pub fn serialize_contract_record(record: &ContractRecord) -> Result<Vec<u8>, Sto
         .collect::<Vec<_>>();
     outer.insert(REPLICAS_KEY.to_string(), Value::Array(replicas));
     Ok(json::to_vec_value(&Value::Object(outer)))
+}
+
+const PROVIDER_ID_KEY: &str = "provider_id";
+const REGION_KEY: &str = "region";
+const MAX_CAPACITY_KEY: &str = "max_capacity_bytes";
+const PRICE_KEY: &str = "price_per_block";
+const DEPOSIT_KEY: &str = "escrow_deposit";
+const LATENCY_KEY: &str = "latency_ms";
+const TAGS_KEY: &str = "tags";
+const SUCC_KEY: &str = "proof_successes";
+const FAIL_KEY: &str = "proof_failures";
+const LAST_SEEN_KEY: &str = "last_seen_block";
+
+pub fn serialize_provider_profile(
+    profile: &ProviderProfile,
+) -> Result<Vec<u8>, StorageMarketError> {
+    let mut map = Map::new();
+    map.insert(
+        PROVIDER_ID_KEY.to_string(),
+        Value::String(profile.provider_id.clone()),
+    );
+    map.insert(
+        REGION_KEY.to_string(),
+        profile
+            .region
+            .as_ref()
+            .map(|value| Value::String(value.clone()))
+            .unwrap_or(Value::Null),
+    );
+    map.insert(
+        MAX_CAPACITY_KEY.to_string(),
+        Value::from(profile.max_capacity_bytes),
+    );
+    map.insert(PRICE_KEY.to_string(), Value::from(profile.price_per_block));
+    map.insert(DEPOSIT_KEY.to_string(), Value::from(profile.escrow_deposit));
+    map.insert(
+        LATENCY_KEY.to_string(),
+        profile.latency_ms.map(Value::from).unwrap_or(Value::Null),
+    );
+    map.insert(
+        TAGS_KEY.to_string(),
+        Value::Array(
+            profile
+                .tags
+                .iter()
+                .map(|tag| Value::String(tag.clone()))
+                .collect(),
+        ),
+    );
+    map.insert(SUCC_KEY.to_string(), Value::from(profile.proof_successes));
+    map.insert(FAIL_KEY.to_string(), Value::from(profile.proof_failures));
+    map.insert(
+        LAST_SEEN_KEY.to_string(),
+        profile
+            .last_seen_block
+            .map(Value::from)
+            .unwrap_or(Value::Null),
+    );
+    Ok(json::to_vec_value(&Value::Object(map)))
+}
+
+pub fn deserialize_provider_profile(bytes: &[u8]) -> Result<ProviderProfile, StorageMarketError> {
+    let value = json::value_from_slice(bytes)
+        .map_err(|err| StorageMarketError::Serialization(err.to_string()))?;
+    let mut map = expect_object(value, "provider profile")?;
+    let provider_id = take_string(&mut map, PROVIDER_ID_KEY, "provider profile")?;
+    let region = take_optional_string(&mut map, REGION_KEY, "provider profile")?;
+    let max_capacity_bytes = take_u64(&mut map, MAX_CAPACITY_KEY, "provider profile")?;
+    let price_per_block = take_u64(&mut map, PRICE_KEY, "provider profile")?;
+    let escrow_deposit = take_u64(&mut map, DEPOSIT_KEY, "provider profile")?;
+    let latency = take_optional_u64(&mut map, LATENCY_KEY, "provider profile")?
+        .map(|value| value.min(u32::MAX as u64) as u32);
+    let tags = take_string_array(&mut map, TAGS_KEY, "provider profile")?;
+    let proof_successes = take_u64_default(&mut map, SUCC_KEY, "provider profile", 0)?;
+    let proof_failures = take_u64_default(&mut map, FAIL_KEY, "provider profile", 0)?;
+    let last_seen_block = take_optional_u64(&mut map, LAST_SEEN_KEY, "provider profile")?;
+    Ok(ProviderProfile {
+        provider_id,
+        region,
+        max_capacity_bytes,
+        price_per_block,
+        escrow_deposit,
+        latency_ms: latency,
+        tags,
+        proof_successes,
+        proof_failures,
+        last_seen_block,
+    })
 }
 
 pub fn deserialize_contract_record(bytes: &[u8]) -> Result<ContractRecord, StorageMarketError> {
@@ -338,4 +426,44 @@ fn take_u16(map: &mut Map, field: &str, context: &str) -> Result<u16, StorageMar
     value.try_into().map_err(|_| {
         StorageMarketError::Serialization(format!("value for {context}.{field} exceeds u16"))
     })
+}
+
+fn take_optional_string(
+    map: &mut Map,
+    field: &str,
+    context: &str,
+) -> Result<Option<String>, StorageMarketError> {
+    match map.remove(field) {
+        Some(Value::String(value)) => Ok(Some(value)),
+        Some(Value::Null) | None => Ok(None),
+        Some(other) => Err(StorageMarketError::Serialization(format!(
+            "expected string or null for {context}.{field}, found {other:?}"
+        ))),
+    }
+}
+
+fn take_string_array(
+    map: &mut Map,
+    field: &str,
+    context: &str,
+) -> Result<Vec<String>, StorageMarketError> {
+    match map.remove(field) {
+        Some(Value::Array(items)) => {
+            let mut strings = Vec::with_capacity(items.len());
+            for item in items {
+                if let Value::String(value) = item {
+                    strings.push(value);
+                } else {
+                    return Err(StorageMarketError::Serialization(format!(
+                        "expected string in {context}.{field} array, found {item:?}"
+                    )));
+                }
+            }
+            Ok(strings)
+        }
+        Some(Value::Null) | None => Ok(Vec::new()),
+        Some(other) => Err(StorageMarketError::Serialization(format!(
+            "expected array or null for {context}.{field}, found {other:?}"
+        ))),
+    }
 }

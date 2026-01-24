@@ -17,7 +17,10 @@ pub use importer::{
 };
 pub use legacy::{manifest_status, ManifestStatus, LEGACY_MANIFEST_FILE, MIGRATED_MANIFEST_PREFIX};
 
-use codec::{deserialize_contract_record, serialize_contract_record};
+use codec::{
+    deserialize_contract_record, deserialize_provider_profile, serialize_contract_record,
+    serialize_provider_profile,
+};
 use engine::{Engine, Tree};
 use foundation_serialization::{Deserialize, Serialize};
 use std::path::Path;
@@ -115,6 +118,83 @@ impl ContractRecord {
     }
 }
 
+/// Provider metadata published into the DHT-backed catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderProfile {
+    pub provider_id: String,
+    #[serde(default)]
+    pub region: Option<String>,
+    pub max_capacity_bytes: u64,
+    pub price_per_block: u64,
+    pub escrow_deposit: u64,
+    #[serde(default)]
+    pub latency_ms: Option<u32>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub proof_successes: u64,
+    #[serde(default)]
+    pub proof_failures: u64,
+    #[serde(default)]
+    pub last_seen_block: Option<u64>,
+}
+
+impl ProviderProfile {
+    pub fn new(
+        provider_id: String,
+        max_capacity_bytes: u64,
+        price_per_block: u64,
+        escrow_deposit: u64,
+    ) -> Self {
+        Self {
+            provider_id,
+            region: None,
+            max_capacity_bytes,
+            price_per_block,
+            escrow_deposit,
+            latency_ms: None,
+            tags: Vec::new(),
+            proof_successes: 0,
+            proof_failures: 0,
+            last_seen_block: None,
+        }
+    }
+
+    pub fn success_rate_ppm(&self) -> u64 {
+        let total = self.proof_successes.saturating_add(self.proof_failures);
+        if total == 0 {
+            1_000_000
+        } else {
+            self.proof_successes.saturating_mul(1_000_000) / total
+        }
+    }
+}
+
+/// Request that powers DHT provider discovery.
+#[derive(Debug, Clone)]
+pub struct DiscoveryRequest {
+    pub object_size: u64,
+    pub shares: u16,
+    pub region: Option<String>,
+    pub max_price_per_block: Option<u64>,
+    pub min_success_rate_ppm: Option<u64>,
+    pub limit: usize,
+}
+
+impl DiscoveryRequest {
+    fn normalized_limit(&self) -> usize {
+        self.limit.clamp(1, 200)
+    }
+
+    fn required_capacity_bytes(&self) -> u64 {
+        let shares = (self.shares.max(1)) as u128;
+        let bytes = (self.object_size.max(1)) as u128;
+        let chunk = (bytes + shares - 1) / shares;
+        let total = chunk.saturating_mul(shares);
+        total.min(u128::from(u64::MAX)) as u64
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofRecord {
     pub object_id: String,
@@ -131,6 +211,7 @@ pub struct ProofRecord {
 pub struct StorageMarket {
     engine: Engine,
     contracts: Tree,
+    providers: Tree,
     /// Pending settlement receipts for block inclusion
     pending_receipts: Vec<receipts::StorageSettlementReceipt>,
 }
@@ -140,10 +221,12 @@ impl StorageMarket {
         let base = path.as_ref();
         let engine = Engine::open(base)?;
         let contracts = engine.open_tree("market/contracts")?;
+        let providers = engine.open_tree("market/providers")?;
         legacy::migrate_if_present(base, &contracts)?;
         Ok(Self {
             engine,
             contracts,
+            providers,
             pending_receipts: Vec::new(),
         })
     }
@@ -190,6 +273,7 @@ impl StorageMarket {
 
     pub fn clear(&self) -> Result<()> {
         self.contracts.clear()?;
+        self.providers.clear()?;
         Ok(())
     }
 
@@ -264,6 +348,8 @@ impl StorageMarket {
                         self.pending_receipts.push(receipt);
                     }
 
+                    let _ = self.record_provider_feedback(&proof.provider_id, success, block);
+
                     return Ok(proof);
                 }
                 Err(_) => continue,
@@ -276,5 +362,183 @@ impl StorageMarket {
             .load_contract(object_id)?
             .ok_or_else(|| StorageMarketError::ContractMissing(object_id.to_string()))?;
         Ok(record.replicas)
+    }
+
+    pub fn register_provider_profile(
+        &self,
+        mut profile: ProviderProfile,
+    ) -> Result<ProviderProfile> {
+        let key = profile.provider_id.as_bytes();
+        if let Some(existing) = self.providers.get(key)? {
+            let existing_profile = deserialize_provider_profile(&existing)?;
+            profile.proof_successes = existing_profile.proof_successes;
+            profile.proof_failures = existing_profile.proof_failures;
+            profile.last_seen_block = existing_profile.last_seen_block;
+        }
+        let bytes = serialize_provider_profile(&profile)?;
+        let _ = self.providers.insert(key, bytes)?;
+        Ok(profile)
+    }
+
+    pub fn provider_profile(&self, provider_id: &str) -> Result<Option<ProviderProfile>> {
+        let key = provider_id.as_bytes();
+        self.providers
+            .get(key)?
+            .map(|bytes| deserialize_provider_profile(&bytes))
+            .transpose()
+    }
+
+    pub fn provider_profiles(&self) -> Result<Vec<ProviderProfile>> {
+        let mut profiles = Vec::new();
+        for entry in self.providers.iter() {
+            let (_, value) = entry?;
+            profiles.push(deserialize_provider_profile(&value)?);
+        }
+        Ok(profiles)
+    }
+
+    pub fn discover_providers(&self, request: DiscoveryRequest) -> Result<Vec<ProviderProfile>> {
+        let limit = request.normalized_limit();
+        let min_capacity = request.required_capacity_bytes();
+        let mut candidates = Vec::new();
+        for entry in self.providers.iter() {
+            let (_, value) = entry?;
+            let profile = deserialize_provider_profile(&value)?;
+            if profile.max_capacity_bytes < min_capacity {
+                continue;
+            }
+            if let Some(region) = &request.region {
+                if profile.region.as_deref() != Some(region.as_str()) {
+                    continue;
+                }
+            }
+            if let Some(max_price) = request.max_price_per_block {
+                if profile.price_per_block > max_price {
+                    continue;
+                }
+            }
+            if let Some(min_success) = request.min_success_rate_ppm {
+                if profile.success_rate_ppm() < min_success {
+                    continue;
+                }
+            }
+            candidates.push(profile);
+        }
+        candidates.sort_by(|a, b| {
+            a.price_per_block
+                .cmp(&b.price_per_block)
+                .then_with(|| b.last_seen_block.cmp(&a.last_seen_block))
+                .then_with(|| a.provider_id.cmp(&b.provider_id))
+        });
+        if candidates.len() > limit {
+            candidates.truncate(limit);
+        }
+        Ok(candidates)
+    }
+
+    fn record_provider_feedback(&self, provider_id: &str, success: bool, block: u64) -> Result<()> {
+        let key = provider_id.as_bytes();
+        let mut profile = self
+            .providers
+            .get(key)?
+            .map(|bytes| deserialize_provider_profile(&bytes))
+            .transpose()?
+            .unwrap_or_else(|| ProviderProfile::new(provider_id.to_string(), 0, 0, 0));
+        if success {
+            profile.proof_successes = profile.proof_successes.saturating_add(1);
+        } else {
+            profile.proof_failures = profile.proof_failures.saturating_add(1);
+        }
+        profile.last_seen_block = Some(block);
+        let bytes = serialize_provider_profile(&profile)?;
+        let _ = self.providers.insert(key, bytes)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sys::tempfile::tempdir;
+
+    fn temp_market() -> StorageMarket {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().to_path_buf();
+        Box::leak(Box::new(dir));
+        StorageMarket::open(&path).expect("open market")
+    }
+
+    #[test]
+    fn discovery_filters_on_price() {
+        let market = temp_market();
+        let cheap = ProviderProfile::new("cheap".into(), 4096, 5, 100);
+        let pricey = ProviderProfile::new("expensive".into(), 4096, 12, 100);
+        market
+            .register_provider_profile(cheap)
+            .expect("register cheap");
+        market
+            .register_provider_profile(pricey)
+            .expect("register pricey");
+        let request = DiscoveryRequest {
+            object_size: 32,
+            shares: 2,
+            region: None,
+            max_price_per_block: Some(8),
+            min_success_rate_ppm: None,
+            limit: 10,
+        };
+        let providers = market.discover_providers(request).expect("discover");
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].provider_id, "cheap");
+    }
+
+    #[test]
+    fn discovery_respects_region_and_success_rate() {
+        let market = temp_market();
+        let mut good = ProviderProfile::new("good".into(), 4096, 7, 100);
+        good.region = Some("us".into());
+        let mut ok = ProviderProfile::new("ok".into(), 4096, 7, 100);
+        ok.region = Some("us".into());
+        market
+            .register_provider_profile(good)
+            .expect("register good");
+        market.register_provider_profile(ok).expect("register ok");
+        market
+            .record_provider_feedback("good", true, 1)
+            .expect("feedback good");
+        market
+            .record_provider_feedback("ok", true, 1)
+            .expect("feedback ok");
+        market
+            .record_provider_feedback("ok", false, 2)
+            .expect("feedback fail");
+
+        let request = DiscoveryRequest {
+            object_size: 64,
+            shares: 4,
+            region: Some("us".into()),
+            max_price_per_block: None,
+            min_success_rate_ppm: Some(950_000),
+            limit: 5,
+        };
+
+        let providers = market.discover_providers(request).expect("discover");
+        assert_eq!(providers.len(), 1);
+        assert_eq!(providers[0].provider_id, "good");
+    }
+
+    #[test]
+    fn provider_profile_serialization_roundtrip() {
+        let mut profile = ProviderProfile::new("prov-123".into(), 8 * 1024, 10, 250);
+        profile.region = Some("europe".into());
+        profile.latency_ms = Some(42);
+        profile.tags = vec!["gpu".into(), "ssd".into()];
+        profile.proof_successes = 9;
+        profile.proof_failures = 1;
+        profile.last_seen_block = Some(1337);
+
+        let bytes = serialize_provider_profile(&profile).expect("serialize profile");
+        let recovered = deserialize_provider_profile(&bytes).expect("deserialize profile");
+        assert_eq!(profile, recovered);
     }
 }
