@@ -434,6 +434,12 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                     struct_writer.field_with("blocktorch_kernel_variant_digest", |field_writer| {
                         write_fixed(field_writer, &blocktorch.kernel_variant_digest);
                     });
+                    struct_writer.field_with("blocktorch_descriptor_digest", |field_writer| {
+                        write_fixed(field_writer, &blocktorch.descriptor_digest);
+                    });
+                    struct_writer.field_with("blocktorch_output_digest", |field_writer| {
+                        write_fixed(field_writer, &blocktorch.output_digest);
+                    });
                     if let Some(commit) = &blocktorch.benchmark_commit {
                         struct_writer.field_string("blocktorch_benchmark_commit", commit);
                     }
@@ -586,6 +592,8 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut publisher_signature = None;
         let mut signature_nonce = None;
         let mut blocktorch_kernel_variant_digest = None;
+        let mut blocktorch_descriptor_digest = None;
+        let mut blocktorch_output_digest = None;
         let mut blocktorch_benchmark_commit = None;
         let mut blocktorch_tensor_profile_epoch = None;
         let mut blocktorch_proof_latency_ms = None;
@@ -718,6 +726,16 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 read_fixed(reader)?,
                 "blocktorch_kernel_variant_digest",
             ),
+            "blocktorch_descriptor_digest" => assign_once(
+                &mut blocktorch_descriptor_digest,
+                read_fixed(reader)?,
+                "blocktorch_descriptor_digest",
+            ),
+            "blocktorch_output_digest" => assign_once(
+                &mut blocktorch_output_digest,
+                read_fixed(reader)?,
+                "blocktorch_output_digest",
+            ),
             "blocktorch_benchmark_commit" => assign_once(
                 &mut blocktorch_benchmark_commit,
                 reader.read_string()?,
@@ -752,13 +770,22 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                     .ok_or(DecodeError::MissingField("signature_nonce"))?,
             })),
             "compute" => {
-                let blocktorch =
-                    blocktorch_kernel_variant_digest.map(|digest| BlockTorchReceiptMetadata {
-                        kernel_variant_digest: digest,
-                        benchmark_commit: blocktorch_benchmark_commit.clone(),
-                        tensor_profile_epoch: blocktorch_tensor_profile_epoch.clone(),
-                        proof_latency_ms: blocktorch_proof_latency_ms.unwrap_or(0),
-                    });
+                let blocktorch = blocktorch_kernel_variant_digest.and_then(|digest| {
+                    if let (Some(descriptor_digest), Some(output_digest)) =
+                        (blocktorch_descriptor_digest, blocktorch_output_digest)
+                    {
+                        Some(BlockTorchReceiptMetadata {
+                            kernel_variant_digest: digest,
+                            descriptor_digest,
+                            output_digest,
+                            benchmark_commit: blocktorch_benchmark_commit.clone(),
+                            tensor_profile_epoch: blocktorch_tensor_profile_epoch.clone(),
+                            proof_latency_ms: blocktorch_proof_latency_ms.unwrap_or(0),
+                        })
+                    } else {
+                        None
+                    }
+                });
                 Ok(Receipt::Compute(ComputeReceipt {
                     job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
                     provider: provider.ok_or(DecodeError::MissingField("provider"))?,

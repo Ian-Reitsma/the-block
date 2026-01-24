@@ -18,9 +18,12 @@ Running `scripts/fuzz_coverage.sh` requires `llvm-profdata` and `llvm-cov`.
 The script attempts to install these via `rustup component add llvm-tools-preview`
 and falls back to the host package manager (`apt`, `brew`, or `pacman`).
 If automatic installation fails, install the binaries manually before invoking
-the script. Generate `.profraw` files by running fuzz targets with
-`RUSTFLAGS="-C instrument-coverage"` and an `LLVM_PROFILE_FILE` path before
-invoking the script.
+the script. The command now defaults to running `cargo fuzz run compute_market`
+(with `RUSTFLAGS="-C instrument-coverage"`) and recording `LLVM_PROFILE_FILE`
+values under `fuzz/coverage/profraw`. Use `--target` / `--targets` to add other
+targets, `--duration` to bound their `-max_total_time`, or `--no-run` when you
+only want to merge pre-existing `.profraw` artifacts. Specify `OUT_DIR` as the
+first argument to move the coverage HTML and profdata files elsewhere.
 
 ## Documentation
 
@@ -77,4 +80,3 @@ ln -s ../../scripts/pre-commit.sample .git/hooks/pre-commit
 - Fork or create a feature branch off `main` for all changes.
 - Rebase against `main` before opening a pull request; avoid merge commits.
 - Squash merges are performed by maintainers; do not force-push after review starts.
-

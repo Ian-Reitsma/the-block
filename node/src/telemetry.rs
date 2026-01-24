@@ -417,6 +417,8 @@ pub struct BlockTorchMetadata {
     pub benchmark_commit: Option<String>,
     pub tensor_profile_epoch: Option<String>,
     pub proof_latency_ms: Option<f64>,
+    pub descriptor_digest: Option<String>,
+    pub output_digest: Option<String>,
     pub aggregator_trace: Option<String>,
 }
 
@@ -426,6 +428,8 @@ impl BlockTorchMetadata {
             && self.benchmark_commit.is_none()
             && self.tensor_profile_epoch.is_none()
             && self.proof_latency_ms.is_none()
+            && self.descriptor_digest.is_none()
+            && self.output_digest.is_none()
             && self.aggregator_trace.is_none()
     }
 }
@@ -454,6 +458,12 @@ pub fn blocktorch_metadata_snapshot() -> BlockTorchMetadata {
     }
     if guard.tensor_profile_epoch.is_none() {
         guard.tensor_profile_epoch = std::env::var("TB_BLOCKTORCH_TENSOR_PROFILE_EPOCH").ok();
+    }
+    if guard.descriptor_digest.is_none() {
+        guard.descriptor_digest = std::env::var("TB_BLOCKTORCH_DESCRIPTOR_DIGEST").ok();
+    }
+    if guard.output_digest.is_none() {
+        guard.output_digest = std::env::var("TB_BLOCKTORCH_OUTPUT_DIGEST").ok();
     }
     guard.clone()
 }
@@ -1565,6 +1575,22 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
     }
     if let Some(latency) = blocktorch_meta.proof_latency_ms {
         push_metric(&mut metrics, "blocktorch_proof_latency_ms", &[], latency);
+    }
+    if let Some(descriptor) = &blocktorch_meta.descriptor_digest {
+        push_metric(
+            &mut metrics,
+            "blocktorch_descriptor_digest",
+            &[("descriptor", descriptor.as_str())],
+            1.0,
+        );
+    }
+    if let Some(output) = &blocktorch_meta.output_digest {
+        push_metric(
+            &mut metrics,
+            "blocktorch_output_digest",
+            &[("digest", output.as_str())],
+            1.0,
+        );
     }
 
     let governance = governance_wrapper_snapshot();

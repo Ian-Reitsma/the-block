@@ -312,11 +312,19 @@ fn write_blocktorch_info(res: &JsonValue, out: &mut dyn Write) -> io::Result<()>
         let tensor_epoch = blocktorch
             .get("tensor_profile_epoch")
             .and_then(|v| v.as_str());
+        let descriptor = blocktorch.get("descriptor_digest").and_then(|v| v.as_str());
+        let output = blocktorch.get("output_digest").and_then(|v| v.as_str());
         let trace = blocktorch.get("aggregator_trace").and_then(|v| v.as_str());
         let latency = blocktorch.get("proof_latency_ms").and_then(|v| v.as_f64());
-        if let Some(lines) =
-            formatted_blocktorch_timeline(kernel, benchmark, tensor_epoch, latency, trace)
-        {
+        if let Some(lines) = formatted_blocktorch_timeline(
+            kernel,
+            benchmark,
+            tensor_epoch,
+            descriptor,
+            output,
+            latency,
+            trace,
+        ) {
             for line in lines {
                 writeln!(out, "{line}")?;
             }
@@ -685,6 +693,14 @@ mod tests {
             JsonValue::String("bench-abc".to_string()),
         );
         blocktorch.insert(
+            "descriptor_digest".to_string(),
+            JsonValue::String("descriptor-xyz".to_string()),
+        );
+        blocktorch.insert(
+            "output_digest".to_string(),
+            JsonValue::String("output-789".to_string()),
+        );
+        blocktorch.insert(
             "proof_latency_ms".to_string(),
             JsonValue::Number(Number::from_f64(42.5).unwrap()),
         );
@@ -708,6 +724,8 @@ mod tests {
             "BlockTorch job timeline:\n",
             "  kernel digest: digest-123\n",
             "  benchmark commit: bench-abc\n",
+            "  descriptor digest: descriptor-xyz\n",
+            "  output digest: output-789\n",
             "  proof latency (ms, last measurement): 42.50\n",
             "  aggregator trace: trace-xyz\n"
         );

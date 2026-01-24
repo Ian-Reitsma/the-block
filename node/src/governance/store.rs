@@ -1342,6 +1342,7 @@ fn key_name(k: ParamKey) -> &'static str {
         ParamKey::EnergySettlementExpiryBlocks => "energy_settlement_expiry_blocks",
         ParamKey::TreasuryPercent => "treasury_percent",
         ParamKey::ProofRebateLimit => "proof_rebate_limit",
+        ParamKey::ProofVerificationBudgetMs => "proof_verification_budget_ms",
         ParamKey::RentRatePerByte => "rent_rate_per_byte",
         ParamKey::KillSwitchSubsidyReduction => "kill_switch_subsidy_reduction",
         ParamKey::MinerRewardLogisticTarget => "miner_reward_logistic_target",
@@ -3269,6 +3270,7 @@ impl GovStore {
                                     params.ad_readiness_min_provider_count
                                 }
                                 ParamKey::ProofRebateLimit => params.proof_rebate_limit,
+                                ParamKey::ProofVerificationBudgetMs => params.proof_verification_budget_ms,
                                 ParamKey::RentRatePerByte => params.rent_rate_per_byte,
                                 ParamKey::KillSwitchSubsidyReduction => {
                                     params.kill_switch_subsidy_reduction
@@ -3609,6 +3611,7 @@ impl GovStore {
                 ParamKey::EnergySettlementQuorumPpm => params.energy_settlement_quorum_ppm,
                 ParamKey::EnergySettlementExpiryBlocks => params.energy_settlement_expiry_blocks,
                 ParamKey::ProofRebateLimit => params.proof_rebate_limit,
+                ParamKey::ProofVerificationBudgetMs => params.proof_verification_budget_ms,
                 ParamKey::RentRatePerByte => params.rent_rate_per_byte,
                 ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
                 ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,
@@ -3713,6 +3716,7 @@ impl GovStore {
             ParamKey::EnergySettlementQuorumPpm => params.energy_settlement_quorum_ppm,
             ParamKey::EnergySettlementExpiryBlocks => params.energy_settlement_expiry_blocks,
             ParamKey::ProofRebateLimit => params.proof_rebate_limit,
+            ParamKey::ProofVerificationBudgetMs => params.proof_verification_budget_ms,
             ParamKey::RentRatePerByte => params.rent_rate_per_byte,
             ParamKey::KillSwitchSubsidyReduction => params.kill_switch_subsidy_reduction as i64,
             ParamKey::MinerRewardLogisticTarget => params.miner_reward_logistic_target,

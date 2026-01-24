@@ -2088,7 +2088,7 @@ fn push_bridge_incentives(
 }
 
 pub fn registry() -> &'static [ParamSpec] {
-    static REGS: [ParamSpec; 68] = [
+    static REGS: [ParamSpec; 69] = [
         ParamSpec {
             key: ParamKey::SnapshotIntervalSecs,
             default: 30,

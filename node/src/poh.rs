@@ -57,7 +57,7 @@ fn hash_step(data: &[u8]) -> [u8; 32] {
     {
         // When GPU feature is enabled, leverage the GPU hash workload used for compute jobs.
         // This preserves deterministic results while allowing GPU offload where available.
-        return crate::compute_market::workloads::gpu::run(data);
+        return crate::compute_market::workloads::gpu::run(data).output;
     }
     #[cfg(not(feature = "gpu"))]
     {

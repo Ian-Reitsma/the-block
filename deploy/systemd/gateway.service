@@ -8,7 +8,7 @@ EnvironmentFile=/etc/the-block/tls/gateway.env
 Environment=TLS_MANIFEST_PATH=/etc/the-block/tls/gateway/tls-manifest.json
 ExecStartPre=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name gateway --service gateway:optional=/etc/the-block/tls/gateway --env-file /etc/the-block/tls/gateway.env --force && /usr/local/bin/tls-manifest-guard --manifest "${TLS_MANIFEST_PATH}" --env-file /etc/the-block/tls/gateway.env'
 ExecReload=/usr/bin/env bash -c '/usr/local/bin/contract tls stage --input /etc/the-block/tls --name gateway --service gateway:optional=/etc/the-block/tls/gateway --env-file /etc/the-block/tls/gateway.env --force && /usr/local/bin/tls-manifest-guard --manifest "${TLS_MANIFEST_PATH}" --env-file /etc/the-block/tls/gateway.env && systemctl kill -s HUP %n'
-ExecStart=/usr/local/bin/gateway --listen 0.0.0.0:9000
+ExecStart=/usr/local/bin/gateway-service --listen 0.0.0.0:9000
 Restart=on-failure
 LimitNOFILE=65536
 

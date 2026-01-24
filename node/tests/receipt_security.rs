@@ -76,6 +76,18 @@ fn sample_blocktorch_metadata(tag: &str) -> BlockTorchReceiptMetadata {
     hasher.update(tag.as_bytes());
     BlockTorchReceiptMetadata {
         kernel_variant_digest: *hasher.finalize().as_bytes(),
+        descriptor_digest: {
+            let mut descriptor_hasher = blake3::Hasher::new();
+            descriptor_hasher.update(tag.as_bytes());
+            descriptor_hasher.update(b"-descriptor");
+            *descriptor_hasher.finalize().as_bytes()
+        },
+        output_digest: {
+            let mut output_hasher = blake3::Hasher::new();
+            output_hasher.update(tag.as_bytes());
+            output_hasher.update(b"-output");
+            *output_hasher.finalize().as_bytes()
+        },
         benchmark_commit: Some(format!("{tag}-benchmark")),
         tensor_profile_epoch: Some(format!("{tag}-epoch")),
         proof_latency_ms: 7,

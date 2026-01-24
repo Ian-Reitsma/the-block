@@ -75,7 +75,7 @@ BlockTorch is the deterministic tensor/autograd layer that powers verified ML co
 - Unit tests live next to code; integration tests under `node/tests`, `gateway/tests`, `bridges/tests`, etc.
 - Replay harness: `cargo test -p the_block --test replay` replays ledger snapshots across architectures.
 - Settlement audit: `cargo test -p the_block --test settlement_audit --release` must pass before merging.
-- Fuzzing: `scripts/fuzz_coverage.sh` installs LLVM tools, runs fuzz targets (e.g., `cargo fuzz run storage`), and uploads `.profraw` artifacts. Remember to set `LLVM_PROFILE_FILE`.
+- Fuzzing: `scripts/fuzz_coverage.sh` installs LLVM tools, runs fuzz targets (defaulting to `compute_market`), and merges the resulting `.profraw` artifacts into HTML coverage output. Override the targets with `--target`/`--targets`, cap runtimes via `--duration`, or pass `--no-run` to merge pre-existing `.profraw` files; the script manages `RUSTFLAGS` and `LLVM_PROFILE_FILE` for you.
 - Chaos: `tests/net_gossip.rs`, `tests/net_quic.rs`, `node/tests/storage_repair.rs`, `node/tests/gateway_rate_limit.rs` simulate packet loss, disk-full, etc.
 - Reviews should include the full gate transcript from `AGENTS.md §0.6` (lint, fmt, `just test-fast`, tiered `just test-full`, replay, settlement audit, fuzz). Attach command output or CI links plus the `.profraw` summary. Ad market touches add the readiness checklist from [`docs/overview.md#ad--targeting-readiness-checklist`](overview.md#ad--targeting-readiness-checklist)—log `npm ci --prefix monitoring && make monitor`, `/wrappers` hashes, and selector dashboards alongside the standard gates.
 
@@ -115,6 +115,7 @@ On Linux swap `DYLD_INSERT_LIBRARIES` → `LD_PRELOAD`. Once ASan pinpoints the 
 
 ## Dependency Policy
 - Policies live in `config/dependency_policies.toml`. Run `cargo run -p dependency_registry -- --check config/dependency_policies.toml` (or `just dependency-audit`) to refresh `docs/dependency_inventory*.json`.
+- **Zero third-party rule**: registry/git sources are forbidden. Keep `FIRST_PARTY_ONLY=1`, ensure `dependency_guard` passes for every crate (build scripts included), and reject PRs that add non-workspace crates or build helpers. Vendored code must live under our namespace with updates reflected in `config/dependency_policies.toml`, `provenance.json`, and `checksums.txt`.
 - After dependency changes: run `cargo vendor`, regenerate `provenance.json` + `checksums.txt`, and update [`docs/security_and_privacy.md#release-provenance-and-supply-chain`](security_and_privacy.md#release-provenance-and-supply-chain) with the attestation summary. CI rejects PRs that skip these artifacts.
 - Wrap critical stacks in first-party crates, record governance overrides, and track violations via telemetry + dashboards so the “pivot strategy” lives in code history rather than a deleted doc.
 - Never introduce `reqwest`, `serde_json`, `bincode`, etc. Production crates must route through the first-party facades.

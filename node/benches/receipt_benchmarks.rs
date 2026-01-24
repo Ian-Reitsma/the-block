@@ -50,6 +50,18 @@ fn sample_blocktorch_metadata(id: u64) -> BlockTorchReceiptMetadata {
     hasher.update(&id.to_le_bytes());
     BlockTorchReceiptMetadata {
         kernel_variant_digest: *hasher.finalize().as_bytes(),
+        descriptor_digest: {
+            let mut descriptor_hasher = Hasher::new();
+            descriptor_hasher.update(b"descriptor");
+            descriptor_hasher.update(&id.to_le_bytes());
+            *descriptor_hasher.finalize().as_bytes()
+        },
+        output_digest: {
+            let mut output_hasher = Hasher::new();
+            output_hasher.update(b"output");
+            output_hasher.update(&id.to_le_bytes());
+            *output_hasher.finalize().as_bytes()
+        },
         benchmark_commit: Some(format!("bench-{}", id)),
         tensor_profile_epoch: Some(format!("epoch-{}", id)),
         proof_latency_ms: 21,

@@ -85,6 +85,8 @@ pub struct ComputeReceipt {
 #[serde(crate = "foundation_serialization::serde")]
 pub struct BlockTorchReceiptMetadata {
     pub kernel_variant_digest: [u8; 32],
+    pub descriptor_digest: [u8; 32],
+    pub output_digest: [u8; 32],
     #[serde(default)]
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub benchmark_commit: Option<String>,

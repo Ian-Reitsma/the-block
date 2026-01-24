@@ -224,6 +224,15 @@ pub static ORCHARD_ALLOC_FREE_DELTA: Lazy<Gauge> = Lazy::new(|| {
 });
 
 #[cfg(feature = "telemetry")]
+pub static ORCHARD_ALLOC_FREE_DELTA_DETAIL: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec(
+        "orchard_alloc_free_delta_detail",
+        "Per-job allocation delta broken down by the ORCHARD_TENSOR_PROFILE label.",
+        &["job_id", "label"],
+    )
+});
+
+#[cfg(feature = "telemetry")]
 pub static PROOF_VERIFICATION_LATENCY_MS: Lazy<Histogram> = Lazy::new(|| {
     register_histogram(
         "proof_verification_latency_ms",
@@ -470,6 +479,16 @@ pub fn set_orchard_alloc_free_delta(delta: i64) {
 }
 
 #[cfg(feature = "telemetry")]
+pub fn set_orchard_alloc_free_delta_detail(job_id: &str, label: &str, delta: i64) {
+    ORCHARD_ALLOC_FREE_DELTA_DETAIL
+        .with_label_values(&[job_id, label])
+        .set(delta);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub fn set_orchard_alloc_free_delta_detail(_job_id: &str, _label: &str, _delta: i64) {}
+
+#[cfg(feature = "telemetry")]
 pub fn record_proof_verification_latency(duration: Duration) {
     PROOF_VERIFICATION_LATENCY_MS.observe(duration.as_secs_f64() * 1000.0);
     blocktorch_update_metadata(|meta| {
@@ -494,6 +513,16 @@ pub fn set_blocktorch_tensor_profile_epoch(epoch: Option<&str>) {
     blocktorch_update_metadata(|meta| {
         meta.tensor_profile_epoch = epoch.map(|value| value.to_string());
     });
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_blocktorch_descriptor_digest(digest: [u8; 32]) {
+    blocktorch_update_metadata(|meta| meta.descriptor_digest = Some(hex::encode(digest)));
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_blocktorch_output_digest(digest: [u8; 32]) {
+    blocktorch_update_metadata(|meta| meta.output_digest = Some(hex::encode(digest)));
 }
 
 /// Record metrics derivation time

@@ -36,8 +36,8 @@ use foundation_serialization::{
     json::{self, Map as JsonMap, Number, Value as JsonValue},
 };
 use httpd::{
-    serve, serve_tls, HttpError, Method, Request, Response, Router, ServerConfig, StatusCode,
-    WebSocketRequest, WebSocketResponse,
+    serve, serve_tls, HttpError, Method, Request, Response, Router, ServerConfig, ServerTlsConfig,
+    StatusCode, WebSocketRequest, WebSocketResponse,
 };
 use runtime::sync::mpsc;
 use runtime::ws::Message as WsMessage;
@@ -1230,11 +1230,13 @@ pub async fn run(
     read_tx: mpsc::Sender<ReadAck>,
     market: Option<MarketplaceHandle>,
     readiness: Option<AdReadinessHandle>,
+    tls: Option<ServerTlsConfig>,
+    resolver: Option<ResolverConfig>,
 ) -> diagnostics::anyhow::Result<()> {
     let listener =
         net::listener::bind_runtime("gateway", "gateway_listener_bind_failed", addr).await?;
-    let resolver = ResolverConfig::from_env();
-    run_listener(listener, stake, read_tx, market, readiness, None, resolver).await
+    let resolver = resolver.unwrap_or_else(ResolverConfig::from_env);
+    run_listener(listener, stake, read_tx, market, readiness, tls, resolver).await
 }
 
 /// Runs the gateway server on the provided listener.

@@ -1,18 +1,18 @@
 # .block Mobile Resolver Runbook
 
 ## Overview
-Operators expose `.block` domains through the gateway binary (`node/src/bin/gateway.rs`) so that browsers, mobile apps, and DoH-enabled DNS clients can fetch `https://<domain>/` content and resolve `.block` names via `/dns/resolve`. This runbook describes how to wire the binary, TLS artifacts, stake gating, and resolver knobs together, then configures phones (Android/iOS/desktop DoH) to browse `.block` reliably.
+Operators expose `.block` domains through the new `gateway-service` binary (built from `node/src/bin/gateway_service.rs`) so browsers, mobile apps, and DoH-enabled DNS clients can fetch `https://<domain>/` content and resolve `.block` names via `/dns/resolve`. This runbook describes how to wire the service binary, TLS artifacts, stake gating, and resolver knobs together, then configures phones (Android/iOS/desktop DoH) to browse `.block` reliably.
 
 ## 1. Gateway daemon + systemd
-1. Build the gateway daemon by enabling the CLI and gateway features of `the_block`.
+1. Build the gateway service binary with only the gateway feature enabled:
    ```bash
-   cargo build -p the_block --bin gateway --locked --release --features "cli gateway"
+   cargo build -p the_block --bin gateway-service --locked --release --features gateway
    ```
-   The resulting binary is `target/release/gateway`.
-2. Install or copy the binary into `/usr/local/bin/gateway` and ensure it is executable.
-3. The service at `deploy/systemd/gateway.service` stays unchanged: it stages TLS via `contract tls stage [...]` and executes `/usr/local/bin/gateway --listen 0.0.0.0:9000`. Adjust `--listen` or `--config-dir` only when customizing the cluster.
-4. The gateway CLI accepts TLS overrides via `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-client-ca-optional`. Matching env vars (`TB_GATEWAY_TLS_*`) follow the `http_env` naming pattern for automated deployments.
-5. Board stake gating before the binary starts: the HTTP stack rejects requests whose `Host` header does not map to a domain with a funded entry in `dns_ownership/<domain>` (see `node/src/gateway/dns.rs`). Use the DNS auction/stake CLI to mint the domain and deposit BLOCK before adding it to the resolver list.
+   This produces `target/release/gateway-service`, which directly runs `the_block::web::gateway::run`.
+2. Install or copy the binary into `/usr/local/bin/gateway-service` and ensure it is executable. The service at `deploy/systemd/gateway.service` now stages TLS via `contract tls stage [...]` and executes `/usr/local/bin/gateway-service --listen 0.0.0.0:9000`. Adjust `--listen` or `--config-dir` via the `TB_GATEWAY_LISTEN`/`TB_GATEWAY_CONFIG_DIR` env vars or CLI flags when customizing the cluster.
+3. The existing `gateway` CLI (`node/src/bin/gateway.rs`, built with `cargo build -p the_block --bin gateway --features "cli gateway"`) stays around for interactive TLS overrides, debugging, and resolver testing.
+4. TLS is configured through `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-client-ca-optional`, or via the matching env vars (`TB_GATEWAY_TLS_*`). The service exposes the same `http_env` naming shortcuts so staging scripts can reuse their existing hooks.
+5. Board stake gating before the binary starts: the HTTP stack rejects requests whose `Host` header does not map to a domain with a funded entry in `dns_ownership/<domain>` (see `node/src/gateway/dns.rs`). Use the DNS auction/stake CLI (see the same file) to mint the domain and deposit BLOCK before adding it to the resolver list.
 
 ## 2. Resolver knobs (for phones)
 - `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses advertised for `.block` DoH answers. Populate this with the gateway server's reachable IPs so clients can connect. Leave empty when you emit a CNAME instead.

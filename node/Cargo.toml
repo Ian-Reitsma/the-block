@@ -3,7 +3,7 @@ name = "the_block"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
- 
+
 [dependencies]
 crypto = { path = "../crypto" }
 crypto_suite = { path = "../crates/crypto_suite" }
@@ -212,6 +212,12 @@ test = false
 name = "gateway"
 path = "src/bin/gateway.rs"
 required-features = ["cli", "gateway"]
+test = false
+
+[[bin]]
+name = "gateway-service"
+path = "src/bin/gateway_service.rs"
+required-features = ["gateway"]
 test = false
 
 [[bin]]

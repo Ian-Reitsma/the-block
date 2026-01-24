@@ -34,8 +34,9 @@ mod compute_market_example {}
 pub mod snark;
 pub mod workloads;
 
+use workloads::blocktorch;
 use workloads::inference::BlockTorchInference;
-use workloads::BlockTorchWorkloadMetadata;
+use workloads::{BlockTorchWorkloadMetadata, WorkloadRunOutput};
 
 pub use errors::MarketError;
 pub use scheduler::job_status;
@@ -218,7 +219,7 @@ impl Workload {
 
 /// Execute workloads and produce proof hashes with per-slice caching.
 pub struct WorkloadRunner {
-    cache: Arc<MutexT<HashMap<usize, [u8; 32]>>>,
+    cache: Arc<MutexT<HashMap<usize, WorkloadRunOutput>>>,
 }
 
 impl WorkloadRunner {
@@ -251,20 +252,35 @@ impl WorkloadRunner {
 
     /// Run the workload for a given slice ID asynchronously. Results are cached so
     /// repeated executions avoid recomputation.
-    pub async fn run(&self, slice_id: usize, w: Workload) -> [u8; 32] {
+    pub async fn run(&self, slice_id: usize, w: Workload) -> WorkloadRunOutput {
         if let Some(cached) = self.cache.guard().get(&slice_id) {
-            return *cached;
+            return cached.clone();
         }
         let res = runtime::spawn_blocking(move || match w {
-            Workload::Transcode(data) => workloads::transcode::run(&data),
+            Workload::Transcode(data) => WorkloadRunOutput::plain(workloads::transcode::run(&data)),
             Workload::Inference(data) => workloads::inference::run(&data),
             Workload::GpuHash(data) => workloads::gpu::run(&data),
-            Workload::Snark(data) => workloads::snark::run(&data),
+            Workload::Snark(data) => WorkloadRunOutput::plain(workloads::snark::run(&data)),
         })
         .await
         .unwrap_or_else(|e| panic!("workload failed: {e}"));
-        self.cache.guard().insert(slice_id, res);
+        self.cache
+            .guard()
+            .insert(slice_id, res.clone());
         res
+    }
+}
+
+fn record_blocktorch_metadata(meta: &BlockTorchWorkloadMetadata) {
+    #[cfg(feature = "telemetry")]
+    {
+        telemetry::receipts::set_blocktorch_kernel_digest(meta.kernel_digest);
+        telemetry::receipts::set_blocktorch_benchmark_commit(meta.benchmark_commit.as_deref());
+        telemetry::receipts::set_blocktorch_tensor_profile_epoch(
+            meta.tensor_profile_epoch.as_deref(),
+        );
+        telemetry::receipts::set_blocktorch_descriptor_digest(meta.descriptor_digest);
+        telemetry::receipts::set_blocktorch_output_digest(meta.output_digest);
     }
 }
 
@@ -348,6 +364,17 @@ impl Market {
         self.current_block = block_height;
     }
 
+    fn apply_blocktorch_metadata(
+        &mut self,
+        job_id: &str,
+        metadata: Option<BlockTorchWorkloadMetadata>,
+    ) {
+        if let (Some(state), Some(meta)) = (self.jobs.get_mut(job_id), metadata) {
+            record_blocktorch_metadata(&meta);
+            state.blocktorch_metadata = Some(meta);
+        }
+    }
+
     fn sweep_overdue_jobs(&mut self) {
         for resolution in settlement::Settlement::sweep_overdue() {
             match &resolution.outcome {
@@ -365,7 +392,7 @@ impl Market {
                     crate::telemetry::COMPUTE_JOB_TIMEOUT_TOTAL.inc();
                 }
                 SlaResolutionKind::Completed => {
-                    if let Some(state) = self.jobs.remove(&resolution.job_id) {
+                    if let Some(mut state) = self.jobs.remove(&resolution.job_id) {
                         let total_units: u64 = state.job.workloads.iter().map(|w| w.units()).sum();
                         let total_payment = total_units.saturating_mul(state.price_per_unit);
                         let verified = state.paid_slices == state.job.slices.len();
@@ -379,6 +406,16 @@ impl Market {
                             #[cfg(feature = "telemetry")]
                             {
                                 telemetry::receipts::set_orchard_alloc_free_delta(snapshot.delta);
+                                for (label, delta) in snapshot.label_deltas.iter() {
+                                    if *delta == 0 {
+                                        continue;
+                                    }
+                                    telemetry::receipts::set_orchard_alloc_free_delta_detail(
+                                        &resolution.job_id,
+                                        label,
+                                        *delta,
+                                    );
+                                }
                                 telemetry::receipts::set_blocktorch_tensor_profile_epoch(Some(
                                     &snapshot.epoch,
                                 ));
@@ -391,6 +428,8 @@ impl Market {
                         let blocktorch = state.blocktorch_metadata.as_ref().map(|meta| {
                             BlockTorchReceiptMetadata {
                                 kernel_variant_digest: meta.kernel_digest,
+                                descriptor_digest: meta.descriptor_digest,
+                                output_digest: meta.output_digest,
                                 benchmark_commit: meta.benchmark_commit.clone(),
                                 tensor_profile_epoch: meta.tensor_profile_epoch.clone(),
                                 proof_latency_ms,
@@ -533,23 +572,7 @@ impl Market {
             .ensure_handle_for_label_values(&[&offer.provider])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(effective as i64);
-        let blocktorch_metadata = job
-            .workloads
-            .iter()
-            .filter_map(|w| match w {
-                Workload::Inference(payload) => Some(payload.metadata()),
-                _ => None,
-            })
-            .next();
-
-        #[cfg(feature = "telemetry")]
-        if let Some(ref meta) = blocktorch_metadata {
-            telemetry::receipts::set_blocktorch_kernel_digest(meta.kernel_digest);
-            telemetry::receipts::set_blocktorch_benchmark_commit(meta.benchmark_commit.as_deref());
-            telemetry::receipts::set_blocktorch_tensor_profile_epoch(
-                meta.tensor_profile_epoch.as_deref(),
-            );
-        }
+        let blocktorch_metadata = None;
 
         let state = JobState {
             job,
@@ -830,10 +853,12 @@ impl Market {
         }
         let results = runtime::join_all(handles).await;
         let mut total = 0;
-        for (expected, (output, w)) in slices
+        for (expected, (run_output, w)) in slices
             .into_iter()
             .zip(results.into_iter().zip(workloads.into_iter()))
         {
+            self.apply_blocktorch_metadata(job_id, run_output.blocktorch.clone());
+            let output = run_output.output;
             let units = w.units();
             let proof_bundle = match &w {
                 Workload::Snark(wasm) => {

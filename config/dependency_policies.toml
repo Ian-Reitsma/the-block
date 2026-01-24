@@ -3,19 +3,12 @@
 [settings]
 # Maximum allowed distance from a workspace crate to a dependency in the resolved DAG.
 max_depth = 3
+# First-party-only: registry/git sources are disallowed. Update provenance when vendoring changes.
 
 [tiers]
-strategic = [
-  "inhouse",
-  "quinn",
-  "rustls",
-  "ed25519-dalek",
-]
-replaceable = [
-  "serde",
-]
-forbidden = [
-]
+strategic = ["inhouse"]
+replaceable = []
+forbidden = ["registry", "git"]
 
 [licenses]
 forbidden = [

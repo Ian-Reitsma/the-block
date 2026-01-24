@@ -11,6 +11,18 @@ metrics:
       - commit
     description: |
       Emits the benchmark commit/benchmarks.json path for the last profiled job, letting operators correlate proof latency deltas with the harness output.
+  - name: blocktorch_descriptor_digest
+    type: gauge
+    labels:
+      - descriptor
+    description: |
+      Exposes the descriptor digest for the submitted tensor workload so auditors can verify the encoded layout that produced a given receipt.
+  - name: blocktorch_output_digest
+    type: gauge
+    labels:
+      - digest
+    description: |
+      Surface the deterministic inference output digest that is anchored inside receipts, proofs, and replay logs.
   - name: blocktorch_proof_latency_ms
     type: gauge
     labels: []

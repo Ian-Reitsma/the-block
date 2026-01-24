@@ -30,6 +30,10 @@ fn wrappers_snapshot_hash_is_pinned() {
     let mut blocktorch_trace_labels = HashMap::new();
     blocktorch_trace_labels.insert("hash".into(), "trace-hash-xyz".into());
     blocktorch_trace_labels.insert("source".into(), "wrappers".into());
+    let mut blocktorch_descriptor_labels = HashMap::new();
+    blocktorch_descriptor_labels.insert("descriptor".into(), "descriptor-xyz".into());
+    let mut blocktorch_output_labels = HashMap::new();
+    blocktorch_output_labels.insert("digest".into(), "output-789".into());
     let mut snark_labels = HashMap::new();
     snark_labels.insert("backend".into(), "cpu".into());
     map.insert(
@@ -219,6 +223,16 @@ fn wrappers_snapshot_hash_is_pinned() {
                 WrapperMetricEntry {
                     metric: "blocktorch_benchmark_commit".into(),
                     labels: blocktorch_benchmark_labels.clone(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "blocktorch_descriptor_digest".into(),
+                    labels: blocktorch_descriptor_labels.clone(),
+                    value: 1.0,
+                },
+                WrapperMetricEntry {
+                    metric: "blocktorch_output_digest".into(),
+                    labels: blocktorch_output_labels.clone(),
                     value: 1.0,
                 },
                 WrapperMetricEntry {

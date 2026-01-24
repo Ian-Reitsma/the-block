@@ -6,11 +6,15 @@
 
 ---
 
+## Dependency governance
+
+- **Zero third-party rule**: registry/git dependencies are forbidden. Keep `FIRST_PARTY_ONLY=1`, ensure `dependency_guard` passes in build scripts, and reject deployments/PRs that add non-workspace crates. When vendoring is adjusted, refresh `config/dependency_policies.toml`, `provenance.json`, and `checksums.txt`, and surface the change in CI notes so ops can audit supply-chain drift before tagging.
+
 ## Telemetry Wiring
 
 ### BlockTorch receipt telemetry & plan enforcement
 
-- **Objective**: `docs/blocktorch_compute_integration_plan.md`, `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii`, and this runbook form the triad for wiring BlockTorch receipts into observability. Treat the plan as your authoritative “what to do first” list; every telemetry change or governor gate must cite it in the PR summary and the runbook entry.
+- **Objective**: `docs/blocktorch/BLOCKCHAIN_INTEGRATION_STRATEGY.md`, `docs/blocktorch_compute_integration_plan.md`, `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md#part-xii`, and this runbook form the triad for wiring BlockTorch receipts into observability. Treat the plan as your authoritative “what to do first” list; every telemetry change or governor gate must cite it in the PR summary and the runbook entry.
 - **Hard requirements**:
   1. Add new metrics from the plan (`receipt_drain_depth`, `proof_verification_latency`, `kernel_variant.digest`, `benchmark_commit`, `orchard_alloc_free_delta`, `snark_prover_latency_seconds`) inside `node/src/telemetry.rs` and `node/src/telemetry/receipts.rs`.
   2. Guard them behind the `telemetry` cargo feature and sink the allocator logs from `blocktorch/metal/runtime/Allocator.h` (parse `/tmp/orchard_tensor_profile.log` lines into labelled histograms with `job_id` + `device`).
@@ -156,7 +160,7 @@
 
 ## Gateway Service Runbook
 
-- **Service binary & unit** – `deploy/systemd/gateway.service` now points at the first-class `gateway` binary (`node/src/bin/gateway.rs`). The service executes `gateway --listen 0.0.0.0:9000` (change the `--listen` flag or `--config-dir` path for non-default clusters) and reloads TLS artifacts from `/etc/the-block/tls/gateway` via the existing staging hooks.
+- **Service binary & unit** – `deploy/systemd/gateway.service` now points at the first-class `gateway-service` binary (`cmd/gateway-service.rs`), which runs `the_block::web::gateway::run` and exposes `TB_GATEWAY_INTERFACES`, `TB_GATEWAY_PORT`, and `TB_GATEWAY_BLOCK_NAME`. Production deploys should align the unit file, Grafana dashboard, and TLS hooks with this binary; local troubleshooting can still use `cargo run -p gateway -- run` but the service must match the shipped binary.
 - **TLS wiring** – TLS is configured either through the CLI flags `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-client-ca-optional`, or by setting the matching env vars `TB_GATEWAY_TLS_CERT`, `TB_GATEWAY_TLS_KEY`, `TB_GATEWAY_TLS_CLIENT_CA`, and `TB_GATEWAY_TLS_CLIENT_CA_OPTIONAL`. The gateway respects the `http_env` naming pattern so anything that already stages `TB_*_TLS` for RPC or aggregator can be reused.
 - **Stake gating** – HTTP requests must include a `Host` header that resolves to a domain with a stake deposit. The gateway ignores any port suffix (so `Host: example.block:9000` still maps to `example.block`) before checking the DNS ownership store (`node/src/gateway/dns.rs`) and verifying that `dns_ownership/<domain>` points to a `dns_stake/<reference>` record with positive escrowed BLOCK—the helper `domain_has_stake` enforces this check before any content is served. Use the DNS auction/stake CLI (see the same file) to mint the domain and deposit the stake.
 - **Static blobs** – Static files live under `pipeline/gateway/static/<domain>/<path>`. The request path is sanitized (`pipeline::sanitized_path`), so populate the matching directory tree within `pipeline/gateway/static` and the gateway will serve it directly (see `node/src/storage/pipeline.rs:fetch_blob`).
@@ -165,6 +169,8 @@
 ### `.block` DNS resolver (DoH)
 
 - See [`docs/gateway_mobile_resolution.md`](docs/gateway_mobile_resolution.md) for the phone-specific DoH/DNS runbook, TLS knobs, and verification steps referenced below.
+
+- **Bridge domain ownership** – `TB_GATEWAY_BLOCK_NAME` should match the authorized `.block` domain advertised via the DoH resolver (`TB_GATEWAY_RESOLVER_CNAME`). The gateway acts as the authoritative DNS server/DoH provider for that domain by proxying requests only when `dns_ownership/<domain>` and `dns_stake/<reference>` show positive escrow, ensuring mobile devices always resolve legitimate `.block` hosts through the in-house stack.
 
 - **Purpose** – The gateway now speaks DNS-over-HTTPS at `/dns/resolve`. The endpoint returns `application/dns-json` payloads with `Status`, TTL, and `Answer` arrays, only responds to `.block` domains, and reuses the same stake table that gates static hosts. The behavior is driven by three knobs:
   - `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses the resolver should advertise (default: empty, must be populated for useful answers).

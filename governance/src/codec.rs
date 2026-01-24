@@ -302,6 +302,7 @@ fn param_key_to_tag(key: ParamKey) -> u8 {
         ParamKey::BridgeFailureSlash => 40,
         ParamKey::BridgeChallengeSlash => 41,
         ParamKey::BridgeDutyWindowSecs => 42,
+        ParamKey::ProofVerificationBudgetMs => 107,
         ParamKey::LaneBasedSettlementEnabled => 43,
         ParamKey::AdReadinessWindowSecs => 44,
         ParamKey::AdReadinessMinUniqueViewers => 45,
@@ -455,6 +456,7 @@ fn param_key_from_tag(tag: u8) -> Result<ParamKey> {
         104 => ParamKey::EnergySettlementMode,
         105 => ParamKey::EnergySettlementQuorumPpm,
         106 => ParamKey::EnergySettlementExpiryBlocks,
+        107 => ParamKey::ProofVerificationBudgetMs,
 
         // Economic Control Laws (Layer 1: Inflation)
         65 => ParamKey::InflationTargetBps,
@@ -1558,6 +1560,7 @@ pub fn param_key_to_string(key: ParamKey) -> &'static str {
         ParamKey::BridgeFailureSlash => "BridgeFailureSlash",
         ParamKey::BridgeChallengeSlash => "BridgeChallengeSlash",
         ParamKey::BridgeDutyWindowSecs => "BridgeDutyWindowSecs",
+        ParamKey::ProofVerificationBudgetMs => "ProofVerificationBudgetMs",
 
         // Economic Control Laws (Layer 1: Inflation)
         ParamKey::InflationTargetBps => "InflationTargetBps",
@@ -1686,6 +1689,7 @@ pub fn param_key_from_string(value: &str) -> Result<ParamKey> {
         "BridgeFailureSlash" => Ok(ParamKey::BridgeFailureSlash),
         "BridgeChallengeSlash" => Ok(ParamKey::BridgeChallengeSlash),
         "BridgeDutyWindowSecs" => Ok(ParamKey::BridgeDutyWindowSecs),
+        "ProofVerificationBudgetMs" => Ok(ParamKey::ProofVerificationBudgetMs),
 
         // Economic Control Laws (Layer 1: Inflation)
         "InflationTargetBps" => Ok(ParamKey::InflationTargetBps),

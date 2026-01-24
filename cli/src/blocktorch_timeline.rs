@@ -2,12 +2,16 @@ pub fn formatted_blocktorch_timeline(
     kernel_digest: Option<&str>,
     benchmark_commit: Option<&str>,
     tensor_profile_epoch: Option<&str>,
+    descriptor_digest: Option<&str>,
+    output_digest: Option<&str>,
     proof_latency_ms: Option<f64>,
     aggregator_trace: Option<&str>,
 ) -> Option<Vec<String>> {
     if kernel_digest.is_none()
         && benchmark_commit.is_none()
         && tensor_profile_epoch.is_none()
+        && descriptor_digest.is_none()
+        && output_digest.is_none()
         && proof_latency_ms.is_none()
         && aggregator_trace.is_none()
     {
@@ -24,6 +28,12 @@ pub fn formatted_blocktorch_timeline(
     }
     if let Some(epoch) = tensor_profile_epoch {
         lines.push(format!("  tensor profile epoch: {epoch}"));
+    }
+    if let Some(descriptor) = descriptor_digest {
+        lines.push(format!("  descriptor digest: {descriptor}"));
+    }
+    if let Some(output) = output_digest {
+        lines.push(format!("  output digest: {output}"));
     }
     if let Some(latency) = proof_latency_ms {
         lines.push(format!(
@@ -47,6 +57,8 @@ mod tests {
             Some("digest-123"),
             Some("bench-abc"),
             Some("epoch-99"),
+            Some("descriptor-456"),
+            Some("output-789"),
             Some(42.555),
             Some("trace-xyz"),
         )
@@ -56,6 +68,8 @@ mod tests {
             "  kernel digest: digest-123".to_string(),
             "  benchmark commit: bench-abc".to_string(),
             "  tensor profile epoch: epoch-99".to_string(),
+            "  descriptor digest: descriptor-456".to_string(),
+            "  output digest: output-789".to_string(),
             "  proof latency (ms, last measurement): 42.56".to_string(),
             "  aggregator trace: trace-xyz".to_string(),
         ];
@@ -64,6 +78,6 @@ mod tests {
 
     #[test]
     fn formatted_blocktorch_timeline_is_empty_when_no_fields() {
-        assert!(formatted_blocktorch_timeline(None, None, None, None, None).is_none());
+        assert!(formatted_blocktorch_timeline(None, None, None, None, None, None, None).is_none());
     }
 }

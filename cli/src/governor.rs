@@ -264,6 +264,8 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
             blocktorch.kernel_digest.as_deref(),
             blocktorch.benchmark_commit.as_deref(),
             blocktorch.tensor_profile_epoch.as_deref(),
+            blocktorch.descriptor_digest.as_deref(),
+            blocktorch.output_digest.as_deref(),
             blocktorch.proof_latency_ms,
             blocktorch.aggregator_trace.as_deref(),
         ) {
@@ -352,6 +354,10 @@ struct BlockTorchView {
     benchmark_commit: Option<String>,
     #[serde(default)]
     tensor_profile_epoch: Option<String>,
+    #[serde(default)]
+    descriptor_digest: Option<String>,
+    #[serde(default)]
+    output_digest: Option<String>,
     #[serde(default)]
     proof_latency_ms: Option<f64>,
     #[serde(default)]
