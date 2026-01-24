@@ -110,11 +110,20 @@ This plan is explicitly connected to [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_A
   1. Wire receipts/SLAs to explorer and governance (update `node/src/settlement.rs`, `governance/src/params.rs`, `docs/economics_and_governance.md`) and mention the BlockTorch artifacts (kernel hashes, profiler logs) on the settlement entries.
   2. Ensure SLA breaches trigger slashing metrics in `node/src/telemetry.rs`, record proof budget overruns, and journal entries in `node/src/settlement.rs` with `BlockTorchJobReceipt`.
   3. Make sure receipts anchor to blocks (`node/src/ledger` path), expose CLI endpoints (`cli/src/compute.rs`, `cli/src/governor.rs`), and show up in explorers (extend `explorer/src/routes/receipts` schema).
+  4. Guarantee every BlockTorch compute receipt carries the full metadata bundle (kernel digest, descriptor/output digests, benchmark commit, tensor profile epoch, proof latency) so the proof loop can be traced from `tb-cli compute stats` through the explorer APIs without hunting in logs.
+  5. Add a deterministic replay test that round-trips a block with a BlockTorch compute receipt and asserts the `BlockTorchReceiptMetadata` survives encoding/decoding; cite the test in the spec bundle (`node/tests/replay.rs`).
 - **Checklist**:
   - [ ] Replay + settlement audit coverage for touched ledger flows (`cargo test -p the_block --test replay`, `settlement_audit` release test); include logs for kernel hash verification and `ORCHARD_TENSOR_PROFILE`.
   - [ ] Governance knobs documented and wired to `TB_*` env vars if needed (`node/src/config.rs`, `governance/src/params.rs`).
   - [ ] Explorer + CLI status endpoints mention BlockTorch receipts/slashes (`cli/src/compute.rs`, `cli/src/explorer.rs`, `explorer/src/routes/receipts`) and surface meta-requests for `benchmark` artifact links.
   - [ ] `docs/economics_and_governance.md` outlines how proof verification latency (<100ms) ties into issuance and slashing, referencing the telemetry metrics from 4.5.
+  - [ ] Explorer receipts APIs now persist and return BlockTorch metadata so operators can read the kernel/benchmark/tensor profile timeline directly from `GET /receipts`.
+
+#### 4.4.1 BlockTorch Proof-Loop Receipts
+- **Metadata guarantee** — Every BlockTorch compute receipt must arrive in the ledger with a `ComputeReceipt.blocktorch` block that includes `kernel_variant_digest`, `descriptor_digest`, `output_digest`, `benchmark_commit`, `tensor_profile_epoch`, and `proof_latency_ms`. These values are the anchors for replay determinism, telemetry, and explorer dashboards.
+- **Validation** — `receipts_validation.rs` enforces the guarantee by rejecting receipts whose metadata is missing, empty, or sets `proof_latency_ms` to zero so that nothing slips through without the required provenance. The validation error should mention which field failed so reviewers can trace the upstream job artifact or telemetry hook that was misconfigured.
+- **Operator visibility** — RPC `compute_market.stats` already publishes a `blocktorch` object; that payload must keep the same bundle so `tb-cli compute stats` prints the kernel/benchmark/epoch/latency lines and the explorer `GET /receipts/{provider|domain}` JSON surfaces the same fields; operators should never have to spelunk logs to reconstruct the proof loop.
+- **Deterministic test** — `node/tests/replay.rs` now includes a targeted round-trip that builds a block with a `Receipt::Compute` containing `BlockTorchReceiptMetadata`, encodes/decodes it, and compares each field so the proof loop's serialization contract stays locked before settlement or governor changes land.
 
 #### 4.5 Observability & Dashboards
 - **Goal**: Make the proof loop visible end-to-end and connect `ORCHARD_TENSOR_PROFILE` to Prometheus.

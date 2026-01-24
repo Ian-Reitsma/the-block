@@ -13,6 +13,7 @@ use foundation_sqlite::{
     params, Connection, Error as SqlError, OptionalExtension, Value as SqlValue,
 };
 use httpd::{HttpError, Request, Response, Router, StatusCode};
+use std::collections::HashSet;
 use std::env;
 use std::fmt;
 use std::fs;
@@ -1344,13 +1345,44 @@ pub(crate) fn decode_json<T: DeserializeOwned>(
 fn encode_json<T: Serialize>(value: &T) -> foundation_serialization::Result<Vec<u8>> {
     json::to_vec(value)
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ReceiptRecord {
     pub key: String,
     pub epoch: u64,
     pub provider: String,
     pub buyer: String,
     pub amount: u64,
+    #[serde(
+        default,
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
+    pub kernel_digest: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
+    pub descriptor_digest: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
+    pub output_digest: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
+    pub benchmark_commit: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
+    pub tensor_profile_epoch: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "foundation_serialization::skip::option_is_none"
+    )]
+    pub proof_latency_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2117,6 +2149,7 @@ mod tests {
             provider: "prov".into(),
             buyer: "buyer".into(),
             amount: 10,
+            ..Default::default()
         })
         .unwrap();
         assert_eq!(ex.receipts_by_provider("prov").unwrap().len(), 1);
@@ -2633,6 +2666,31 @@ pub struct Explorer {
     did_cache: Mutex<LruCache<String, DidDocumentView>>,
 }
 
+fn ensure_receipt_columns(conn: &Connection) -> DbResult<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(receipts)")?;
+    let mut existing: HashSet<String> = HashSet::new();
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        existing.insert(row.get::<_, String>(1)?);
+    }
+    for (name, kind) in [
+        ("kernel_digest", "TEXT"),
+        ("descriptor_digest", "TEXT"),
+        ("output_digest", "TEXT"),
+        ("benchmark_commit", "TEXT"),
+        ("tensor_profile_epoch", "TEXT"),
+        ("proof_latency_ms", "INTEGER"),
+    ] {
+        if !existing.contains(*name) {
+            conn.execute(
+                &format!("ALTER TABLE receipts ADD COLUMN {name} {kind}"),
+                params![],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 impl Explorer {
     fn decode_block(bytes: &[u8]) -> AnyhowResult<Block> {
         if let Ok(block) = decode_json(bytes) {
@@ -2662,9 +2720,10 @@ impl Explorer {
         let gov_db_path = env::var("TB_GOV_DB_PATH").unwrap_or_else(|_| "governance_db".into());
         let mut conn = Connection::open(&p)?;
         conn.execute(
-            "CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, epoch INTEGER, provider TEXT, buyer TEXT, amount INTEGER)",
+            "CREATE TABLE IF NOT EXISTS receipts (key TEXT PRIMARY KEY, epoch INTEGER, provider TEXT, buyer TEXT, amount INTEGER, kernel_digest TEXT, descriptor_digest TEXT, output_digest TEXT, benchmark_commit TEXT, tensor_profile_epoch TEXT, proof_latency_ms INTEGER)",
             params![],
         )?;
+        ensure_receipt_columns(&conn)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS blocks (hash TEXT PRIMARY KEY, height INTEGER, data BLOB)",
             params![],
@@ -3979,12 +4038,37 @@ impl Explorer {
                     if let Ok(bytes) = std::fs::read(ent.path()) {
                         if let Ok(list) = binary::decode::<Vec<ComputeReceipt>>(&bytes) {
                             for r in list {
+                                let (
+                                    kernel_digest,
+                                    descriptor_digest,
+                                    output_digest,
+                                    benchmark_commit,
+                                    tensor_profile_epoch,
+                                    proof_latency_ms,
+                                ) = if let Some(meta) = &r.blocktorch {
+                                    (
+                                        Some(hex_encode(meta.kernel_variant_digest)),
+                                        Some(hex_encode(meta.descriptor_digest)),
+                                        Some(hex_encode(meta.output_digest)),
+                                        meta.benchmark_commit.clone(),
+                                        meta.tensor_profile_epoch.clone(),
+                                        Some(meta.proof_latency_ms),
+                                    )
+                                } else {
+                                    (None, None, None, None, None, None)
+                                };
                                 let rec = ReceiptRecord {
                                     key: hex_encode(r.idempotency_key),
                                     epoch,
                                     provider: r.provider.clone(),
                                     buyer: r.buyer.clone(),
                                     amount: r.quote_price,
+                                    kernel_digest,
+                                    descriptor_digest,
+                                    output_digest,
+                                    benchmark_commit,
+                                    tensor_profile_epoch,
+                                    proof_latency_ms,
                                 };
                                 let _ = self.index_receipt(&rec);
                             }
@@ -3999,8 +4083,20 @@ impl Explorer {
     pub fn index_receipt(&self, rec: &ReceiptRecord) -> DbResult<()> {
         let conn = self.conn()?;
         conn.execute(
-            "INSERT OR REPLACE INTO receipts (key, epoch, provider, buyer, amount) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![&rec.key, rec.epoch, &rec.provider, &rec.buyer, rec.amount],
+            "INSERT OR REPLACE INTO receipts (key, epoch, provider, buyer, amount, kernel_digest, descriptor_digest, output_digest, benchmark_commit, tensor_profile_epoch, proof_latency_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                &rec.key,
+                rec.epoch,
+                &rec.provider,
+                &rec.buyer,
+                rec.amount,
+                rec.kernel_digest.as_deref(),
+                rec.descriptor_digest.as_deref(),
+                rec.output_digest.as_deref(),
+                rec.benchmark_commit.as_deref(),
+                rec.tensor_profile_epoch.as_deref(),
+                rec.proof_latency_ms
+            ],
         )?;
         Ok(())
     }
@@ -4008,7 +4104,7 @@ impl Explorer {
     pub fn receipts_by_provider(&self, prov: &str) -> DbResult<Vec<ReceiptRecord>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT key, epoch, provider, buyer, amount FROM receipts WHERE provider=?1 ORDER BY epoch",
+            "SELECT key, epoch, provider, buyer, amount, kernel_digest, descriptor_digest, output_digest, benchmark_commit, tensor_profile_epoch, proof_latency_ms FROM receipts WHERE provider=?1 ORDER BY epoch",
         )?;
         let rows = stmt.query_map(params![prov], |row| {
             Ok(ReceiptRecord {
@@ -4017,6 +4113,12 @@ impl Explorer {
                 provider: row.get(2)?,
                 buyer: row.get(3)?,
                 amount: row.get(4)?,
+                kernel_digest: row.get(5)?,
+                descriptor_digest: row.get(6)?,
+                output_digest: row.get(7)?,
+                benchmark_commit: row.get(8)?,
+                tensor_profile_epoch: row.get(9)?,
+                proof_latency_ms: row.get(10)?,
             })
         })?;
         let mut out = Vec::new();
@@ -4029,7 +4131,7 @@ impl Explorer {
     pub fn receipts_by_domain(&self, dom: &str) -> DbResult<Vec<ReceiptRecord>> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT key, epoch, provider, buyer, amount FROM receipts WHERE buyer=?1 ORDER BY epoch",
+            "SELECT key, epoch, provider, buyer, amount, kernel_digest, descriptor_digest, output_digest, benchmark_commit, tensor_profile_epoch, proof_latency_ms FROM receipts WHERE buyer=?1 ORDER BY epoch",
         )?;
         let rows = stmt.query_map(params![dom], |row| {
             Ok(ReceiptRecord {
@@ -4038,6 +4140,12 @@ impl Explorer {
                 provider: row.get(2)?,
                 buyer: row.get(3)?,
                 amount: row.get(4)?,
+                kernel_digest: row.get(5)?,
+                descriptor_digest: row.get(6)?,
+                output_digest: row.get(7)?,
+                benchmark_commit: row.get(8)?,
+                tensor_profile_epoch: row.get(9)?,
+                proof_latency_ms: row.get(10)?,
             })
         })?;
         let mut out = Vec::new();

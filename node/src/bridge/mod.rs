@@ -21,6 +21,7 @@ use bridges::{
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json::{self, Number, Value};
+use foundation_serialization::Serialize;
 use sled::{Config as SledConfig, Db as SledDb};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
@@ -415,6 +416,16 @@ pub struct RelayerQuorumInfo {
     pub relayers: Vec<RelayerInfo>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct IncentiveSummaryEntry {
+    pub asset: String,
+    pub pending_duties: usize,
+    pub claimable_rewards: u64,
+    pub receipt_count: usize,
+    pub active_relayers: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChallengeRecord {
     pub asset: String,
@@ -602,6 +613,7 @@ struct BridgeState {
     duties: DutyStore,
     incentives: BridgeIncentiveParameters,
     token_bridge: TokenBridge,
+    pending_rewards: HashMap<String, u64>,
     reward_accruals: VecDeque<RewardAccrualRecord>,
     reward_claims: VecDeque<RewardClaimRecord>,
     next_claim_id: u64,
@@ -735,6 +747,23 @@ mod state_codec {
             accounting.insert(relayer.clone(), record);
         }
         Ok(accounting)
+    }
+
+    fn encode_pending_rewards(pending: &HashMap<String, u64>) -> Value {
+        let mut map = Map::new();
+        for (asset, amount) in pending {
+            map.insert(asset.clone(), Value::Number(Number::from(*amount)));
+        }
+        Value::Object(map)
+    }
+
+    fn decode_pending_rewards(value: &Value) -> Result<HashMap<String, u64>, CodecError> {
+        let obj = require_object(value, "pending_rewards")?;
+        let mut pending = HashMap::new();
+        for (asset, entry) in obj.iter() {
+            pending.insert(asset.clone(), require_u64(entry, "pending_reward")?);
+        }
+        Ok(pending)
     }
 
     fn encode_incentives(params: &BridgeIncentiveParameters) -> Value {
@@ -1960,6 +1989,10 @@ mod state_codec {
             encode_reward_accruals(&state.reward_accruals, state.next_accrual_id),
         );
         map.insert(
+            "pending_rewards".to_string(),
+            encode_pending_rewards(&state.pending_rewards),
+        );
+        map.insert(
             "settlement_log".to_string(),
             encode_settlements(&state.settlement_log),
         );
@@ -2035,6 +2068,11 @@ mod state_codec {
         } else {
             (VecDeque::new(), 0)
         };
+        let pending_rewards = if let Some(value) = obj.get("pending_rewards") {
+            decode_pending_rewards(value)?
+        } else {
+            HashMap::new()
+        };
         let settlement_log = if let Some(value) = obj.get("settlement_log") {
             decode_settlements(value)?
         } else {
@@ -2086,6 +2124,7 @@ mod state_codec {
             duties,
             incentives,
             token_bridge,
+            pending_rewards,
             reward_accruals,
             reward_claims,
             next_claim_id,
@@ -2354,6 +2393,10 @@ impl Bridge {
                 accounting.apply_penalty(delta);
             }
         }
+        let removed = self.remove_pending_reward(asset, delta);
+        if removed > 0 {
+            crate::telemetry::adjust_bridge_rewards_pending(-(removed as i64));
+        }
         let record = SlashRecord {
             relayer: relayer.to_string(),
             asset: asset.to_string(),
@@ -2380,6 +2423,60 @@ impl Bridge {
                 self.apply_slash(&id, asset, prev_stake - new_state.stake);
             }
         }
+    }
+
+    fn add_pending_reward(&mut self, asset: &str, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        let entry = self
+            .state
+            .pending_rewards
+            .entry(asset.to_string())
+            .or_insert(0);
+        *entry = entry.saturating_add(amount);
+    }
+
+    fn remove_pending_reward(&mut self, asset: &str, amount: u64) -> u64 {
+        if amount == 0 {
+            return 0;
+        }
+        if let Some(entry) = self.state.pending_rewards.get_mut(asset) {
+            let removed = (*entry).min(amount);
+            *entry -= removed;
+            if *entry == 0 {
+                self.state.pending_rewards.remove(asset);
+            }
+            removed
+        } else {
+            0
+        }
+    }
+
+    fn consume_pending_rewards(&mut self, mut amount: u64) -> u64 {
+        if amount == 0 {
+            return 0;
+        }
+        let mut assets: Vec<String> = self.state.pending_rewards.keys().cloned().collect();
+        assets.sort();
+        let mut removed_total = 0;
+        for asset in assets {
+            if amount == 0 {
+                break;
+            }
+            let removed = self.remove_pending_reward(&asset, amount);
+            amount -= removed;
+            removed_total += removed;
+        }
+        removed_total
+    }
+
+    fn pending_rewards_for_asset(&self, asset: &str) -> u64 {
+        self.state
+            .pending_rewards
+            .get(asset)
+            .copied()
+            .unwrap_or_default()
     }
 
     fn refresh_incentives(&mut self) {
@@ -2463,6 +2560,8 @@ impl Bridge {
             recorded_at: now_secs(),
         };
         self.state.next_accrual_id = self.state.next_accrual_id.saturating_add(1);
+        self.add_pending_reward(&record.asset, amount);
+        crate::telemetry::record_bridge_reward_accrual(&record.asset, amount);
         self.state.reward_accruals.push_back(record);
         while self.state.reward_accruals.len() > REWARD_ACCRUAL_RETENTION {
             self.state.reward_accruals.pop_front();
@@ -2597,6 +2696,7 @@ impl Bridge {
             status: DutyStatus::Pending,
         };
         let id = self.state.duties.assign(record);
+        crate::telemetry::increment_bridge_pending_duties();
         self.accounting_mut(relayer).assign_duty();
         id
     }
@@ -2614,6 +2714,7 @@ impl Bridge {
                 telemetry_record_dispute(kind_label, "success");
             }
             let relayer_id = record.relayer.clone();
+            crate::telemetry::decrement_bridge_pending_duties();
             let accounting = self.accounting_mut(&relayer_id);
             accounting.complete_duty();
             if reward > 0 {
@@ -2643,6 +2744,7 @@ impl Bridge {
                 telemetry_record_dispute(kind_label, reason_label);
             }
             let relayer_id = record.relayer.clone();
+            crate::telemetry::decrement_bridge_pending_duties();
             let accounting = self.accounting_mut(&relayer_id);
             accounting.fail_duty();
             if let Some(channel) = self.state.channels.get_mut(&record.asset) {
@@ -2691,6 +2793,10 @@ impl Bridge {
         accounting.mark_claimed(amount);
         let pending_after = accounting.rewards_pending;
         let claimed_amount = pending_before.saturating_sub(pending_after);
+        let drained = self.consume_pending_rewards(claimed_amount);
+        if drained > 0 {
+            crate::telemetry::adjust_bridge_rewards_pending(-(drained as i64));
+        }
         let record = RewardClaimRecord {
             id: self.state.next_claim_id,
             relayer: relayer.to_string(),
@@ -3257,6 +3363,48 @@ impl Bridge {
             })
             .collect();
         paginate(accruals, cursor, limit)
+    }
+
+    pub fn incentive_summary(&self) -> Vec<IncentiveSummaryEntry> {
+        let mut assets: HashSet<String> = self.state.channels.keys().cloned().collect();
+        assets.extend(self.state.pending_rewards.keys().cloned());
+        for record in &self.state.reward_accruals {
+            assets.insert(record.asset.clone());
+        }
+        let mut asset_list: Vec<String> = assets.into_iter().collect();
+        asset_list.sort();
+        asset_list
+            .into_iter()
+            .map(|asset| {
+                let pending_duties = self
+                    .state
+                    .duties
+                    .records()
+                    .iter()
+                    .filter(|record| record.asset == asset && record.is_pending())
+                    .count();
+                let claimable_rewards = self.pending_rewards_for_asset(&asset);
+                let receipt_count = self
+                    .state
+                    .reward_accruals
+                    .iter()
+                    .filter(|record| record.asset == asset)
+                    .count();
+                let active_relayers = self
+                    .state
+                    .channels
+                    .get(&asset)
+                    .map(|channel| channel.relayers.iter().count())
+                    .unwrap_or(0);
+                IncentiveSummaryEntry {
+                    asset,
+                    pending_duties,
+                    claimable_rewards,
+                    receipt_count,
+                    active_relayers,
+                }
+            })
+            .collect()
     }
 
     pub fn reward_claims(

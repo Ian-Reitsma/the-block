@@ -219,6 +219,35 @@ fn bridge_settlement_command_round_trips_payload() {
 }
 
 #[test]
+fn bridge_incentives_command_requests_summary() {
+    let response = ok_response(json_object([("summaries", JsonValue::Array(vec![]))]));
+    let mock = MockTransport::new(vec![response.clone()]);
+
+    let mut output = Vec::new();
+    handle_with_transport(
+        BridgeCmd::Incentives {
+            url: "http://mock.bridge".into(),
+        },
+        &mock,
+        &mut output,
+    )
+    .expect("incentives command");
+
+    let captured = mock.captured_requests();
+    assert_eq!(captured.len(), 1);
+    let request_value = parse_json(&captured[0]);
+    let expected_request = rpc_envelope("bridge.incentives", json_object([]));
+    assert_eq!(request_value, expected_request);
+
+    let printed = String::from_utf8(output).expect("utf8");
+    let printed_value = parse_json(printed.trim());
+    assert_eq!(printed_value, response);
+
+    let urls = mock.captured_urls();
+    assert_eq!(urls, vec!["http://mock.bridge".to_string()]);
+}
+
+#[test]
 fn bridge_reward_claims_paginates_requests() {
     let claims_response = ok_response(json_object([
         (

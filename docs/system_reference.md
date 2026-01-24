@@ -875,6 +875,9 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 - `SlashLogRequest`: `{asset?, relayer?, cursor?, limit?}`.
 - `AssetsRequest`: `{}` → returns `BridgeAssetSnapshot` entries.
 - `ConfigureAssetRequest`: `{asset, channel_config:ChannelConfig}` for governance.
+- `IncentiveSummaryRequest`: `{}`.
+- `IncentiveSummaryResponse`: `{summaries:[IncentiveSummaryEntry]}`.
+- `IncentiveSummaryEntry`: `{asset,String, pending_duties,u64, claimable_rewards,u64, receipt_count,u64, active_relayers,u64}`.
 
 **Common errors** map bridge errors to RPC codes (`-32002` invalid proof, `-32007` duplicate withdrawal, `-32010` challenge window open, etc.) plus `-32602` invalid params and `-32000` busy DB lock.
 
@@ -896,6 +899,7 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | `bridge.settlement_log` | `SettlementLogRequest` | `{items:[SettlementRecord], next_cursor?}` | none |
 | `bridge.dispute_audit` | `DisputeAuditRequest` | `{items:[DisputeAuditRecord], next_cursor?}` | none |
 | `bridge.relayer_accounting` | `RelayerAccountingRequest` | `{relayer, stake, duty_totals, slash_totals}` | none |
+| `bridge.incentives` | `IncentiveSummaryRequest` | `IncentiveSummaryResponse { summaries:[IncentiveSummaryEntry] }` | summary of pending rewards, duties, and active relayers |
 | `bridge.duty_log` | `DutyLogRequest` | `{items:[DutyRecord], next_cursor?}` | none |
 | `bridge.deposit_history` | `DepositHistoryRequest` | `{items:[DepositReceipt], next_cursor?}` | none |
 | `bridge.slash_log` | `SlashLogRequest` | `{items:[SlashRecord], next_cursor?}` | none |
@@ -1316,6 +1320,9 @@ The table below is generated directly from `node/src/telemetry.rs`. Run `python 
 | `telemetry_alloc_bytes` | IntGauge | – | bytes | Telemetry memory allocation in bytes |
 | `threshold_signature_fail_total` | IntCounter | – | count | Failed threshold signature verifications |
 | `token_bridge_volume_total` | IntCounter | – | count | Volume bridged via token bridge |
+| `bridge_reward_accruals_total` | IntCounterVec | asset | BLOCK | Reward accrual amounts grouped by asset |
+| `bridge_rewards_pending_total` | IntGauge | – | BLOCK | Claimable rewards pending across relayers |
+| `bridge_pending_duties_total` | IntGauge | – | count | Relayer duties awaiting completion |
 | `tokens_created_total` | IntCounter | – | count | Total number of registered tokens |
 | `treasury_executor_last_error_seconds` | IntGauge | – | seconds | Timestamp of the last treasury executor error |
 | `treasury_executor_last_submitted_nonce` | IntGauge | – | unitless | Latest nonce submitted by the treasury executor |

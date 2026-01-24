@@ -26,12 +26,12 @@ pub use token_bridge::TokenBridge;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
 #[cfg(feature = "telemetry")]
-use runtime::telemetry::{Counter, CounterVec};
+use runtime::telemetry::{Counter, CounterVec, IntGaugeHandle};
 
 #[cfg(feature = "telemetry")]
 mod telemetry_support {
     use concurrency::Lazy;
-    use runtime::telemetry::{Counter, CounterVec, Opts, Registry};
+    use runtime::telemetry::{Counter, CounterVec, IntGauge, IntGaugeHandle, Opts, Registry};
 
     pub(super) static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
 
@@ -55,10 +55,19 @@ mod telemetry_support {
             .expect("register bridge telemetry counter vec");
         vec
     }
+
+    pub(super) fn int_gauge(name: &'static str, help: &'static str) -> IntGaugeHandle {
+        let gauge = IntGauge::new(name, help).expect("create bridge telemetry gauge");
+        REGISTRY
+            .get()
+            .register(Box::new(gauge.clone()))
+            .expect("register bridge telemetry gauge");
+        gauge.handle()
+    }
 }
 
 #[cfg(feature = "telemetry")]
-use telemetry_support::{counter, counter_vec};
+use telemetry_support::{counter, counter_vec, int_gauge};
 
 #[cfg(feature = "telemetry")]
 fn proof_verify_success_counter() -> Counter {
@@ -113,6 +122,31 @@ fn bridge_reward_approvals_consumed_counter() -> Counter {
     counter(
         "bridge_reward_approvals_consumed_total",
         "Total bridge reward allowance consumed by approved claims",
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_reward_accrual_counter() -> CounterVec {
+    counter_vec(
+        "bridge_reward_accruals_total",
+        "Bridge reward accrual amounts grouped by asset",
+        &["asset"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_pending_duties_gauge() -> IntGaugeHandle {
+    int_gauge(
+        "bridge_pending_duties_total",
+        "Number of relayer duties awaiting completion",
+    )
+}
+
+#[cfg(feature = "telemetry")]
+fn bridge_rewards_pending_gauge() -> IntGaugeHandle {
+    int_gauge(
+        "bridge_rewards_pending_total",
+        "Claimable rewards currently pending across relayers",
     )
 }
 
@@ -202,6 +236,18 @@ pub static BRIDGE_REWARD_CLAIMS_TOTAL: Lazy<Counter> = Lazy::new(bridge_reward_c
 #[cfg(feature = "telemetry")]
 pub static BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL: Lazy<Counter> =
     Lazy::new(bridge_reward_approvals_consumed_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_REWARD_ACCRUALS_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_reward_accrual_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_PENDING_DUTIES_TOTAL: Lazy<IntGaugeHandle> =
+    Lazy::new(bridge_pending_duties_gauge);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_REWARDS_PENDING_TOTAL: Lazy<IntGaugeHandle> =
+    Lazy::new(bridge_rewards_pending_gauge);
 
 #[cfg(feature = "telemetry")]
 pub static BRIDGE_SETTLEMENT_RESULTS_TOTAL: Lazy<CounterVec> =

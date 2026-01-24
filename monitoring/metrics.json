@@ -323,6 +323,26 @@
     },
     {
       "deprecated": false,
+      "description": "Bridge reward accrual amounts grouped by asset",
+      "labels": [
+        "asset"
+      ],
+      "name": "bridge_reward_accruals_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Claimable rewards pending across relayers",
+      "labels": [],
+      "name": "bridge_rewards_pending_total"
+    },
+    {
+      "deprecated": false,
+      "description": "Relayer duties awaiting completion",
+      "labels": [],
+      "name": "bridge_pending_duties_total"
+    },
+    {
+      "deprecated": false,
       "description": "Total bridge reward allowance consumed by approved claims",
       "labels": [],
       "name": "bridge_reward_approvals_consumed_total"

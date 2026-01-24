@@ -125,6 +125,11 @@ pub trait RuntimeAdapter {
     fn set_jurisdiction_region(&mut self, _v: i64) {}
     fn set_ai_diagnostics_enabled(&mut self, _v: bool) {}
     fn set_lane_based_settlement_enabled(&mut self, _v: bool) {}
+    fn set_launch_operational(&mut self, _enabled: bool) {}
+    fn set_launch_economics(&mut self, _enabled: bool) {}
+    fn set_launch_storage_autopilot(&mut self, _enabled: bool) {}
+    fn set_launch_compute_autopilot(&mut self, _enabled: bool) {}
+    fn set_launch_energy_autopilot(&mut self, _enabled: bool) {}
     fn set_scheduler_weight(&mut self, _class: ServiceClass, _weight: u64) {}
     fn set_runtime_backend_policy(&mut self, _allowed: &[String]) {}
     fn set_transport_provider_policy(&mut self, _allowed: &[String]) {}
@@ -215,6 +220,21 @@ impl<'a> Runtime<'a> {
     }
     pub fn set_jurisdiction_region(&mut self, v: i64) {
         self.adapter.set_jurisdiction_region(v);
+    }
+    pub fn set_launch_operational(&mut self, enabled: bool) {
+        self.adapter.set_launch_operational(enabled);
+    }
+    pub fn set_launch_economics(&mut self, enabled: bool) {
+        self.adapter.set_launch_economics(enabled);
+    }
+    pub fn set_launch_storage_autopilot(&mut self, enabled: bool) {
+        self.adapter.set_launch_storage_autopilot(enabled);
+    }
+    pub fn set_launch_compute_autopilot(&mut self, enabled: bool) {
+        self.adapter.set_launch_compute_autopilot(enabled);
+    }
+    pub fn set_launch_energy_autopilot(&mut self, enabled: bool) {
+        self.adapter.set_launch_energy_autopilot(enabled);
     }
     pub fn set_ai_diagnostics_enabled(&mut self, v: bool) {
         self.adapter.set_ai_diagnostics_enabled(v);

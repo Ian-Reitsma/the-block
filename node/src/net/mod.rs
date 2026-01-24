@@ -205,16 +205,6 @@ fn with_metric_handle<T, E, F, const N: usize>(
 }
 
 #[cfg(feature = "telemetry")]
-fn record_transport_handshake_attempt(provider: &'static str) {
-    with_metric_handle(
-        "transport_handshake_attempt_total",
-        [provider],
-        TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL.ensure_handle_for_label_values(&[provider]),
-        |handle| handle.inc(),
-    );
-}
-
-#[cfg(feature = "telemetry")]
 fn record_overlay_metrics(snapshot: &OverlayDiagnostics) {
     let active = overlay_metric_value(snapshot.active_peers);
     let persisted = overlay_metric_value(snapshot.persisted_peers);
@@ -695,7 +685,13 @@ fn build_transport_callbacks() -> TransportCallbacks {
             #[cfg(feature = "telemetry")]
             {
                 let provider_label = transport::ProviderKind::Inhouse.id();
-                record_transport_handshake_attempt(provider_label);
+                with_metric_handle(
+                    "transport_handshake_attempt_total",
+                    [provider_label],
+                    TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
+                        .ensure_handle_for_label_values(&[provider_label]),
+                    |handle| handle.inc(),
+                );
             }
             #[cfg(not(feature = "telemetry"))]
             let _ = _addr;
@@ -2341,6 +2337,17 @@ mod tests {
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     #[cfg(feature = "telemetry")]
+    fn increment_transport_handshake(provider_label: &'static str) {
+        with_metric_handle(
+            "transport_handshake_attempt_total",
+            [provider_label],
+            TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
+                .ensure_handle_for_label_values(&[provider_label]),
+            |handle| handle.inc(),
+        );
+    }
+
+    #[cfg(feature = "telemetry")]
     fn metrics_registry_guard() -> MutexGuard<'static, ()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
         GUARD
@@ -2359,9 +2366,9 @@ mod tests {
             .expect("quinn handle");
         quinn_handle.reset();
         assert_eq!(quinn_handle.get(), 0);
-        record_transport_handshake_attempt(quinn_label);
+        increment_transport_handshake(quinn_label);
         assert_eq!(quinn_handle.get(), 1);
-        record_transport_handshake_attempt(quinn_label);
+        increment_transport_handshake(quinn_label);
         assert_eq!(quinn_handle.get(), 2);
 
         let s2n_label = transport::ProviderKind::S2nQuic.id();
@@ -2370,7 +2377,7 @@ mod tests {
             .expect("s2n handle");
         s2n_handle.reset();
         assert_eq!(s2n_handle.get(), 0);
-        record_transport_handshake_attempt(s2n_label);
+        increment_transport_handshake(s2n_label);
         assert_eq!(s2n_handle.get(), 1);
     }
 }

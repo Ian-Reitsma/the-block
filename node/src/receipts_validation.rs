@@ -94,6 +94,12 @@ pub enum ValidationError {
         nonce: u64,
     },
     DuplicateReceipt,
+    MissingBlockTorchMetadata {
+        field: String,
+    },
+    InvalidBlockTorchMetadata {
+        reason: String,
+    },
     EmptySignature,
 }
 
@@ -145,6 +151,12 @@ impl std::fmt::Display for ValidationError {
                 write!(f, "Replayed nonce {} for provider {}", nonce, provider_id)
             }
             ValidationError::DuplicateReceipt => write!(f, "Duplicate receipt"),
+            ValidationError::MissingBlockTorchMetadata { field } => {
+                write!(f, "Missing blocktorch metadata field: {}", field)
+            }
+            ValidationError::InvalidBlockTorchMetadata { reason } => {
+                write!(f, "Invalid blocktorch metadata: {}", reason)
+            }
             ValidationError::EmptySignature => write!(f, "Empty signature bytes"),
         }
     }
@@ -319,6 +331,58 @@ pub fn validate_receipt(
             }
             if r.provider_signature.is_empty() {
                 return Err(ValidationError::EmptySignature);
+            }
+            if let Some(meta) = &r.blocktorch {
+                if meta.benchmark_commit.is_none() {
+                    return Err(ValidationError::MissingBlockTorchMetadata {
+                        field: "benchmark_commit".to_string(),
+                    });
+                }
+                if meta.tensor_profile_epoch.is_none() {
+                    return Err(ValidationError::MissingBlockTorchMetadata {
+                        field: "tensor_profile_epoch".to_string(),
+                    });
+                }
+                if meta
+                    .benchmark_commit
+                    .as_ref()
+                    .map(|value| value.is_empty())
+                    .unwrap_or(false)
+                {
+                    return Err(ValidationError::InvalidBlockTorchMetadata {
+                        reason: "benchmark_commit is empty".to_string(),
+                    });
+                }
+                if meta
+                    .tensor_profile_epoch
+                    .as_ref()
+                    .map(|value| value.is_empty())
+                    .unwrap_or(false)
+                {
+                    return Err(ValidationError::InvalidBlockTorchMetadata {
+                        reason: "tensor_profile_epoch is empty".to_string(),
+                    });
+                }
+                if meta.kernel_variant_digest == [0u8; 32] {
+                    return Err(ValidationError::InvalidBlockTorchMetadata {
+                        reason: "kernel_variant_digest is unset".to_string(),
+                    });
+                }
+                if meta.descriptor_digest == [0u8; 32] {
+                    return Err(ValidationError::InvalidBlockTorchMetadata {
+                        reason: "descriptor_digest is unset".to_string(),
+                    });
+                }
+                if meta.output_digest == [0u8; 32] {
+                    return Err(ValidationError::InvalidBlockTorchMetadata {
+                        reason: "output_digest is unset".to_string(),
+                    });
+                }
+                if meta.proof_latency_ms == 0 {
+                    return Err(ValidationError::InvalidBlockTorchMetadata {
+                        reason: "proof_latency_ms must be positive".to_string(),
+                    });
+                }
             }
         }
         Receipt::Energy(r) => {

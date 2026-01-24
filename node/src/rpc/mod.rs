@@ -1586,6 +1586,10 @@ fn dispatch(
             let params = parse_params::<bridge::RewardAccrualsRequest>(&req.params)?;
             serialize_response(bridge::reward_accruals(params)?)?
         }
+        "bridge.incentives" => {
+            let params = parse_params::<bridge::IncentiveSummaryRequest>(&req.params)?;
+            serialize_response(bridge::incentive_summary(params)?)?
+        }
         "bridge.settlement_log" => {
             let params = parse_params::<bridge::SettlementLogRequest>(&req.params)?;
             serialize_response(bridge::settlement_log(params)?)?

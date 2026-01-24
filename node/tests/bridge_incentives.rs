@@ -1236,3 +1236,55 @@ fn bridge_restart_restores_accrual_and_dispute_history() {
         .iter()
         .any(|record| record.commitment == commitment_two));
 }
+
+#[test]
+fn bridge_incentive_summary_exposes_pending_rewards_and_duties() {
+    let tmp = tempdir().expect("tempdir");
+    let gov_path = tmp.path().join("gov");
+    let _guard = GovEnvGuard::set(&gov_path);
+
+    let bridge_path = tmp.path().join("bridge_db_summary");
+    let headers_dir = tmp.path().join("headers_native_summary");
+    let mut bridge = Bridge::open(bridge_path.to_str().expect("bridge path"));
+    configure_native_channel(&mut bridge, &headers_dir, 0);
+
+    let params = BridgeIncentiveParameters {
+        min_bond: 10,
+        duty_reward: 15,
+        failure_slash: 5,
+        challenge_slash: 10,
+        duty_window_secs: 120,
+    };
+    let _incentive_guard = IncentiveGuard::set(params.clone());
+
+    bridge.bond_relayer("r1", 100).unwrap();
+    bridge.bond_relayer("r2", 100).unwrap();
+
+    let header = sample_header_with_height(2);
+    let proof = sample_proof();
+    let bundle = sample_bundle("alice", 5);
+
+    bridge
+        .deposit("native", "r1", "alice", 5, &header, &proof, &bundle)
+        .expect("deposit");
+    let commitment = bundle.aggregate_commitment("alice", 5);
+    approve_release(&gov_path, "native", &commitment);
+
+    let pending_commitment = bridge
+        .request_withdrawal("native", "r1", "alice", 5, &bundle)
+        .expect("withdraw request");
+
+    let summaries = bridge.incentive_summary();
+    let summary = summaries
+        .into_iter()
+        .find(|entry| entry.asset == "native")
+        .expect("native summary");
+    assert_eq!(summary.claimable_rewards, params.duty_reward);
+    assert!(summary.pending_duties >= 1);
+    assert_eq!(summary.active_relayers, 2);
+    assert!(summary.receipt_count >= 1);
+
+    bridge
+        .finalize_withdrawal("native", pending_commitment)
+        .expect("finalize");
+}

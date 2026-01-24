@@ -7,6 +7,7 @@ use concurrency::{mutex, MutexExt, MutexT};
 use foundation_serialization::{Deserialize, Serialize};
 use settlement::{SlaOutcome, SlaResolutionKind};
 use std::collections::{HashMap, VecDeque};
+use std::env;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -270,15 +271,45 @@ impl WorkloadRunner {
 }
 
 fn record_blocktorch_metadata(meta: &BlockTorchWorkloadMetadata) {
+    let (benchmark_commit, tensor_profile_epoch) = resolved_blocktorch_strings(meta);
     #[cfg(feature = "telemetry")]
     {
         telemetry::receipts::set_blocktorch_kernel_digest(meta.kernel_digest);
-        telemetry::receipts::set_blocktorch_benchmark_commit(meta.benchmark_commit.as_deref());
-        telemetry::receipts::set_blocktorch_tensor_profile_epoch(
-            meta.tensor_profile_epoch.as_deref(),
-        );
+        telemetry::receipts::set_blocktorch_benchmark_commit(benchmark_commit.as_deref());
+        telemetry::receipts::set_blocktorch_tensor_profile_epoch(tensor_profile_epoch.as_deref());
         telemetry::receipts::set_blocktorch_descriptor_digest(meta.descriptor_digest);
         telemetry::receipts::set_blocktorch_output_digest(meta.output_digest);
+    }
+}
+
+fn fallback_blocktorch_string(value: &Option<String>, env_key: &str) -> Option<String> {
+    value.clone().or_else(|| env::var(env_key).ok())
+}
+
+fn resolved_blocktorch_strings(
+    meta: &BlockTorchWorkloadMetadata,
+) -> (Option<String>, Option<String>) {
+    (
+        fallback_blocktorch_string(&meta.benchmark_commit, "TB_BLOCKTORCH_BENCHMARK_COMMIT"),
+        fallback_blocktorch_string(
+            &meta.tensor_profile_epoch,
+            "TB_BLOCKTORCH_TENSOR_PROFILE_EPOCH",
+        ),
+    )
+}
+
+fn blocktorch_receipt_metadata(
+    meta: &BlockTorchWorkloadMetadata,
+    proof_latency_ms: u64,
+) -> BlockTorchReceiptMetadata {
+    let (benchmark_commit, tensor_profile_epoch) = resolved_blocktorch_strings(meta);
+    BlockTorchReceiptMetadata {
+        kernel_variant_digest: meta.kernel_digest,
+        descriptor_digest: meta.descriptor_digest,
+        output_digest: meta.output_digest,
+        benchmark_commit,
+        tensor_profile_epoch,
+        proof_latency_ms,
     }
 }
 
@@ -301,6 +332,14 @@ pub struct Job {
     /// Priority for scheduling.
     #[serde(default = "foundation_serialization::defaults::default")]
     pub priority: scheduler::Priority,
+}
+
+impl Job {
+    fn contains_blocktorch_workload(&self) -> bool {
+        self.workloads
+            .iter()
+            .any(|w| matches!(w, Workload::Inference(_)))
+    }
 }
 
 /// Internal state for a matched job.
@@ -423,16 +462,15 @@ impl Market {
                             }
                         }
 
-                        let blocktorch = state.blocktorch_metadata.as_ref().map(|meta| {
-                            BlockTorchReceiptMetadata {
-                                kernel_variant_digest: meta.kernel_digest,
-                                descriptor_digest: meta.descriptor_digest,
-                                output_digest: meta.output_digest,
-                                benchmark_commit: meta.benchmark_commit.clone(),
-                                tensor_profile_epoch: meta.tensor_profile_epoch.clone(),
-                                proof_latency_ms,
-                            }
-                        });
+                        let blocktorch = if state.job.contains_blocktorch_workload() {
+                            let meta = state
+                                .blocktorch_metadata
+                                .as_ref()
+                                .expect("blocktorch job missing metadata");
+                            Some(blocktorch_receipt_metadata(meta, proof_latency_ms))
+                        } else {
+                            None
+                        };
 
                         self.pending_receipts.push(crate::ComputeReceipt {
                             job_id: resolution.job_id.clone(),

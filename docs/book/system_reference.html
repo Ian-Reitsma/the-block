@@ -1171,6 +1171,9 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <li><code>SlashLogRequest</code>: <code>{asset?, relayer?, cursor?, limit?}</code>.</li>
 <li><code>AssetsRequest</code>: <code>{}</code> → returns <code>BridgeAssetSnapshot</code> entries.</li>
 <li><code>ConfigureAssetRequest</code>: <code>{asset, channel_config:ChannelConfig}</code> for governance.</li>
+<li><code>IncentiveSummaryRequest</code>: <code>{}</code>.</li>
+<li><code>IncentiveSummaryResponse</code>: <code>{summaries:[IncentiveSummaryEntry]}</code>.</li>
+<li><code>IncentiveSummaryEntry</code>: <code>{asset,String, pending_duties,u64, claimable_rewards,u64, receipt_count,u64, active_relayers,u64}</code>.</li>
 </ul>
 <p><strong>Common errors</strong> map bridge errors to RPC codes (<code>-32002</code> invalid proof, <code>-32007</code> duplicate withdrawal, <code>-32010</code> challenge window open, etc.) plus <code>-32602</code> invalid params and <code>-32000</code> busy DB lock.</p>
 <div class="table-wrapper"><table><thead><tr><th>Method</th><th>Request</th><th>Response</th><th>Error codes</th></tr></thead><tbody>
@@ -1190,6 +1193,7 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>bridge.settlement_log</code></td><td><code>SettlementLogRequest</code></td><td><code>{items:[SettlementRecord], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.dispute_audit</code></td><td><code>DisputeAuditRequest</code></td><td><code>{items:[DisputeAuditRecord], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.relayer_accounting</code></td><td><code>RelayerAccountingRequest</code></td><td><code>{relayer, stake, duty_totals, slash_totals}</code></td><td>none</td></tr>
+<tr><td><code>bridge.incentives</code></td><td><code>IncentiveSummaryRequest</code></td><td><code>IncentiveSummaryResponse {summaries:[IncentiveSummaryEntry]}</code></td><td>none</td></tr>
 <tr><td><code>bridge.duty_log</code></td><td><code>DutyLogRequest</code></td><td><code>{items:[DutyRecord], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.deposit_history</code></td><td><code>DepositHistoryRequest</code></td><td><code>{items:[DepositReceipt], next_cursor?}</code></td><td>none</td></tr>
 <tr><td><code>bridge.slash_log</code></td><td><code>SlashLogRequest</code></td><td><code>{items:[SlashRecord], next_cursor?}</code></td><td>none</td></tr>
@@ -1605,6 +1609,9 @@ Additional selector-specific errors: <code>-32034</code> invalid presence bucket
 <tr><td><code>telemetry_alloc_bytes</code></td><td>IntGauge</td><td>–</td><td>bytes</td><td>Telemetry memory allocation in bytes</td></tr>
 <tr><td><code>threshold_signature_fail_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Failed threshold signature verifications</td></tr>
 <tr><td><code>token_bridge_volume_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Volume bridged via token bridge</td></tr>
+<tr><td><code>bridge_reward_accruals_total</code></td><td>IntCounterVec</td><td>asset</td><td>BLOCK</td><td>Reward accrual amounts grouped by asset</td></tr>
+<tr><td><code>bridge_rewards_pending_total</code></td><td>IntGauge</td><td>–</td><td>BLOCK</td><td>Claimable rewards pending across relayers</td></tr>
+<tr><td><code>bridge_pending_duties_total</code></td><td>IntGauge</td><td>–</td><td>count</td><td>Relayer duties awaiting completion</td></tr>
 <tr><td><code>tokens_created_total</code></td><td>IntCounter</td><td>–</td><td>count</td><td>Total number of registered tokens</td></tr>
 <tr><td><code>treasury_executor_last_error_seconds</code></td><td>IntGauge</td><td>–</td><td>seconds</td><td>Timestamp of the last treasury executor error</td></tr>
 <tr><td><code>treasury_executor_last_submitted_nonce</code></td><td>IntGauge</td><td>–</td><td>unitless</td><td>Latest nonce submitted by the treasury executor</td></tr>

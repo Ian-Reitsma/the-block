@@ -140,8 +140,10 @@ pub mod treasury;
 
 #[cfg(feature = "telemetry")]
 pub use bridges::{
-    BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL,
-    BRIDGE_REWARD_CLAIMS_TOTAL, BRIDGE_SETTLEMENT_RESULTS_TOTAL, BRIDGE_SLASHES_TOTAL,
+    BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_PENDING_DUTIES_TOTAL,
+    BRIDGE_REWARDS_PENDING_TOTAL, BRIDGE_REWARD_ACCRUALS_TOTAL,
+    BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL, BRIDGE_REWARD_CLAIMS_TOTAL,
+    BRIDGE_SETTLEMENT_RESULTS_TOTAL, BRIDGE_SLASHES_TOTAL,
 };
 
 pub static REGISTRY: Lazy<Registry> = Lazy::new(Registry::new);
@@ -201,6 +203,46 @@ pub(super) fn register_int_gauge(name: &'static str, help: &'static str) -> IntG
         .unwrap_or_else(|err| panic!("registry {name}: {err}"));
     gauge
 }
+
+#[cfg(feature = "telemetry")]
+pub(super) fn record_bridge_reward_accrual(asset: &str, amount: u64) {
+    if let Ok(handle) = BRIDGE_REWARD_ACCRUALS_TOTAL.ensure_handle_for_label_values(&[asset]) {
+        handle.inc_by(amount);
+    }
+    adjust_bridge_rewards_pending(amount as i64);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub(super) fn record_bridge_reward_accrual(_: &str, _: u64) {}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn adjust_bridge_rewards_pending(delta: i64) {
+    let gauge = BRIDGE_REWARDS_PENDING_TOTAL.get();
+    if delta > 0 {
+        gauge.add(delta);
+    } else if delta < 0 {
+        gauge.sub(-delta);
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub(super) fn adjust_bridge_rewards_pending(_: i64) {}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn increment_bridge_pending_duties() {
+    BRIDGE_PENDING_DUTIES_TOTAL.get().add(1);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub(super) fn increment_bridge_pending_duties() {}
+
+#[cfg(feature = "telemetry")]
+pub(super) fn decrement_bridge_pending_duties() {
+    BRIDGE_PENDING_DUTIES_TOTAL.get().sub(1);
+}
+
+#[cfg(not(feature = "telemetry"))]
+pub(super) fn decrement_bridge_pending_duties() {}
 
 #[cfg(feature = "telemetry")]
 pub(super) fn register_int_gauge_vec(

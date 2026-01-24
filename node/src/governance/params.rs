@@ -153,6 +153,18 @@ impl<'a> Runtime<'a> {
         self.bc.params.launch_economics_autopilot = if enabled { 1 } else { 0 };
     }
 
+    pub fn set_launch_storage_autopilot(&mut self, enabled: bool) {
+        self.bc.params.launch_storage_autopilot = if enabled { 1 } else { 0 };
+    }
+
+    pub fn set_launch_compute_autopilot(&mut self, enabled: bool) {
+        self.bc.params.launch_compute_autopilot = if enabled { 1 } else { 0 };
+    }
+
+    pub fn set_launch_energy_autopilot(&mut self, enabled: bool) {
+        self.bc.params.launch_energy_autopilot = if enabled { 1 } else { 0 };
+    }
+
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {
         self.bc.set_consumer_p90_comfort(v);
     }
@@ -342,6 +354,12 @@ pub struct Params {
     pub dns_rehearsal_enabled: i64,
     #[serde(default = "default_launch_economics_autopilot")]
     pub launch_economics_autopilot: i64,
+    #[serde(default = "default_launch_storage_autopilot")]
+    pub launch_storage_autopilot: i64,
+    #[serde(default = "default_launch_compute_autopilot")]
+    pub launch_compute_autopilot: i64,
+    #[serde(default = "default_launch_energy_autopilot")]
+    pub launch_energy_autopilot: i64,
     #[serde(default = "default_ad_readiness_window_secs")]
     pub ad_readiness_window_secs: i64,
     #[serde(default = "default_ad_readiness_min_unique_viewers")]
@@ -584,6 +602,9 @@ impl Default for Params {
             launch_operational_flag: 0,
             dns_rehearsal_enabled: default_dns_rehearsal_enabled(),
             launch_economics_autopilot: default_launch_economics_autopilot(),
+            launch_storage_autopilot: default_launch_storage_autopilot(),
+            launch_compute_autopilot: default_launch_compute_autopilot(),
+            launch_energy_autopilot: default_launch_energy_autopilot(),
             ad_readiness_window_secs: default_ad_readiness_window_secs(),
             ad_readiness_min_unique_viewers: default_ad_readiness_min_unique_viewers(),
             ad_readiness_min_host_count: default_ad_readiness_min_host_count(),
@@ -807,6 +828,22 @@ impl Params {
         map.insert(
             "ad_readiness_min_provider_count".into(),
             Value::Number(self.ad_readiness_min_provider_count.into()),
+        );
+        map.insert(
+            "launch_economics_autopilot".into(),
+            Value::Number(self.launch_economics_autopilot.into()),
+        );
+        map.insert(
+            "launch_storage_autopilot".into(),
+            Value::Number(self.launch_storage_autopilot.into()),
+        );
+        map.insert(
+            "launch_compute_autopilot".into(),
+            Value::Number(self.launch_compute_autopilot.into()),
+        );
+        map.insert(
+            "launch_energy_autopilot".into(),
+            Value::Number(self.launch_energy_autopilot.into()),
         );
         map.insert(
             "treasury_percent".into(),
@@ -1112,6 +1149,18 @@ impl Params {
                 .get("launch_economics_autopilot")
                 .and_then(Value::as_i64)
                 .unwrap_or_else(default_launch_economics_autopilot),
+            launch_storage_autopilot: obj
+                .get("launch_storage_autopilot")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_launch_storage_autopilot),
+            launch_compute_autopilot: obj
+                .get("launch_compute_autopilot")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_launch_compute_autopilot),
+            launch_energy_autopilot: obj
+                .get("launch_energy_autopilot")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(default_launch_energy_autopilot),
             ad_readiness_window_secs: obj
                 .get("ad_readiness_window_secs")
                 .and_then(Value::as_i64)
@@ -1512,6 +1561,18 @@ const fn default_dns_rehearsal_enabled() -> i64 {
 }
 
 const fn default_launch_economics_autopilot() -> i64 {
+    0
+}
+
+const fn default_launch_storage_autopilot() -> i64 {
+    0
+}
+
+const fn default_launch_compute_autopilot() -> i64 {
+    0
+}
+
+const fn default_launch_energy_autopilot() -> i64 {
     0
 }
 

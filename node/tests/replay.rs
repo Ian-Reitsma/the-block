@@ -13,7 +13,7 @@ use the_block::{
         },
         GovStore, ParamKey, Params, Proposal, ProposalStatus, Runtime, Vote, VoteChoice,
     },
-    receipts::StorageReceipt,
+    receipts::{BlockTorchReceiptMetadata, ComputeReceipt, StorageReceipt},
     Account, Block, Blockchain, Receipt, TokenBalance,
 };
 
@@ -73,6 +73,128 @@ fn replay_roundtrip_block_with_receipts() {
     let decoded = block_binary::decode_block(&encoded).expect("decode block");
 
     assert_eq!(block, decoded);
+}
+
+#[test]
+fn replay_roundtrip_block_with_compute_receipt_blocktorch_metadata() {
+    let receipt = Receipt::Compute(ComputeReceipt {
+        job_id: "blocktorch-job".into(),
+        provider: "blocktorch-provider".into(),
+        compute_units: 10,
+        payment: 50,
+        block_height: 1,
+        verified: true,
+        blocktorch: Some(BlockTorchReceiptMetadata {
+            kernel_variant_digest: [0xAA; 32],
+            descriptor_digest: [0xBB; 32],
+            output_digest: [0xCC; 32],
+            benchmark_commit: Some("bench-commit".into()),
+            tensor_profile_epoch: Some("epoch-1".into()),
+            proof_latency_ms: 123,
+        }),
+        provider_signature: vec![0u8; 64],
+        signature_nonce: 1,
+    });
+
+    let block = Block {
+        index: 2,
+        receipts: vec![receipt],
+        ..Default::default()
+    };
+
+    let encoded = block_binary::encode_block(&block).expect("encode block");
+    let decoded = block_binary::decode_block(&encoded).expect("decode block");
+
+    assert_eq!(block, decoded);
+}
+
+#[test]
+fn replay_roundtrip_block_compute_receipt_metadata_integrity() {
+    let receipt = Receipt::Compute(ComputeReceipt {
+        job_id: "bt-job-42".into(),
+        provider: "bt-provider".into(),
+        compute_units: 5,
+        payment: 15,
+        block_height: 10,
+        verified: true,
+        blocktorch: Some(BlockTorchReceiptMetadata {
+            kernel_variant_digest: [0xDD; 32],
+            descriptor_digest: [0xEE; 32],
+            output_digest: [0xFF; 32],
+            benchmark_commit: Some("bench-42".into()),
+            tensor_profile_epoch: Some("epoch-42".into()),
+            proof_latency_ms: 4242,
+        }),
+        provider_signature: vec![1, 2, 3],
+        signature_nonce: 2,
+    });
+
+    let block = Block {
+        index: 3,
+        receipts: vec![receipt.clone()],
+        ..Default::default()
+    };
+
+    let encoded = block_binary::encode_block(&block).expect("encode block");
+    let decoded = block_binary::decode_block(&encoded).expect("decode block");
+
+    let compute_receipt = match &decoded.receipts[0] {
+        Receipt::Compute(r) => r,
+        other => panic!("expected compute receipt, got {other:?}"),
+    };
+    let meta = compute_receipt
+        .blocktorch
+        .as_ref()
+        .expect("blocktorch metadata missing");
+    assert_eq!(meta.kernel_variant_digest, [0xDD; 32]);
+    assert_eq!(meta.descriptor_digest, [0xEE; 32]);
+    assert_eq!(meta.output_digest, [0xFF; 32]);
+    assert_eq!(meta.benchmark_commit.as_deref(), Some("bench-42"));
+    assert_eq!(meta.tensor_profile_epoch.as_deref(), Some("epoch-42"));
+    assert_eq!(meta.proof_latency_ms, 4242);
+    assert_eq!(block, decoded);
+}
+
+#[test]
+fn replay_roundtrip_block_with_blocktorch_proof_loop_receipt() {
+    let receipt = Receipt::Compute(ComputeReceipt {
+        job_id: "bt-proof-job".into(),
+        provider: "bt-proof-provider".into(),
+        compute_units: 42,
+        payment: 420,
+        block_height: 5,
+        verified: true,
+        blocktorch: Some(BlockTorchReceiptMetadata {
+            kernel_variant_digest: [0x11; 32],
+            descriptor_digest: [0x22; 32],
+            output_digest: [0x33; 32],
+            benchmark_commit: Some("bench-proof".into()),
+            tensor_profile_epoch: Some("epoch-proof".into()),
+            proof_latency_ms: 9001,
+        }),
+        provider_signature: vec![9; 64],
+        signature_nonce: 7,
+    });
+
+    let block = Block {
+        index: 10,
+        receipts: vec![receipt],
+        ..Default::default()
+    };
+
+    let encoded = block_binary::encode_block(&block).expect("encode block");
+    let decoded = block_binary::decode_block(&encoded).expect("decode block");
+
+    assert_eq!(block, decoded);
+    if let Receipt::Compute(compute) = &decoded.receipts[0] {
+        let meta = compute
+            .blocktorch
+            .as_ref()
+            .expect("BlockTorch metadata should survive");
+        assert_eq!(meta.proof_latency_ms, 9001);
+    } else {
+        panic!("expected compute receipt");
+    }
 }
 
 #[test]

@@ -53,10 +53,7 @@ fn read_override<'a>(lock: &'a RwLock<Option<PathBuf>>) -> RwLockReadGuard<'a, O
     }
 }
 
-use super::{load_net_key, transport_registry};
-
-#[cfg(feature = "telemetry")]
-use super::record_transport_handshake_attempt;
+use super::{load_net_key, transport_registry, with_metric_handle};
 
 #[derive(Clone, Debug)]
 pub struct CertAdvertisement {
@@ -305,7 +302,16 @@ pub async fn connect(addr: SocketAddr) -> Result<()> {
         #[cfg(feature = "s2n-quic")]
         ActiveProvider::S2n(adapter) => {
             #[cfg(feature = "telemetry")]
-            record_transport_handshake_attempt(ProviderKind::S2nQuic.id());
+            {
+                let provider_label = ProviderKind::S2nQuic.id();
+                with_metric_handle(
+                    "transport_handshake_attempt_total",
+                    [provider_label],
+                    crate::telemetry::TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
+                        .ensure_handle_for_label_values(&[provider_label]),
+                    |handle| handle.inc(),
+                );
+            }
             adapter.connect(addr).await
         }
         #[cfg(feature = "inhouse")]

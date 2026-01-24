@@ -2,8 +2,8 @@ use super::RpcError;
 use crate::{
     bridge::{
         Bridge, BridgeError, ChallengeRecord, ChannelConfig, DepositReceipt, DisputeAuditRecord,
-        DutyOutcomeSnapshot, PendingWithdrawalInfo, RelayerInfo, RelayerQuorumInfo,
-        RewardAccrualRecord, RewardClaimRecord, SettlementRecord, SlashRecord,
+        DutyOutcomeSnapshot, IncentiveSummaryEntry, PendingWithdrawalInfo, RelayerInfo,
+        RelayerQuorumInfo, RewardAccrualRecord, RewardClaimRecord, SettlementRecord, SlashRecord,
     },
     simple_db::names,
     SimpleDb,
@@ -324,6 +324,16 @@ pub struct DisputeAuditRequest {
 #[derive(Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct AssetsRequest {}
+
+#[derive(Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct IncentiveSummaryRequest {}
+
+#[derive(Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct IncentiveSummaryResponse {
+    pub summaries: Vec<IncentiveSummaryEntry>,
+}
 
 #[derive(Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -1238,6 +1248,14 @@ pub fn reward_accruals(req: RewardAccrualsRequest) -> Result<RewardAccrualsRespo
         accruals,
         next_cursor,
     })
+}
+
+pub fn incentive_summary(
+    _req: IncentiveSummaryRequest,
+) -> Result<IncentiveSummaryResponse, RpcError> {
+    let bridge = guard()?;
+    let summaries = bridge.incentive_summary();
+    Ok(IncentiveSummaryResponse { summaries })
 }
 
 pub fn settlement_log(req: SettlementLogRequest) -> Result<SettlementLogResponse, RpcError> {

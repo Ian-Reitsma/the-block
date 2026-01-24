@@ -126,6 +126,8 @@ pub enum BridgeCmd {
     },
     /// List configured bridge assets
     Assets { url: String },
+    /// Summarize bridge relayer incentives
+    Incentives { url: String },
     /// Configure a bridge asset channel
     ConfigureAsset {
         asset: String,
@@ -555,6 +557,17 @@ impl BridgeCmd {
         )
         .subcommand(
             CommandBuilder::new(
+                CommandId("bridge.incentives"),
+                "incentives",
+                "Summarize bridge relayer incentives",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "RPC endpoint").default("http://localhost:26658"),
+            ))
+            .build(),
+        )
+        .subcommand(
+            CommandBuilder::new(
                 CommandId("bridge.assets"),
                 "assets",
                 "List configured bridge assets",
@@ -850,6 +863,11 @@ impl BridgeCmd {
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
                 Ok(BridgeCmd::Assets { url })
+            }
+            "incentives" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                Ok(BridgeCmd::Incentives { url })
             }
             "configure" => {
                 let asset = require_positional(sub_matches, "asset")?;
@@ -1178,6 +1196,10 @@ pub fn handle_with_transport(
         }
         BridgeCmd::Assets { url } => {
             let payload = json_rpc_request("bridge.assets", empty_object());
+            send_rpc(transport, &url, &payload, out)?;
+        }
+        BridgeCmd::Incentives { url } => {
+            let payload = json_rpc_request("bridge.incentives", empty_object());
             send_rpc(transport, &url, &payload, out)?;
         }
         BridgeCmd::ConfigureAsset {

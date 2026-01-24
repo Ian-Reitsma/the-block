@@ -616,6 +616,9 @@ impl SharedState {
             "ad_targeting_presence".into(),
             GateRuntime::new("ad_targeting_presence", required),
         );
+        gates.insert("storage".into(), GateRuntime::new("storage", required));
+        gates.insert("compute".into(), GateRuntime::new("compute", required));
+        gates.insert("energy".into(), GateRuntime::new("energy", required));
         Self {
             enabled: config.enabled,
             base_path: config.base_path.to_string_lossy().into_owned(),
@@ -857,6 +860,9 @@ async fn run_service(
     let mut economics_ctrl = EconomicsController::new(window_secs);
     let mut ad_contextual_ctrl = AdTierController::new(AdTargetingTier::Contextual, window_secs);
     let mut ad_presence_ctrl = AdTierController::new(AdTargetingTier::Presence, window_secs);
+    let mut storage_ctrl = MarketAutopilotController::new("storage", window_secs);
+    let mut compute_ctrl = MarketAutopilotController::new("compute", window_secs);
+    let mut energy_ctrl = MarketAutopilotController::new("energy", window_secs);
     loop {
         if cancel.is_cancelled() {
             break;
@@ -941,6 +947,34 @@ async fn run_service(
             economics_ctrl.required(),
             economics_ctrl.eval(),
         );
+
+        for (ctrl, gate) in [
+            (&mut storage_ctrl, "storage"),
+            (&mut compute_ctrl, "compute"),
+            (&mut energy_ctrl, "energy"),
+        ] {
+            if let Some(eval) = ctrl.evaluate(epoch, &economics_sample) {
+                if let Some(intent) = plan_intent(
+                    &base_path,
+                    &mut intent_seq,
+                    gate,
+                    eval.action,
+                    epoch,
+                    eval.metrics.clone(),
+                    eval.reason.clone(),
+                ) {
+                    process_intent(intent, &chain, &shared);
+                }
+            }
+            shared.update_gate(
+                gate,
+                ctrl.gate_state(),
+                ctrl.enter(),
+                ctrl.exit(),
+                ctrl.required(),
+                ctrl.eval(),
+            );
+        }
         if let Some(ad_sample) = ad_tier_sample() {
             if let Some(eval) = ad_contextual_ctrl.evaluate(epoch, &ad_sample) {
                 if let Some(intent) = plan_intent(
@@ -1036,6 +1070,24 @@ fn plan_intent(
         }
         ("economics", GateAction::Exit) => {
             json_map(vec![("economics_autopilot", JsonValue::Bool(false))])
+        }
+        ("storage", GateAction::Enter) => {
+            json_map(vec![("launch_storage_autopilot", JsonValue::Bool(true))])
+        }
+        ("storage", GateAction::Exit) => {
+            json_map(vec![("launch_storage_autopilot", JsonValue::Bool(false))])
+        }
+        ("compute", GateAction::Enter) => {
+            json_map(vec![("launch_compute_autopilot", JsonValue::Bool(true))])
+        }
+        ("compute", GateAction::Exit) => {
+            json_map(vec![("launch_compute_autopilot", JsonValue::Bool(false))])
+        }
+        ("energy", GateAction::Enter) => {
+            json_map(vec![("launch_energy_autopilot", JsonValue::Bool(true))])
+        }
+        ("energy", GateAction::Exit) => {
+            json_map(vec![("launch_energy_autopilot", JsonValue::Bool(false))])
         }
         ("naming", GateAction::Rehearsal) => {
             json_map(vec![("naming_mode", JsonValue::String("rehearsal".into()))])
@@ -1136,6 +1188,12 @@ fn apply_intent(
             ("operational", GateAction::Exit) => runtime.set_launch_operational(false),
             ("economics", GateAction::Enter) => runtime.set_launch_economics(true),
             ("economics", GateAction::Exit) => runtime.set_launch_economics(false),
+            ("storage", GateAction::Enter) => runtime.set_launch_storage_autopilot(true),
+            ("storage", GateAction::Exit) => runtime.set_launch_storage_autopilot(false),
+            ("compute", GateAction::Enter) => runtime.set_launch_compute_autopilot(true),
+            ("compute", GateAction::Exit) => runtime.set_launch_compute_autopilot(false),
+            ("energy", GateAction::Enter) => runtime.set_launch_energy_autopilot(true),
+            ("energy", GateAction::Exit) => runtime.set_launch_energy_autopilot(false),
             ("naming", GateAction::Rehearsal) => runtime.set_dns_rehearsal(true),
             ("naming", GateAction::Trade) => runtime.set_dns_rehearsal(false),
             _ => {
@@ -1871,6 +1929,149 @@ impl AdTargetingTier {
             AdTargetingTier::Contextual => "contextual",
             AdTargetingTier::Presence => "presence",
         }
+    }
+}
+
+pub struct MarketAutopilotController {
+    market: &'static str,
+    required_streak: u64,
+    enter_streak: u64,
+    exit_streak: u64,
+    active: bool,
+    last_eval: GateEval,
+    history_capacity: usize,
+    util_history: VecDeque<f64>,
+    margin_history: VecDeque<f64>,
+}
+
+impl MarketAutopilotController {
+    pub fn new(market: &'static str, window_secs: u64) -> Self {
+        let epoch_secs = crate::EPOCH_BLOCKS.max(1);
+        let required_streak = (epoch_secs / window_secs.max(1)).max(1);
+        let history_capacity = (required_streak as usize).max(4) * 2;
+        Self {
+            market,
+            required_streak,
+            enter_streak: 0,
+            exit_streak: 0,
+            active: false,
+            last_eval: GateEval::default(),
+            history_capacity,
+            util_history: VecDeque::with_capacity(history_capacity),
+            margin_history: VecDeque::with_capacity(history_capacity),
+        }
+    }
+
+    pub fn evaluate(&mut self, epoch: u64, sample: &EconomicsSample) -> Option<PlannedEval> {
+        let (util, margin) = self.market_metrics(sample);
+        let capacity = self.history_capacity;
+        Self::push_history(&mut self.util_history, capacity, util);
+        Self::push_history(&mut self.margin_history, capacity, margin);
+        if self.util_history.len() < 2 || self.margin_history.len() < 2 {
+            return None;
+        }
+        const MIN_UTIL: f64 = 0.01;
+        const MAX_UTIL: f64 = 0.95;
+        const MIN_MARGIN: f64 = -0.5;
+        const MAX_MARGIN: f64 = 3.0;
+        let util_ok = util >= MIN_UTIL && util <= MAX_UTIL;
+        let margin_ok = margin >= MIN_MARGIN && margin <= MAX_MARGIN;
+        let enter_ok = util_ok && margin_ok;
+        let exit_ok = enter_ok;
+        let reason = format!("{} util={:.4} margin={:.4}", self.market, util, margin);
+        let metrics = json_map(vec![
+            ("market", JsonValue::String(self.market.into())),
+            (
+                "utilization",
+                JsonValue::Number(JsonNumber::from_f64(util).unwrap_or(JsonNumber::from(0u64))),
+            ),
+            (
+                "margin",
+                JsonValue::Number(JsonNumber::from_f64(margin).unwrap_or(JsonNumber::from(0u64))),
+            ),
+            ("enter_ok", JsonValue::Bool(enter_ok)),
+            ("exit_ok", JsonValue::Bool(exit_ok)),
+        ]);
+        self.last_eval = GateEval {
+            enter_ok,
+            exit_ok,
+            reason: reason.clone(),
+            metrics: metrics.clone(),
+        };
+        if enter_ok {
+            self.enter_streak = self.enter_streak.saturating_add(1);
+            self.exit_streak = 0;
+        } else {
+            self.enter_streak = 0;
+            self.exit_streak = self.exit_streak.saturating_add(1);
+        }
+        if !self.active && self.enter_streak >= self.required_streak {
+            self.active = true;
+            self.exit_streak = 0;
+            return Some(PlannedEval {
+                action: GateAction::Enter,
+                reason: format!("epoch {epoch}: {} autopilot enter", self.market),
+                metrics,
+            });
+        } else if self.active && self.exit_streak >= self.required_streak {
+            self.active = false;
+            self.enter_streak = 0;
+            return Some(PlannedEval {
+                action: GateAction::Exit,
+                reason: format!("epoch {epoch}: {} autopilot exit", self.market),
+                metrics,
+            });
+        }
+        None
+    }
+
+    fn push_history(history: &mut VecDeque<f64>, capacity: usize, value: f64) {
+        if history.len() == capacity {
+            history.pop_front();
+        }
+        history.push_back(value);
+    }
+
+    fn market_metrics(&self, sample: &EconomicsSample) -> (f64, f64) {
+        match self.market {
+            "storage" => (
+                sample.market_metrics.storage.utilization,
+                sample.market_metrics.storage.provider_margin,
+            ),
+            "compute" => (
+                sample.market_metrics.compute.utilization,
+                sample.market_metrics.compute.provider_margin,
+            ),
+            "energy" => (
+                sample.market_metrics.energy.utilization,
+                sample.market_metrics.energy.provider_margin,
+            ),
+            _ => (0.0, 0.0),
+        }
+    }
+
+    fn gate_state(&self) -> GateState {
+        if self.active {
+            GateState::Active
+        } else {
+            GateState::Inactive
+        }
+    }
+
+    fn enter(&self) -> u64 {
+        self.enter_streak
+    }
+
+    fn exit(&self) -> u64 {
+        self.exit_streak
+    }
+
+    fn required(&self) -> u64 {
+        self.required_streak
+    }
+
+    fn eval(&self) -> &GateEval {
+        &self.last_eval
     }
 }
 

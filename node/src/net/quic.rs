@@ -5,8 +5,7 @@ use std::net::SocketAddr;
 
 use transport::{self, ConnectionHandle, ListenerHandle};
 
-#[cfg(feature = "telemetry")]
-use super::record_transport_handshake_attempt;
+use super::with_metric_handle;
 
 pub use transport::{
     classify_err, CertificateHandle, ConnectError, ConnectionStatsSnapshot, HandshakeError,
@@ -54,7 +53,14 @@ pub async fn connect(
 ) -> std::result::Result<ConnectionHandle, ConnectError> {
     #[cfg(feature = "telemetry")]
     {
-        record_transport_handshake_attempt("quinn");
+        let provider_label = "quinn";
+        with_metric_handle(
+            "transport_handshake_attempt_total",
+            [provider_label],
+            crate::telemetry::TRANSPORT_HANDSHAKE_ATTEMPT_TOTAL
+                .ensure_handle_for_label_values(&[provider_label]),
+            |handle| handle.inc(),
+        );
     }
     let adapter = quinn_adapter().map_err(ConnectError::Other)?;
     adapter.connect(addr, cert).await

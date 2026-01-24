@@ -334,6 +334,45 @@ fn accept_valid_compute_receipt() {
 }
 
 #[test]
+fn reject_compute_receipt_with_zero_proof_latency() {
+    let (sk, vk) = create_test_keypair();
+
+    let mut meta = sample_blocktorch_metadata("zero_latency");
+    meta.proof_latency_ms = 0;
+
+    let mut receipt = ComputeReceipt {
+        job_id: "job_004".into(),
+        provider: "provider_004".into(),
+        compute_units: 1000,
+        payment: 250,
+        block_height: 100,
+        verified: true,
+        blocktorch: Some(meta),
+        provider_signature: vec![],
+        signature_nonce: 4,
+    };
+
+    sign_compute_receipt(&mut receipt, &sk);
+
+    let mut registry = ProviderRegistry::new();
+    registry
+        .register_provider("provider_004".into(), vk, 0)
+        .expect("register provider");
+    let mut nonce_tracker = NonceTracker::new(100);
+
+    let result = validate_receipt(
+        &Receipt::Compute(receipt),
+        100,
+        &registry,
+        &mut nonce_tracker,
+    );
+    assert!(matches!(
+        result,
+        Err(ValidationError::InvalidBlockTorchMetadata { .. })
+    ));
+}
+
+#[test]
 fn receipt_deduplication_registry() {
     let receipt = Receipt::Storage(StorageReceipt {
         contract_id: "contract_001".into(),
