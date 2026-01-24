@@ -303,6 +303,8 @@ node/dns_db/
 node/governance_db/
 node/ledger_db/
 node/state_db/
+dns_db/
+gateway_acks/
 
 # Node runtime metadata artifacts
 node/**/manifest.json

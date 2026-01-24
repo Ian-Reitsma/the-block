@@ -2714,7 +2714,9 @@ impl GovStore {
                                 ParamKey::KappaCpuSub => params.kappa_cpu_sub,
                                 ParamKey::LambdaBytesOutSub => params.lambda_bytes_out_sub,
                                 ParamKey::ProofRebateLimit => params.proof_rebate_limit,
-                                ParamKey::ProofVerificationBudgetMs => params.proof_verification_budget_ms,
+                                ParamKey::ProofVerificationBudgetMs => {
+                                    params.proof_verification_budget_ms
+                                }
                                 ParamKey::RentRatePerByte => params.rent_rate_per_byte,
                                 ParamKey::KillSwitchSubsidyReduction => {
                                     params.kill_switch_subsidy_reduction

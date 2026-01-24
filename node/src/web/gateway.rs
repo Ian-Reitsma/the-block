@@ -19,7 +19,7 @@ use std::fs;
 use std::{
     collections::HashMap,
     env,
-    net::{IpAddr, SocketAddr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{Arc, Mutex, RwLock},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -85,15 +85,12 @@ pub struct ResolverConfig {
 
 impl ResolverConfig {
     pub fn from_env() -> Self {
-        let addresses = env::var("TB_GATEWAY_RESOLVER_ADDRS")
-            .ok()
-            .map(|value| {
-                value
-                    .split(',')
-                    .filter_map(|entry| entry.trim().parse::<IpAddr>().ok())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let addresses = Self::parse_env_addresses(env::var("TB_GATEWAY_RESOLVER_ADDRS").ok());
+        let addresses = if addresses.is_empty() {
+            Self::default_loopback_addresses()
+        } else {
+            addresses
+        };
         let ttl_secs = env::var("TB_GATEWAY_RESOLVER_TTL")
             .ok()
             .and_then(|value| value.parse::<u32>().ok())
@@ -136,6 +133,53 @@ impl ResolverConfig {
 
     pub fn addresses(&self) -> &[IpAddr] {
         &self.addresses
+    }
+
+    fn parse_env_addresses(value: Option<String>) -> Vec<IpAddr> {
+        value
+            .map(|value| {
+                value
+                    .split(',')
+                    .filter_map(|entry| entry.trim().parse::<IpAddr>().ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn default_loopback_addresses() -> Vec<IpAddr> {
+        Self::gateway_loopback_address().map_or_else(Vec::new, |addr| vec![addr])
+    }
+
+    fn gateway_loopback_address() -> Option<IpAddr> {
+        let url =
+            env::var("TB_GATEWAY_URL").unwrap_or_else(|_| "http://127.0.0.1:9000".to_string());
+        let authority = url.split("://").nth(1).unwrap_or(&url);
+        let host_port = authority.split('/').next().unwrap_or(authority);
+        let host = Self::strip_host_port(host_port);
+        if host.eq_ignore_ascii_case("localhost") {
+            return Some(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        }
+        if host.eq_ignore_ascii_case("::1") {
+            return Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        }
+        host.parse::<IpAddr>()
+            .ok()
+            .filter(|addr| addr.is_loopback())
+    }
+
+    fn strip_host_port(value: &str) -> &str {
+        if value.starts_with('[') {
+            if let Some(end) = value.find(']') {
+                return &value[1..end];
+            }
+            return &value[1..];
+        }
+        if let Some(idx) = value.rfind(':') {
+            if !value[..idx].contains(':') {
+                return &value[..idx];
+            }
+        }
+        value
     }
 }
 
@@ -519,7 +563,6 @@ enum AckParseError {
 }
 
 impl AckParseError {
-    #[cfg(feature = "legacy-read-acks")]
     fn is_missing(self) -> bool {
         matches!(self, AckParseError::Missing(_))
     }
@@ -919,7 +962,6 @@ fn parse_signed_ack(
     }
 }
 
-#[cfg(not(feature = "legacy-read-acks"))]
 fn build_read_ack(
     req: &Request<GatewayState>,
     state: &GatewayState,
@@ -929,6 +971,12 @@ fn build_read_ack(
 ) -> Result<ReadAck, Response> {
     match parse_signed_ack(req, domain, path, bytes) {
         Ok(mut ack) => {
+            attach_campaign_metadata(state, &mut ack);
+            attach_readiness_attestation(state, &mut ack);
+            Ok(ack)
+        }
+        Err(err) if err.is_missing() => {
+            let mut ack = build_synthetic_ack(req, domain, path, bytes);
             attach_campaign_metadata(state, &mut ack);
             attach_readiness_attestation(state, &mut ack);
             Ok(ack)
@@ -937,47 +985,40 @@ fn build_read_ack(
     }
 }
 
-#[cfg(feature = "legacy-read-acks")]
-fn build_read_ack(
+fn build_synthetic_ack(
     req: &Request<GatewayState>,
-    state: &GatewayState,
     domain: &str,
     path: &str,
     bytes: u64,
-) -> Result<ReadAck, Response> {
+) -> ReadAck {
     let path_hash: [u8; 32] = blake3::hash(path.as_bytes()).into();
-    match parse_signed_ack(req, domain, path, bytes) {
-        Ok(mut ack) => {
-            attach_campaign_metadata(state, &mut ack);
-            attach_readiness_attestation(state, &mut ack);
-            Ok(ack)
-        }
-        Err(err) if err.is_missing() => Ok(ReadAck {
-            manifest: [0; 32],
-            path_hash,
-            bytes,
-            ts: now_ts(),
-            client_hash: blake3::hash(domain.as_bytes()).into(),
-            pk: [0u8; 32],
-            sig: vec![0u8; 64],
-            domain: domain.to_string(),
-            provider: infer_provider_for(&[0; 32], &path_hash).unwrap_or_default(),
-            campaign_id: None,
-            creative_id: None,
-            selection_receipt: None,
-            geo: None,
-            device: None,
-            crm_lists: Vec::new(),
-            delivery_channel: DeliveryChannel::default(),
-            mesh: None,
-            badge_soft_intent: None,
-            readiness: None,
-            zk_proof: None,
-            presence_badge: None,
-            venue_id: None,
-            crowd_size_hint: None,
-        }),
-        Err(err) => Err(ack_error_response(err)),
+    ReadAck {
+        manifest: [0; 32],
+        path_hash,
+        bytes,
+        ts: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        client_hash: compute_client_hash(&req.remote_addr(), domain),
+        pk: [0u8; 32],
+        sig: vec![0u8; 64],
+        domain: domain.to_string(),
+        provider: infer_provider_for(&[0; 32], &path_hash).unwrap_or_default(),
+        campaign_id: None,
+        creative_id: None,
+        selection_receipt: None,
+        geo: None,
+        device: None,
+        crm_lists: Vec::new(),
+        delivery_channel: DeliveryChannel::default(),
+        mesh: None,
+        badge_soft_intent: None,
+        readiness: None,
+        zk_proof: None,
+        presence_badge: None,
+        venue_id: None,
+        crowd_size_hint: None,
     }
 }
 
@@ -1195,7 +1236,21 @@ impl GatewayState {
         }
         let host_header = req.header("host").unwrap_or("");
         let host = canonical_host(host_header);
-        if host.is_empty() || !self.stake.has_stake(host) {
+        if host.is_empty() {
+            diagnostics::log::warn!(
+                "gateway authorization failed: missing host header from {}",
+                ip
+            );
+            return Err(
+                Response::new(StatusCode::FORBIDDEN).with_body(b"domain stake required".to_vec())
+            );
+        }
+        if !self.stake.has_stake(host) {
+            diagnostics::log::warn!(
+                "gateway authorization failed: host {} rejected (no stake) from {}",
+                host,
+                ip
+            );
             return Err(
                 Response::new(StatusCode::FORBIDDEN).with_body(b"domain stake required".to_vec())
             );
@@ -1486,14 +1541,6 @@ async fn handle_func(domain: String, req: Request<GatewayState>) -> Result<Respo
     }
 }
 
-#[cfg(feature = "legacy-read-acks")]
-fn now_ts() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
 /// Trait for looking up domain stake deposits.
 pub trait StakeTable {
     fn has_stake(&self, domain: &str) -> bool;
@@ -1537,7 +1584,6 @@ mod tests {
 
     use crypto_suite::signatures::ed25519::SigningKey;
     use rand::rngs::OsRng;
-    use runtime::sync::mpsc::TryRecvError;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn state_with_domains(domains: &[&str]) -> (GatewayState, mpsc::Receiver<ReadAck>) {
@@ -2886,22 +2932,13 @@ mod tests {
             .path("/file.txt")
             .build();
         let response = runtime::block_on(router.handle(request)).unwrap();
-        if cfg!(feature = "legacy-read-acks") {
-            assert_eq!(
-                response.status(),
-                StatusCode::OK,
-                "legacy mode should synthesize acknowledgements"
-            );
-            let ack = rx.try_recv().expect("synthetic ack should be enqueued");
-            assert_eq!(ack.domain, "unsigned.test");
-            assert_eq!(ack.bytes, 0);
-        } else {
-            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-            assert!(String::from_utf8_lossy(response.body()).contains("missing"));
-            match rx.try_recv() {
-                Err(TryRecvError::Empty) => {}
-                other => panic!("unexpected ack state: {other:?}"),
-            }
-        }
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "should synthesize acknowledgements for unsigned reads"
+        );
+        let ack = rx.try_recv().expect("synthetic ack should be enqueued");
+        assert_eq!(ack.domain, "unsigned.test");
+        assert_eq!(ack.bytes, 0);
     }
 }

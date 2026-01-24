@@ -173,7 +173,7 @@
 - **Bridge domain ownership** – `TB_GATEWAY_BLOCK_NAME` should match the authorized `.block` domain advertised via the DoH resolver (`TB_GATEWAY_RESOLVER_CNAME`). The gateway acts as the authoritative DNS server/DoH provider for that domain by proxying requests only when `dns_ownership/<domain>` and `dns_stake/<reference>` show positive escrow, ensuring mobile devices always resolve legitimate `.block` hosts through the in-house stack.
 
 - **Purpose** – The gateway now speaks DNS-over-HTTPS at `/dns/resolve`. The endpoint returns `application/dns-json` payloads with `Status`, TTL, and `Answer` arrays, only responds to `.block` domains, and reuses the same stake table that gates static hosts. The behavior is driven by three knobs:
-  - `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses the resolver should advertise (default: empty, must be populated for useful answers).
+  - `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses the resolver should advertise (default: empty in production; for localhost smoke tests where `TB_GATEWAY_URL` points at a loopback address, the gateway will advertise that loopback IP by default).
   - `TB_GATEWAY_RESOLVER_TTL`: cache TTL in seconds (default `60`). The gateway echoes this value in the JSON `Answer` entries and the HTTP `Cache-Control` header.
   - `TB_GATEWAY_RESOLVER_CNAME`: optional CNAME target emitted when the address list is empty (for example `gateway.example.block` pointing back into the mesh).
 

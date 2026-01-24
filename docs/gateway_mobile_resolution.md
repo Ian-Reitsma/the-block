@@ -13,9 +13,10 @@ Operators expose `.block` domains through the new `gateway-service` binary (buil
 3. The existing `gateway` CLI (`node/src/bin/gateway.rs`, built with `cargo build -p the_block --bin gateway --features "cli gateway"`) stays around for interactive TLS overrides, debugging, and resolver testing.
 4. TLS is configured through `--tls-cert`, `--tls-key`, `--tls-client-ca`, and `--tls-client-ca-optional`, or via the matching env vars (`TB_GATEWAY_TLS_*`). The service exposes the same `http_env` naming shortcuts so staging scripts can reuse their existing hooks.
 5. Board stake gating before the binary starts: the HTTP stack rejects requests whose `Host` header does not map to a domain with a funded entry in `dns_ownership/<domain>` (see `node/src/gateway/dns.rs`). Use the DNS auction/stake CLI (see the same file) to mint the domain and deposit BLOCK before adding it to the resolver list.
+   - For local integration tests that cover the entire smoke test flow before your DNS auction is complete, set `TB_GATEWAY_STAKE_ALLOWLIST` (comma-separated `.block` names). Domains in that list bypass the stake gate so you can keep exercising `/` and `/dns/resolve` without modifying the production registry.
 
 ## 2. Resolver knobs (for phones)
-- `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses advertised for `.block` DoH answers. Populate this with the gateway server's reachable IPs so clients can connect. Leave empty when you emit a CNAME instead.
+- `TB_GATEWAY_RESOLVER_ADDRS`: comma-separated IPv4/IPv6 addresses advertised for `.block` DoH answers. Populate this with the gateway server's reachable IPs so clients can connect. Leave empty when you emit a CNAME instead (or when running a localhost smoke test: if `TB_GATEWAY_URL` points at a loopback address, the gateway will advertise that loopback IP by default).
 - `TB_GATEWAY_RESOLVER_TTL`: TTL in seconds (default `60`). The gateway writes this value into the JSON `Answer` entries and the `Cache-Control` header so phones honor the desired cache duration.
 - `TB_GATEWAY_RESOLVER_CNAME`: optional CNAME target emitted when `TB_GATEWAY_RESOLVER_ADDRS` is empty. Point it at `gateway.example.block` (or any resolvable host) that loops back into your mesh.
 
@@ -33,13 +34,32 @@ The resolver reuses the stake table that guards static assets. If `domain_has_st
 - Monitor `node/src/telemetry.rs` counters `GATEWAY_DOH_STATUS_TOTAL` (labels match the `Status` value) and `aggregator_doh_resolver_failure_total` from `/wrappers`. Raise alerts in `monitoring/alert.rules.yml` to catch repeated `Status=3` answers.
 - If your gateway front-end sits behind a load balancer, make sure the resolver address list includes every front-end IP, or use a CNAME that points back to the TLS host.
 
-## 5. Ops tips for phone troubleshooting
+## 5. Read-ack persistence & smoke test
+
+- `gateway-service` now persists every `ReadAck` into `TB_GATEWAY_ACK_DIR` (default `gateway_acks`). Files rotate by epoch (`epoch = ts / 3600`) and append newline-delimited JSON so operators, explorers, and the aggregator can tail the log and replay the raw receipts the on-chain settlement code expects.
+- After visiting `https://<domain>/`, inspect the current epoch file (`tail -n1 "$(TB_GATEWAY_ACK_DIR:-gateway_acks)/$(($(date -u +%s) / 3600)).jsonl"`) to verify the latest line references the expected domain. The line mirrors `node/src/read_receipt.rs::ReadAck`, so you can count bytes, inspect providers, or forward it to your ingestion pipeline.
+- Run `gateway-ack-ingest` (the `node/src/bin/gateway_ack_ingest.rs` binary) on whatever host feeds `TB_GATEWAY_RECEIPTS`. It polls `TB_GATEWAY_ACK_DIR`, parses each newline-delimited JSON `ReadAck`, and calls `gateway::read_receipt::append_with_ts` so the ledger/settlement stack gets the same receipt stream it has always consumed. Set `TB_GATEWAY_ACK_POLL_INTERVAL_MS` if you need a faster loop, e.g.:
+  ```bash
+  TB_GATEWAY_ACK_DIR=/opt/gateway/acks \
+    TB_GATEWAY_RECEIPTS=/opt/node/receipts \
+    TB_GATEWAY_ACK_POLL_INTERVAL_MS=2000 \
+    /opt/node/bin/gateway-ack-ingest
+  ```
+- Run `scripts/gateway_smoke_test.sh` to exercise `/`, `/dns/resolve`, and the persisted acknowledgements in one hit. Example:
+  ```bash
+  chmod +x scripts/gateway_smoke_test.sh
+  TB_GATEWAY_ACK_DIR=/opt/gateway/acks \
+    scripts/gateway_smoke_test.sh https://gateway.example.block example.block
+  ```
+  The script fetches the domain, verifies the DoH `Status=0` answer, and greps the epoch log for the domain to prove the read was persisted.
+
+## 6. Ops tips for phone troubleshooting
 - A 403 from the DoH endpoint indicates `domain_has_stake` returned `false`. Fund the stake via `contract-cli dns register-stake` or the CLI described in `docs/system_reference.md#9-gateway-dns-and-read-receipts`.
-- A `Status=3` response with HTTP `404` means no resolver addresses or CNAME were configured. Set `TB_GATEWAY_RESOLVER_ADDRS`/`TB_GATEWAY_RESOLVER_CNAME` and reload TLS envs via the service’s `ExecReload` hook.
+- A `Status=3` response with HTTP `404` means no resolver answers were configured (no `TB_GATEWAY_RESOLVER_ADDRS` match and no `TB_GATEWAY_RESOLVER_CNAME`), and the gateway could not infer a loopback address from `TB_GATEWAY_URL`. Set `TB_GATEWAY_RESOLVER_ADDRS`/`TB_GATEWAY_RESOLVER_CNAME` and reload TLS envs via the service’s `ExecReload` hook.
 - Use `TB_GATEWAY_RESOLVER_TTL` to tune how often phones re-query the resolver; snapping it to 60 keeps resolver drifts short while still caching the gateway IPs.
 - Document any VPN/app-level profiles (iOS/macOS DoH or Android Private DNS) inside `docs/gateway_mobile_resolution.md` so field teams can hand them to testers and perform `curl`/`telnet` pre-flight checks.
 
-## References
+## 7. References
 - `node/src/bin/gateway.rs` – CLI wiring for TLS, stake, and resolver flags.
 - `node/src/web/gateway.rs` – DoH endpoint, stake gating, and static/drive handlers.
 - `deploy/systemd/gateway.service` – systemd unit that stages TLS artifacts and runs the binary.

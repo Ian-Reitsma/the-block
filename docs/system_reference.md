@@ -528,8 +528,9 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   `pubkey`/`sig` are lowercase hex (Ed25519). `dns_lookup` fetches TXT via the configured resolver (default `runtime::net::lookup_txt`), caches verdicts for `VERIFY_TTL = 3600s`, and persists them under `TB_DNS_DB_PATH` (`dns_db` by default).
 - Verification and auditing:
   - RPC `gateway.policy` returns the active TXT policy parsed via `gateway::dns::gateway_policy`.
-  - `gateway.dns_lookup` exposes the cached verdict (`verified`, `pending`, `failed`) so explorers can show trust badges.
-  - CLI `contract-cli net dns verify <domain>` exercises the same path and prints cache hits/misses.
+- `gateway.dns_lookup` exposes the cached verdict (`verified`, `pending`, `failed`) so explorers can show trust badges.
+- CLI `contract-cli net dns verify <domain>` exercises the same path and prints cache hits/misses.
+- For local test runs that exercise the new smoke test before the auction is finalized, set `TB_GATEWAY_STAKE_ALLOWLIST` to a comma separated list of `.block` hosts. Those names skip the `domain_has_stake` check so `Host` requests like `example.block` stay “staked” without posting real BLOCK.
 
 ### 9.2 Read receipts, batching, and audit workflow
 
@@ -538,6 +539,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   - Stored per hour (`current_epoch(ts) = ts / 3600`). Files are binary CBOR or legacy CBOR for compatibility.
   - `batch(epoch)` loads all receipts, computes a BLAKE3 Merkle root, writes `<epoch>.root`, combines with execution receipts (`exec::batch`), and submits the final anchor to the settlement engine.
   - `reads_since(epoch, domain)` returns `(count, last_ts)` for CLI/RPC reporting.
+- The standalone `gateway-service` binary now appends every `ReadAck` it receives to `TB_GATEWAY_ACK_DIR` (default `gateway_acks`). Files rotate hourly as `<epoch>.jsonl` and hold newline-delimited JSON identical to `node/src/read_receipt.rs::ReadAck`, giving telemetry collectors and ingestion scripts a reliable copy even before on-chain anchoring. `scripts/gateway_smoke_test.sh` exercises `/`, `/dns/resolve`, and then greps the current epoch file so operators can validate DoH success and persisted acknowledgements in one command.
+- Use the `gateway-ack-ingest` binary (`node/src/bin/gateway_ack_ingest.rs`) on the ledger/aggregator host to tail `TB_GATEWAY_ACK_DIR`, parse each `ReadAck`, and invoke `gateway::read_receipt::append_with_ts` so the settlement engine consumes the same event stream it expects. `TB_GATEWAY_ACK_POLL_INTERVAL_MS` controls poll cadence (default 5000 ms).
 - CLI runbook:
   1. `contract-cli gateway reads-since --domain example.block --epoch $(date -u +%s)/3600` (custom script) polls the RPC `gateway.reads_since`.
   2. `contract-cli gateway mobile-cache flush` before maintenance to force anchors.

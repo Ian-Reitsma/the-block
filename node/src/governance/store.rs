@@ -3270,7 +3270,9 @@ impl GovStore {
                                     params.ad_readiness_min_provider_count
                                 }
                                 ParamKey::ProofRebateLimit => params.proof_rebate_limit,
-                                ParamKey::ProofVerificationBudgetMs => params.proof_verification_budget_ms,
+                                ParamKey::ProofVerificationBudgetMs => {
+                                    params.proof_verification_budget_ms
+                                }
                                 ParamKey::RentRatePerByte => params.rent_rate_per_byte,
                                 ParamKey::KillSwitchSubsidyReduction => {
                                     params.kill_switch_subsidy_reduction

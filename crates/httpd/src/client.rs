@@ -787,7 +787,7 @@ fn build_request(
     let host_header = url
         .host_header()
         .unwrap_or_else(|| host.as_ref().to_string());
-    headers.insert("host".into(), host_header);
+    headers.entry("host".into()).or_insert(host_header);
     headers
         .entry("connection".into())
         .or_insert_with(|| "close".to_string());

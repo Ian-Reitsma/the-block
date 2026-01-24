@@ -16,14 +16,14 @@ use crate::telemetry::{
 };
 use crate::transaction::BlobTx;
 use coding::{Compressor, EncryptError, Encryptor};
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 use concurrency::Lazy;
 use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::{Deserialize, Serialize};
 use rand::{rngs::OsRng, RngCore};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::env;
@@ -34,7 +34,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -1503,7 +1503,7 @@ fn select_provider(
 }
 
 pub fn provider_for_manifest(manifest: &[u8; 32], path_hash: &[u8; 32]) -> Option<String> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "gateway-test-helpers"))]
     {
         if let Some(providers) = TEST_MANIFEST_PROVIDERS
             .lock()
@@ -1551,7 +1551,7 @@ fn sanitized_path(root: &Path, domain: &str, path: &str) -> Option<PathBuf> {
 
 #[cfg(feature = "gateway")]
 pub fn fetch_blob(domain: &str, path: &str) -> Option<Vec<u8>> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "gateway-test-helpers"))]
     {
         if let Some(bytes) = TEST_GATEWAY_BLOBS
             .lock()
@@ -1570,7 +1570,7 @@ pub fn fetch_blob(domain: &str, path: &str) -> Option<Vec<u8>> {
 
 #[cfg(feature = "gateway")]
 pub fn fetch_wasm(domain: &str) -> Option<Vec<u8>> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "gateway-test-helpers"))]
     {
         if let Some(bytes) = TEST_GATEWAY_WASM.lock().unwrap().get(domain).cloned() {
             return Some(bytes);
@@ -1586,15 +1586,15 @@ pub fn fetch_wasm(domain: &str) -> Option<Vec<u8>> {
     fs::read(path).ok()
 }
 
-#[cfg(all(test, feature = "gateway"))]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 static TEST_GATEWAY_BLOBS: Lazy<Mutex<HashMap<(String, String), Vec<u8>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[cfg(all(test, feature = "gateway"))]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 static TEST_GATEWAY_WASM: Lazy<Mutex<HashMap<String, Vec<u8>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[cfg(all(test, feature = "gateway"))]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub fn override_static_blob_for_test(domain: &str, path: &str, data: Vec<u8>) {
     TEST_GATEWAY_BLOBS
         .lock()
@@ -1602,12 +1602,12 @@ pub fn override_static_blob_for_test(domain: &str, path: &str, data: Vec<u8>) {
         .insert((domain.to_string(), path.to_string()), data);
 }
 
-#[cfg(all(test, feature = "gateway"))]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub fn clear_test_static_blobs() {
     TEST_GATEWAY_BLOBS.lock().unwrap().clear();
 }
 
-#[cfg(all(test, feature = "gateway"))]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub fn override_wasm_for_test(domain: &str, data: Vec<u8>) {
     TEST_GATEWAY_WASM
         .lock()
@@ -1615,16 +1615,16 @@ pub fn override_wasm_for_test(domain: &str, data: Vec<u8>) {
         .insert(domain.to_string(), data);
 }
 
-#[cfg(all(test, feature = "gateway"))]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub fn clear_test_wasm() {
     TEST_GATEWAY_WASM.lock().unwrap().clear();
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 static TEST_MANIFEST_PROVIDERS: Lazy<Mutex<HashMap<[u8; 32], Vec<String>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub fn override_manifest_providers_for_test(manifest: [u8; 32], providers: Vec<String>) {
     let normalized = normalize_providers(providers);
     TEST_MANIFEST_PROVIDERS
@@ -1633,17 +1633,17 @@ pub fn override_manifest_providers_for_test(manifest: [u8; 32], providers: Vec<S
         .insert(manifest, normalized);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub fn clear_test_manifest_providers() {
     TEST_MANIFEST_PROVIDERS.lock().unwrap().clear();
 }
 
 /// RAII guard to automatically clear pipeline test state on drop.
 /// Ensures test isolation by cleaning up even if a test panics.
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 pub struct PipelineTestGuard;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 impl Drop for PipelineTestGuard {
     fn drop(&mut self) {
         clear_test_manifest_providers();
@@ -1655,7 +1655,7 @@ impl Drop for PipelineTestGuard {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "gateway-test-helpers"))]
 impl PipelineTestGuard {
     /// Create a new guard that will clean up test state on drop.
     pub fn new() -> Self {

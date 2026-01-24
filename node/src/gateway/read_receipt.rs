@@ -117,6 +117,17 @@ pub fn append(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    append_with_ts(domain, provider_id, bytes_served, dynamic, allowed, ts)
+}
+
+pub fn append_with_ts(
+    domain: &str,
+    provider_id: &str,
+    bytes_served: u64,
+    dynamic: bool,
+    allowed: bool,
+    ts: u64,
+) -> IoResult<()> {
     let epoch = current_epoch(ts);
     let dir = base_dir().join("read").join(epoch.to_string());
     fs::create_dir_all(&dir)?;

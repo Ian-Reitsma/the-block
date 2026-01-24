@@ -104,6 +104,7 @@ pq-crypto = ["pqcrypto-dilithium"]
 bluetooth = []
 gpu = ["crypto_suite/gpu"]
 gateway = []
+gateway-test-helpers = ["gateway"]
 quic = ["transport", "dep:foundation_tls"]
 quinn = ["quic", "transport/quinn"]
 inhouse = []
@@ -149,6 +150,11 @@ harness = false
 [[test]]
 name = "nonce_supply_prop"
 path = "tests/nonce_supply_prop.rs"
+
+[[test]]
+name = "gateway_service"
+path = "tests/gateway_service.rs"
+required-features = ["gateway-test-helpers"]
 
 [lib]
 name = "the_block"
@@ -218,6 +224,12 @@ test = false
 name = "gateway-service"
 path = "src/bin/gateway_service.rs"
 required-features = ["gateway"]
+test = false
+
+[[bin]]
+name = "gateway-ack-ingest"
+path = "src/bin/gateway_ack_ingest.rs"
+required-features = []
 test = false
 
 [[bin]]

@@ -1,55 +1,74 @@
-# Default configuration for The-Block networking
-max_peer_metrics = 1024
-peer_metrics_export = true
-peer_metrics_path = "state/peer_metrics.json"
-peer_metrics_retention = 604800
-peer_metrics_compress = false
-peer_metrics_sample_rate = 1
-metrics_export_dir = "state"
-peer_metrics_export_quota_bytes = 10485760
-
-[runtime]
-reactor_idle_poll_ms = 100
-io_read_backoff_ms = 10
-io_write_backoff_ms = 10
-[overlay]
-backend = "inhouse"
-peer_db_path = "state/overlay/peers.json"
-
-[storage]
-default_engine = "inhouse"
-
-[storage.overrides]
-gossip_relay = "inhouse"
-net_peer_chunks = "inhouse"
-gateway_dns = "memory"
-localnet_receipts = "memory"
-
-track_peer_drop_reasons = true
-track_handshake_failures = true
-peer_reputation_decay = 0.01
-p2p_max_per_sec = 100
-p2p_max_bytes_per_sec = 65536
-provider_reputation_decay = 0.05
-provider_reputation_retention = 604800
-reputation_gossip = true
-scheduler_metrics = true
+gateway_blocklist = "gateway-blocklist.txt"
 gateway_dns_allow_external = false
 gateway_dns_disable_verify = false
-gateway_blocklist = "gateway-blocklist.txt"
-
-[telemetry]
-sample_rate = 1.0
-compaction_secs = 60
-
-[metrics_aggregator]
-url = "https://aggregator.local:9000"
-auth_token = "changeme"
-retention_secs = 604800
-
+max_peer_metrics = 1024
+metrics_export_dir = "state"
+p2p_chain_sync_interval_ms = 500
+p2p_max_bytes_per_sec = 65536
+p2p_max_per_sec = 100
+p2p_rate_window_secs = 1
+peer_metrics_compress = false
+peer_metrics_db = "state/peer_metrics.db"
+peer_metrics_export = true
+peer_metrics_export_quota_bytes = 10485760
+peer_metrics_path = "state/peer_metrics.json"
+peer_metrics_retention = 604800
+peer_metrics_sample_rate = 1
+peer_reputation_decay = 0.01
+price_board_path = "state/price_board.v2.bin"
+price_board_save_interval = 30
+price_board_window = 100
+proof_rebate_rate = 1
+provider_reputation_decay = 0.05
+provider_reputation_retention = 604800
+read_ack_privacy = "Enforce"
+receipt_blob_da_window_secs = 604800
+receipt_header_activation_height = 0
+receipt_max_per_provider_per_shard = 1
+receipt_min_asn_diversity = 1
+receipt_min_region_diversity = 1
+receipt_providers = []
+receipt_shard_count = 64
+reputation_gossip = true
+scheduler_metrics = true
+snapshot_interval = 1024
+storage_legacy_mode = false
+telemetry_summary_interval = 0
+track_handshake_failures = true
+track_peer_drop_reasons = true
+treasury_account = "treasury"
 [compute_market]
 enable_preempt = false
-preempt_min_delta = 10
 low_priority_cap_pct = 50
-reputation_multiplier_min = 0.5
+preempt_min_delta = 10
 reputation_multiplier_max = 1.0
+reputation_multiplier_min = 0.5
+settle_mode = "DryRun"
+[energy]
+provider_keys = []
+[lighthouse]
+low_density_multiplier_max = 1000000
+[overlay]
+backend = "Inhouse"
+peer_db_path = "/Users/ianreitsma/.the_block/overlay/peers.json"
+[rpc]
+admin_token_file = "secrets/admin.token"
+allowed_hosts = ["127.0.0.1", "localhost"]
+cors_allow_origins = []
+enable_debug = false
+energy_admin_token_file = "secrets/energy_admin.token"
+energy_oracle_token_file = "secrets/energy_oracle.token"
+energy_provider_token_file = "secrets/energy_provider.token"
+max_body_bytes = 1048576
+relay_only = false
+request_timeout_ms = 5000
+[runtime]
+io_read_backoff_ms = 10
+io_write_backoff_ms = 10
+reactor_idle_poll_ms = 100
+[storage]
+default_engine = "Inhouse"
+overrides = {}
+[telemetry]
+compaction_secs = 60
+sample_rate = 1.0

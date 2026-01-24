@@ -9,7 +9,10 @@ use diagnostics::anyhow::Result;
 use runtime::{self, sync::mpsc};
 use the_block::{
     config,
-    gateway::{stake::DnsStakeTable, tls::build_tls_config},
+    gateway::{
+        stake::{self, DnsStakeTable},
+        tls::build_tls_config,
+    },
     web::gateway::{self, ResolverConfig},
     ReadAck,
 };
@@ -120,7 +123,7 @@ async fn async_main(args: GatewayArgs) -> Result<()> {
             // Read acknowledgements are currently not persisted in the gateway-only binary.
         }
     });
-    let stake_table = DnsStakeTable::new();
+    let stake_table = stake::with_env_overrides(DnsStakeTable::new());
     gateway::run(
         args.listen,
         stake_table,

@@ -264,9 +264,7 @@ impl WorkloadRunner {
         })
         .await
         .unwrap_or_else(|e| panic!("workload failed: {e}"));
-        self.cache
-            .guard()
-            .insert(slice_id, res.clone());
+        self.cache.guard().insert(slice_id, res.clone());
         res
     }
 }
