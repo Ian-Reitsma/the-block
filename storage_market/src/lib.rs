@@ -5,7 +5,7 @@
 )]
 #![forbid(unsafe_code)]
 
-mod codec;
+pub mod codec;
 mod engine;
 mod importer;
 mod legacy;
@@ -23,6 +23,8 @@ use codec::{
 };
 use engine::{Engine, Tree};
 use foundation_serialization::{Deserialize, Serialize};
+use std::sync::{Arc, OnceLock};
+use std::time::SystemTime;
 use std::path::Path;
 use storage::StorageContract;
 use thiserror::Error;
@@ -128,6 +130,10 @@ pub struct ProviderProfile {
     pub price_per_block: u64,
     pub escrow_deposit: u64,
     #[serde(default)]
+    pub version: u64,
+    #[serde(default)]
+    pub expires_at: Option<u64>,
+    #[serde(default)]
     pub latency_ms: Option<u32>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -152,11 +158,28 @@ impl ProviderProfile {
             max_capacity_bytes,
             price_per_block,
             escrow_deposit,
+            version: 0,
+            expires_at: None,
             latency_ms: None,
             tags: Vec::new(),
             proof_successes: 0,
             proof_failures: 0,
             last_seen_block: None,
+        }
+    }
+
+    pub fn mark_version(&mut self, version: u64) {
+        self.version = version;
+    }
+
+    pub fn set_expiry(&mut self, expires_at: u64) {
+        self.expires_at = Some(expires_at);
+    }
+
+    pub fn is_expired(&self, now: u64) -> bool {
+        match self.expires_at {
+            Some(expiry) => expiry <= now,
+            None => false,
         }
     }
 
@@ -194,6 +217,24 @@ impl DiscoveryRequest {
         total.min(u128::from(u64::MAX)) as u64
     }
 }
+
+pub trait ProviderDirectory: Send + Sync {
+    fn publish(&self, profile: ProviderProfile);
+
+    fn discover(&self, request: &DiscoveryRequest) -> Result<Vec<ProviderProfile>>;
+}
+
+static PROVIDER_DIRECTORY: OnceLock<Arc<dyn ProviderDirectory>> = OnceLock::new();
+
+pub fn install_provider_directory(directory: Arc<dyn ProviderDirectory>) {
+    let _ = PROVIDER_DIRECTORY.set(directory);
+}
+
+fn provider_directory() -> Option<Arc<dyn ProviderDirectory>> {
+    PROVIDER_DIRECTORY.get().cloned()
+}
+
+const DEFAULT_PROFILE_TTL_SECS: u64 = 15 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProofRecord {
@@ -364,6 +405,14 @@ impl StorageMarket {
         Ok(record.replicas)
     }
 
+    fn default_expiry() -> u64 {
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_add(DEFAULT_PROFILE_TTL_SECS)
+    }
+
     pub fn register_provider_profile(
         &self,
         mut profile: ProviderProfile,
@@ -371,13 +420,53 @@ impl StorageMarket {
         let key = profile.provider_id.as_bytes();
         if let Some(existing) = self.providers.get(key)? {
             let existing_profile = deserialize_provider_profile(&existing)?;
+            let next_version = existing_profile.version.saturating_add(1);
+            profile.proof_successes = existing_profile.proof_successes;
+            profile.proof_failures = existing_profile.proof_failures;
+            profile.last_seen_block = existing_profile.last_seen_block;
+            if profile.version == 0 {
+                profile.version = next_version;
+            }
+        } else if profile.version == 0 {
+            profile.version = 1;
+        }
+        if profile.expires_at.is_none() {
+            profile.expires_at = Some(Self::default_expiry());
+        }
+        let bytes = serialize_provider_profile(&profile)?;
+        let _ = self.providers.insert(key, bytes)?;
+        if let Some(directory) = provider_directory() {
+            directory.publish(profile.clone());
+        }
+        Ok(profile)
+    }
+
+    pub fn cache_provider_profile(
+        &self,
+        mut profile: ProviderProfile,
+    ) -> Result<Option<ProviderProfile>> {
+        let key = profile.provider_id.as_bytes();
+        if let Some(existing) = self.providers.get(key)? {
+            let existing_profile = deserialize_provider_profile(&existing)?;
+            let newer = profile.version > existing_profile.version
+                || (profile.version == existing_profile.version
+                    && profile
+                        .expires_at
+                        .unwrap_or(0)
+                        > existing_profile.expires_at.unwrap_or(0));
+            if !newer {
+                return Ok(None);
+            }
             profile.proof_successes = existing_profile.proof_successes;
             profile.proof_failures = existing_profile.proof_failures;
             profile.last_seen_block = existing_profile.last_seen_block;
         }
+        if profile.expires_at.is_none() {
+            profile.expires_at = Some(Self::default_expiry());
+        }
         let bytes = serialize_provider_profile(&profile)?;
         let _ = self.providers.insert(key, bytes)?;
-        Ok(profile)
+        Ok(Some(profile))
     }
 
     pub fn provider_profile(&self, provider_id: &str) -> Result<Option<ProviderProfile>> {
@@ -401,9 +490,23 @@ impl StorageMarket {
         let limit = request.normalized_limit();
         let min_capacity = request.required_capacity_bytes();
         let mut candidates = Vec::new();
+        if let Some(directory) = provider_directory() {
+            let fetched = directory.discover(&request)?;
+            for profile in fetched {
+                let _ = self.cache_provider_profile(profile.clone())?;
+                candidates.push(profile);
+            }
+        }
+        let now = SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         for entry in self.providers.iter() {
             let (_, value) = entry?;
             let profile = deserialize_provider_profile(&value)?;
+            if profile.is_expired(now) {
+                continue;
+            }
             if profile.max_capacity_bytes < min_capacity {
                 continue;
             }
@@ -428,6 +531,7 @@ impl StorageMarket {
             a.price_per_block
                 .cmp(&b.price_per_block)
                 .then_with(|| b.last_seen_block.cmp(&a.last_seen_block))
+                .then_with(|| b.version.cmp(&a.version))
                 .then_with(|| a.provider_id.cmp(&b.provider_id))
         });
         if candidates.len() > limit {
@@ -450,8 +554,13 @@ impl StorageMarket {
             profile.proof_failures = profile.proof_failures.saturating_add(1);
         }
         profile.last_seen_block = Some(block);
+        profile.version = profile.version.saturating_add(1);
+        profile.expires_at = Some(Self::default_expiry());
         let bytes = serialize_provider_profile(&profile)?;
         let _ = self.providers.insert(key, bytes)?;
+        if let Some(directory) = provider_directory() {
+            directory.publish(profile);
+        }
         Ok(())
     }
 }
@@ -533,6 +642,8 @@ mod tests {
         profile.region = Some("europe".into());
         profile.latency_ms = Some(42);
         profile.tags = vec!["gpu".into(), "ssd".into()];
+        profile.version = 3;
+        profile.expires_at = Some(9_999);
         profile.proof_successes = 9;
         profile.proof_failures = 1;
         profile.last_seen_block = Some(1337);

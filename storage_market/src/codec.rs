@@ -28,6 +28,8 @@ const REGION_KEY: &str = "region";
 const MAX_CAPACITY_KEY: &str = "max_capacity_bytes";
 const PRICE_KEY: &str = "price_per_block";
 const DEPOSIT_KEY: &str = "escrow_deposit";
+const VERSION_KEY: &str = "version";
+const EXPIRES_KEY: &str = "expires_at";
 const LATENCY_KEY: &str = "latency_ms";
 const TAGS_KEY: &str = "tags";
 const SUCC_KEY: &str = "proof_successes";
@@ -56,6 +58,11 @@ pub fn serialize_provider_profile(
     );
     map.insert(PRICE_KEY.to_string(), Value::from(profile.price_per_block));
     map.insert(DEPOSIT_KEY.to_string(), Value::from(profile.escrow_deposit));
+    map.insert(VERSION_KEY.to_string(), Value::from(profile.version));
+    map.insert(
+        EXPIRES_KEY.to_string(),
+        profile.expires_at.map(Value::from).unwrap_or(Value::Null),
+    );
     map.insert(
         LATENCY_KEY.to_string(),
         profile.latency_ms.map(Value::from).unwrap_or(Value::Null),
@@ -91,6 +98,8 @@ pub fn deserialize_provider_profile(bytes: &[u8]) -> Result<ProviderProfile, Sto
     let max_capacity_bytes = take_u64(&mut map, MAX_CAPACITY_KEY, "provider profile")?;
     let price_per_block = take_u64(&mut map, PRICE_KEY, "provider profile")?;
     let escrow_deposit = take_u64(&mut map, DEPOSIT_KEY, "provider profile")?;
+    let version = take_u64_default(&mut map, VERSION_KEY, "provider profile", 0)?;
+    let expires_at = take_optional_u64(&mut map, EXPIRES_KEY, "provider profile")?;
     let latency = take_optional_u64(&mut map, LATENCY_KEY, "provider profile")?
         .map(|value| value.min(u32::MAX as u64) as u32);
     let tags = take_string_array(&mut map, TAGS_KEY, "provider profile")?;
@@ -103,6 +112,8 @@ pub fn deserialize_provider_profile(bytes: &[u8]) -> Result<ProviderProfile, Sto
         max_capacity_bytes,
         price_per_block,
         escrow_deposit,
+        version,
+        expires_at,
         latency_ms: latency,
         tags,
         proof_successes,

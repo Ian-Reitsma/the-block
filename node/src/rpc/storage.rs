@@ -10,6 +10,7 @@ use storage_market::{
 };
 
 use crate::drive::DriveStore;
+use crate::storage::provider_directory;
 use crate::storage::marketplace::SearchOptions;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::repair_log_entry_to_value;
@@ -57,7 +58,9 @@ static MARKET: Lazy<StorageMarketHandle> = Lazy::new(|| {
     let path = market_path();
     let market = StorageMarket::open(&path)
         .unwrap_or_else(|err| panic!("failed to open storage market at {path}: {err}"));
-    Arc::new(mutex(market))
+    let handle = Arc::new(mutex(market));
+    provider_directory::install_directory(handle.clone());
+    handle
 });
 
 fn market_error_value(err: StorageMarketError) -> Value {
@@ -187,6 +190,18 @@ fn provider_profile_value(profile: &ProviderProfile) -> Value {
     map.insert(
         "escrow_deposit".into(),
         Value::Number(Number::from(profile.escrow_deposit)),
+    );
+    map.insert(
+        "version".into(),
+        Value::Number(Number::from(profile.version)),
+    );
+    map.insert(
+        "expires_at".into(),
+        profile
+            .expires_at
+            .map(Number::from)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
     );
     map.insert(
         "latency_ms".into(),

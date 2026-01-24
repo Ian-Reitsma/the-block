@@ -4,6 +4,7 @@ pub mod manifest_binary;
 pub mod marketplace;
 pub mod migrate;
 pub mod pipeline;
+pub mod provider_directory;
 pub mod placement;
 pub mod repair;
 pub mod settings;

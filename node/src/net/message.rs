@@ -5,6 +5,7 @@ use crate::block_binary;
 use crate::net::peer::ReputationUpdate;
 use crate::p2p::handshake::Hello;
 use crate::p2p::wire_binary;
+use crate::storage::provider_directory::ProviderAdvertisement;
 use crate::transaction::binary::{self as tx_binary, EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{BlobTx, Block, SignedTransaction};
@@ -77,6 +78,8 @@ pub enum Payload {
     BlobChunk(BlobChunk),
     /// Propagate provider reputation scores.
     Reputation(Vec<ReputationUpdate>),
+    /// Advertise storage provider capabilities across the overlay.
+    StorageProviderAdvertisement(ProviderAdvertisement),
 }
 
 /// Individual erasure-coded shard associated with a blob root.
@@ -228,10 +231,6 @@ fn write_payload(writer: &mut BinaryWriter, payload: &Payload) -> EncodeResult<(
                 block_binary::write_block(writer, block)
             })?;
         }
-        Payload::ChainRequest(request) => {
-            writer.write_u32(8);
-            write_chain_request(writer, request)?;
-        }
         Payload::BlobChunk(chunk) => {
             writer.write_u32(6);
             write_blob_chunk(writer, chunk)?;
@@ -241,6 +240,14 @@ fn write_payload(writer: &mut BinaryWriter, payload: &Payload) -> EncodeResult<(
             write_vec(writer, updates, "reputation", |writer, update| {
                 write_reputation_update(writer, update)
             })?;
+        }
+        Payload::ChainRequest(request) => {
+            writer.write_u32(8);
+            write_chain_request(writer, request)?;
+        }
+        Payload::StorageProviderAdvertisement(advert) => {
+            writer.write_u32(9);
+            write_provider_advertisement(writer, advert)?;
         }
     }
     Ok(())
@@ -267,6 +274,9 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
             read_reputation_update,
         )?)),
         8 => Ok(Payload::ChainRequest(read_chain_request(reader)?)),
+        9 => Ok(Payload::StorageProviderAdvertisement(
+            read_provider_advertisement(reader)?,
+        )),
         other => Err(DecodeError::InvalidEnumDiscriminant {
             ty: "Payload",
             value: other,
@@ -369,6 +379,99 @@ fn read_reputation_update(
         provider_id: provider_id.ok_or(DecodeError::MissingField("provider_id"))?,
         reputation_score: reputation_score.ok_or(DecodeError::MissingField("reputation_score"))?,
         epoch: epoch.ok_or(DecodeError::MissingField("epoch"))?,
+    })
+}
+
+fn write_provider_advertisement(
+    writer: &mut BinaryWriter,
+    advert: &ProviderAdvertisement,
+) -> EncodeResult<()> {
+    let mut result: EncodeResult<()> = Ok(());
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_with("profile", |field_writer| {
+            if result.is_ok() {
+                match storage_market::codec::serialize_provider_profile(&advert.profile) {
+                    Ok(bytes) => {
+                        if let Err(err) = write_bytes(
+                            field_writer,
+                            &Bytes::from(bytes),
+                            "storage_provider_profile",
+                        ) {
+                            result = Err(err);
+                        }
+                    }
+                    Err(_) => result = Err(EncodeError::LengthOverflow("storage_provider_profile")),
+                }
+            }
+        });
+        struct_writer.field_u64("version", advert.version);
+        struct_writer.field_u64("ttl_secs", advert.ttl_secs);
+        struct_writer.field_u64("expires_at", advert.expires_at);
+        struct_writer.field_with("publisher", |field_writer| {
+            if result.is_ok() {
+                let bytes = Bytes::from(advert.publisher.to_vec());
+                if let Err(err) = write_bytes(field_writer, &bytes, "publisher") {
+                    result = Err(err);
+                }
+            }
+        });
+        struct_writer.field_with("signature", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) =
+                    write_bytes(field_writer, &Bytes::from(advert.signature.clone()), "signature")
+                {
+                    result = Err(err);
+                }
+            }
+        });
+    });
+    result
+}
+
+fn read_provider_advertisement(
+    reader: &mut BinaryReader<'_>,
+) -> binary_struct::Result<ProviderAdvertisement> {
+    let mut profile = None;
+    let mut version = None;
+    let mut ttl_secs = None;
+    let mut expires_at = None;
+    let mut publisher = None;
+    let mut signature = None;
+
+    decode_struct(reader, Some(6), |key, reader| match key {
+        "profile" => assign_once(&mut profile, read_bytes(reader)?, "profile"),
+        "version" => assign_once(&mut version, reader.read_u64()?, "version"),
+        "ttl_secs" => assign_once(&mut ttl_secs, reader.read_u64()?, "ttl_secs"),
+        "expires_at" => assign_once(&mut expires_at, reader.read_u64()?, "expires_at"),
+        "publisher" => assign_once(&mut publisher, read_bytes(reader)?, "publisher"),
+        "signature" => assign_once(&mut signature, read_bytes(reader)?, "signature"),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+
+    let profile_bytes = profile.ok_or(DecodeError::MissingField("profile"))?;
+    let profile = storage_market::codec::deserialize_provider_profile(&profile_bytes)
+        .map_err(|err| DecodeError::InvalidFieldValue {
+            field: "profile",
+            reason: err.to_string(),
+        })?;
+    let publisher_bytes = publisher.ok_or(DecodeError::MissingField("publisher"))?;
+    let publisher_arr: [u8; 32] = publisher_bytes
+        .as_ref()
+        .try_into()
+        .map_err(|_| DecodeError::InvalidFieldValue {
+            field: "publisher",
+            reason: "expected 32 bytes".into(),
+        })?;
+
+    Ok(ProviderAdvertisement {
+        profile,
+        version: version.ok_or(DecodeError::MissingField("version"))?,
+        ttl_secs: ttl_secs.ok_or(DecodeError::MissingField("ttl_secs"))?,
+        expires_at: expires_at.ok_or(DecodeError::MissingField("expires_at"))?,
+        publisher: publisher_arr,
+        signature: signature
+            .ok_or(DecodeError::MissingField("signature"))?
+            .into_vec(),
     })
 }
 

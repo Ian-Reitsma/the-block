@@ -4333,6 +4333,72 @@ pub static STORAGE_DISCOVERY_RESULTS_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
     c
 });
 
+pub static STORAGE_PROVIDER_PUBLISH_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "storage_provider_publish_total",
+            "Networked storage provider advertisements grouped by outcome",
+        ),
+        &["result"],
+    )
+    .unwrap_or_else(|e| panic!("counter storage_provider_publish_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_provider_publish_total: {e}"));
+    c
+});
+
+pub static STORAGE_PROVIDER_ADVERT_SEEN_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_provider_advert_seen_total",
+        "Total inbound storage provider advertisements applied",
+    )
+    .unwrap_or_else(|e| panic!("counter storage_provider_advert_seen_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_provider_advert_seen_total: {e}"));
+    c.handle()
+});
+
+pub static STORAGE_PROVIDER_STALE_REJECT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "storage_provider_stale_reject_total",
+        "Total rejected storage provider advertisements due to staleness or expiry",
+    )
+    .unwrap_or_else(|e| panic!("counter storage_provider_stale_reject_total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_provider_stale_reject_total: {e}"));
+    c.handle()
+});
+
+pub static STORAGE_PROVIDER_DISCOVERY_LATENCY_SECONDS: Lazy<Histogram> = Lazy::new(|| {
+    let h = Histogram::with_opts(
+        HistogramOpts::new(
+            "storage_provider_discovery_latency_seconds",
+            "Latency for network-backed storage provider discovery",
+        )
+        .buckets(exponential_buckets(0.001, 2.0, 12).unwrap()),
+    )
+    .unwrap_or_else(|e| panic!("histogram storage_provider_discovery_latency_seconds: {e}"));
+    REGISTRY
+        .register(Box::new(h.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_provider_discovery_latency_seconds: {e}"));
+    h
+});
+
+pub static STORAGE_PROVIDER_CANDIDATE_GAUGE: Lazy<IntGauge> = Lazy::new(|| {
+    let g = IntGauge::new(
+        "storage_provider_candidate_total",
+        "Gauge tracking provider candidates returned from network discovery",
+    )
+    .unwrap_or_else(|e| panic!("gauge storage_provider_candidate_total: {e}"));
+    REGISTRY
+        .register(Box::new(g.clone()))
+        .unwrap_or_else(|e| panic!("registry storage_provider_candidate_total: {e}"));
+    g
+});
+
 pub static RETRIEVAL_FAILURE_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
     let c = IntCounter::new(
         "retrieval_failure_total",

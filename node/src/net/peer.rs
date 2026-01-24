@@ -11,6 +11,7 @@ use crate::net::Bytes;
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::{Hello, Transport};
+use crate::storage::provider_directory;
 use crate::simple_db::{names, SimpleDb};
 use crate::{Block, Blockchain};
 use concurrency::{Lazy, MutexExt, OrderedMap};
@@ -1428,6 +1429,9 @@ impl PeerSet {
                         }
                     }
                 }
+            }
+            Payload::StorageProviderAdvertisement(advert) => {
+                provider_directory::handle_advertisement(advert);
             }
         }
     }
