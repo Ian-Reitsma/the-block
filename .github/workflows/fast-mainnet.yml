@@ -124,11 +124,11 @@ jobs:
         run: |
           echo "=== Running fuzzing on critical paths ==="
           if [ -f scripts/fuzz_coverage.sh ]; then
-            bash scripts/fuzz_coverage.sh --target consensus,treasury,receipts,energy --duration 60 2>&1 | tail -50
+            bash scripts/fuzz_coverage.sh --targets consensus,treasury,receipts,energy --target gateway_doh --duration 60 2>&1 | tail -50
           else
             echo "Fuzz script not found, skipping (optional)"
           fi
-        timeout-minutes: 5
+        timeout-minutes: 12
         continue-on-error: true
 
       - name: Report Results
@@ -144,8 +144,8 @@ jobs:
         with:
           name: coverage-reports-${{ github.run_id }}
           path: |
-            target/coverage/
-            .profraw
+            fuzz/coverage/
+            fuzz/coverage/profraw/
           retention-days: 30
 
 check-compilation:

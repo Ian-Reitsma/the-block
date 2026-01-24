@@ -10,7 +10,7 @@ sys = { path = "../crates/sys" }
 foundation_serialization = { path = "../crates/foundation_serialization" }
 foundation_rpc = { path = "../crates/foundation_rpc" }
 
-the_block = { path = "../node", features = ["fuzzy"] }
+the_block = { path = "../node", features = ["fuzzy", "gateway"] }
 crypto_suite = { path = "../crates/crypto_suite" }
 
 [[bin]]
@@ -57,6 +57,26 @@ path = "fuzz_targets/quic_frame.rs"
 test = false
 
 [[bin]]
-name = "energy_receipt"
-path = "fuzz_targets/energy_receipt.rs"
+name = "energy"
+path = "fuzz_targets/energy.rs"
+test = false
+
+[[bin]]
+name = "consensus"
+path = "fuzz_targets/consensus.rs"
+test = false
+
+[[bin]]
+name = "receipts"
+path = "fuzz_targets/receipts.rs"
+test = false
+
+[[bin]]
+name = "treasury"
+path = "fuzz_targets/treasury.rs"
+test = false
+
+[[bin]]
+name = "gateway_doh"
+path = "fuzz_targets/gateway_doh.rs"
 test = false

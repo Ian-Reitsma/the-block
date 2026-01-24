@@ -184,7 +184,7 @@ impl ResolverConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum RecordType {
+pub enum RecordType {
     A,
     Aaaa,
     Txt,
@@ -192,7 +192,7 @@ enum RecordType {
 }
 
 impl RecordType {
-    fn as_u16(self) -> u16 {
+    pub fn as_u16(self) -> u16 {
         match self {
             RecordType::A => 1,
             RecordType::Aaaa => 28,
@@ -231,9 +231,9 @@ impl RecordType {
 }
 
 #[derive(Debug)]
-struct DnsQuestion {
-    name: String,
-    record_type: RecordType,
+pub struct DnsQuestion {
+    pub name: String,
+    pub record_type: RecordType,
 }
 
 #[derive(Debug)]
@@ -387,7 +387,7 @@ fn parse_dns_request(req: &Request<GatewayState>) -> Result<DnsQuestion, Respons
         .with_body(b"name or dns parameter required".to_vec()))
 }
 
-fn parse_dns_packet(bytes: &[u8]) -> Option<DnsQuestion> {
+pub fn parse_dns_packet(bytes: &[u8]) -> Option<DnsQuestion> {
     if bytes.len() < 12 {
         return None;
     }
