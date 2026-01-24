@@ -49,14 +49,21 @@ This document consolidates the consensus, networking, storage, marketplace, gove
 | 17–23 | `ad_viewer`, `ad_host`, `ad_hardware`, `ad_verifier`, `ad_liquidity`, `ad_miner`, `ad_total_usd_micros` | Ad settlement buckets + USD micros counter. |
 | 24–25 | `ad_settlement_count`, `ad_oracle_price_usd_micros` | Ad settlement counts + oracle price. |
 | 26–27 | `compute_sub`, `proof_rebate` | Compute subsidy + proof rebate (BLOCK). |
-| 28–30 | `read_root`, `fee_checksum`, `state_root` | Merkle roots; `fee_checksum` protects the per‑block fee accumulator. |
-| 31–32 | `l2_roots`, `l2_sizes` | Variable‑length arrays; order is encoded as bytes then sizes. |
+| 28–30 | `read_root`, `fee_checksum`, `state_root` | Merkle roots; `fee_checksum` protects the per-block fee accumulator. |
+| 31–?? | `root_bundle.slot`, `root_bundle.hash`, `root_bundle.entries` | Canonical micro-shard root bundle (see below). Each bundle encodes the deterministic slot/tick, the BLAKE3 hash of the packed entries, and the variable-length array of `MicroShardRootEntry` records that follow. |
 | 33–36 | `vdf_commit`, `vdf_output`, `len(vdf_proof)`, `vdf_proof` | PoH/VDF proof material. |
 | 37–42 | `receipt_header.shard_count`, `receipt_header.shard_roots`, `receipt_header.blob_commitments`, `receipt_header.available_until`, `receipt_header.aggregate_scheme`, `receipt_header.aggregate_sig` | Receipt manifest header; empty/zeroed when legacy path is active. |
-| 43–44 | `len(receipts_serialized)`, `receipts_serialized` | Receipts are consensus‑critical and hashed before transactions. |
+| 43–44 | `len(receipts_serialized)`, `receipts_serialized` | Receipts are consensus-critical and hashed before transactions. |
 | 45 | `tx_ids` | Final section: transaction IDs. |
 
 Never reorder or remove fields; instead add new suffix fields and bump the hash layout tests. If you add or rename a field in `BlockEncoder`, update this table and regenerate schema docs under `docs/spec/`.
+
+#### 1.4.1 Micro-shard root bundle
+
+- **Bundle structure:** `BlockEncoder` now serializes a `root_bundle` immediately after `state_root`. The bundle starts with a 64‑bit `slot` (the tick index owned by the `RootAssembler`), followed by the 32‑byte `bundle_hash` (BLAKE3 over the slot + packed entries), then the entry count, and finally the entries themselves. Each `MicroShardRootEntry` encodes `root_hash:[u8;32]`, `shard_id:u32`, `size_class:u8` (`1=L2`, `2=L3`), `lane:u8`, `available_until:u64`, and `payload_bytes:u32`.
+- **Deterministic scheduling:** The new `RootAssembler` (see `node/src/root_assembler.rs`) maintains deterministic queues per size class, releases an `L2` bundle every 4 s and an `L3` bundle every 16 s, and persists the queue state to `simple_db::names::ROOT_MANIFEST` so replays see the same bundles. When a queue saturates, the oldest entries are evicted deterministically and the telemetry gauge `root_queue_evictions_total` increments so operators can tune `root_bundle_depth`.
+- **Validation contract:** During block import, `node/src/blockchain/validation.rs` recomputes the `RootBundle` for the expected `slot` and rejects blocks whose `bundle_hash` does not match the recomputed bundle or whose entries violate the paced schedule (`BlockValidationError::RootScheduleMismatch`). The replay harness (`tests/root_bundle_replay.rs`) replays long chains so `RootAssembler` deterministically produces the same bundles every tick.
+- **Availability and manifest:** Each entry’s `available_until` mirrors the blob DA window so the `MicroShardAvailabilityTracker` can assert data availability before a bundle is emitted. Bundles themselves are appended to a shared manifest that `macro-block` checkpoints summarize (one per size class). Light clients consume the compact `RootBundleSummary` (slot, hash, entry count, available_until) via `microshard.roots.last` without replaying the full blob payloads.
 
 ### 1.5 Schema migrations (v7–v10)
 

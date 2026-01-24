@@ -37,6 +37,7 @@ fn dummy_block() -> Block {
         read_root: [0; 32],
         fee_checksum: String::new(),
         state_root: String::new(),
+        root_bundles: Vec::new(),
         base_fee: 0,
         l2_roots: Vec::new(),
         l2_sizes: Vec::new(),

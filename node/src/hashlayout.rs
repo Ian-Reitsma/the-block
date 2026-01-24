@@ -1,4 +1,5 @@
 use crypto_suite::hashing::blake3::Hasher;
+use crate::root_assembler::{RootBundle, RootSizeClass};
 
 pub trait HashEncoder {
     fn encode(&self, h: &mut Hasher);
@@ -35,6 +36,7 @@ pub struct BlockEncoder<'a> {
     pub read_root: [u8; 32],
     pub fee_checksum: &'a str,
     pub state_root: &'a str,
+    pub root_bundles: &'a [RootBundle],
     pub tx_ids: &'a [&'a [u8]],
     pub l2_roots: &'a [[u8; 32]],
     pub l2_sizes: &'a [u32],
@@ -86,6 +88,22 @@ impl<'a> HashEncoder for BlockEncoder<'a> {
         h.update(&self.read_root);
         h.update(self.fee_checksum.as_bytes());
         h.update(self.state_root.as_bytes());
+        if !self.root_bundles.is_empty() {
+            h.update(&(self.root_bundles.len() as u32).to_le_bytes());
+            for bundle in self.root_bundles {
+                h.update(&bundle.slot.to_le_bytes());
+                h.update(&[bundle.size_class.as_byte()]);
+                h.update(&(bundle.entries.len() as u32).to_le_bytes());
+                for entry in &bundle.entries {
+                    h.update(&entry.root_hash);
+                    h.update(&(entry.shard_id as u32).to_le_bytes());
+                    h.update(&[entry.lane as u8]);
+                    h.update(&entry.available_until.to_le_bytes());
+                    h.update(&entry.payload_bytes.to_le_bytes());
+                }
+                h.update(&bundle.bundle_hash);
+            }
+        }
         for r in self.l2_roots {
             h.update(r);
         }

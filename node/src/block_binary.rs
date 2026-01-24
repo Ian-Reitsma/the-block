@@ -5,13 +5,14 @@ use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 
 use crate::receipts::BlockTorchReceiptMetadata;
 use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
-use crate::transaction::binary as tx_binary;
+use crate::transaction::{binary as tx_binary, FeeLane};
 use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{
     AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, ComputeSlashReceipt, EnergyReceipt,
     EnergySlashReceipt, Receipt, SignedTransaction, StorageReceipt, TokenAmount,
 };
+use crate::root_assembler::{RootBundle, RootSizeClass, MicroShardRootEntry};
 
 /// Encode a [`Block`] into the canonical binary layout.
 pub fn encode_block(block: &Block) -> EncodeResult<Vec<u8>> {
@@ -80,6 +81,13 @@ pub(crate) fn write_block(writer: &mut Writer, block: &Block) -> EncodeResult<()
         });
         struct_writer.field_string("fee_checksum", &block.fee_checksum);
         struct_writer.field_string("state_root", &block.state_root);
+        struct_writer.field_with("root_bundles", |field_writer| {
+            if result.is_ok() {
+                if let Err(err) = write_root_bundles(field_writer, &block.root_bundles) {
+                    result = Err(err);
+                }
+            }
+        });
         struct_writer.field_u64("base_fee", block.base_fee);
         struct_writer.field_with("l2_roots", |field_writer| {
             if result.is_ok() {
@@ -181,6 +189,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
     let mut read_root = None;
     let mut fee_checksum = None;
     let mut state_root = None;
+    let mut root_bundles = None;
     let mut base_fee = None;
     let mut l2_roots = None;
     let mut l2_sizes = None;
@@ -269,6 +278,11 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         "read_root" => assign_once(&mut read_root, read_fixed(reader)?, "read_root"),
         "fee_checksum" => assign_once(&mut fee_checksum, reader.read_string()?, "fee_checksum"),
         "state_root" => assign_once(&mut state_root, reader.read_string()?, "state_root"),
+        "root_bundles" => assign_once(
+            &mut root_bundles,
+            read_root_bundles(reader)?,
+            "root_bundles",
+        ),
         "base_fee" => assign_once(&mut base_fee, reader.read_u64()?, "base_fee"),
         "l2_roots" => assign_once(&mut l2_roots, read_root_vec(reader)?, "l2_roots"),
         "l2_sizes" => assign_once(&mut l2_sizes, read_u32_vec(reader)?, "l2_sizes"),
@@ -325,6 +339,7 @@ pub(crate) fn read_block(reader: &mut Reader<'_>) -> binary_struct::Result<Block
         read_root: read_root.unwrap_or([0; 32]),
         fee_checksum: fee_checksum.unwrap_or_default(),
         state_root: state_root.unwrap_or_default(),
+        root_bundles: root_bundles.unwrap_or_default(),
         base_fee: base_fee.unwrap_or_default(),
         l2_roots: l2_roots.unwrap_or_default(),
         l2_sizes: l2_sizes.unwrap_or_default(),
@@ -998,6 +1013,69 @@ fn read_u32_vec(reader: &mut Reader<'_>) -> Result<Vec<u32>, DecodeError> {
     })
 }
 
+fn write_root_bundles(writer: &mut Writer, bundles: &[RootBundle]) -> EncodeResult<()> {
+    write_vec(writer, bundles, "root_bundles", |writer, bundle| {
+        writer.write_u64(bundle.slot);
+        writer.write_u64(bundle.size_class.as_byte() as u64);
+        write_fixed(writer, &bundle.bundle_hash);
+        write_vec(writer, &bundle.entries, "entries", |writer, entry| {
+            write_fixed(writer, &entry.root_hash);
+            writer.write_u32(entry.shard_id as u32);
+            writer.write_u8(entry.lane as u8);
+            writer.write_u64(entry.available_until);
+            writer.write_u32(entry.payload_bytes);
+            Ok(())
+        })
+    })
+}
+
+fn read_root_bundles(reader: &mut Reader<'_>) -> Result<Vec<RootBundle>, DecodeError> {
+    read_vec(reader, |reader| {
+        let slot = reader.read_u64()?;
+        let size_class = match reader.read_u64()? {
+            1 => RootSizeClass::L2,
+            2 => RootSizeClass::L3,
+            other => {
+                return Err(DecodeError::InvalidFieldValue {
+                    field: "size_class",
+                    reason: format!("unknown size class {other}"),
+                })
+            }
+        };
+        let bundle_hash = read_fixed(reader)?;
+        let entries = read_vec(reader, |reader| {
+            let root_hash = read_fixed(reader)?;
+            let shard_id_raw = reader.read_u32()?;
+            let shard_id = shard_id_raw as u8;
+            let lane = match reader.read_u8()? {
+                0 => FeeLane::Consumer,
+                1 => FeeLane::Industrial,
+                other => {
+                    return Err(DecodeError::InvalidFieldValue {
+                        field: "lane",
+                        reason: format!("unknown lane {other}"),
+                    })
+                }
+            };
+            let available_until = reader.read_u64()?;
+            let payload_bytes = reader.read_u32()?;
+            Ok(MicroShardRootEntry {
+                root_hash,
+                shard_id,
+                lane,
+                available_until,
+                payload_bytes,
+            })
+        })?;
+        Ok(RootBundle {
+            slot,
+            size_class,
+            bundle_hash,
+            entries,
+        })
+    })
+}
+
 fn write_bytes(writer: &mut Writer, value: &[u8], field: &'static str) -> EncodeResult<()> {
     let _ = u64::try_from(value.len()).map_err(|_| EncodeError::LengthOverflow(field))?;
     writer.write_bytes(value);
@@ -1176,6 +1254,7 @@ mod tests {
             read_root: [1u8; 32],
             fee_checksum: "fee".into(),
             state_root: "state".into(),
+            root_bundles: Vec::new(),
             base_fee: 7,
             l2_roots: vec![[2u8; 32], [3u8; 32]],
             l2_sizes: vec![4, 5],

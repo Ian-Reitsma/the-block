@@ -8,7 +8,7 @@ use crate::json_helpers::{
     json_rpc_request, json_string, json_u64,
 };
 use crate::parse_utils::{
-    optional_path, parse_bool, parse_u64, parse_u64_required, parse_usize_required,
+    optional_path, parse_bool, parse_u64, parse_u64_required, parse_usize, parse_usize_required,
     require_positional, take_string,
 };
 use crate::rpc::RpcClient;
@@ -32,6 +32,8 @@ pub enum LightClientCmd {
     RebateStatus { url: String },
     /// Inspect historical proof rebate claims
     RebateHistory(RebateHistoryArgs),
+    /// Inspect recent micro-shard root bundles
+    RootBundles(RootBundlesArgs),
     /// Interact with the decentralized identifier registry
     Did { action: DidCmd },
     /// Inspect or configure device-aware sync policy
@@ -120,6 +122,13 @@ pub struct RebateHistoryArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct RootBundlesArgs {
+    pub url: String,
+    pub limit: usize,
+    pub json: bool,
+}
+
 impl LightClientCmd {
     pub fn command() -> Command {
         CommandBuilder::new(
@@ -169,6 +178,26 @@ impl LightClientCmd {
             )))
             .build(),
         )
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("light-client.root-bundles"),
+                "root-bundles",
+                "Inspect recent micro-shard root bundles",
+            )
+            .arg(ArgSpec::Option(
+                OptionSpec::new("url", "url", "JSON-RPC endpoint")
+                    .default("http://localhost:26658"),
+            ))
+            .arg(ArgSpec::Option(
+                OptionSpec::new("limit", "limit", "Number of bundles").default("5"),
+            ))
+            .arg(ArgSpec::Flag(FlagSpec::new(
+                "json",
+                "json",
+                "Emit JSON instead of human-readable output",
+            )))
+            .build(),
+        )
         .subcommand(DidCmd::command())
         .subcommand(DeviceCmd::command())
         .build()
@@ -188,6 +217,14 @@ impl LightClientCmd {
             "rebate-history" => {
                 let args = RebateHistoryArgs::from_matches(sub_matches)?;
                 Ok(LightClientCmd::RebateHistory(args))
+            }
+            "root-bundles" => {
+                let url = take_string(sub_matches, "url")
+                    .unwrap_or_else(|| "http://localhost:26658".to_string());
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?
+                    .unwrap_or(5);
+                let json = sub_matches.get_flag("json");
+                Ok(LightClientCmd::RootBundles(RootBundlesArgs { url, limit, json }))
             }
             "did" => {
                 let action = DidCmd::from_matches(sub_matches)?;
@@ -508,6 +545,12 @@ pub fn handle(cmd: LightClientCmd) {
                 eprintln!("{}", err);
             }
         }
+        LightClientCmd::RootBundles(args) => {
+            let client = RpcClient::from_env();
+            if let Err(err) = query_root_bundles(&client, &args) {
+                eprintln!("{}", err);
+            }
+        }
         LightClientCmd::Did { action } => match action {
             DidCmd::Anchor(args) => {
                 if let Err(err) = run_anchor_command(args) {
@@ -593,6 +636,46 @@ fn query_rebate_history(client: &RpcClient, args: &RebateHistoryArgs) -> Result<
     }
     if let Some(next) = result.next {
         println!("Next cursor: {}", next);
+    }
+    Ok(())
+}
+
+fn query_root_bundles(client: &RpcClient, args: &RootBundlesArgs) -> Result<()> {
+    let mut params = JsonMap::new();
+    params.insert("n".to_string(), json_u64(args.limit as u64));
+
+    let payload = json_rpc_request("microshard.roots.last", Value::Object(params));
+    let response = client
+        .call(&args.url, &payload)
+        .context("root bundle RPC call failed")?;
+    let text = response
+        .text()
+        .context("failed to read root bundle response")?;
+    let value: Value = json_from_str(&text).context("failed to parse root bundle response")?;
+    let envelope: RpcEnvelope<Vec<RootBundleSummaryJson>> =
+        foundation_serialization::json::from_value(value.clone())
+            .context("invalid microshard.roots.last response")?;
+    if let Some(err) = envelope.error {
+        anyhow::bail!("{} (code {})", err.message, err.code);
+    }
+    let summaries = envelope.result.unwrap_or_default();
+    if args.json {
+        println!("{}", json_to_string_pretty(&value)?);
+        return Ok(());
+    }
+    if summaries.is_empty() {
+        println!("No micro-shard root bundles recorded.");
+    } else {
+        for summary in summaries {
+            println!(
+                "Slot {} ({}) – hash {} entries {} available_until {}",
+                summary.slot,
+                summary.size_class,
+                summary.bundle_hash,
+                summary.entry_count,
+                summary.available_until,
+            );
+        }
     }
     Ok(())
 }

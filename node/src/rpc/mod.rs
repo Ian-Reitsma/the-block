@@ -5,6 +5,7 @@ use crate::{
     gateway,
     governance::{Params, NODE_GOV_STORE},
     identity::{handle_registry::HandleRegistry, DidRegistry},
+    root_assembler::RootBundleSummary,
     kyc, launch_governor,
     localnet::{validate_proximity, AssistReceipt},
     net,
@@ -948,6 +949,19 @@ fn serialize_response<T: Serialize>(
     json::to_value(value).map_err(|_| rpc_error(-32603, "failed to serialize response"))
 }
 
+fn gather_recent_root_bundles(chain: &[crate::Block], limit: usize) -> Vec<RootBundleSummary> {
+    let mut summaries = Vec::new();
+    for block in chain.iter().rev() {
+        for bundle in block.root_bundles.iter().rev() {
+            summaries.push(RootBundleSummary::from(bundle));
+            if summaries.len() >= limit {
+                return summaries;
+            }
+        }
+    }
+    summaries
+}
+
 fn check_nonce(
     scope: impl Into<String>,
     params: &RpcParams,
@@ -1785,7 +1799,9 @@ fn dispatch(
         }
         "microshard.roots.last" => {
             let n = req.params.get("n").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
-            serialize_response(compute_market::recent_roots(n))?
+            let guard = bc.lock().unwrap_or_else(|e| e.into_inner());
+            let summaries = gather_recent_root_bundles(&guard.chain, n);
+            serialize_response(summaries)?
         }
         "mempool.stats" => {
             let lane_str = req

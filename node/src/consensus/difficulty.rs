@@ -182,6 +182,7 @@ mod tests {
                 read_root: [0u8; 32],
                 fee_checksum: String::new(),
                 state_root: String::new(),
+                root_bundles: Vec::new(),
                 base_fee: 1,
                 l2_roots: Vec::new(),
                 l2_sizes: Vec::new(),

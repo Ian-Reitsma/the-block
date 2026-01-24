@@ -1,6 +1,7 @@
 use crate::ledger_binary;
 use crate::receipts_validation::ReceiptHeader;
 use crate::util::binary_struct;
+use crate::root_assembler::RootBundleSummary;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
 use std::collections::HashMap;
@@ -21,6 +22,9 @@ pub struct MacroBlock {
     /// Optional receipt header captured at the macro-block boundary.
     #[serde(default = "foundation_serialization::defaults::default")]
     pub receipt_header: Option<ReceiptHeader>,
+    /// Root bundle summaries anchored since the last macro-block.
+    #[serde(default = "foundation_serialization::defaults::default")]
+    pub root_summaries: Vec<RootBundleSummary>,
 }
 
 impl MacroBlock {

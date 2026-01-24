@@ -21,6 +21,9 @@ use crate::consensus::observer;
 use crate::governance::{DisbursementStatus, NODE_GOV_STORE};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::MemoryComponent;
+use crate::root_assembler::{
+    MicroShardRootEntry, RootAssembler, RootBundle, RootBundleSummary, RootManifest, RootSizeClass,
+};
 use crate::transaction::{TxSignature, TxVersion};
 use ad_market::{DeliveryChannel, SettlementBreakdown};
 use concurrency::cache::LruCache;
@@ -39,6 +42,7 @@ pub mod http_client;
 pub mod ledger_binary;
 mod legacy_cbor;
 mod py;
+pub mod root_assembler;
 
 #[cfg(feature = "python-bindings")]
 pub use py::prepare_freethreaded_python;
@@ -173,8 +177,6 @@ use crate::consensus::difficulty;
 pub use blockchain::snapshot::SnapshotManager;
 pub mod service_badge;
 pub use service_badge::ServiceBadgeTracker;
-
-pub mod blob_chain;
 
 pub mod economics;
 pub use economics::{
@@ -680,6 +682,9 @@ pub struct Block {
     /// Merkle root of account state
     pub state_root: String,
     #[serde(default = "foundation_serialization::defaults::default")]
+    /// Deterministic micro-shard root bundles anchored in this block.
+    pub root_bundles: Vec<RootBundle>,
+    #[serde(default = "foundation_serialization::defaults::default")]
     /// Base fee in effect for this block.
     pub base_fee: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -748,6 +753,7 @@ impl Default for Block {
             read_root: [0u8; 32],
             fee_checksum: String::new(),
             state_root: String::new(),
+            root_bundles: Vec::new(),
             base_fee: 0,
             l2_roots: Vec::new(),
             l2_sizes: Vec::new(),
@@ -917,8 +923,13 @@ pub struct Blockchain {
     pub blob_mempool: Vec<BlobTx>,
     /// Total bytes of pending blob transactions
     pub pending_blob_bytes: u64,
-    /// Scheduler coordinating L2/L3 blob anchoring cadences
-    pub blob_scheduler: blob_chain::BlobScheduler,
+    /// Deterministic micro-shard root assembler
+    pub root_assembler: RootAssembler,
+    /// Append-only manifest tracker for anchored root bundles
+    pub root_manifest: RootManifest,
+    /// Last anchored slot observed for each size class (cached for validation).
+    pub last_root_slot_l2: Option<u64>,
+    pub last_root_slot_l3: Option<u64>,
     /// Pending read acknowledgements awaiting batching
     pub read_batcher: crate::read_receipt::ReadBatcher,
     /// Pending advertising settlements awaiting credit assignment
@@ -1142,7 +1153,10 @@ impl Default for Blockchain {
             epoch_bytes_out: 0,
             blob_mempool: Vec::new(),
             pending_blob_bytes: 0,
-            blob_scheduler: blob_chain::BlobScheduler::default(),
+            root_assembler: RootAssembler::new(),
+            root_manifest: RootManifest::default(),
+            last_root_slot_l2: None,
+            last_root_slot_l3: None,
             read_batcher: crate::read_receipt::ReadBatcher::new(),
             pending_ad_settlements: Vec::new(),
             proof_tracker: crate::light_client::proof_tracker::ProofTracker::default(),
@@ -2159,6 +2173,7 @@ impl Blockchain {
                                 &b.fee_checksum,
                                 &b.transactions,
                                 &b.state_root,
+                                &b.root_bundles,
                                 &b.l2_roots,
                                 &b.l2_sizes,
                                 b.vdf_commit,
@@ -2316,6 +2331,7 @@ impl Blockchain {
                                     &b.fee_checksum,
                                     &b.transactions,
                                     &b.state_root,
+                                    &b.root_bundles,
                                     &b.l2_roots,
                                     &b.l2_sizes,
                                     b.vdf_commit,
@@ -2489,6 +2505,7 @@ impl Blockchain {
                             &b.fee_checksum,
                             &b.transactions,
                             &b.state_root,
+                            &b.root_bundles,
                             &b.l2_roots,
                             &b.l2_sizes,
                             b.vdf_commit,
@@ -3035,6 +3052,7 @@ impl Blockchain {
             telemetry::ORPHAN_SWEEP_TOTAL.inc_by(missing_drop_total);
             telemetry::STARTUP_TTL_DROP_TOTAL.inc_by(ttl_drop_total);
         }
+        bc.recompute_root_slots();
         Ok(bc)
     }
 
@@ -3186,6 +3204,7 @@ impl Blockchain {
             ..Block::default()
         };
         self.chain.push(g);
+        self.update_root_slots_for_block(&self.chain.last().unwrap());
         self.recent_timestamps.push_back(0);
         self.block_height = 1;
         self.persist_chain()
@@ -4335,7 +4354,29 @@ impl Blockchain {
             return Err(py_value_err("blob mempool full"));
         }
         self.pending_blob_bytes += tx.blob_size;
-        self.blob_scheduler.push(tx.blob_root, tx.fractal_lvl > 1);
+        let shard = address::shard_id(&tx.owner);
+        let lane = FeeLane::Consumer;
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_secs();
+        let available_until = tx
+            .expiry
+            .unwrap_or(now_secs.saturating_add(self.receipt_blob_da_window_secs));
+        let payload_bytes = u32::try_from(tx.blob_size).unwrap_or(u32::MAX);
+        let entry = MicroShardRootEntry {
+            root_hash: tx.blob_root,
+            shard_id: shard,
+            lane,
+            available_until,
+            payload_bytes,
+        };
+        let size_class = if tx.fractal_lvl > 1 {
+            RootSizeClass::L3
+        } else {
+            RootSizeClass::L2
+        };
+        self.root_assembler.enqueue(entry, size_class);
         self.blob_mempool.push(tx);
         Ok(())
     }
@@ -5173,15 +5214,17 @@ impl Blockchain {
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
-        let ready_roots = {
-            let mut r = self.blob_scheduler.pop_l2_ready();
-            r.extend(self.blob_scheduler.pop_l3_ready());
-            r
-        };
+        let ready_bundles = self.root_assembler.ready_bundles(timestamp_millis);
+        let mut ready_root_hashes: HashSet<[u8; 32]> = HashSet::new();
+        for bundle in &ready_bundles {
+            for entry in &bundle.entries {
+                ready_root_hashes.insert(entry.root_hash);
+            }
+        }
         let mut included_roots = Vec::new();
         let mut included_sizes = Vec::new();
         self.blob_mempool.retain(|b| {
-            if ready_roots.contains(&b.blob_root) {
+            if ready_root_hashes.contains(&b.blob_root) {
                 included_roots.push(b.blob_root);
                 included_sizes.push(b.blob_size as u32);
                 false
@@ -5226,6 +5269,7 @@ impl Blockchain {
             read_root: batch.root,
             fee_checksum: fee_checksum.clone(),
             state_root: root.clone(),
+            root_bundles: ready_bundles.clone(),
             base_fee: block_base_fee,
             l2_roots: included_roots,
             l2_sizes: included_sizes,
@@ -5296,6 +5340,7 @@ impl Blockchain {
                 &fee_checksum,
                 &txs,
                 &root,
+                &block.root_bundles,
                 &block.l2_roots,
                 &block.l2_sizes,
                 block.vdf_commit,
@@ -5310,6 +5355,10 @@ impl Blockchain {
                 block.nonce = nonce;
                 block.hash = hash.clone();
                 self.chain.push(block.clone());
+                for bundle in &block.root_bundles {
+                    self.root_manifest.record(&mut self.db, bundle);
+                }
+                self.update_root_slots_for_block(&block);
 
                 // Update dynamic pricing engine with new block data
                 let mut consumer_count = 0u64;
@@ -5733,6 +5782,7 @@ impl Blockchain {
                         total_reward: self.macro_acc,
                         queue_root: self.inter_shard.root(),
                         receipt_header: block.receipt_header.clone(),
+                        root_summaries: self.root_manifest.drain_recent(),
                     };
                     let _ = self
                         .db
@@ -5809,6 +5859,8 @@ impl Blockchain {
             return Ok(false);
         }
 
+        self.verify_root_bundles(block)?;
+
         let calc = calculate_hash(
             block.index,
             &block.previous_hash,
@@ -5840,6 +5892,7 @@ impl Blockchain {
             &block.fee_checksum,
             &block.transactions,
             &block.state_root,
+            &block.root_bundles,
             &block.l2_roots,
             &block.l2_sizes,
             block.vdf_commit,
@@ -6162,6 +6215,8 @@ impl Blockchain {
         self.economics_baseline_tx_volume = replayed_econ.baseline_tx_volume;
         self.economics_baseline_miners = replayed_econ.baseline_miners;
 
+        self.recompute_root_slots();
+
         let diff_path = std::path::Path::new(&self.path).join("diff_history");
         for block in &self.chain {
             state::append_difficulty(&diff_path, block.index, block.difficulty);
@@ -6314,6 +6369,7 @@ impl Blockchain {
             {
                 return Err("coinbase_mismatch");
             }
+            Self::verify_root_bundles(b)?;
             let calc = calculate_hash(
                 b.index,
                 &b.previous_hash,
@@ -6345,6 +6401,7 @@ impl Blockchain {
                 &b.fee_checksum,
                 &b.transactions,
                 &b.state_root,
+                &b.root_bundles,
                 &b.l2_roots,
                 &b.l2_sizes,
                 b.vdf_commit,
@@ -7068,6 +7125,58 @@ mod market_metric_tests {
     }
 }
 
+impl Blockchain {
+    fn slot_for_timestamp(timestamp: u64, class: RootSizeClass) -> u64 {
+        timestamp / class.cadence_millis()
+    }
+
+    fn verify_root_bundles(block: &Block) -> PyResult<()> {
+        for bundle in &block.root_bundles {
+            if bundle.entries.is_empty() {
+                return Err(py_value_err("root bundle contains no entries"));
+            }
+            let computed = RootBundle::compute_hash(bundle.slot, bundle.size_class, &bundle.entries);
+            if computed != bundle.bundle_hash {
+                return Err(py_value_err("root bundle hash mismatch"));
+            }
+            let expected_slot = Self::slot_for_timestamp(block.timestamp_millis, bundle.size_class);
+            if bundle.slot != expected_slot {
+                return Err(py_value_err("root bundle slot mismatch"));
+            }
+        }
+        Ok(())
+    }
+
+    fn update_root_slots_for_block(&mut self, block: &Block) {
+        for bundle in &block.root_bundles {
+            match bundle.size_class {
+                RootSizeClass::L2 => {
+                    self.last_root_slot_l2 = Some(
+                        self.last_root_slot_l2
+                            .map(|prev| prev.max(bundle.slot))
+                            .unwrap_or(bundle.slot),
+                    );
+                }
+                RootSizeClass::L3 => {
+                    self.last_root_slot_l3 = Some(
+                        self.last_root_slot_l3
+                            .map(|prev| prev.max(bundle.slot))
+                            .unwrap_or(bundle.slot),
+                    );
+                }
+            }
+        }
+    }
+
+    fn recompute_root_slots(&mut self) {
+        self.last_root_slot_l2 = None;
+        self.last_root_slot_l3 = None;
+        for block in &self.chain {
+            self.update_root_slots_for_block(block);
+        }
+    }
+}
+
 /// Deterministic block hashing as per `docs/detailed_updates.md`.
 /// Field order is fixed; all integers are little-endian.
 ///
@@ -7104,6 +7213,7 @@ fn calculate_hash_with_cached_receipts(
     fee_checksum: &str,
     txs: &[SignedTransaction],
     state_root: &str,
+    root_bundles: &[RootBundle],
     l2_roots: &[[u8; 32]],
     l2_sizes: &[u32],
     vdf_commit: [u8; 32],
@@ -7157,6 +7267,7 @@ fn calculate_hash_with_cached_receipts(
         read_root,
         fee_checksum,
         state_root,
+        root_bundles,
         tx_ids: &id_refs,
         l2_roots,
         l2_sizes,
@@ -7203,6 +7314,7 @@ fn calculate_hash(
     fee_checksum: &str,
     txs: &[SignedTransaction],
     state_root: &str,
+    root_bundles: &[RootBundle],
     l2_roots: &[[u8; 32]],
     l2_sizes: &[u32],
     vdf_commit: [u8; 32],
@@ -7257,6 +7369,7 @@ fn calculate_hash(
         fee_checksum,
         txs,
         state_root,
+        root_bundles,
         l2_roots,
         l2_sizes,
         vdf_commit,

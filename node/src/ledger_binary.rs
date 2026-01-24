@@ -8,6 +8,7 @@ use crate::block_binary;
 use crate::blockchain::macro_block::MacroBlock;
 use crate::economics;
 use crate::localnet::AssistReceipt;
+use crate::root_assembler::{RootBundleSummary, RootSizeClass};
 use crate::transaction::binary::{self as tx_binary, EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{Account, Block, ChainDisk, MempoolEntryDisk, Params, TokenAmount, TokenBalance};
@@ -1106,7 +1107,7 @@ fn read_market_metrics(reader: &mut Reader<'_>) -> binary_struct::Result<economi
 }
 
 fn write_macro_block(writer: &mut Writer, block: &MacroBlock) -> EncodeResult<()> {
-    writer.write_u64(6);
+    writer.write_u64(7);
     writer.write_string("height");
     writer.write_u64(block.height);
     writer.write_string("shard_heights");
@@ -1119,6 +1120,8 @@ fn write_macro_block(writer: &mut Writer, block: &MacroBlock) -> EncodeResult<()
     write_fixed(writer, &block.queue_root);
     writer.write_string("receipt_header");
     block_binary::write_optional_receipt_header(writer, &block.receipt_header)?;
+    writer.write_string("root_summaries");
+    write_root_summaries(writer, &block.root_summaries)?;
     Ok(())
 }
 
@@ -1129,6 +1132,7 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
     let mut total_reward = None;
     let mut queue_root = None;
     let mut receipt_header = None;
+    let mut root_summaries = None;
 
     decode_struct(reader, None, |key, reader| match key {
         "height" => assign_once(&mut height, reader.read_u64()?, "height"),
@@ -1141,6 +1145,11 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
             block_binary::read_optional_receipt_header(reader)?,
             "receipt_header",
         ),
+        "root_summaries" => assign_once(
+            &mut root_summaries,
+            read_root_summaries(reader)?,
+            "root_summaries",
+        ),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
@@ -1151,6 +1160,45 @@ fn read_macro_block(reader: &mut Reader<'_>) -> binary_struct::Result<MacroBlock
         total_reward: total_reward.unwrap_or_default(),
         queue_root: queue_root.unwrap_or([0; 32]),
         receipt_header: receipt_header.unwrap_or_default(),
+        root_summaries: root_summaries.unwrap_or_default(),
+    })
+}
+
+fn write_root_summaries(writer: &mut Writer, summaries: &[RootBundleSummary]) -> EncodeResult<()> {
+    write_vec(writer, summaries, "root_summaries", |writer, summary| {
+        writer.write_u64(summary.slot);
+        writer.write_u64(summary.size_class.as_byte() as u64);
+        write_fixed(writer, &summary.bundle_hash);
+        writer.write_u32(summary.entry_count);
+        writer.write_u64(summary.available_until);
+        Ok(())
+    })
+}
+
+fn read_root_summaries(reader: &mut Reader<'_>) -> binary_struct::Result<Vec<RootBundleSummary>> {
+    read_vec(reader, |reader| {
+        let slot = reader.read_u64()?;
+        let size_class_raw = reader.read_u64()?;
+        let size_class = match size_class_raw {
+            1 => RootSizeClass::L2,
+            2 => RootSizeClass::L3,
+            other => {
+                return Err(DecodeError::InvalidFieldValue {
+                    field: "size_class",
+                    reason: format!("unknown value {other}"),
+                })
+            }
+        };
+        let bundle_hash = read_fixed(reader)?;
+        let entry_count = reader.read_u32()?;
+        let available_until = reader.read_u64()?;
+        Ok(RootBundleSummary {
+            slot,
+            size_class,
+            bundle_hash,
+            entry_count,
+            available_until,
+        })
     })
 }
 
@@ -1377,6 +1425,7 @@ mod tests {
             read_root: [0; 32],
             fee_checksum: String::new(),
             state_root: String::new(),
+            root_bundles: Vec::new(),
             base_fee: 21,
             l2_roots: vec![],
             l2_sizes: vec![],
