@@ -496,9 +496,14 @@ impl Groth16Bn256 {
             }
         }
 
+        let _ = std::mem::take(&mut cs.values);
+        let _ = std::mem::take(&mut cs.constraints);
+        let public_inputs = std::mem::take(&mut cs.public_inputs);
+        let aux_assignments = std::mem::take(&mut cs.aux_inputs);
+
         Ok(Proof {
-            public_inputs: cs.public_inputs,
-            aux_assignments: cs.aux_inputs,
+            public_inputs,
+            aux_assignments,
         })
     }
 
@@ -525,9 +530,14 @@ impl Groth16Bn256 {
         let assignments = cs.assignments();
         verify_constraints_parallel(&cs.constraints, &assignments)?;
 
+        let _ = std::mem::take(&mut cs.values);
+        let _ = std::mem::take(&mut cs.constraints);
+        let public_inputs = std::mem::take(&mut cs.public_inputs);
+        let aux_assignments = std::mem::take(&mut cs.aux_inputs);
+
         Ok(Proof {
-            public_inputs: cs.public_inputs,
-            aux_assignments: cs.aux_inputs,
+            public_inputs,
+            aux_assignments,
         })
     }
 

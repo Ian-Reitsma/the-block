@@ -415,6 +415,7 @@ pub struct WrapperSummary {
 pub struct BlockTorchMetadata {
     pub kernel_digest: Option<String>,
     pub benchmark_commit: Option<String>,
+    pub tensor_profile_epoch: Option<String>,
     pub proof_latency_ms: Option<f64>,
     pub aggregator_trace: Option<String>,
 }
@@ -423,6 +424,7 @@ impl BlockTorchMetadata {
     pub fn is_empty(&self) -> bool {
         self.kernel_digest.is_none()
             && self.benchmark_commit.is_none()
+            && self.tensor_profile_epoch.is_none()
             && self.proof_latency_ms.is_none()
             && self.aggregator_trace.is_none()
     }
@@ -449,6 +451,9 @@ pub fn blocktorch_metadata_snapshot() -> BlockTorchMetadata {
     }
     if guard.benchmark_commit.is_none() {
         guard.benchmark_commit = std::env::var("TB_BLOCKTORCH_BENCHMARK_COMMIT").ok();
+    }
+    if guard.tensor_profile_epoch.is_none() {
+        guard.tensor_profile_epoch = std::env::var("TB_BLOCKTORCH_TENSOR_PROFILE_EPOCH").ok();
     }
     guard.clone()
 }

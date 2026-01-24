@@ -21,6 +21,15 @@ static PRESENCE_RESERVATIONS: Lazy<Mutex<HashSet<String>>> =
 static PRESENCE_STAGES: Lazy<Mutex<std::collections::HashMap<String, u8>>> =
     Lazy::new(|| Mutex::new(std::collections::HashMap::new()));
 
+pub fn reset_presence_reservations() {
+    if let Ok(mut guard) = PRESENCE_RESERVATIONS.lock() {
+        guard.clear();
+    }
+    if let Ok(mut stages) = PRESENCE_STAGES.lock() {
+        stages.clear();
+    }
+}
+
 fn unavailable() -> Value {
     let mut map = Map::new();
     map.insert("status".into(), Value::String("unavailable".into()));

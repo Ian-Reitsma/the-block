@@ -272,6 +272,18 @@ fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
     hasher.update(&receipt.payment.to_le_bytes());
     hasher.update(&[u8::from(receipt.verified)]);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
+    if let Some(meta) = &receipt.blocktorch {
+        hasher.update(&meta.kernel_variant_digest);
+        if let Some(commit) = &meta.benchmark_commit {
+            hasher.update(commit.as_bytes());
+        }
+        if let Some(epoch) = &meta.tensor_profile_epoch {
+            hasher.update(epoch.as_bytes());
+        }
+        hasher.update(&meta.proof_latency_ms.to_le_bytes());
+    } else {
+        hasher.update(b"blocktorch:none");
+    }
 
     hasher.finalize().as_bytes().to_vec()
 }

@@ -1,12 +1,16 @@
 use std::hint::black_box;
 use std::sync::OnceLock;
 
+use crypto_suite::hashing::blake3::Hasher;
 use testkit::bench;
 
 use the_block::{
     block_binary::{decode_receipts, encode_receipts},
     receipt_crypto::{NonceTracker, ProviderRegistry},
-    receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt},
+    receipts::{
+        AdReceipt, BlockTorchReceiptMetadata, ComputeReceipt, EnergyReceipt, Receipt,
+        StorageReceipt,
+    },
     receipts_validation::validate_receipt,
 };
 
@@ -35,9 +39,21 @@ fn create_compute_receipt(id: u64) -> Receipt {
         payment: 500,
         block_height: id,
         verified: true,
+        blocktorch: Some(sample_blocktorch_metadata(id)),
         provider_signature: vec![0u8; 64],
         signature_nonce: id,
     })
+}
+
+fn sample_blocktorch_metadata(id: u64) -> BlockTorchReceiptMetadata {
+    let mut hasher = Hasher::new();
+    hasher.update(&id.to_le_bytes());
+    BlockTorchReceiptMetadata {
+        kernel_variant_digest: *hasher.finalize().as_bytes(),
+        benchmark_commit: Some(format!("bench-{}", id)),
+        tensor_profile_epoch: Some(format!("epoch-{}", id)),
+        proof_latency_ms: 21,
+    }
 }
 
 fn create_energy_receipt(id: u64) -> Receipt {

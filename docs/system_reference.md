@@ -380,6 +380,13 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
 - Confirm the formatting never drifts by running `cargo test -p contract-cli --features telemetry formatted_blocktorch_timeline`. The helper exercised by this test enforces the header plus the kernel digest, benchmark commit, proof latency, and aggregator trace lines in that exact order (latency stays formatted to two decimals). When the test fails, check the helper, the RPC payload that supplies the `blocktorch` object, and the `TB_BLOCKTORCH_*` overrides you can set to emit fallback metadata.
 - If either CLI surface stops printing the timeline, rerun the helper test, then replay `contract-cli compute stats`/`tb-cli governor status` with `TB_BLOCKTORCH_KERNEL_VARIANT_DIGEST` set to a known value and the aggregator hash recorded from `/wrappers`. This reproduces the gating path so you can trace which field became `None`, fix the telemetry taps in `node/src/telemetry.rs`, and re-run the test before merging.
 
+#### BlockTorch inference job format & receipts
+
+- `Workload::Inference` payloads now encode a BlockTorch job: the `artifact` bytes describe the compiled model/kernels, `input` is the tensor encoding the inference request, `benchmark_commit` links to the `/tmp/bench/<commit>/benchmarks.json` trace, and `tensor_profile_epoch` points to the `ORCHARD_TENSOR_PROFILE` log bucket that observed the allocations.
+- Each inference slice still publishes an expected output hash inside `Job::slices`; compute matches must reproduce that hash to complete the proof loop. The `WorkloadRunner` now mixes the artifact + input deterministically (CPU fallback today, Metal once enabled) so identical metadata yields identical outputs.
+- The settlement receipt now carries the `blocktorch` struct (`node/src/receipts.rs`) containing `kernel_variant_digest`, `benchmark_commit`, `tensor_profile_epoch`, and the averaged `proof_latency_ms`. This is the canonical on-chain proof of which artifact produced the block, the benchmark that validated the commit, the tensor-profile epoch pointer that documents allocator churn, and the SNARK latency that bounded verifier budgets. See [`docs/architecture.md#receipt-types-and-schema`](docs/architecture.md#receipt-types-and-schema) for the exact field list.
+- Receipts feed explorer/CLI timelines plus telemetry (`proof_verification_latency`, `orchard_alloc_free_delta`, `blocktorch_benchmark_commit`, `blocktorch_kernel_variant_digest`) so operators can trace every job from submission through `tensor_profile_epoch` to governor intent.
+
 ### 6.8 Energy market (providers, credits, receipts)
 
 - **Core structs** (`crates/energy-market/src/lib.rs`):

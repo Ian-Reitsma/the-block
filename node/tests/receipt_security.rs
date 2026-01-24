@@ -12,7 +12,7 @@ use crypto_suite::signatures::ed25519::SigningKey;
 use rand::rngs::StdRng;
 use std::sync::atomic::{AtomicU64, Ordering};
 use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
-use the_block::receipts::{ComputeReceipt, Receipt, StorageReceipt};
+use the_block::receipts::{BlockTorchReceiptMetadata, ComputeReceipt, Receipt, StorageReceipt};
 use the_block::receipts_validation::{
     validate_receipt, ReceiptId, ReceiptRegistry, ValidationError,
 };
@@ -53,10 +53,33 @@ fn sign_compute_receipt(receipt: &mut ComputeReceipt, sk: &SigningKey) {
     hasher.update(&receipt.payment.to_le_bytes());
     hasher.update(&[u8::from(receipt.verified)]);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
+    if let Some(meta) = &receipt.blocktorch {
+        hasher.update(&meta.kernel_variant_digest);
+        if let Some(commit) = &meta.benchmark_commit {
+            hasher.update(commit.as_bytes());
+        }
+        if let Some(epoch) = &meta.tensor_profile_epoch {
+            hasher.update(epoch.as_bytes());
+        }
+        hasher.update(&meta.proof_latency_ms.to_le_bytes());
+    } else {
+        hasher.update(b"blocktorch:none");
+    }
 
     let msg = hasher.finalize();
     let sig = sk.sign(msg.as_bytes());
     receipt.provider_signature = sig.to_bytes().to_vec();
+}
+
+fn sample_blocktorch_metadata(tag: &str) -> BlockTorchReceiptMetadata {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(tag.as_bytes());
+    BlockTorchReceiptMetadata {
+        kernel_variant_digest: *hasher.finalize().as_bytes(),
+        benchmark_commit: Some(format!("{tag}-benchmark")),
+        tensor_profile_epoch: Some(format!("{tag}-epoch")),
+        proof_latency_ms: 7,
+    }
 }
 
 #[test]
@@ -276,6 +299,7 @@ fn accept_valid_compute_receipt() {
         payment: 250,
         block_height: 100,
         verified: true,
+        blocktorch: Some(sample_blocktorch_metadata("accept_valid")),
         provider_signature: vec![],
         signature_nonce: 1,
     };

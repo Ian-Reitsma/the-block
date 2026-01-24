@@ -36,6 +36,7 @@ use the_block::serve_metrics_with_shutdown;
 use the_block::{
     ad_readiness::{AdReadinessConfig, AdReadinessHandle},
     identity::{handle_registry::HandleRegistry, DidRegistry},
+    rpc::ad_market::reset_presence_reservations,
     rpc::{fuzz_dispatch_request, fuzz_runtime_config_with_admin, RpcRuntimeConfig},
     Blockchain,
 };
@@ -185,12 +186,7 @@ fn seed_presence_bucket(
         population_estimate: Some(5_000),
         ..ImpressionContext::default()
     };
-    let key = ReservationKey {
-        manifest: [0x11; 32],
-        path_hash: [0x22; 32],
-        discriminator: [0x33; 32],
-    };
-    let _ = market.reserve_impression(key, ctx);
+    market.seed_presence_cohort(&ctx);
     bucket
 }
 
@@ -2094,6 +2090,7 @@ fn presence_listing_and_reservation_flow() {
     config.privacy_budget.max_delta = 1e-6;
     config.privacy_budget.default_delta_cost = 1e-6;
     config.privacy_budget.cool_off_impressions = 3;
+    reset_presence_reservations();
     let (_dir, harness, readiness) = build_in_memory_harness("presence_flow", config);
     let market_impl = harness.in_memory_market.as_ref().expect("in-memory market");
 

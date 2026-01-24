@@ -2,7 +2,15 @@
 #![allow(clippy::unwrap_used)]
 use runtime::join_all;
 use testkit::tb_prop_test;
-use the_block::compute_market::{Workload, WorkloadRunner};
+use the_block::compute_market::{
+    workloads::inference::BlockTorchInference, Workload, WorkloadRunner,
+};
+
+fn inference_workload(input: Vec<u8>) -> Workload {
+    let artifact = input.clone();
+    let inference = BlockTorchInference::new(artifact, input);
+    Workload::Inference(inference)
+}
 
 tb_prop_test!(parallel_runs_deterministic, |runner| {
     runner
@@ -68,7 +76,7 @@ tb_prop_test!(mixed_workloads_deterministic, |runner| {
                     if i % 2 == 0 {
                         Workload::Transcode(vec![*b])
                     } else {
-                        Workload::Inference(vec![*b])
+                        inference_workload(vec![*b])
                     }
                 })
                 .collect();

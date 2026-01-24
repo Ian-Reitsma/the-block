@@ -221,6 +221,8 @@ pub struct BlockTorchStatus {
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub benchmark_commit: Option<String>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub tensor_profile_epoch: Option<String>,
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub proof_latency_ms: Option<f64>,
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub aggregator_trace: Option<String>,
@@ -790,6 +792,7 @@ fn blocktorch_status_snapshot() -> Option<BlockTorchStatus> {
         Some(BlockTorchStatus {
             kernel_digest: meta.kernel_digest,
             benchmark_commit: meta.benchmark_commit,
+            tensor_profile_epoch: meta.tensor_profile_epoch,
             proof_latency_ms: meta.proof_latency_ms,
             aggregator_trace: meta.aggregator_trace,
         })

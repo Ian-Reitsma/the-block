@@ -1,24 +1,29 @@
 pub fn formatted_blocktorch_timeline(
     kernel_digest: Option<&str>,
     benchmark_commit: Option<&str>,
+    tensor_profile_epoch: Option<&str>,
     proof_latency_ms: Option<f64>,
     aggregator_trace: Option<&str>,
 ) -> Option<Vec<String>> {
     if kernel_digest.is_none()
         && benchmark_commit.is_none()
+        && tensor_profile_epoch.is_none()
         && proof_latency_ms.is_none()
         && aggregator_trace.is_none()
     {
         return None;
     }
 
-    let mut lines = Vec::with_capacity(5);
+    let mut lines = Vec::with_capacity(6);
     lines.push("BlockTorch job timeline:".to_string());
     if let Some(digest) = kernel_digest {
         lines.push(format!("  kernel digest: {digest}"));
     }
     if let Some(commit) = benchmark_commit {
         lines.push(format!("  benchmark commit: {commit}"));
+    }
+    if let Some(epoch) = tensor_profile_epoch {
+        lines.push(format!("  tensor profile epoch: {epoch}"));
     }
     if let Some(latency) = proof_latency_ms {
         lines.push(format!(
@@ -41,6 +46,7 @@ mod tests {
         let lines = formatted_blocktorch_timeline(
             Some("digest-123"),
             Some("bench-abc"),
+            Some("epoch-99"),
             Some(42.555),
             Some("trace-xyz"),
         )
@@ -49,6 +55,7 @@ mod tests {
             "BlockTorch job timeline:".to_string(),
             "  kernel digest: digest-123".to_string(),
             "  benchmark commit: bench-abc".to_string(),
+            "  tensor profile epoch: epoch-99".to_string(),
             "  proof latency (ms, last measurement): 42.56".to_string(),
             "  aggregator trace: trace-xyz".to_string(),
         ];
@@ -57,6 +64,6 @@ mod tests {
 
     #[test]
     fn formatted_blocktorch_timeline_is_empty_when_no_fields() {
-        assert!(formatted_blocktorch_timeline(None, None, None, None).is_none());
+        assert!(formatted_blocktorch_timeline(None, None, None, None, None).is_none());
     }
 }

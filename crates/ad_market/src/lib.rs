@@ -4614,6 +4614,14 @@ impl InMemoryMarketplace {
             CohortPricingState::new(config, telemetry)
         })
     }
+
+    /// Ensure a presence cohort exists for the provided impression context without
+    /// consuming privacy budget. Used by tests to inject presence buckets safely.
+    pub fn seed_presence_cohort(&self, ctx: &ImpressionContext) {
+        let cohort = InMemoryMarketplace::cohort_key(ctx);
+        let mut pricing = self.pricing.write().unwrap();
+        InMemoryMarketplace::get_price_and_state(&mut pricing, &cohort, &self.config);
+    }
 }
 
 impl Marketplace for InMemoryMarketplace {

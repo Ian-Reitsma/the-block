@@ -830,6 +830,16 @@ pub fn receipt_leaf_hash(receipt: &Receipt) -> [u8; 32] {
             hasher.update(&r.compute_units.to_le_bytes());
             hasher.update(&r.payment.to_le_bytes());
             hasher.update(&[u8::from(r.verified)]);
+            if let Some(meta) = &r.blocktorch {
+                hasher.update(&meta.kernel_variant_digest);
+                if let Some(commit) = &meta.benchmark_commit {
+                    hasher.update(commit.as_bytes());
+                }
+                if let Some(epoch) = &meta.tensor_profile_epoch {
+                    hasher.update(epoch.as_bytes());
+                }
+                hasher.update(&meta.proof_latency_ms.to_le_bytes());
+            }
         }
         Receipt::ComputeSlash(r) => {
             hasher.update(r.provider.as_bytes());

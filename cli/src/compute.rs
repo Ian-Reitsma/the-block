@@ -309,9 +309,14 @@ fn write_blocktorch_info(res: &JsonValue, out: &mut dyn Write) -> io::Result<()>
     if let Some(blocktorch) = res.get("blocktorch").and_then(|v| v.as_object()) {
         let kernel = blocktorch.get("kernel_digest").and_then(|v| v.as_str());
         let benchmark = blocktorch.get("benchmark_commit").and_then(|v| v.as_str());
+        let tensor_epoch = blocktorch
+            .get("tensor_profile_epoch")
+            .and_then(|v| v.as_str());
         let trace = blocktorch.get("aggregator_trace").and_then(|v| v.as_str());
         let latency = blocktorch.get("proof_latency_ms").and_then(|v| v.as_f64());
-        if let Some(lines) = formatted_blocktorch_timeline(kernel, benchmark, latency, trace) {
+        if let Some(lines) =
+            formatted_blocktorch_timeline(kernel, benchmark, tensor_epoch, latency, trace)
+        {
             for line in lines {
                 writeln!(out, "{line}")?;
             }

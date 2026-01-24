@@ -12,6 +12,7 @@ use crate::receipts::Receipt;
 use crate::receipts_validation::ReceiptBlockUsage;
 #[cfg(feature = "telemetry")]
 use concurrency::Lazy;
+use crypto_suite::hex;
 #[cfg(feature = "telemetry")]
 use runtime::telemetry::IntGaugeVec;
 #[cfg(feature = "telemetry")]
@@ -473,6 +474,25 @@ pub fn record_proof_verification_latency(duration: Duration) {
     PROOF_VERIFICATION_LATENCY_MS.observe(duration.as_secs_f64() * 1000.0);
     blocktorch_update_metadata(|meta| {
         meta.proof_latency_ms = Some(duration.as_secs_f64() * 1000.0)
+    });
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_blocktorch_kernel_digest(digest: [u8; 32]) {
+    blocktorch_update_metadata(|meta| meta.kernel_digest = Some(hex::encode(digest)));
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_blocktorch_benchmark_commit(commit: Option<&str>) {
+    blocktorch_update_metadata(|meta| {
+        meta.benchmark_commit = commit.map(|value| value.to_string());
+    });
+}
+
+#[cfg(feature = "telemetry")]
+pub fn set_blocktorch_tensor_profile_epoch(epoch: Option<&str>) {
+    blocktorch_update_metadata(|meta| {
+        meta.tensor_profile_epoch = epoch.map(|value| value.to_string());
     });
 }
 

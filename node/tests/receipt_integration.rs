@@ -5,6 +5,8 @@
 /// 2. Block hash determinism with receipts
 /// 3. Metrics derivation from receipts produces deterministic results
 /// 4. Cross-node consistency (two nodes, same chain, same metrics)
+use crypto_suite::hashing::blake3::Hasher;
+use the_block::receipts::BlockTorchReceiptMetadata;
 use the_block::{
     block_binary, economics::deterministic_metrics::derive_market_metrics_from_chain, AdReceipt,
     Block, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt,
@@ -15,6 +17,17 @@ fn block_with_receipts(index: u64, receipts: Vec<Receipt>) -> Block {
         index,
         receipts,
         ..Default::default()
+    }
+}
+
+fn sample_blocktorch_metadata(tag: &str) -> BlockTorchReceiptMetadata {
+    let mut hasher = Hasher::new();
+    hasher.update(tag.as_bytes());
+    BlockTorchReceiptMetadata {
+        kernel_variant_digest: *hasher.finalize().as_bytes(),
+        benchmark_commit: Some(format!("{tag}-benchmark")),
+        tensor_profile_epoch: Some(format!("{tag}-epoch")),
+        proof_latency_ms: 33,
     }
 }
 
@@ -51,6 +64,7 @@ fn receipts_survive_block_serialization_roundtrip() {
                 payment: 2_500,
                 block_height: 100,
                 verified: true,
+                blocktorch: Some(sample_blocktorch_metadata("job_1")),
                 provider_signature: vec![0u8; 64],
                 signature_nonce: 100,
             }),
@@ -61,6 +75,7 @@ fn receipts_survive_block_serialization_roundtrip() {
                 payment: 1_500,
                 block_height: 100,
                 verified: false,
+                blocktorch: Some(sample_blocktorch_metadata("job_2")),
                 provider_signature: vec![0u8; 64],
                 signature_nonce: 100,
             }),
@@ -178,6 +193,7 @@ fn deterministic_metrics_from_receipts_chain() {
                     payment: 5_000,
                     block_height: 1,
                     verified: true,
+                    blocktorch: Some(sample_blocktorch_metadata("chain_job_1")),
                     provider_signature: vec![0u8; 64],
                     signature_nonce: 1,
                 }),
@@ -188,6 +204,7 @@ fn deterministic_metrics_from_receipts_chain() {
                     payment: 2_500,
                     block_height: 1,
                     verified: true,
+                    blocktorch: Some(sample_blocktorch_metadata("chain_job_2")),
                     provider_signature: vec![0u8; 64],
                     signature_nonce: 1,
                 }),
@@ -332,6 +349,7 @@ fn receipt_metrics_integration_pipeline() {
                 payment: 25_000,
                 block_height: 42,
                 verified: true,
+                blocktorch: Some(sample_blocktorch_metadata("compute_job_1")),
                 provider_signature: vec![0u8; 64],
                 signature_nonce: 42,
             }),

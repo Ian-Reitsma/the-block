@@ -28,6 +28,11 @@ name = "network"
 path = "fuzz_targets/network.rs"
 test = false
 
+[[bin]]
+name = "compute_receipt"
+path = "fuzz_targets/compute_receipt.rs"
+test = false
+
 [package.metadata]
 cargo-fuzz = true
 

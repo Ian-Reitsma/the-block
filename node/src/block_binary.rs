@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 
 use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 
+use crate::receipts::BlockTorchReceiptMetadata;
 use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
 use crate::transaction::binary as tx_binary;
 use crate::transaction::binary::{EncodeError, EncodeResult};
@@ -429,6 +430,19 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                         .expect("signature length fits");
                 });
                 struct_writer.field_u64("signature_nonce", r.signature_nonce);
+                if let Some(blocktorch) = &r.blocktorch {
+                    struct_writer.field_with("blocktorch_kernel_variant_digest", |field_writer| {
+                        write_fixed(field_writer, &blocktorch.kernel_variant_digest);
+                    });
+                    if let Some(commit) = &blocktorch.benchmark_commit {
+                        struct_writer.field_string("blocktorch_benchmark_commit", commit);
+                    }
+                    if let Some(epoch) = &blocktorch.tensor_profile_epoch {
+                        struct_writer.field_string("blocktorch_tensor_profile_epoch", epoch);
+                    }
+                    struct_writer
+                        .field_u64("blocktorch_proof_latency_ms", blocktorch.proof_latency_ms);
+                }
             }
             Receipt::ComputeSlash(r) => {
                 struct_writer.field_string("type", "compute_slash");
@@ -571,6 +585,10 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut provider_signature = None;
         let mut publisher_signature = None;
         let mut signature_nonce = None;
+        let mut blocktorch_kernel_variant_digest = None;
+        let mut blocktorch_benchmark_commit = None;
+        let mut blocktorch_tensor_profile_epoch = None;
+        let mut blocktorch_proof_latency_ms = None;
 
         decode_struct(reader, None, |key, reader| match key {
             "type" => assign_once(&mut receipt_type, reader.read_string()?, "type"),
@@ -695,6 +713,26 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "signature_nonce" => {
                 assign_once(&mut signature_nonce, reader.read_u64()?, "signature_nonce")
             }
+            "blocktorch_kernel_variant_digest" => assign_once(
+                &mut blocktorch_kernel_variant_digest,
+                read_fixed(reader)?,
+                "blocktorch_kernel_variant_digest",
+            ),
+            "blocktorch_benchmark_commit" => assign_once(
+                &mut blocktorch_benchmark_commit,
+                reader.read_string()?,
+                "blocktorch_benchmark_commit",
+            ),
+            "blocktorch_tensor_profile_epoch" => assign_once(
+                &mut blocktorch_tensor_profile_epoch,
+                reader.read_string()?,
+                "blocktorch_tensor_profile_epoch",
+            ),
+            "blocktorch_proof_latency_ms" => assign_once(
+                &mut blocktorch_proof_latency_ms,
+                reader.read_u64()?,
+                "blocktorch_proof_latency_ms",
+            ),
             other => Err(DecodeError::UnknownField(other.to_string())),
         })?;
 
@@ -713,18 +751,29 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 signature_nonce: signature_nonce
                     .ok_or(DecodeError::MissingField("signature_nonce"))?,
             })),
-            "compute" => Ok(Receipt::Compute(ComputeReceipt {
-                job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
-                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
-                compute_units: compute_units.ok_or(DecodeError::MissingField("compute_units"))?,
-                payment: payment.ok_or(DecodeError::MissingField("payment"))?,
-                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
-                verified: verified.ok_or(DecodeError::MissingField("verified"))? != 0,
-                provider_signature: provider_signature
-                    .ok_or(DecodeError::MissingField("provider_signature"))?,
-                signature_nonce: signature_nonce
-                    .ok_or(DecodeError::MissingField("signature_nonce"))?,
-            })),
+            "compute" => {
+                let blocktorch =
+                    blocktorch_kernel_variant_digest.map(|digest| BlockTorchReceiptMetadata {
+                        kernel_variant_digest: digest,
+                        benchmark_commit: blocktorch_benchmark_commit.clone(),
+                        tensor_profile_epoch: blocktorch_tensor_profile_epoch.clone(),
+                        proof_latency_ms: blocktorch_proof_latency_ms.unwrap_or(0),
+                    });
+                Ok(Receipt::Compute(ComputeReceipt {
+                    job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
+                    provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                    compute_units: compute_units
+                        .ok_or(DecodeError::MissingField("compute_units"))?,
+                    payment: payment.ok_or(DecodeError::MissingField("payment"))?,
+                    block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                    verified: verified.ok_or(DecodeError::MissingField("verified"))? != 0,
+                    blocktorch,
+                    provider_signature: provider_signature
+                        .ok_or(DecodeError::MissingField("provider_signature"))?,
+                    signature_nonce: signature_nonce
+                        .ok_or(DecodeError::MissingField("signature_nonce"))?,
+                }))
+            }
             "compute_slash" => Ok(Receipt::ComputeSlash(ComputeSlashReceipt {
                 job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
                 provider: provider.ok_or(DecodeError::MissingField("provider"))?,

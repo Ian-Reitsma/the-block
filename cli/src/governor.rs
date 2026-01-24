@@ -263,6 +263,7 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
         if let Some(lines) = formatted_blocktorch_timeline(
             blocktorch.kernel_digest.as_deref(),
             blocktorch.benchmark_commit.as_deref(),
+            blocktorch.tensor_profile_epoch.as_deref(),
             blocktorch.proof_latency_ms,
             blocktorch.aggregator_trace.as_deref(),
         ) {
@@ -349,6 +350,8 @@ struct BlockTorchView {
     kernel_digest: Option<String>,
     #[serde(default)]
     benchmark_commit: Option<String>,
+    #[serde(default)]
+    tensor_profile_epoch: Option<String>,
     #[serde(default)]
     proof_latency_ms: Option<f64>,
     #[serde(default)]

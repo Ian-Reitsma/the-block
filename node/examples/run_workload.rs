@@ -1,5 +1,7 @@
 use std::fs;
-use the_block::compute_market::{Workload, WorkloadRunner};
+use the_block::compute_market::{
+    workloads::inference::BlockTorchInference, Workload, WorkloadRunner,
+};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -7,7 +9,10 @@ fn main() {
     let kind = args.next().unwrap_or_else(|| "transcode".into());
     let data = fs::read(file).expect("read slice");
     let workload = match kind.as_str() {
-        "inference" => Workload::Inference(data),
+        "inference" => {
+            let inference = BlockTorchInference::new(data.clone(), data);
+            Workload::Inference(inference)
+        }
         "snark" => Workload::Snark(data),
         _ => Workload::Transcode(data),
     };

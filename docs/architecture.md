@@ -107,15 +107,25 @@ pub struct StorageReceipt {
 #### Compute Receipt
 ```rust
 pub struct ComputeReceipt {
-    pub job_id: String,            // Unique job identifier
-    pub worker: String,            // Compute provider address
-    pub compute_units: u64,        // Units consumed
-    pub cost: u64,              // BLOCK paid to worker
-    pub block_height: u64,         // When job completed
-    pub proof_type: String,        // "snark", "trusted", etc.
+    pub job_id: String,                    // Unique job identifier
+    pub provider: String,                  // Compute provider address
+    pub compute_units: u64,                // Units consumed
+    pub payment: u64,                      // BLOCK paid to provider
+    pub block_height: u64,                 // When job completed
+    pub verified: bool,                    // Proof verification success
+    pub blocktorch: Option<BlockTorchReceiptMetadata>, // Optional BlockTorch provenance
+    pub provider_signature: Vec<u8>,       // Provider signature
+    pub signature_nonce: u64,              // Nonce to prevent replay
+}
+
+pub struct BlockTorchReceiptMetadata {
+    pub kernel_variant_digest: [u8; 32],               // SHA256 over the metal/CUDA artifacts
+    pub benchmark_commit: Option<String>,              // `/tmp/bench/<commit>/benchmarks.json`
+    pub tensor_profile_epoch: Option<String>,          // `/tmp/orchard_tensor_profile.log` epoch pointer
+    pub proof_latency_ms: u64,                         // `snark_prover_latency` measurement in ms
 }
 ```
-**Tracks:** Computation jobs, resource usage, verification method
+**Tracks:** Computation jobs, BlockTorch provenance (kernel hashes, benchmarks, tensor profilers, proof latency) plus verification results so receipts anchor telemetry and governor traces.
 
 #### Energy Receipt
 ```rust

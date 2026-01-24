@@ -70,11 +70,28 @@ pub struct ComputeReceipt {
     pub block_height: u64,
     /// SNARK verification success
     pub verified: bool,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub blocktorch: Option<BlockTorchReceiptMetadata>,
     /// Provider Ed25519 signature over receipt fields (prevents forgery)
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub provider_signature: Vec<u8>,
     /// Nonce to prevent replay attacks
     pub signature_nonce: u64,
+}
+
+/// BlockTorch provenance metadata that travels with compute receipts.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct BlockTorchReceiptMetadata {
+    pub kernel_variant_digest: [u8; 32],
+    #[serde(default)]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub benchmark_commit: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    pub tensor_profile_epoch: Option<String>,
+    pub proof_latency_ms: u64,
 }
 
 /// Energy market settlement receipt.
@@ -261,6 +278,7 @@ mod tests {
             payment: 200,
             block_height: 101,
             verified: true,
+            blocktorch: None,
             provider_signature: vec![0u8; 64],
             signature_nonce: 0,
         });

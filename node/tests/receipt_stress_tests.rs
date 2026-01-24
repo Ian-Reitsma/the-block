@@ -13,7 +13,9 @@ use rand::Rng;
 use std::time::Instant;
 use the_block::block_binary::encode_receipts;
 use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
-use the_block::receipts::{AdReceipt, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt};
+use the_block::receipts::{
+    AdReceipt, BlockTorchReceiptMetadata, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt,
+};
 use the_block::receipts_validation::{
     receipt_verify_units, validate_receipt, validate_receipt_budget, validate_receipt_count,
     ReceiptBlockUsage, MAX_RECEIPTS_PER_BLOCK, RECEIPT_BYTE_BUDGET, RECEIPT_VERIFY_BUDGET,
@@ -142,6 +144,7 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             payment: 50,
             block_height: id,
             verified: true,
+            blocktorch: Some(sample_blocktorch_metadata(id)),
             provider_signature: vec![0u8; 64],
             signature_nonce: id,
         }),
@@ -169,6 +172,17 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             publisher_signature: vec![0u8; 64],
             signature_nonce: id,
         }),
+    }
+}
+
+fn sample_blocktorch_metadata(id: u64) -> BlockTorchReceiptMetadata {
+    let mut hasher = Hasher::new();
+    hasher.update(&id.to_le_bytes());
+    BlockTorchReceiptMetadata {
+        kernel_variant_digest: *hasher.finalize().as_bytes(),
+        benchmark_commit: Some(format!("bench-{}", id)),
+        tensor_profile_epoch: Some(format!("epoch-{}", id)),
+        proof_latency_ms: 42,
     }
 }
 
@@ -493,6 +507,18 @@ fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
     hasher.update(&receipt.payment.to_le_bytes());
     hasher.update(&[u8::from(receipt.verified)]);
     hasher.update(&receipt.signature_nonce.to_le_bytes());
+    if let Some(meta) = &receipt.blocktorch {
+        hasher.update(&meta.kernel_variant_digest);
+        if let Some(commit) = &meta.benchmark_commit {
+            hasher.update(commit.as_bytes());
+        }
+        if let Some(epoch) = &meta.tensor_profile_epoch {
+            hasher.update(epoch.as_bytes());
+        }
+        hasher.update(&meta.proof_latency_ms.to_le_bytes());
+    } else {
+        hasher.update(b"blocktorch:none");
+    }
     hasher.finalize().as_bytes().to_vec()
 }
 

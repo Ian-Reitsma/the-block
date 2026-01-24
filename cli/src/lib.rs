@@ -1,7 +1,7 @@
 pub mod ai;
+pub mod blocktorch_timeline;
 pub mod bridge;
 pub mod codec_helpers;
-pub mod blocktorch_timeline;
 pub mod compute;
 #[cfg(not(doc))]
 pub mod explorer;

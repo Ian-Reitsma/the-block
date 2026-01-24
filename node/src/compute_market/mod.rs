@@ -1,4 +1,5 @@
 use self::snark::{SnarkBackend, SnarkError};
+use crate::receipts::BlockTorchReceiptMetadata;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
@@ -11,7 +12,7 @@ use std::sync::{
     Arc,
 };
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sys::cpu;
 
 pub mod admission;
@@ -31,6 +32,9 @@ pub mod workload;
 mod compute_market_example {}
 pub mod snark;
 pub mod workloads;
+
+use workloads::inference::BlockTorchInference;
+use workloads::BlockTorchWorkloadMetadata;
 
 pub use errors::MarketError;
 pub use scheduler::job_status;
@@ -145,18 +149,24 @@ pub struct ExecutionReceipt {
 
 impl ExecutionReceipt {
     /// Verify that the output matches the reference hash and any provided proof.
-    pub fn verify(&self, workload: &Workload) -> bool {
+    pub fn verify_with_duration(&self, workload: &Workload) -> (bool, Option<std::time::Duration>) {
         if self.reference != self.output {
-            return false;
+            return (false, None);
         }
         match (&self.proof, workload) {
             (Some(bundle), Workload::Snark(wasm)) => {
-                snark::verify(bundle, wasm, &self.output).unwrap_or(false)
+                let start = Instant::now();
+                let result = snark::verify(bundle, wasm, &self.output).unwrap_or(false);
+                (result, Some(start.elapsed()))
             }
-            (None, Workload::Snark(_)) => false,
-            (Some(_), _) => false,
-            _ => true,
+            (None, Workload::Snark(_)) => (false, None),
+            (Some(_), _) => (false, None),
+            _ => (true, None),
         }
+    }
+
+    pub fn verify(&self, workload: &Workload) -> bool {
+        self.verify_with_duration(workload).0
     }
 
     pub fn total(&self) -> u64 {
@@ -186,7 +196,7 @@ pub fn adjust_price(median: u64, backlog_factor: f64) -> u64 {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum Workload {
     Transcode(Vec<u8>),
-    Inference(Vec<u8>),
+    Inference(BlockTorchInference),
     GpuHash(Vec<u8>),
     Snark(Vec<u8>),
 }
@@ -196,10 +206,11 @@ impl Workload {
     /// `compute_units` helper.
     pub fn units(&self) -> u64 {
         match self {
-            Workload::Transcode(data)
-            | Workload::Inference(data)
-            | Workload::GpuHash(data)
-            | Workload::Snark(data) => workload::compute_units(data),
+            Workload::Transcode(data) | Workload::GpuHash(data) | Workload::Snark(data) => {
+                workload::compute_units(data)
+            }
+            Workload::Inference(payload) => workload::compute_units(&payload.artifact)
+                .saturating_add(workload::compute_units(&payload.input)),
         }
     }
 }
@@ -289,6 +300,13 @@ struct JobState {
     fee_pct: u8,
     paid_slices: usize,
     completed: bool,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
+    blocktorch_metadata: Option<BlockTorchWorkloadMetadata>,
+    #[serde(default)]
+    proof_latency_sum_ms: u64,
+    #[serde(default)]
+    proof_latency_count: u64,
 }
 
 /// In-memory market tracking offers and active jobs.
@@ -351,6 +369,20 @@ impl Market {
                         let total_payment = total_units.saturating_mul(state.price_per_unit);
                         let verified = state.paid_slices == state.job.slices.len();
 
+                        let proof_latency_ms = if state.proof_latency_count == 0 {
+                            0
+                        } else {
+                            state.proof_latency_sum_ms / state.proof_latency_count
+                        };
+                        let blocktorch = state.blocktorch_metadata.as_ref().map(|meta| {
+                            BlockTorchReceiptMetadata {
+                                kernel_variant_digest: meta.kernel_digest,
+                                benchmark_commit: meta.benchmark_commit.clone(),
+                                tensor_profile_epoch: meta.tensor_profile_epoch.clone(),
+                                proof_latency_ms,
+                            }
+                        });
+
                         self.pending_receipts.push(crate::ComputeReceipt {
                             job_id: resolution.job_id.clone(),
                             provider: state.provider.clone(),
@@ -358,6 +390,7 @@ impl Market {
                             payment: total_payment,
                             block_height: self.current_block,
                             verified,
+                            blocktorch,
                             provider_signature: vec![],
                             signature_nonce: self.current_block,
                         });
@@ -486,6 +519,24 @@ impl Market {
             .ensure_handle_for_label_values(&[&offer.provider])
             .expect(crate::telemetry::LABEL_REGISTRATION_ERR)
             .set(effective as i64);
+        let blocktorch_metadata = job
+            .workloads
+            .iter()
+            .filter_map(|w| match w {
+                Workload::Inference(payload) => Some(payload.metadata()),
+                _ => None,
+            })
+            .next();
+
+        #[cfg(feature = "telemetry")]
+        if let Some(ref meta) = blocktorch_metadata {
+            telemetry::receipts::set_blocktorch_kernel_digest(meta.kernel_digest);
+            telemetry::receipts::set_blocktorch_benchmark_commit(meta.benchmark_commit.as_deref());
+            telemetry::receipts::set_blocktorch_tensor_profile_epoch(
+                meta.tensor_profile_epoch.as_deref(),
+            );
+        }
+
         let state = JobState {
             job,
             provider: offer.provider.clone(),
@@ -495,6 +546,9 @@ impl Market {
             fee_pct: offer.fee_pct,
             paid_slices: 0,
             completed: false,
+            blocktorch_metadata,
+            proof_latency_sum_ms: 0,
+            proof_latency_count: 0,
         };
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -633,7 +687,8 @@ impl Market {
             return Err("reference mismatch");
         }
         let workload = &state.job.workloads[state.paid_slices];
-        if !proof.verify(workload) {
+        let (verified, proof_latency) = proof.verify_with_duration(workload);
+        if !verified {
             scheduler::record_failure(&state.provider);
             if state.job.capability.accelerator.is_some() {
                 scheduler::record_accelerator_failure(&state.provider);
@@ -645,6 +700,11 @@ impl Market {
                 crate::telemetry::SNARK_FAIL_TOTAL.inc();
             }
             return Err("invalid proof");
+        }
+        if let Some(duration) = proof_latency {
+            let latency_ms = duration.as_millis() as u64;
+            state.proof_latency_sum_ms = state.proof_latency_sum_ms.saturating_add(latency_ms);
+            state.proof_latency_count = state.proof_latency_count.saturating_add(1);
         }
         if let (Workload::Snark(_), Some(bundle)) = (workload, &proof.proof) {
             #[cfg(feature = "telemetry")]
