@@ -33,7 +33,7 @@ Scripts in `../benchmarks` record hardware information, runtime flags beginning 
 - Expand these documents whenever significant features land or roadmap items change.
 - Reference identifiers with inline code and avoid fenced code blocks.
 - Ensure any added file fits within the repository’s 5 MB artifact limit.
-- Note that tests use the trimmed `third_party/googletest` tree or a system package when `FETCHCONTENT_FULLY_DISCONNECTED=ON` is supplied during configuration so documentation referencing the test workflow should mention this offline mode.
+- Note that tests run on the first-party harness under `metal-tensor/tests/` so documentation referencing the test workflow should highlight the fully in-house, offline test runner.
 
 ## Contributor Protocol
 - Read `../AGENTS.md` before editing documentation; it describes required build and test steps and repository etiquette.

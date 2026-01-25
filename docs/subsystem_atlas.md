@@ -215,4 +215,3 @@ The `node/` crate is densely packed. This index spells out every module so that 
 2. **Jump to the linked doc section** for deeper requirements and telemetry expectations. For example, `node/src/parallel.rs` references the compute marketplace and telemetry obligations documented in `docs/architecture.md#compute-marketplace`.
 3. **Record TODOs** in `AGENTS.md §15` whenever you discover missing documentation or future work; mirror your code comments so the backlog remains transparent.
 4. **Keep this atlas current**—if you add a new module, update this file (and link it from the Document Map) so the next contributor has instant context.
->>>>>>> a47e24783b578beb29ca36d4c577cdedbd77c0a8

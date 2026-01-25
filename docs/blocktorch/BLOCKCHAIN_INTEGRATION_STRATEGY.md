@@ -38,7 +38,7 @@ A minimal, systems-grade GPU compute substrate designed for embedding and long-t
 - **Dependencies:**
   - **System frameworks (APPLE ONLY):** Metal, Accelerate
   - **Standard library:** C++20 stdlib only
-  - **Test framework:** Minimal GoogleTest (vendored)
+  - **Test framework:** In-house harness in `metal-tensor/tests/`
   - **Profiling:** Internal (allocation logging)
   - **Total external deps:** **ZERO**
 
@@ -227,10 +227,10 @@ Orchard today is a **general-purpose tensor runtime**. To integrate with the-blo
    - Replacement: Not needed; CMake is de facto standard
    - Impact on first-party compliance: NONE
 
-2. **GoogleTest** (Test framework)
-   - Status: Vendored (you have the source in `third_party/googletest`)
-   - Replacement: Custom test harness (~500 lines)
-   - Impact on first-party compliance: NONE (vendored = owned)
+2. **Test harness**
+   - Status: In-house (`metal-tensor/tests/harness.*`)
+   - Replacement: Not needed (already first-party)
+   - Impact on first-party compliance: NONE
 
 3. **Ninja** (Build generator)
    - Status: Optional (CMake also supports Unix Makefiles, Xcode)
@@ -252,12 +252,9 @@ Orchard today is a **general-purpose tensor runtime**. To integrate with the-blo
    - Impact: CPU fallback is already working; this is performance-only
    - When: After signature verification GPU path is proven
 
-2. **Optional: Replace GoogleTest with custom harness**
-   - Effort: ~500 lines
-   - Benefit: Vendor-independent testing
-   - Impact: Tests still pass; just use different test runner
-   - When: If you plan to go "no external infrastructure"
-   - Reality: Not necessary; GoogleTest is vendored
+2. **Test harness**
+   - Status: GoogleTest removed; in-house runner under `metal-tensor/tests/`
+   - Action: None required for first-party compliance
 
 3. **System Frameworks (Metal, Accelerate, ObjC runtime):**
    - **DO NOT REPLACE.** These are macOS system-level. Replacing them is impossible and unproductive.
@@ -271,7 +268,7 @@ Orchard today is a **general-purpose tensor runtime**. To integrate with the-blo
 - Zero embedded third-party libraries
 - All external deps are system frameworks (Apple only)
 - CPU fallback path is 100% standard C++
-- Vendored test infrastructure (GoogleTest in `third_party/`)
+- First-party test infrastructure (custom harness under `metal-tensor/tests/`)
 
 **Action:** You need to do **NOTHING** to Orchard for first-party compliance. It's already ready.
 

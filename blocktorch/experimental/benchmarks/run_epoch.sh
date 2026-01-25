@@ -69,44 +69,26 @@ _ts=$(date +%Y%m%d-%H%M%S)
 LOG_FILE="$RUN_DIR/${_ts}_${tag}.log"
 POW_FILE="$RUN_DIR/${_ts}_${tag}.power"
 
-<<<<<<< HEAD
-# 4 launch powermetrics (requires sudo or NOPASSWD entry)
-#POW_FILE=""  # No power logging by default on PC
-# if [[ "$(uname)" == "Darwin" ]]; then
-#  sudo powermetrics $PM_OPTS -o "$POW_FILE" &
-#  PM_PID=$!
-#  trap 'kill $PM_PID 2>/dev/null || true' EXIT INT TERM
-#  export POW_FILE
-#fi
-=======
 # 4 launch powermetrics (requires sudo or NOPASSWD entry)
-#    UID + mtime are later verified by the Python script
-sudo powermetrics $PM_OPTS -o "$POW_FILE" &
-PM_PID=$!
-trap 'kill $PM_PID 2>/dev/null || true' EXIT INT TERM
->>>>>>> 46e12ceb3ddf080d920992a64f613562dbf72ed1
+PM_PID=""
+if [[ "$(uname)" == "Darwin" ]] && command -v powermetrics >/dev/null 2>&1; then
+  # UID + mtime are later verified by the Python script
+  if sudo powermetrics $PM_OPTS -o "$POW_FILE" & then
+    PM_PID=$!
+    trap 'kill $PM_PID 2>/dev/null || true' EXIT INT TERM
+  else
+    echo "powermetrics unavailable; skipping power log" >&2
+    POW_FILE=""
+  fi
+else
+  POW_FILE=""
+fi
 
 export POW_FILE  # consumed by orchard_bench_v0.8.py
 
 # 5 run benchmark, capture exit code (PIPESTATUS[0] = python)
 python3 "$PY" --data "$data_path" --tag "$tag" "${py_args[@]}" 2>&1 | tee "$LOG_FILE"
 
-<<<<<<< HEAD
-python3 "$PY" --data "$data_path" --tag "$tag" "${py_args[@]}" 2>&1 | tee "$LOG_FILE_ALL" | \
-while IFS= read -r line; do
-    # Progress lines
-    if [[ "$line" =~ ^\[orchard\]\[.*\]\ step ]]; then
-        echo "$line" | tee -a "$LOG_FILE_RUN"
-    fi
-    # Errors
-    if echo "$line" | grep -qE 'ERROR|Traceback|RuntimeError'; then
-        echo "$line" | tee -a "$LOG_FILE_ERRORS"
-    fi
-done
-
-
-=======
->>>>>>> 46e12ceb3ddf080d920992a64f613562dbf72ed1
 exit_code=${PIPESTATUS[0]}
 
 exit "$exit_code"

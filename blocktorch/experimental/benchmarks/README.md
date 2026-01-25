@@ -10,7 +10,7 @@ Update or remove these scripts once equivalent benchmarking exists for the Metal
 ## Contributor Protocol
 - See `../../AGENTS.md` for repository governance and mandatory build and test steps.
 - Run `cmake -S . -B build -G Ninja` and `cmake --build build --target check` from the repository root and attach output to pull requests.
-- Supply `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` during configuration when network access is unavailable so tests link against the trimmed `third_party/googletest` tree or a system package.
+- Tests run on the in-house harness under `metal-tensor/tests/` and never fetch external dependencies during configuration.
 - Use `rg` instead of `ls -R` or `grep -R` when searching the repository.
 - Do not commit generated benchmark results or any large artifacts.
 - Keep commits single-purpose with an imperative summary line, and reference modified files by path and line number in the pull request.

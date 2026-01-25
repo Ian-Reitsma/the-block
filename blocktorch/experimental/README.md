@@ -35,7 +35,7 @@ These components remain only for historical comparison. They will be removed onc
 ## Contributor Protocol
 - Follow `../AGENTS.md` for all repository rules even when working in this experimental subtree.
 - Configure and test the project with `cmake -S . -B build -G Ninja` and `cmake --build build --target check`; include any failures in pull requests.
-- Pass `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` when configuring without network access so tests link against the trimmed `third_party/googletest` tree or a system package.
+- Tests rely on the first-party harness under `metal-tensor/tests/` and do not download external code during configuration.
 - Use `rg` for code searches; avoid recursive `ls` or `grep` commands.
 - Do not commit datasets, run outputs, or other generated files. The `data/` and `runs/` directories remain untracked to keep large artifacts out of version control.
 - Format C++ and Python sources consistently and keep commits to a single logical change with an imperative summary line.

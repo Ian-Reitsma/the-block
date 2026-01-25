@@ -108,7 +108,7 @@ This documentation package contains the complete analysis, strategy, and tactica
 | Accelerate Framework | System | Optional | Can replace if needed (~200 lines) |
 | C++ Standard Library | Standard | Required | Keep (not a "third-party" dep) |
 | Objective-C Runtime | System | Required on macOS | Keep (system-level) |
-| GoogleTest | Build-time | Vendored | Keep (embedded in repo) |
+| Test harness | Build-time | First-party (`metal-tensor/tests/harness.*`) | Keep (embedded in repo) |
 | CMake | Build-time | Not runtime | Keep (build infrastructure) |
 
 **Conclusion:** ✅ **Orchard is already first-party-only compliant for runtime execution.** Zero external dependencies you need to replace.

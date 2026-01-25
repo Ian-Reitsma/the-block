@@ -57,7 +57,7 @@ Setting ORCHARD_TENSOR_PROFILE enables logging of allocation and deallocation ev
 - macOS continuous integration enforces warnings-as-errors and executes the test suite; Linux hosts provide diagnostic failures only.
 - Fused FlashAttention backward kernels with dropout are present under `experimental/` and enable end-to-end gradient checks for keys and values.
 - Documentation covers design specifications, tensor features, and project status but evolves with each milestone.
-- A minimal copy of GoogleTest under `third_party/googletest` builds the test suite without fetching from the network; upstream tests and samples are not included.
+- A custom first-party harness under `metal-tensor/tests/harness.*` drives the suite without any third-party code or network downloads.
 
 ## Milestones
 1. Fused FlashAttention backward kernels with dropout support.

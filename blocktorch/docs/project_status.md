@@ -31,7 +31,7 @@ This document captures the current state of the Orchard effort and the path forw
       - benchmarks compile on all hosts and report whether kernels executed on the CPU or Metal
     - macOS continuous integration caches builds, treats warnings as errors, and runs the test suite on every pull request.
 - Implementation targets macOS with Xcode 15+ and the Metal 4 SDK. The CPU runtime allows building and running tests in this Linux environment without GPU acceleration.
-- A minimal copy of GoogleTest resides under `third_party/googletest` so tests compile without downloads; upstream tests and samples were dropped to reduce repository size.
+- Tests now rely on the in-house harness under `metal-tensor/tests/` so no third-party code or downloads are required to build or run the suite.
 
 ## Next Steps
 1. Harden the fused FlashAttention backward kernels and benchmark training loops that depend on dropout.

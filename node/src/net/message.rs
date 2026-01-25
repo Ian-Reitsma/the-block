@@ -5,7 +5,9 @@ use crate::block_binary;
 use crate::net::peer::ReputationUpdate;
 use crate::p2p::handshake::Hello;
 use crate::p2p::wire_binary;
-use crate::storage::provider_directory::ProviderAdvertisement;
+use crate::storage::provider_directory::{
+    ProviderAdvertisement, ProviderLookupRequest, ProviderLookupResponse,
+};
 use crate::transaction::binary::{self as tx_binary, EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{BlobTx, Block, SignedTransaction};
@@ -80,6 +82,10 @@ pub enum Payload {
     Reputation(Vec<ReputationUpdate>),
     /// Advertise storage provider capabilities across the overlay.
     StorageProviderAdvertisement(ProviderAdvertisement),
+    /// Request storage provider lookup via overlay (DHT-style).
+    StorageProviderLookup(ProviderLookupRequest),
+    /// Response carrying provider matches for a lookup.
+    StorageProviderLookupResponse(ProviderLookupResponse),
 }
 
 /// Individual erasure-coded shard associated with a blob root.
@@ -249,6 +255,14 @@ fn write_payload(writer: &mut BinaryWriter, payload: &Payload) -> EncodeResult<(
             writer.write_u32(9);
             write_provider_advertisement(writer, advert)?;
         }
+        Payload::StorageProviderLookup(request) => {
+            writer.write_u32(10);
+            write_provider_lookup_request(writer, request)?;
+        }
+        Payload::StorageProviderLookupResponse(response) => {
+            writer.write_u32(11);
+            write_provider_lookup_response(writer, response)?;
+        }
     }
     Ok(())
 }
@@ -276,6 +290,12 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
         8 => Ok(Payload::ChainRequest(read_chain_request(reader)?)),
         9 => Ok(Payload::StorageProviderAdvertisement(
             read_provider_advertisement(reader)?,
+        )),
+        10 => Ok(Payload::StorageProviderLookup(
+            read_provider_lookup_request(reader)?,
+        )),
+        11 => Ok(Payload::StorageProviderLookupResponse(
+            read_provider_lookup_response(reader)?,
         )),
         other => Err(DecodeError::InvalidEnumDiscriminant {
             ty: "Payload",
@@ -472,6 +492,142 @@ fn read_provider_advertisement(
         signature: signature
             .ok_or(DecodeError::MissingField("signature"))?
             .into_vec(),
+    })
+}
+
+fn write_provider_lookup_request(
+    writer: &mut BinaryWriter,
+    request: &ProviderLookupRequest,
+) -> EncodeResult<()> {
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_u64("object_size", request.request.object_size);
+        struct_writer.field_u16("shares", request.request.shares);
+        struct_writer.field_option_string("region", request.request.region.as_ref());
+        struct_writer.field_option_u64("max_price_per_block", request.request.max_price_per_block);
+        struct_writer.field_option_u64(
+            "min_success_rate_ppm",
+            request.request.min_success_rate_ppm,
+        );
+        struct_writer.field_u64("limit", request.request.limit as u64);
+        struct_writer.field_u64("nonce", request.nonce);
+        struct_writer.field_u64("issued_at", request.issued_at);
+        struct_writer.field_u8("ttl", request.ttl);
+        struct_writer.field_with("origin", |field_writer| {
+            write_fixed(field_writer, &request.origin);
+        });
+        struct_writer.field_with("signature", |field_writer| {
+            write_bytes(field_writer, &request.signature, "signature")
+        });
+    });
+    Ok(())
+}
+
+fn read_provider_lookup_request(
+    reader: &mut BinaryReader<'_>,
+) -> binary_struct::Result<ProviderLookupRequest> {
+    let mut object_size = None;
+    let mut shares = None;
+    let mut region = None;
+    let mut max_price_per_block = None;
+    let mut min_success_rate_ppm = None;
+    let mut limit = None;
+    let mut nonce = None;
+    let mut issued_at = None;
+    let mut ttl = None;
+    let mut origin = None;
+    let mut signature = None;
+
+    decode_struct(reader, Some(6), |key, reader| match key {
+        "object_size" => assign_once(&mut object_size, reader.read_u64()?, "object_size"),
+        "shares" => assign_once(&mut shares, reader.read_u16()?, "shares"),
+        "region" => assign_once(&mut region, reader.read_option_string()?, "region"),
+        "max_price_per_block" => assign_once(
+            &mut max_price_per_block,
+            reader.read_option_u64()?,
+            "max_price_per_block",
+        ),
+        "min_success_rate_ppm" => assign_once(
+            &mut min_success_rate_ppm,
+            reader.read_option_u64()?,
+            "min_success_rate_ppm",
+        ),
+        "limit" => assign_once(&mut limit, reader.read_u64()?, "limit"),
+        "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
+        "issued_at" => assign_once(&mut issued_at, reader.read_u64()?, "issued_at"),
+        "ttl" => assign_once(&mut ttl, reader.read_u8()?, "ttl"),
+        "origin" => assign_once(&mut origin, read_fixed(reader)?, "origin"),
+        "signature" => assign_once(&mut signature, read_bytes(reader)?, "signature"),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+
+    let req = storage_market::DiscoveryRequest {
+        object_size: object_size.ok_or(DecodeError::MissingField("object_size"))?,
+        shares: shares.ok_or(DecodeError::MissingField("shares"))?,
+        region,
+        max_price_per_block,
+        min_success_rate_ppm,
+        limit: limit.ok_or(DecodeError::MissingField("limit"))? as usize,
+    };
+
+    Ok(ProviderLookupRequest {
+        request: req,
+        nonce: nonce.ok_or(DecodeError::MissingField("nonce"))?,
+        issued_at: issued_at.ok_or(DecodeError::MissingField("issued_at"))?,
+        ttl: ttl.ok_or(DecodeError::MissingField("ttl"))?,
+        origin: origin.ok_or(DecodeError::MissingField("origin"))?,
+        signature: signature.ok_or(DecodeError::MissingField("signature"))?,
+    })
+}
+
+fn write_provider_lookup_response(
+    writer: &mut BinaryWriter,
+    response: &ProviderLookupResponse,
+) -> EncodeResult<()> {
+    writer.write_struct(|struct_writer| {
+        struct_writer.field_u64("nonce", response.nonce);
+        struct_writer.field_with("responder", |field_writer| {
+            write_fixed(field_writer, &response.responder);
+        });
+        struct_writer.field_with("providers", |field_writer| {
+            write_vec(
+                field_writer,
+                &response.providers,
+                "providers",
+                |writer, profile| storage_market::codec::write_provider_profile(writer, profile),
+            )
+        });
+        struct_writer.field_with("signature", |field_writer| {
+            write_bytes(field_writer, &response.signature, "signature")
+        });
+    });
+    Ok(())
+}
+
+fn read_provider_lookup_response(
+    reader: &mut BinaryReader<'_>,
+) -> binary_struct::Result<ProviderLookupResponse> {
+    let mut nonce = None;
+    let mut responder = None;
+    let mut providers: Option<Vec<storage_market::ProviderProfile>> = None;
+    let mut signature = None;
+
+    decode_struct(reader, Some(4), |key, reader| match key {
+        "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
+        "responder" => assign_once(&mut responder, read_fixed(reader)?, "responder"),
+        "providers" => assign_once(
+            &mut providers,
+            read_vec(reader, |reader| storage_market::codec::read_provider_profile(reader))?,
+            "providers",
+        ),
+        "signature" => assign_once(&mut signature, read_bytes(reader)?, "signature"),
+        other => Err(DecodeError::UnknownField(other.to_owned())),
+    })?;
+
+    Ok(ProviderLookupResponse {
+        nonce: nonce.ok_or(DecodeError::MissingField("nonce"))?,
+        responder: responder.ok_or(DecodeError::MissingField("responder"))?,
+        providers: providers.ok_or(DecodeError::MissingField("providers"))?,
+        signature: signature.ok_or(DecodeError::MissingField("signature"))?,
     })
 }
 

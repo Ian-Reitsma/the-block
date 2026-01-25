@@ -36,7 +36,7 @@
 ### Modules & Responsibilities
 - `node/src/blockchain/inter_shard.rs` — Cross-shard queue, deterministic ordering, and TTL enforcement.
 - `node/src/blockchain/shard_fork_choice.rs` — Maintains per-shard heads and reconciles with macro-block checkpoints.
-- `node/src/storage/blob_chain.rs` + `node/src/blob_chain.rs` — Blob root scheduling referenced in AGENTS.
+- `node/src/storage/blob_chain.rs` + `node/src/blob_chain.rs` — Canonical micro-shard root assembly (RootAssembler) and blob root scheduling referenced in AGENTS.
 - `ledger/src/shard.rs` — Defines `ShardState` serialization (`ShardState::to_bytes`, `::from_bytes`).
 - `node/src/gateway/storage_alloc.rs` — Schedules shard placements for storage workloads; same weighting is reused for compute lanes.
 
@@ -45,7 +45,7 @@
 | --- | --- | --- |
 | `blockchain::inter_shard::PendingMessage` | Envelope with origin shard, destination shard, commitment hash, and expiry height. | Stored in sled tree `inter_shard:<dst>` keyed by message index. |
 | `state::MerkleTrie` roots | Each shard column family maintains its own trie root hashed into macro-block checkpoints. | Column family `shard:{id}`. |
-| `node/src/blob_chain.rs::BlobRoot` | Contains `object_id`, `shard`, `receipt_hash`, and byte counters. | `blob_roots` sled tree + RPC exposures. |
+| `node/src/root_assembler.rs::RootBundle` | Canonical micro-shard bundle: slot, size class, hash, and ordered `MicroShardRootEntry` items (hash, shard, lane, payload bytes, DA window). | Stored via `RootManifest` entries keyed by size class + slot and hashed into block headers. |
 
 ### RPC
 - `node/src/rpc/shards.rs` (generated via `rpc/state_stream.rs`) — Allows clients to subscribe to shard roots; used by `contract-cli light follow-shard`.

@@ -6351,6 +6351,8 @@ impl Blockchain {
         } else {
             ReplayedEconomicsState::default()
         };
+        let mut last_root_slot_l2: Option<u64> = None;
+        let mut last_root_slot_l3: Option<u64> = None;
 
         for i in 0..chain.len() {
             let b = &chain[i];
@@ -6376,7 +6378,15 @@ impl Blockchain {
             {
                 return Err("coinbase_mismatch");
             }
-            Self::verify_root_bundles(b)?;
+            let slots = Self::verify_root_bundles_with_slots(
+                &b.root_bundles,
+                b.timestamp_millis,
+                last_root_slot_l2,
+                last_root_slot_l3,
+            )
+            .map_err(|_| "root_bundle_validation_failed")?;
+            last_root_slot_l2 = slots.0;
+            last_root_slot_l3 = slots.1;
             let calc = calculate_hash(
                 b.index,
                 &b.previous_hash,
@@ -7137,8 +7147,13 @@ impl Blockchain {
         timestamp / class.cadence_millis()
     }
 
-    fn verify_root_bundles(block: &Block) -> PyResult<()> {
-        for bundle in &block.root_bundles {
+    fn verify_root_bundles_with_slots(
+        bundles: &[RootBundle],
+        timestamp_millis: u64,
+        mut last_l2: Option<u64>,
+        mut last_l3: Option<u64>,
+    ) -> PyResult<(Option<u64>, Option<u64>)> {
+        for bundle in bundles {
             if bundle.entries.is_empty() {
                 return Err(py_value_err("root bundle contains no entries"));
             }
@@ -7146,11 +7161,31 @@ impl Blockchain {
             if computed != bundle.bundle_hash {
                 return Err(py_value_err("root bundle hash mismatch"));
             }
-            let expected_slot = Self::slot_for_timestamp(block.timestamp_millis, bundle.size_class);
+            let expected_slot = Self::slot_for_timestamp(timestamp_millis, bundle.size_class);
             if bundle.slot != expected_slot {
                 return Err(py_value_err("root bundle slot mismatch"));
             }
+            let last_seen = match bundle.size_class {
+                RootSizeClass::L2 => &mut last_l2,
+                RootSizeClass::L3 => &mut last_l3,
+            };
+            if let Some(prev) = *last_seen {
+                if bundle.slot <= prev {
+                    return Err(py_value_err("root bundle slot regression"));
+                }
+            }
+            *last_seen = Some(bundle.slot);
         }
+        Ok((last_l2, last_l3))
+    }
+
+    fn verify_root_bundles(&self, block: &Block) -> PyResult<()> {
+        let _ = Self::verify_root_bundles_with_slots(
+            &block.root_bundles,
+            block.timestamp_millis,
+            self.last_root_slot_l2,
+            self.last_root_slot_l3,
+        )?;
         Ok(())
     }
 

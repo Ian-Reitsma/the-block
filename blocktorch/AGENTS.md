@@ -21,7 +21,7 @@ The directory layout is intentionally shallow to make navigation unambiguous:
 - `experimental/` – preserves the legacy PyTorch-based path. Subdirectories include `orchard_ops/` for C++ and Python extension modules, `benchmarks/` for performance scripts, `tests/` for PyTorch-driven verification, `kernel_lib/` for prebuilt FlashAttention binaries, and transient holders like `data/` and `runs/` which remain ignored by Git.
 - `docs/` – houses project-wide narrative material.
 - `.github/` – contains continuous integration workflows: `workflows/macos.yml` for macOS and `workflows/linux.yml` for CPU-only builds.
-- `third_party/` – vendors external code. A trimmed `googletest` tree supplies headers and sources only; upstream tests, samples, and documentation were dropped to keep the repository small.
+- The `tests/harness.{h,cpp}` runner is fully in-house; no third-party code or vendored trees are present.
 
 ## Component Highlights
 - `Storage` implements intrusive reference counting to track underlying `MTLBuffer` allocations. The static factory `Tensor::fromData` wraps external memory without copying by accepting a raw pointer, explicit shape, data type, device, and optional deleter callback.
@@ -32,13 +32,13 @@ The directory layout is intentionally shallow to make navigation unambiguous:
 
 ## Build Protocol
 1. Obtain Xcode 15+ with the Metal 4 SDK; ensure command line tools are active. Builds only query the Metal SDK when `CMAKE_SYSTEM_NAME` is `Darwin` and `FindMetal.cmake` registers a stub `Metal::Metal` target elsewhere so CPU-only hosts can proceed without the SDK.
-2. From the repo root, configure with CMake into a `build/` dir using Ninja. Pass `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` to keep configuration offline and rely on the trimmed `third_party/googletest` tree or a system package; optionally enable `-DORCHARD_BUILD_EXPERIMENTAL=ON` to compile the legacy PyTorch bridge under `experimental/`.
+2. From the repo root, configure with CMake into a `build/` dir using Ninja. Optionally enable `-DORCHARD_BUILD_EXPERIMENTAL=ON` to compile the legacy PyTorch bridge under `experimental/`.
 3. Build the default target. Darwin emits `liborchard_core.a` and `liborchard_metal.a`; other platforms produce only `liborchard_core.a` as a CPU fallback.
 
 ## Test Protocol
 1. With a configured build tree, run the `check` target. Tests live under `metal-tensor/tests/` and exercise CPU/Metal paths.
 2. Run configure + tests before every PR and capture failure logs in the PR description when toolchains are missing.
-3. When `FETCHCONTENT_FULLY_DISCONNECTED=ON` is set during configuration the `metal_tensor_tests` target links against the trimmed `third_party/googletest` tree or a system installation so the suite executes without network access.
+3. The `metal_tensor_tests` target links only against the in-house harness and executes entirely offline.
 4. Tests that flip `ORCHARD_TENSOR_PROFILE` must call `tensor_profile_reset` after changing the environment and purge `/tmp/orchard_tensor_profile.log` with `tensor_profile_clear_log` to keep logs isolated.
 
 ## Benchmark Protocol
@@ -86,7 +86,7 @@ The directory layout is intentionally shallow to make navigation unambiguous:
 - The legacy PyTorch bridge persists under `experimental/` but is excluded from default builds.
 - Continuous integration now covers `macos-13` (M1) and `macos-14` (M2) with Xcode 15.3 pinned and Homebrew updates disabled. A Linux job installs a clang-based Objective-C++ toolchain and is allowed to fail for diagnostics.
 - Documentation outlines tensor internals, profiling hooks, and contributor expectations yet remains a living reference.
-- GoogleTest ships as a minimal vendored copy under `third_party/googletest` so tests compile without network access; obtain upstream tests and samples from the official repository when needed.
+- A custom test harness under `tests/harness.*` replaces GoogleTest so the suite remains first-party and offline.
   - Safe division recomputes denominator offsets after each broadcast step so
     zero denominators do not poison later elements.
   - Sum and mean shift stride metadata after axis reductions so dimension 1

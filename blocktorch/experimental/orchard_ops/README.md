@@ -19,7 +19,7 @@ Current additions include a dropout-aware FlashAttention backward launcher and a
 ## Contributor Protocol
 - Adhere to `../../AGENTS.md` when modifying extension code or Python glue.
 - Run `cmake -S . -B build -G Ninja` and `cmake --build build --target check` from the repository root; record any failures in the pull request.
-- When offline, configure with `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` so tests link against the trimmed `third_party/googletest` tree or a system installation without downloading.
+- Tests depend solely on the first-party harness under `metal-tensor/tests/`; configuration never fetches third-party code.
 - Use `rg` for symbol searches; do not rely on `ls -R` or `grep -R`.
 - Avoid committing compiled extensions, generated outputs, or files larger than five megabytes.
 - Keep each commit focused on one change with an imperative summary line and cite modified files by path and line number in the pull request.

@@ -42,8 +42,7 @@ Apple-Metal-Orchard/
       core/              (autograd, storage)
       runtime/           (Metal .mm + CPU fallback)
       kernels/           (Metal shader files)
-    tests/               (comprehensive)
-  third_party/           (GoogleTest, vendored)
+    tests/               (comprehensive, in-house harness)
   docs/                  (design notes)
 ```
 
@@ -79,7 +78,7 @@ the-block/
 - C++ stdlib: Standard (not a "third-party" dependency)
 
 **Build infrastructure:** Not runtime dependencies
-- CMake, GoogleTest: Build-time only
+- CMake, first-party harness (`metal-tensor/tests/harness.*`): Build-time only
 - Not part of shipped binary
 
 **Action:** You need to change **NOTHING**. Orchard is already first-party-only.

@@ -23,7 +23,7 @@ This plan is explicitly connected to [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_A
   - `blocktorch/metal-tensor/` houses the core: `metal/` for production sources (`common/`, `core/`, `kernels/`, `runtime/`), `tests/` for contiguity/autograd coverage, `docs/` for design notes, and `AGENTS.md` that governs tensor-level edits.
   - `experimental/` keeps the PyTorch bridge and FlashAttention kernels under `orchard_ops/`, `benchmarks/`, `tests/`, `kernel_lib/`, `data/`, and `runs/` (all but docs ignored by Git). Build this only when `-DORCHARD_BUILD_EXPERIMENTAL=ON`.
   - `scripts/`, `docs/`, and `benchmarks/run.py` encode build/profile automation; `bootstrap_codex.sh` and `cmake/` contain helper toolchains.
-  - `third_party/googletest` is trimmed; configure `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` when isolating builds.
+  - The `metal-tensor/tests/harness.*` runner is fully in-house; no third-party test framework remains.
 - **Feature cues to mirror in the plan**:
   - Rank-eight shape metadata, gradient logging, zero-copy transfers, and allocation profiling (`ORCHARD_TENSOR_PROFILE`) are all recorded inside `metal-tensor/metal/common/Profiling.h` and surfaced to the compute marketplace through receipts/metadata. Ensure the plan mentions how to propagate these diagnostics into `node/src/telemetry`.
   - Autograd instrumentation (requires_grad, Tensor::grad, Node/Edge graph, detach semantics) underpins proof determinism; annotate the metadata plan with `Tensor::detach`, `Tensor::is_alias_of`, and `tensor_profile_reset`.
@@ -79,7 +79,7 @@ This plan is explicitly connected to [`docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_A
   1. Define canonical artifact schema: job metadata, gradient serialization, SNARK proof descriptors, GPU kernel fingerprints (pull from `metal-tensor/metal/kernels`), profiler dumps, and CUDA build IDs.
   2. Establish sync points: versioned releases in BlockTorch repo, exported `ORCHARD_TENSOR_PROFILE` logs, and ledger proofs that mention job IDs; mention the `benchmarks/` output structure so artifacts are discoverable (`/tmp/bench/<commit>/benchmarks.json`, `runs/`).
   3. Add automation (scripts, CI) that pulls or vendors BlockTorch artifacts into `blocktorch/` / `node` for deterministic execution; reuse `blocktorch/scripts/bootstrap_codex.sh` and `cmake/` helpers to configure `metal-tensor` builds from the compute repo.
-  4. Document how `third_party/googletest` bridging works when building on Linux vs macOS to keep cross-platform deterministic.
+  4. Document how the first-party `metal-tensor/tests/harness.*` runner behaves on macOS vs Linux (Metal vs CPU fallback) so test determinism is consistent across platforms.
   5. Record the expected provenance of each artifact: commit hash, kernel file list, `ORCHARD_TENSOR_PROFILE` log checksum, GPU driver version, and cross-check in `docs/blocktorch_compute_integration_plan.md`.
 - **Checklist**:
   - [ ] Artifact schema documented, versioned, and mirrored in `docs/ECONOMIC_PHILOSOPHY_AND_GOVERNANCE_ANALYSIS.md`, referencing `blocktorch/docs/` + `metal-tensor/docs/design_spec_tensor_v0.md`.

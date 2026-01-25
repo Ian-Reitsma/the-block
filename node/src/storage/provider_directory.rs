@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use crate::net::{known_peers_with_info, load_net_key, send_msg};
+use crate::net::{known_peers_with_info, load_net_key, send_msg, Transport};
 #[cfg(feature = "quic")]
 use crate::net::send_quic_msg;
 use crate::rpc::storage::StorageMarketHandle;
@@ -8,7 +8,9 @@ use concurrency::{mutex, MutexExt, MutexT};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
+use rand::RngCore;
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use storage_market::{DiscoveryRequest, ProviderDirectory, ProviderProfile};
@@ -20,6 +22,9 @@ use crate::telemetry::{
 };
 use std::time::Instant;
 
+const LOOKUP_MAX_AGE_SECS: u64 = 30;
+const LOOKUP_RATE_LIMIT_SECS: u64 = 5;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProviderAdvertisement {
     pub profile: ProviderProfile,
@@ -30,6 +35,24 @@ pub struct ProviderAdvertisement {
     pub signature: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProviderLookupRequest {
+    pub request: DiscoveryRequest,
+    pub nonce: u64,
+    pub issued_at: u64,
+    pub ttl: u8,
+    pub origin: [u8; 32],
+    pub signature: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProviderLookupResponse {
+    pub nonce: u64,
+    pub responder: [u8; 32],
+    pub providers: Vec<ProviderProfile>,
+    pub signature: Vec<u8>,
+}
+
 #[derive(Serialize)]
 struct ProviderAdvertisementBody {
     profile: ProviderProfile,
@@ -37,6 +60,22 @@ struct ProviderAdvertisementBody {
     ttl_secs: u64,
     expires_at: u64,
     publisher: [u8; 32],
+}
+
+#[derive(Serialize)]
+struct ProviderLookupBody<'a> {
+    request: &'a DiscoveryRequest,
+    nonce: u64,
+    issued_at: u64,
+    ttl: u8,
+    origin: [u8; 32],
+}
+
+#[derive(Serialize)]
+struct ProviderLookupResponseBody<'a> {
+    nonce: u64,
+    responder: [u8; 32],
+    providers: &'a [ProviderProfile],
 }
 
 impl ProviderAdvertisement {
@@ -86,11 +125,98 @@ impl ProviderAdvertisement {
     }
 }
 
+impl ProviderLookupRequest {
+    pub fn sign(request: DiscoveryRequest, ttl: u8, sk: &SigningKey) -> Self {
+        let mut nonce_bytes = [0u8; 8];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = u64::from_le_bytes(nonce_bytes);
+        let body = ProviderLookupBody {
+            request: &request,
+            nonce,
+            issued_at: now(),
+            ttl,
+            origin: sk.verifying_key().to_bytes(),
+        };
+        let bytes = serialize_lookup_body(&body);
+        let sig = sk.sign(&bytes);
+        Self {
+            request,
+            nonce,
+            issued_at: body.issued_at,
+            ttl,
+            origin: body.origin,
+            signature: sig.to_bytes().to_vec(),
+        }
+    }
+
+    pub fn verify(&self) -> bool {
+        if now().saturating_sub(self.issued_at) > LOOKUP_MAX_AGE_SECS {
+            return false;
+        }
+        let vk = match VerifyingKey::from_bytes(&self.origin) {
+            Ok(vk) => vk,
+            Err(_) => return false,
+        };
+        let body = ProviderLookupBody {
+            request: &self.request,
+            nonce: self.nonce,
+            issued_at: self.issued_at,
+            ttl: self.ttl,
+            origin: self.origin,
+        };
+        let bytes = serialize_lookup_body(&body);
+        let sig = match Signature::from_bytes(&self.signature) {
+            Ok(sig) => sig,
+            Err(_) => return false,
+        };
+        vk.verify(&bytes, &sig).is_ok()
+    }
+}
+
+impl ProviderLookupResponse {
+    pub fn sign(nonce: u64, providers: Vec<ProviderProfile>, sk: &SigningKey) -> Self {
+        let body = ProviderLookupResponseBody {
+            nonce,
+            responder: sk.verifying_key().to_bytes(),
+            providers: &providers,
+        };
+        let bytes = serialize_lookup_response_body(&body);
+        let sig = sk.sign(&bytes);
+        Self {
+            nonce,
+            responder: body.responder,
+            providers,
+            signature: sig.to_bytes().to_vec(),
+        }
+    }
+
+    pub fn verify(&self) -> bool {
+        let vk = match VerifyingKey::from_bytes(&self.responder) {
+            Ok(vk) => vk,
+            Err(_) => return false,
+        };
+        let body = ProviderLookupResponseBody {
+            nonce: self.nonce,
+            responder: self.responder,
+            providers: &self.providers,
+        };
+        let bytes = serialize_lookup_response_body(&body);
+        let sig = match Signature::from_bytes(&self.signature) {
+            Ok(sig) => sig,
+            Err(_) => return false,
+        };
+        vk.verify(&bytes, &sig).is_ok()
+    }
+}
+
 pub struct NetworkProviderDirectory {
     market: StorageMarketHandle,
     cache: MutexT<HashMap<String, ProviderProfile>>,
     ttl_secs: u64,
     seen_publishers: MutexT<HashSet<[u8; 32]>>,
+    seen_requests: MutexT<HashSet<(u64, [u8; 32])>>,
+    seen_responses: MutexT<HashSet<(u64, [u8; 32])>>,
+    last_request_from_origin: MutexT<HashMap<[u8; 32], u64>>,
 }
 
 impl NetworkProviderDirectory {
@@ -100,6 +226,9 @@ impl NetworkProviderDirectory {
             cache: mutex(HashMap::new()),
             ttl_secs,
             seen_publishers: mutex(HashSet::new()),
+            seen_requests: mutex(HashSet::new()),
+            seen_responses: mutex(HashSet::new()),
+            last_request_from_origin: mutex(HashMap::new()),
         }
     }
 
@@ -121,6 +250,62 @@ impl NetworkProviderDirectory {
             #[cfg(feature = "telemetry")]
             STORAGE_PROVIDER_STALE_REJECT_TOTAL.inc();
         }
+    }
+
+    pub fn ingest_lookup_request(
+        &self,
+        request: ProviderLookupRequest,
+        responder: Option<SocketAddr>,
+    ) {
+        if !request.verify() {
+            return;
+        }
+        {
+            let mut guard = self.seen_requests.guard();
+            if guard.contains(&(request.nonce, request.origin)) {
+                return;
+            }
+            guard.insert((request.nonce, request.origin));
+        }
+        if self.rate_limited(request.origin, request.issued_at) {
+            return;
+        }
+
+        let matches = self.discover(&request.request).unwrap_or_default();
+        if let Some(addr) = responder {
+            self.send_lookup_response(request.nonce, matches.clone(), addr);
+        }
+
+        if request.ttl > 0 {
+            self.forward_lookup(request);
+        }
+    }
+
+    pub fn ingest_lookup_response(&self, response: ProviderLookupResponse) {
+        if !response.verify() {
+            return;
+        }
+        {
+            let mut guard = self.seen_responses.guard();
+            if guard.contains(&(response.nonce, response.responder)) {
+                return;
+            }
+            guard.insert((response.nonce, response.responder));
+        }
+        for profile in response.providers {
+            let _ = self.cache_profile(profile.clone());
+            let _ = self.market.guard().cache_provider_profile(profile);
+        }
+    }
+
+    fn rate_limited(&self, origin: [u8; 32], issued_at: u64) -> bool {
+        let mut guard = self.last_request_from_origin.guard();
+        let last = guard.get(&origin).copied().unwrap_or(0);
+        if issued_at.saturating_sub(last) < LOOKUP_RATE_LIMIT_SECS {
+            return true;
+        }
+        guard.insert(origin, issued_at);
+        false
     }
 
     fn track_publisher(&self, publisher: [u8; 32]) {
@@ -173,10 +358,10 @@ impl NetworkProviderDirectory {
     fn broadcast(&self, msg: crate::net::Message) {
         for (addr, transport, cert) in known_peers_with_info() {
             match transport {
-                crate::net::Transport::Tcp => {
+                Transport::Tcp => {
                     let _ = send_msg(addr, &msg);
                 }
-                crate::net::Transport::Quic => {
+                Transport::Quic => {
                     #[cfg(feature = "quic")]
                     if let Some(c) = cert.as_ref() {
                         let _ = send_quic_msg(addr, c, &msg);
@@ -227,6 +412,9 @@ impl ProviderDirectory for NetworkProviderDirectory {
             STORAGE_PROVIDER_CANDIDATE_GAUGE.set(out.len() as i64);
             STORAGE_PROVIDER_DISCOVERY_LATENCY_SECONDS.observe(started.elapsed().as_secs_f64());
         }
+        if out.is_empty() {
+            self.broadcast_lookup(request.clone());
+        }
         Ok(out)
     }
 }
@@ -236,7 +424,12 @@ type DirectoryHandle = Arc<MutexT<Option<Arc<NetworkProviderDirectory>>>>;
 static DIRECTORY: concurrency::Lazy<DirectoryHandle> = concurrency::Lazy::new(|| mutex(None));
 
 pub fn install_directory(market: StorageMarketHandle) {
-    let dir = Arc::new(NetworkProviderDirectory::new(market, 15 * 60));
+    let dir = Arc::new(NetworkProviderDirectory::new(market.clone(), 15 * 60));
+    if let Ok(profiles) = market.guard().provider_profiles() {
+        for profile in profiles {
+            let _ = dir.cache_profile(profile.clone());
+        }
+    }
     *DIRECTORY.guard() = Some(dir.clone());
     storage_market::install_provider_directory(dir);
 }
@@ -248,6 +441,18 @@ pub fn directory() -> Option<Arc<NetworkProviderDirectory>> {
 pub fn handle_advertisement(advert: ProviderAdvertisement) {
     if let Some(dir) = directory() {
         dir.ingest_advertisement(advert);
+    }
+}
+
+pub fn handle_lookup_request(request: ProviderLookupRequest, responder: Option<SocketAddr>) {
+    if let Some(dir) = directory() {
+        dir.ingest_lookup_request(request, responder);
+    }
+}
+
+pub fn handle_lookup_response(response: ProviderLookupResponse) {
+    if let Some(dir) = directory() {
+        dir.ingest_lookup_response(response);
     }
 }
 
@@ -295,4 +500,164 @@ fn serialize_body(body: &ProviderAdvertisementBody) -> Vec<u8> {
     foundation_serialization::json::to_vec_value(&foundation_serialization::json::Value::Object(
         map,
     ))
+}
+
+fn serialize_lookup_body(body: &ProviderLookupBody<'_>) -> Vec<u8> {
+    let mut map = foundation_serialization::json::Map::new();
+    let mut req = foundation_serialization::json::Map::new();
+    req.insert(
+        "object_size".into(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.request.object_size),
+        ),
+    );
+    req.insert(
+        "shares".into(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.request.shares),
+        ),
+    );
+    req.insert(
+        "region".into(),
+        body.request
+            .region
+            .as_ref()
+            .map(|r| foundation_serialization::json::Value::String(r.clone()))
+            .unwrap_or(foundation_serialization::json::Value::Null),
+    );
+    req.insert(
+        "max_price_per_block".into(),
+        body.request
+            .max_price_per_block
+            .map(|p| foundation_serialization::json::Value::Number(
+                foundation_serialization::json::Number::from(p),
+            ))
+            .unwrap_or(foundation_serialization::json::Value::Null),
+    );
+    req.insert(
+        "min_success_rate_ppm".into(),
+        body.request
+            .min_success_rate_ppm
+            .map(|p| foundation_serialization::json::Value::Number(
+                foundation_serialization::json::Number::from(p),
+            ))
+            .unwrap_or(foundation_serialization::json::Value::Null),
+    );
+    req.insert(
+        "limit".into(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.request.limit as u64),
+        ),
+    );
+    map.insert(
+        "request".into(),
+        foundation_serialization::json::Value::Object(req),
+    );
+    map.insert(
+        "nonce".to_string(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.nonce),
+        ),
+    );
+    map.insert(
+        "issued_at".to_string(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.issued_at),
+        ),
+    );
+    map.insert(
+        "ttl".to_string(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.ttl),
+        ),
+    );
+    map.insert(
+        "origin".to_string(),
+        foundation_serialization::json::value_from_slice(&body.origin).unwrap_or(
+            foundation_serialization::json::Value::Array(
+                body.origin
+                    .iter()
+                    .map(|b| {
+                        foundation_serialization::json::Value::Number(
+                            foundation_serialization::json::Number::from(*b as u64),
+                        )
+                    })
+                    .collect(),
+            ),
+        ),
+    );
+    foundation_serialization::json::to_vec_value(&foundation_serialization::json::Value::Object(
+        map,
+    ))
+}
+
+fn serialize_lookup_response_body(body: &ProviderLookupResponseBody<'_>) -> Vec<u8> {
+    let mut map = foundation_serialization::json::Map::new();
+    map.insert(
+        "nonce".to_string(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.nonce),
+        ),
+    );
+    map.insert(
+        "responder".to_string(),
+        foundation_serialization::json::value_from_slice(&body.responder).unwrap_or(
+            foundation_serialization::json::Value::Array(
+                body.responder
+                    .iter()
+                    .map(|b| {
+                        foundation_serialization::json::Value::Number(
+                            foundation_serialization::json::Number::from(*b as u64),
+                        )
+                    })
+                    .collect(),
+            ),
+        ),
+    );
+    map.insert(
+        "providers".to_string(),
+        foundation_serialization::json::value_from_slice(
+            &body
+                .providers
+                .iter()
+                .map(|p| storage_market::codec::serialize_provider_profile(p).unwrap_or_default())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or(foundation_serialization::json::Value::Null),
+    );
+    foundation_serialization::json::to_vec_value(&foundation_serialization::json::Value::Object(
+        map,
+    ))
+}
+
+impl NetworkProviderDirectory {
+    fn broadcast_lookup(&self, request: DiscoveryRequest) {
+        let sk = load_net_key();
+        let lookup = ProviderLookupRequest::sign(request, 2, &sk);
+        if let Ok(msg) =
+            crate::net::Message::new(crate::net::Payload::StorageProviderLookup(lookup), &sk)
+        {
+            self.broadcast(msg);
+        }
+    }
+
+    fn send_lookup_response(&self, nonce: u64, providers: Vec<ProviderProfile>, addr: SocketAddr) {
+        let sk = load_net_key();
+        let response = ProviderLookupResponse::sign(nonce, providers, &sk);
+        if let Ok(msg) = crate::net::Message::new(
+            crate::net::Payload::StorageProviderLookupResponse(response),
+            &sk,
+        ) {
+            let _ = send_msg(addr, &msg);
+        }
+    }
+
+    fn forward_lookup(&self, request: ProviderLookupRequest) {
+        let sk = load_net_key();
+        if let Ok(msg) =
+            crate::net::Message::new(crate::net::Payload::StorageProviderLookup(request), &sk)
+        {
+            self.broadcast(msg);
+        }
+    }
 }

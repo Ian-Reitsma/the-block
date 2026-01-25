@@ -12,7 +12,7 @@ Provide download scripts or links here if specific datasets become required for 
 - Do not commit datasets or generated files; this directory stays untracked except for explanatory README files.
 - Document dataset origin, version, and preprocessing using inline code for commands and flags; avoid fenced code blocks.
 - Prior to submitting changes elsewhere, run `cmake -S . -B build -G Ninja` and `cmake --build build --target check` from the repository root and capture the output.
-- Use `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` during configuration when offline so the test suite links against the trimmed `third_party/googletest` tree or a system installation.
+- Tests run on the first-party harness under `metal-tensor/tests/` and never fetch external dependencies during configuration.
 - Keep commits single-purpose with an imperative summary line and cite paths and line numbers in the pull request description.
 - Use `rg` for repository-wide searches and work only on the default branch.
 - When profiling behaviour is exercised, call `tensor_profile_reset` after

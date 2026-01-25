@@ -4,7 +4,7 @@
 #include "runtime/Runtime.h"
 #include <array>
 #include <cstdlib>
-#include <gtest/gtest.h>
+#include "harness.h"
 
 using namespace orchard::core::tensor;
 using namespace orchard::core::autograd;

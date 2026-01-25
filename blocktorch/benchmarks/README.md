@@ -19,7 +19,7 @@ Each JSON file includes a top-level dictionary keyed by operation name. Entries 
 ## Contributor Protocol
 - Consult `../AGENTS.md` for the authoritative repository policy.
 - Run `cmake -S . -B build -G Ninja` and `cmake --build build --target check` from the repository root before pushing changes; include any diagnostic output in pull requests.
-- When configuring offline, supply `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` so the test suite links against the trimmed `third_party/googletest` tree or a system installation without attempting a download.
+- The test suite links only against the in-house harness under `metal-tensor/tests/` and never downloads dependencies, so offline configuration requires no extra flags.
 - Search the repository with `rg` rather than `ls -R` or `grep -R`.
 - Do not commit generated JSON outputs or any file exceeding five megabytes.
 - Use `clang-format` for C++ and Objective-C++ sources.

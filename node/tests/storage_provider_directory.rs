@@ -4,7 +4,9 @@ use concurrency::{mutex, MutexT};
 use storage_market::{DiscoveryRequest, ProviderProfile, StorageMarket};
 use sys::tempfile::tempdir;
 use the_block::net::load_net_key;
-use the_block::storage::provider_directory::{self, ProviderAdvertisement};
+use the_block::storage::provider_directory::{
+    self, ProviderAdvertisement, ProviderLookupResponse,
+};
 
 type MarketHandle = std::sync::Arc<MutexT<StorageMarket>>;
 
@@ -45,4 +47,36 @@ fn discovers_remote_provider_from_advertisement() {
     assert_eq!(providers.len(), 1);
     assert_eq!(providers[0].provider_id, remote.provider_id);
     assert_eq!(providers[0].version, remote.version);
+}
+
+#[test]
+fn hydrates_directory_from_lookup_response() {
+    let dir = tempdir().expect("tempdir");
+    let market_path = dir.path().join("market");
+    let key_path = dir.path().join("net_key_lookup");
+    std::env::set_var("TB_NET_KEY_PATH", key_path.to_string_lossy().to_string());
+    let handle = market_handle(market_path);
+    provider_directory::install_directory(handle.clone());
+
+    let mut remote = ProviderProfile::new("remote-lookup".into(), 16 * 1024, 7, 50);
+    remote.version = 3;
+    let key = load_net_key();
+    let resp = provider_directory::ProviderLookupResponse::sign(42, vec![remote.clone()], &key);
+    provider_directory::handle_lookup_response(resp);
+
+    let request = DiscoveryRequest {
+        object_size: 512,
+        shares: 2,
+        region: None,
+        max_price_per_block: None,
+        min_success_rate_ppm: None,
+        limit: 3,
+    };
+
+    let providers = handle
+        .guard()
+        .discover_providers(request)
+        .expect("discover providers");
+    assert_eq!(providers.len(), 1);
+    assert_eq!(providers[0].provider_id, remote.provider_id);
 }

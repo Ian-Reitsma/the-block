@@ -1433,6 +1433,12 @@ impl PeerSet {
             Payload::StorageProviderAdvertisement(advert) => {
                 provider_directory::handle_advertisement(advert);
             }
+            Payload::StorageProviderLookup(request) => {
+                provider_directory::handle_lookup_request(request, addr);
+            }
+            Payload::StorageProviderLookupResponse(response) => {
+                provider_directory::handle_lookup_response(response);
+            }
         }
     }
 }

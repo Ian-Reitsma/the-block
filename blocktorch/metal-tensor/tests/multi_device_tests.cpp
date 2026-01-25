@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+#include "harness.h"
 
 #include <array>
 #include <atomic>

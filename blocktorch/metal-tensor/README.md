@@ -36,7 +36,7 @@
 
 ## Building
 1. Ensure Xcode 15+, the Metal 4 SDK, and command line tools are installed.
-2. From the repository root run `cmake -S . -B build -G Ninja` followed by `cmake --build build` to configure and build the library. CMake consults the Metal SDK only when `CMAKE_SYSTEM_NAME` is `Darwin`; other platforms receive a stub `Metal::Metal` target, skip Objective-C++ sources, and compile `metal/runtime/runtime_cpu.cpp`. Supplying `-DFETCHCONTENT_FULLY_DISCONNECTED=ON` during configuration directs tests to the trimmed `third_party/googletest` tree or a system package and keeps the process offline.
+2. From the repository root run `cmake -S . -B build -G Ninja` followed by `cmake --build build` to configure and build the library. CMake consults the Metal SDK only when `CMAKE_SYSTEM_NAME` is `Darwin`; other platforms receive a stub `Metal::Metal` target, skip Objective-C++ sources, and compile `metal/runtime/runtime_cpu.cpp`. Tests link solely against the in-house harness under `metal-tensor/tests/` so configuration never fetches external code.
 3. Non-Apple hosts follow the same steps and produce only `liborchard_core.a`; include any diagnostic output in pull requests.
 
 ## Testing

@@ -27,7 +27,7 @@
 - The existing FlashAttention forward pass continues to work through `libflash_attn.dylib`. Build scripts for the dylib include headers from `metal-tensor/`, and a shim converts `orchard::Tensor` to `at::Tensor` during the transition period.
 
 ### 7. Validation Matrix & Testing Strategy
-- Unit tests live under `metal-tensor/tests/` and use a vendored copy of GoogleTest under `third_party/googletest`. They verify zero-copy `to("cpu")`, slice/view mutation coherence, clone storage independence, data pointer alignment, and allocator stress with 100 k alloc/free cycles.
+- Unit tests live under `metal-tensor/tests/` and run on the in-house harness in `tests/harness.*`. They verify zero-copy `to("cpu")`, slice/view mutation coherence, clone storage independence, data pointer alignment, and allocator stress with 100 k alloc/free cycles.
 - Fuzz tests and race-condition tests (planned) will exercise random shape/stride transformations and multi-threaded reference counting. Any imbalance or lock misuse fails the suite to keep concurrency bugs from creeping in.
 - Before every pull request, run `cmake --build build --target check` on a configured build tree and capture success or failure in the pull request description.
 
