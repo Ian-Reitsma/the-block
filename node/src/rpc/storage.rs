@@ -15,6 +15,7 @@ use crate::storage::marketplace::SearchOptions;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
+use crate::market_gates::{self, MarketMode};
 
 fn json_object(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
@@ -36,6 +37,21 @@ fn number_from_option_i32(value: Option<i32>) -> Value {
     value
         .map(|inner| Value::Number(Number::from(inner)))
         .unwrap_or(Value::Null)
+}
+
+fn gate_rehearsal_response(action: &str) -> Value {
+    json_object(vec![
+        ("status", Value::String("rehearsal".to_string())),
+        ("mode", Value::String("storage_rehearsal".to_string())),
+        ("action", Value::String(action.to_string())),
+    ])
+}
+
+fn ensure_storage_trade(action: &str) -> Option<Value> {
+    if market_gates::storage_mode() == MarketMode::Rehearsal {
+        return Some(gate_rehearsal_response(action));
+    }
+    None
 }
 
 fn string_from_option(value: Option<String>) -> Value {
@@ -313,6 +329,9 @@ pub fn upload(
     contract: StorageContract,
     offers: Vec<StorageOffer>,
 ) -> foundation_serialization::json::Value {
+    if let Some(resp) = ensure_storage_trade("upload") {
+        return resp;
+    }
     let allocation = crate::gateway::storage_alloc::allocate(&offers, contract.shares);
     if allocation.is_empty() {
         return error_value("no_providers");
@@ -360,6 +379,9 @@ pub fn challenge(
     proof: &MerkleProof,
     current_block: u64,
 ) -> foundation_serialization::json::Value {
+    if let Some(resp) = ensure_storage_trade("challenge") {
+        return resp;
+    }
     let record = match MARKET.guard().load_contract(object_id) {
         Ok(Some(record)) => record,
         Ok(None) => return error_value("not_found"),
@@ -781,9 +803,12 @@ pub fn drive_put(encoded: &str) -> Value {
 /// settlement receipts, and converts them to the canonical `StorageReceipt` format
 /// used in blocks.
 pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
-    let receipts: Vec<_> = MARKET
-        .guard()
-        .drain_receipts()
+    let drained = MARKET.guard().drain_receipts();
+    if market_gates::storage_mode() == MarketMode::Rehearsal {
+        // Clear receipts but do not emit them while in rehearsal.
+        return Vec::new();
+    }
+    let receipts: Vec<_> = drained
         .into_iter()
         .map(|r| crate::receipts::StorageReceipt {
             contract_id: r.contract_id,

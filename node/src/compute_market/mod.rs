@@ -3,6 +3,8 @@ use crate::receipts::BlockTorchReceiptMetadata;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
+use crate::market_gates::{self, MarketMode};
+use crate::market_gates::{self, MarketMode};
 use concurrency::{mutex, MutexExt, MutexT};
 use foundation_serialization::{Deserialize, Serialize};
 use settlement::{SlaOutcome, SlaResolutionKind};
@@ -376,6 +378,10 @@ pub struct Market {
 }
 
 impl Market {
+    fn settlement_allowed() -> bool {
+        market_gates::compute_mode() == MarketMode::Trade
+    }
+
     /// Create an empty market.
     pub fn new() -> Self {
         admission::record_available_shards(100);
@@ -413,6 +419,9 @@ impl Market {
     }
 
     fn sweep_overdue_jobs(&mut self) {
+        if !Self::settlement_allowed() {
+            return;
+        }
         for resolution in settlement::Settlement::sweep_overdue() {
             match &resolution.outcome {
                 SlaResolutionKind::Violated { .. } => {
@@ -677,6 +686,9 @@ impl Market {
         if !scheduler::cancel_job(job_id, &state.provider, reason) {
             return None;
         }
+        if !Self::settlement_allowed() {
+            return Some((state.provider_bond, state.job.consumer_bond));
+        }
         let outcome = match reason {
             scheduler::CancelReason::Provider | scheduler::CancelReason::ProviderFault => {
                 SlaOutcome::Violated {
@@ -798,7 +810,9 @@ impl Market {
             return Err("payout mismatch");
         }
         record_units_processed(slice_units);
-        settlement::Settlement::accrue(&state.provider, "payout", proof.payout);
+        if Self::settlement_allowed() {
+            settlement::Settlement::accrue(&state.provider, "payout", proof.payout);
+        }
         state.paid_slices += 1;
         if state.paid_slices == state.job.slices.len() {
             state.completed = true;
@@ -824,6 +838,9 @@ impl Market {
         let mut provider_refund = state.provider_bond;
         let mut consumer_refund = state.job.consumer_bond;
         let has_accel = state.job.capability.accelerator.is_some();
+        if !Self::settlement_allowed() {
+            return Some((provider_refund, consumer_refund));
+        }
         let resolution = if let Some((expected, actual)) = scheduler::job_duration(job_id) {
             if expected > 0 && actual > expected {
                 scheduler::record_failure(&provider_id);
@@ -957,6 +974,10 @@ pub fn set_compute_current_block(block_height: u64) {
 /// Drain pending compute market receipts for block inclusion
 pub fn drain_compute_receipts() -> Vec<crate::ComputeReceipt> {
     let receipts = compute_market().drain_receipts();
+    if market_gates::compute_mode() == MarketMode::Rehearsal {
+        // Clear receipts but avoid emitting when gate is not active.
+        return Vec::new();
+    }
 
     // Record telemetry for drain operation
     #[cfg(feature = "telemetry")]
@@ -976,7 +997,11 @@ pub fn drain_compute_receipts() -> Vec<crate::ComputeReceipt> {
 
 /// Drain compute SLA slash receipts for inclusion in block receipts.
 pub fn drain_compute_slash_receipts(block_height: u64) -> Vec<crate::ComputeSlashReceipt> {
-    settlement::Settlement::drain_slash_receipts(block_height)
+    let receipts = settlement::Settlement::drain_slash_receipts(block_height);
+    if market_gates::compute_mode() == MarketMode::Rehearsal {
+        return Vec::new();
+    }
+    receipts
 }
 
 fn prefer_gpu_backend(capability: &scheduler::Capability) -> bool {

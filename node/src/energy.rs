@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::governance::NODE_GOV_STORE;
+use crate::market_gates::{self, MarketMode};
 use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::energy as energy_metrics;
@@ -616,6 +617,10 @@ pub fn drain_energy_receipts() -> Vec<EnergyReceipt> {
         guard.market.drain_receipts()
     }; // Lock released here
 
+    if market_gates::energy_mode() == MarketMode::Rehearsal {
+        return Vec::new();
+    }
+
     // Record telemetry for drain operation
     #[cfg(feature = "telemetry")]
     {
@@ -650,6 +655,9 @@ pub fn drain_energy_slash_receipts() -> Vec<EnergySlash> {
         let mut guard = store();
         guard.drain_slashes()
     };
+    if market_gates::energy_mode() == MarketMode::Rehearsal {
+        return Vec::new();
+    }
     if !slashes.is_empty() {
         let mut guard = store();
         if let Err(err) = guard.persist_slashes() {

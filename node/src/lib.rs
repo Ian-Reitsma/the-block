@@ -143,6 +143,7 @@ pub mod launch_governor;
 pub mod light_client;
 pub mod liquidity;
 pub mod localnet;
+pub mod market_gates;
 pub mod relay;
 pub mod net;
 pub mod partition_recover;
@@ -1204,6 +1205,7 @@ impl Default for Blockchain {
             "",
             crate::compute_market::settlement::SettleMode::DryRun,
         );
+        crate::market_gates::sync_from_params(&bc.params);
 
         bc
     }
@@ -3053,6 +3055,7 @@ impl Blockchain {
             telemetry::ORPHAN_SWEEP_TOTAL.inc_by(missing_drop_total);
             telemetry::STARTUP_TTL_DROP_TOTAL.inc_by(ttl_drop_total);
         }
+        crate::market_gates::sync_from_params(&bc.params);
         bc.recompute_root_slots();
         Ok(bc)
     }

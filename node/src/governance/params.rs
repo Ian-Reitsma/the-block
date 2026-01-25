@@ -2,6 +2,7 @@ use super::ParamKey;
 use crate::ad_readiness::AdReadinessConfig;
 use crate::energy::{self, GovernanceEnergyParams};
 use crate::governance::{EnergySettlementMode, EnergySettlementPayload};
+use crate::market_gates::{self, MarketMode};
 use crate::scheduler::{self, ServiceClass};
 use crate::Blockchain;
 use ad_market::{DistributionPolicy, MarketplaceHandle};
@@ -155,14 +156,17 @@ impl<'a> Runtime<'a> {
 
     pub fn set_launch_storage_autopilot(&mut self, enabled: bool) {
         self.bc.params.launch_storage_autopilot = if enabled { 1 } else { 0 };
+        market_gates::set_storage_mode(MarketMode::from_enabled(enabled));
     }
 
     pub fn set_launch_compute_autopilot(&mut self, enabled: bool) {
         self.bc.params.launch_compute_autopilot = if enabled { 1 } else { 0 };
+        market_gates::set_compute_mode(MarketMode::from_enabled(enabled));
     }
 
     pub fn set_launch_energy_autopilot(&mut self, enabled: bool) {
         self.bc.params.launch_energy_autopilot = if enabled { 1 } else { 0 };
+        market_gates::set_energy_mode(MarketMode::from_enabled(enabled));
     }
 
     pub fn set_consumer_p90_comfort(&mut self, v: u64) {

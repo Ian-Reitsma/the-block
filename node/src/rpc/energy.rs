@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 use crate::energy::{self, DisputeError, DisputeFilter, DisputeStatus};
+use crate::market_gates::{self, MarketMode};
 use crypto_suite::hex;
 use energy_market::{
     EnergyCredit, EnergyMarketError, EnergyProvider, EnergyReceipt, MeterReading, H256,
@@ -16,6 +17,7 @@ const ERR_SETTLEMENT_CONFLICT: i32 = -33005;
 const ERR_PROVIDER_INACTIVE: i32 = -33006;
 const ERR_NONCE_REPLAY: i32 = -33007;
 const ERR_TIMESTAMP_SKEW: i32 = -33008;
+const ERR_AUTOPILOT_REHEARSAL: i32 = -33020;
 const ERR_INVALID_PARAMS: i32 = -32602;
 
 fn energy_rpc_error(code: i32, message: impl Into<String>) -> RpcError {
@@ -28,6 +30,16 @@ fn invalid_params(message: impl Into<String>) -> RpcError {
 
 fn number(value: u64) -> Value {
     Value::Number(Number::from(value))
+}
+
+fn guard_energy_trade(method: &str) -> Option<RpcError> {
+    if market_gates::energy_mode() == MarketMode::Rehearsal {
+        return Some(energy_rpc_error(
+            ERR_AUTOPILOT_REHEARSAL,
+            format!("{method} blocked: energy market in rehearsal"),
+        ));
+    }
+    None
 }
 
 fn provider_value(provider: &EnergyProvider) -> Value {
@@ -328,6 +340,9 @@ fn map_dispute_error(err: DisputeError) -> RpcError {
 }
 
 pub fn register(params: &Params) -> Result<Value, RpcError> {
+    if let Some(err) = guard_energy_trade("energy.register_provider") {
+        return Err(err);
+    }
     let params = params_object(params)?;
     let capacity = require_u64(params, "capacity_kwh")?;
     let price = require_u64(params, "price_per_kwh")?;
@@ -342,6 +357,9 @@ pub fn register(params: &Params) -> Result<Value, RpcError> {
 }
 
 pub fn update_provider(params: &Params) -> Result<Value, RpcError> {
+    if let Some(err) = guard_energy_trade("energy.update_provider") {
+        return Err(err);
+    }
     let params = params_object(params)?;
     let provider_id = require_string(params, "provider_id")?;
     let capacity = optional_u64(params, "capacity_kwh");
@@ -547,6 +565,9 @@ pub fn credits(params: &Params) -> Result<Value, RpcError> {
 }
 
 pub fn flag_dispute(params: &Params, block: u64) -> Result<Value, RpcError> {
+    if let Some(err) = guard_energy_trade("energy.flag_dispute") {
+        return Err(err);
+    }
     let params = params_object(params)?;
     let meter_hash = require_string(params, "meter_hash").and_then(|hex| decode_hash(&hex))?;
     let reason = require_string(params, "reason")?;
@@ -558,6 +579,9 @@ pub fn flag_dispute(params: &Params, block: u64) -> Result<Value, RpcError> {
 }
 
 pub fn resolve_dispute(params: &Params, block: u64) -> Result<Value, RpcError> {
+    if let Some(err) = guard_energy_trade("energy.resolve_dispute") {
+        return Err(err);
+    }
     let params = params_object(params)?;
     let dispute_id = require_u64(params, "dispute_id")?;
     let resolver = optional_string(params, "resolver").unwrap_or_else(|| "system".into());
@@ -569,6 +593,9 @@ pub fn resolve_dispute(params: &Params, block: u64) -> Result<Value, RpcError> {
 }
 
 pub fn settle(params: &Params, block: u64) -> Result<Value, RpcError> {
+    if let Some(err) = guard_energy_trade("energy.settle") {
+        return Err(err);
+    }
     let params = params_object(params)?;
     let provider_id = require_string(params, "provider_id")?;
     let buyer = require_string(params, "buyer").unwrap_or_else(|_| "anonymous".into());
@@ -581,6 +608,9 @@ pub fn settle(params: &Params, block: u64) -> Result<Value, RpcError> {
 }
 
 pub fn submit_reading(params: &Params, block: u64) -> Result<Value, RpcError> {
+    if let Some(err) = guard_energy_trade("energy.submit_reading") {
+        return Err(err);
+    }
     let params = params_object(params)?;
     let provider_id = require_string(params, "provider_id")?;
     let meter_address = require_string(params, "meter_address")?;
