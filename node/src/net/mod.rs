@@ -1981,6 +1981,12 @@ impl Node {
                                             Payload::StorageProviderLookupResponse(_) => {
                                                 "StorageProviderLookupResponse"
                                             }
+                                            Payload::StorageProviderQuery(_) => {
+                                                "StorageProviderQuery"
+                                            }
+                                            Payload::StorageProviderQueryResponse(_) => {
+                                                "StorageProviderQueryResponse"
+                                            }
                                         };
                                         eprintln!(
                                             "listener: decoded {} from {:?}",

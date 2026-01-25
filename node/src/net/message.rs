@@ -86,6 +86,10 @@ pub enum Payload {
     StorageProviderLookup(ProviderLookupRequest),
     /// Response carrying provider matches for a lookup.
     StorageProviderLookupResponse(ProviderLookupResponse),
+    /// New-style storage provider query (alias for lookup).
+    StorageProviderQuery(ProviderLookupRequest),
+    /// Response to a provider query with bounded result set.
+    StorageProviderQueryResponse(ProviderLookupResponse),
 }
 
 /// Individual erasure-coded shard associated with a blob root.
@@ -262,6 +266,14 @@ fn write_payload(writer: &mut BinaryWriter, payload: &Payload) -> EncodeResult<(
             writer.write_u32(11);
             write_provider_lookup_response(writer, response)?;
         }
+        Payload::StorageProviderQuery(request) => {
+            writer.write_u32(12);
+            write_provider_lookup_request(writer, request)?;
+        }
+        Payload::StorageProviderQueryResponse(response) => {
+            writer.write_u32(13);
+            write_provider_lookup_response(writer, response)?;
+        }
     }
     Ok(())
 }
@@ -294,6 +306,12 @@ fn read_payload(reader: &mut BinaryReader<'_>) -> binary_struct::Result<Payload>
             read_provider_lookup_request(reader)?,
         )),
         11 => Ok(Payload::StorageProviderLookupResponse(
+            read_provider_lookup_response(reader)?,
+        )),
+        12 => Ok(Payload::StorageProviderQuery(read_provider_lookup_request(
+            reader,
+        )?)),
+        13 => Ok(Payload::StorageProviderQueryResponse(
             read_provider_lookup_response(reader)?,
         )),
         other => Err(DecodeError::InvalidEnumDiscriminant {
@@ -518,6 +536,13 @@ fn write_provider_lookup_request(
         struct_writer.field_with("origin", |field_writer| {
             write_fixed(field_writer, &request.origin);
         });
+        struct_writer.field_with("path", |field_writer| {
+            write_vec(field_writer, &request.path, "path", |writer, hop| {
+                write_fixed(writer, hop);
+                Ok(())
+            })
+            .expect("path encodes")
+        });
         struct_writer.field_with("signature", |field_writer| {
             write_bytes(field_writer, &request.signature, "signature").expect("signature fits");
         });
@@ -538,9 +563,10 @@ fn read_provider_lookup_request(
     let mut issued_at = None;
     let mut ttl = None;
     let mut origin = None;
+    let mut path: Option<Vec<[u8; 32]>> = None;
     let mut signature = None;
 
-    decode_struct(reader, Some(6), |key, reader| match key {
+    decode_struct(reader, None, |key, reader| match key {
         "object_size" => assign_once(&mut object_size, reader.read_u64()?, "object_size"),
         "shares" => assign_once(&mut shares, reader.read_u32()?, "shares"),
         "region" => assign_once(
@@ -563,6 +589,10 @@ fn read_provider_lookup_request(
         "issued_at" => assign_once(&mut issued_at, reader.read_u64()?, "issued_at"),
         "ttl" => assign_once(&mut ttl, reader.read_u8()?, "ttl"),
         "origin" => assign_once(&mut origin, read_fixed(reader)?, "origin"),
+        "path" => {
+            let parsed = read_vec(reader, |reader| read_fixed(reader))?;
+            assign_once(&mut path, parsed, "path")
+        }
         "signature" => assign_once(&mut signature, read_bytes(reader)?, "signature"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
@@ -588,6 +618,7 @@ fn read_provider_lookup_request(
         issued_at: issued_at.ok_or(DecodeError::MissingField("issued_at"))?,
         ttl: ttl.ok_or(DecodeError::MissingField("ttl"))?,
         origin: origin.ok_or(DecodeError::MissingField("origin"))?,
+        path: path.unwrap_or_default(),
         signature: signature.ok_or(DecodeError::MissingField("signature"))?,
     })
 }
@@ -614,6 +645,19 @@ fn write_provider_lookup_response(
             )
             .expect("provider profiles encode")
         });
+        struct_writer.field_with("path", |field_writer| {
+            write_vec(
+                field_writer,
+                &response.path,
+                "response_path",
+                |writer, hop| {
+                    write_fixed(writer, hop);
+                    Ok(())
+                },
+            )
+            .expect("path encodes")
+        });
+        struct_writer.field_u8("ttl", response.ttl);
         struct_writer.field_with("signature", |field_writer| {
             write_bytes(field_writer, &response.signature, "signature").expect("signature fits");
         });
@@ -627,9 +671,11 @@ fn read_provider_lookup_response(
     let mut nonce = None;
     let mut responder = None;
     let mut providers: Option<Vec<storage_market::ProviderProfile>> = None;
+    let mut path: Option<Vec<[u8; 32]>> = None;
+    let mut ttl = None;
     let mut signature = None;
 
-    decode_struct(reader, Some(4), |key, reader| match key {
+    decode_struct(reader, None, |key, reader| match key {
         "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
         "responder" => assign_once(&mut responder, read_fixed(reader)?, "responder"),
         "providers" => {
@@ -644,6 +690,11 @@ fn read_provider_lookup_response(
             })?;
             assign_once(&mut providers, parsed, "providers")
         }
+        "path" => {
+            let parsed = read_vec(reader, |reader| read_fixed(reader))?;
+            assign_once(&mut path, parsed, "path")
+        }
+        "ttl" => assign_once(&mut ttl, reader.read_u8()?, "ttl"),
         "signature" => assign_once(&mut signature, read_bytes(reader)?, "signature"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
@@ -652,6 +703,8 @@ fn read_provider_lookup_response(
         nonce: nonce.ok_or(DecodeError::MissingField("nonce"))?,
         responder: responder.ok_or(DecodeError::MissingField("responder"))?,
         providers: providers.ok_or(DecodeError::MissingField("providers"))?,
+        path: path.unwrap_or_default(),
+        ttl: ttl.unwrap_or(2),
         signature: signature.ok_or(DecodeError::MissingField("signature"))?,
     })
 }

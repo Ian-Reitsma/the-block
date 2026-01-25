@@ -80,10 +80,8 @@ mod stub {
 
     pub type PyResult<T> = Result<T, PyError>;
 
-    pub fn prepare_freethreaded_python() -> PyResult<()> {
-        Err(PyError::feature_disabled())
-    }
+    // No-op stub when python bindings are disabled.
 }
 
 #[cfg(not(feature = "python-bindings"))]
-pub use stub::{prepare_freethreaded_python, PyError, PyErrorKind, PyResult};
+pub use stub::{PyError, PyErrorKind, PyResult};

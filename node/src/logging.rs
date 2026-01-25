@@ -19,7 +19,7 @@ pub fn corr_id_random() -> String {
     crypto_suite::hex::encode(bytes)
 }
 
-pub(crate) fn info_span_with_field(
+pub fn info_span_with_field(
     name: &'static str,
     key: &'static str,
     value: String,
@@ -33,6 +33,10 @@ pub(crate) fn info_span_with_field(
         }],
     )
 }
+
+// Mark the span helper as used even in builds that do not expand the logging macros.
+const _: fn(&'static str, &'static str, String) -> diagnostics::tracing::Span =
+    info_span_with_field;
 
 #[macro_export]
 macro_rules! log_context {

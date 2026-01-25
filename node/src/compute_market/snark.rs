@@ -137,6 +137,7 @@ pub enum SnarkBackend {
 }
 
 impl SnarkBackend {
+    #[cfg(feature = "telemetry")]
     fn as_label(&self) -> &'static str {
         match self {
             SnarkBackend::Cpu => "cpu",

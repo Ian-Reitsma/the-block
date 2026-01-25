@@ -59,7 +59,9 @@ fn hydrates_directory_from_lookup_response() {
     let mut remote = ProviderProfile::new("remote-lookup".into(), 16 * 1024, 7, 50);
     remote.version = 3;
     let key = load_net_key();
-    let resp = provider_directory::ProviderLookupResponse::sign(42, vec![remote.clone()], &key);
+    let path = vec![key.verifying_key().to_bytes()];
+    let resp =
+        provider_directory::ProviderLookupResponse::sign(42, vec![remote.clone()], path, 2, &key);
     provider_directory::handle_lookup_response(resp);
 
     let request = DiscoveryRequest {

@@ -1,6 +1,7 @@
 use base64_fp::decode_standard;
 #[cfg(feature = "pq")]
 use base64_fp::encode_standard;
+use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::{Signature, VerifyingKey};
 use diagnostics::log;
 use foundation_lazy::sync::Lazy;
@@ -258,8 +259,52 @@ fn invalid_field(field: &str, detail: impl Into<String>) -> io::Error {
     invalid_data(format!("{field}: {}", detail.into()))
 }
 
+/// Registry of trusted jurisdiction signing keys.
+#[derive(Clone, Debug, Default)]
+pub struct KeyRegistry {
+    keys: HashMap<String, VerifyingKey>,
+}
+
+impl KeyRegistry {
+    /// Load registry from the provided JSON file: `{ "US_CA": "<hex pk>", ... }`.
+    pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
+        let bytes = std::fs::read(path)?;
+        let value = json::value_from_slice(&bytes).map_err(|err| invalid_data(err.to_string()))?;
+        let map = value
+            .as_object()
+            .ok_or_else(|| invalid_data("registry must be a JSON object"))?;
+        let mut keys = HashMap::with_capacity(map.len());
+        for (region, entry) in map {
+            let hex_str = entry
+                .as_str()
+                .ok_or_else(|| invalid_field(region, "value must be hex string"))?;
+            let raw = hex::decode(hex_str)
+                .map_err(|err| invalid_field(region, format!("invalid hex: {err}")))?;
+            let bytes: [u8; 32] = raw
+                .as_slice()
+                .try_into()
+                .map_err(|_| invalid_field(region, "verifying key must be 32 bytes"))?;
+            let vk = VerifyingKey::from_bytes(&bytes)
+                .map_err(|_| invalid_field(region, "invalid ed25519 verifying key"))?;
+            keys.insert(region.clone(), vk);
+        }
+        Ok(Self { keys })
+    }
+
+    /// Load the default registry location.
+    pub fn load_default() -> io::Result<Self> {
+        let path = std::env::var("TB_JURISDICTION_REGISTRY")
+            .unwrap_or_else(|_| "config/jurisdiction_registry.json".to_string());
+        Self::load(path)
+    }
+
+    pub fn key_for(&self, region: &str) -> Option<&VerifyingKey> {
+        self.keys.get(region)
+    }
+}
+
 /// Fetch a signed policy pack from a URL and cache it.
-pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack> {
+pub fn fetch_signed(url: &str, registry: &KeyRegistry) -> std::io::Result<PolicyPack> {
     log::info!("jurisdiction.fetch_signed start url={url}");
     let response = HTTP_CLIENT
         .request(Method::Get, url)
@@ -280,9 +325,16 @@ pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack>
         .text()
         .map_err(|err| io::Error::new(ErrorKind::InvalidData, err.to_string()))?;
     let signed = SignedPack::from_json_str(&body)?;
+    let region = signed.pack.region.clone();
+    let pk = registry
+        .key_for(&region)
+        .ok_or_else(|| io::Error::new(ErrorKind::PermissionDenied, "untrusted region"))?;
     if !signed.verify(pk) {
         log::warn!("jurisdiction.fetch_signed bad_signature url={url}");
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "bad sig"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "bad sig",
+        ));
     }
     let pack = signed.pack.resolve();
     CACHE
@@ -296,6 +348,12 @@ pub fn fetch_signed(url: &str, pk: &VerifyingKey) -> std::io::Result<PolicyPack>
         pack.features.len()
     );
     Ok(pack)
+}
+
+/// Convenience helper that loads the default registry path.
+pub fn fetch_signed_with_default_registry(url: &str) -> std::io::Result<PolicyPack> {
+    let registry = KeyRegistry::load_default()?;
+    fetch_signed(url, &registry)
 }
 
 pub fn persist_signed_pack(path: impl AsRef<Path>, signed: &SignedPack) -> std::io::Result<()> {
@@ -503,6 +561,8 @@ pub fn log_law_enforcement_request(path: impl AsRef<Path>, metadata: &str) -> st
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crypto_suite::hex;
+    use std::fs;
     use sys::tempfile::tempdir;
 
     #[test]
@@ -518,5 +578,27 @@ mod tests {
         assert_eq!(pack.region, "US");
         assert!(pack.consent_required);
         assert_eq!(pack.features, vec!["wallet"]);
+    }
+
+    #[test]
+    fn registry_loads_known_keys() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("registry.json");
+        let json = r#"{
+            "US_CA": "1f7d8986fc7ff6c257d1af4990abb1fb2a3ed4a9757c46443876f804b8275859",
+            "US_NY": "85864ccfecc79f68690535d6e5aef6da3a86098e714b1d21a2bae3f3478f8ef8"
+        }"#;
+        fs::write(&path, json).unwrap();
+        let registry = KeyRegistry::load(&path).expect("load registry");
+        let ca = registry.key_for("US_CA").expect("CA key present");
+        assert_eq!(
+            hex::encode(ca.to_bytes()),
+            "1f7d8986fc7ff6c257d1af4990abb1fb2a3ed4a9757c46443876f804b8275859"
+        );
+        let ny = registry.key_for("US_NY").expect("NY key present");
+        assert_eq!(
+            hex::encode(ny.to_bytes()),
+            "85864ccfecc79f68690535d6e5aef6da3a86098e714b1d21a2bae3f3478f8ef8"
+        );
     }
 }

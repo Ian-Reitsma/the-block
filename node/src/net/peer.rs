@@ -145,9 +145,6 @@ fn log_suspicious(path: &str) {
     }
 }
 
-#[cfg(not(feature = "telemetry"))]
-fn log_suspicious(_path: &str) {}
-
 fn overlay_peer_label(pk: &[u8; 32]) -> String {
     overlay_peer_from_bytes(pk)
         .map(|peer| overlay_peer_to_base58(&peer))
@@ -1316,13 +1313,8 @@ impl PeerSet {
                     };
                     let mut bc = chain.guard();
                     let chain_changed = bc.chain.len() != chain_snapshot.len()
-                        || bc
-                            .chain
-                            .last()
-                            .map(|b| b.hash.as_str())
-                            != chain_snapshot
-                                .last()
-                                .map(|b| b.hash.as_str());
+                        || bc.chain.last().map(|b| b.hash.as_str())
+                            != chain_snapshot.last().map(|b| b.hash.as_str());
                     if chain_changed || bc.params != params_snapshot {
                         params_snapshot = bc.params.clone();
                         chain_snapshot = bc.chain.clone();
@@ -1448,6 +1440,12 @@ impl PeerSet {
                 provider_directory::handle_lookup_request(request, addr);
             }
             Payload::StorageProviderLookupResponse(response) => {
+                provider_directory::handle_lookup_response(response);
+            }
+            Payload::StorageProviderQuery(request) => {
+                provider_directory::handle_lookup_request(request, addr);
+            }
+            Payload::StorageProviderQueryResponse(response) => {
                 provider_directory::handle_lookup_response(response);
             }
         }
@@ -1840,6 +1838,7 @@ enum PeerErrorCode {
 }
 
 impl PeerErrorCode {
+    #[cfg(feature = "telemetry")]
     fn as_str(&self) -> &'static str {
         match self {
             Self::HandshakeVersion => "1000",
@@ -2339,6 +2338,19 @@ pub(crate) fn record_handshake_latency(pk: &[u8; 32], ms: u64) {
 
 pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
     ADDR_MAP.guard().get(addr).copied()
+}
+
+pub fn addr_for_pk(pk: &[u8; 32]) -> Option<SocketAddr> {
+    let map = ADDR_MAP.guard();
+    map.iter().find_map(
+        |(addr, stored)| {
+            if stored == pk {
+                Some(*addr)
+            } else {
+                None
+            }
+        },
+    )
 }
 
 pub fn inject_addr_mapping_for_tests(addr: SocketAddr, peer: super::OverlayPeerId) {
@@ -2977,9 +2989,6 @@ fn remove_peer_metrics(pk: &[u8; 32]) {
     }
     let _ = crate::telemetry::PEER_REPUTATION_SCORE.remove_label_values(&[id.as_str()]);
 }
-
-#[cfg(not(feature = "telemetry"))]
-fn remove_peer_metrics(_pk: &[u8; 32]) {}
 
 #[cfg(test)]
 static RECORDED_DROPS: Lazy<Mutex<Vec<SocketAddr>>> = Lazy::new(|| Mutex::new(Vec::new()));

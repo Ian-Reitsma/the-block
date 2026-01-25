@@ -2,7 +2,7 @@
 
 use super::RpcError;
 use crate::Blockchain;
-use crypto_suite::signatures::ed25519::VerifyingKey;
+use std::io::ErrorKind;
 use std::sync::{Arc, Mutex};
 
 use foundation_serialization::Serialize;
@@ -43,15 +43,21 @@ pub fn status(bc: &Arc<Mutex<Blockchain>>) -> Result<JurisdictionStatusResponse,
 }
 
 pub fn set(bc: &Arc<Mutex<Blockchain>>, path: &str) -> Result<JurisdictionSetResponse, RpcError> {
-    let pack_res = if path.starts_with("http") {
-        // placeholder: use zero key for demo
-        let pk = VerifyingKey::from_bytes(&[0u8; 32]).unwrap();
-        jurisdiction::fetch_signed(path, &pk)
+    let pack_res: Result<_, RpcError> = if path.starts_with("http") {
+        let registry = jurisdiction::KeyRegistry::load_default()
+            .map_err(|_| RpcError::new(-32071, "jurisdiction registry missing or unreadable"))?;
+        jurisdiction::fetch_signed(path, &registry).map_err(|err| {
+            let code = if err.kind() == ErrorKind::PermissionDenied {
+                -32072
+            } else {
+                -32070
+            };
+            RpcError::new(code, "jurisdiction signature rejected")
+        })
     } else if std::path::Path::new(path).exists() {
-        jurisdiction::PolicyPack::load(path)
+        jurisdiction::PolicyPack::load(path).map_err(|_| RpcError::new(-32070, "load failed"))
     } else {
-        jurisdiction::PolicyPack::template(path)
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "template"))
+        jurisdiction::PolicyPack::template(path).ok_or_else(|| RpcError::new(-32070, "load failed"))
     };
     match pack_res {
         Ok(pack) => {

@@ -48,6 +48,7 @@ pub mod names {
     pub const STORAGE_PIPELINE: &str = "storage_pipeline";
     pub const STORAGE_REPAIR: &str = "storage_repair";
     pub const ENERGY_MARKET: &str = "energy_market";
+    pub const STORAGE_PROVIDER_DIRECTORY: &str = "storage_provider_directory";
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -310,6 +311,14 @@ impl Engine {
         dispatch!(self, engine, engine.list_cfs())
     }
 
+    fn prefix_iterator(&self, cf: &str, prefix: &[u8]) -> StorageResult<Box<dyn KeyValueIterator>> {
+        dispatch!(
+            self,
+            engine,
+            Ok(Box::new(engine.prefix_iterator(cf, prefix)?) as Box<dyn KeyValueIterator>)
+        )
+    }
+
     fn flush_wal(&self) -> StorageResult<()> {
         dispatch!(self, engine, engine.flush_wal())
     }
@@ -447,6 +456,24 @@ impl SimpleDb {
 
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
         self.engine.get("default", key.as_bytes()).ok().flatten()
+    }
+
+    /// Return all key/value pairs whose key shares the provided prefix.
+    pub fn scan_prefix(&self, prefix: &str) -> io::Result<Vec<(String, Vec<u8>)>> {
+        self.engine.ensure_cf("default").map_err(to_io_error)?;
+        let mut iter = self
+            .engine
+            .prefix_iterator("default", prefix.as_bytes())
+            .map_err(to_io_error)?;
+        let mut out = Vec::new();
+        while let Some((key, value)) = iter.next().map_err(to_io_error)? {
+            if let Ok(k) = String::from_utf8(key.clone()) {
+                if k.starts_with(prefix) {
+                    out.push((k, value));
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub fn try_insert(&mut self, key: &str, value: Vec<u8>) -> io::Result<Option<Vec<u8>>> {

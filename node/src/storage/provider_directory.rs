@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-use crate::net::peer::known_peers_with_info;
+use crate::net::peer::{addr_for_pk, known_peers_with_info, pk_from_addr};
 #[cfg(feature = "quic")]
 use crate::net::send_quic_msg;
 use crate::net::{load_net_key, send_msg, Transport};
+use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     STORAGE_PROVIDER_ADVERT_SEEN_TOTAL, STORAGE_PROVIDER_CANDIDATE_GAUGE,
@@ -11,13 +12,16 @@ use crate::telemetry::{
     STORAGE_PROVIDER_STALE_REJECT_TOTAL,
 };
 use concurrency::{mutex, Bytes, MutexExt, MutexT};
+use crypto_suite::hashing::blake3::hash;
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use rand::RngCore;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::hash::Hash;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +31,19 @@ type StorageMarketHandle = Arc<MutexT<StorageMarket>>;
 
 const LOOKUP_MAX_AGE_SECS: u64 = 30;
 const LOOKUP_RATE_LIMIT_SECS: u64 = 5;
+const MAX_PROVIDER_RESULTS: usize = 64;
+const MAX_QUERY_FANOUT: usize = 6;
+const MAX_QUERY_PATH: usize = 8;
+const MAX_SEEN_ENTRIES: usize = 2_048;
+const ADVERT_RATE_LIMIT_SECS: u64 = 30;
+const MAX_ADVERT_BYTES: usize = 16 * 1024;
+
+pub type StorageProviderQuery = ProviderLookupRequest;
+pub type StorageProviderQueryResponse = ProviderLookupResponse;
+
+fn default_ttl() -> u8 {
+    2
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
@@ -48,6 +65,8 @@ pub struct ProviderLookupRequest {
     pub issued_at: u64,
     pub ttl: u8,
     pub origin: [u8; 32],
+    #[serde(default)]
+    pub path: Vec<[u8; 32]>,
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub signature: Bytes,
 }
@@ -58,6 +77,10 @@ pub struct ProviderLookupResponse {
     pub nonce: u64,
     pub responder: [u8; 32],
     pub providers: Vec<ProviderProfile>,
+    #[serde(default)]
+    pub path: Vec<[u8; 32]>,
+    #[serde(default = "default_ttl")]
+    pub ttl: u8,
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub signature: Bytes,
 }
@@ -82,6 +105,8 @@ struct ProviderLookupResponseBody<'a> {
     nonce: u64,
     responder: [u8; 32],
     providers: &'a [ProviderProfile],
+    path: &'a [[u8; 32]],
+    ttl: u8,
 }
 
 impl ProviderAdvertisement {
@@ -135,6 +160,7 @@ impl ProviderAdvertisement {
 
 impl ProviderLookupRequest {
     pub fn sign(request: DiscoveryRequest, ttl: u8, sk: &SigningKey) -> Self {
+        let ttl = ttl.max(1).min(MAX_QUERY_PATH as u8);
         let mut nonce_bytes = [0u8; 8];
         rand::thread_rng().fill_bytes(&mut nonce_bytes);
         let nonce = u64::from_le_bytes(nonce_bytes);
@@ -153,12 +179,19 @@ impl ProviderLookupRequest {
             issued_at: body.issued_at,
             ttl,
             origin: body.origin,
+            path: vec![body.origin],
             signature: Bytes::from(sig.to_bytes().to_vec()),
         }
     }
 
     pub fn verify(&self) -> bool {
         if now().saturating_sub(self.issued_at) > LOOKUP_MAX_AGE_SECS {
+            return false;
+        }
+        if self.ttl == 0 || self.ttl > MAX_QUERY_PATH as u8 {
+            return false;
+        }
+        if self.path.len() > MAX_QUERY_PATH {
             return false;
         }
         let vk = match VerifyingKey::from_bytes(&self.origin) {
@@ -184,11 +217,20 @@ impl ProviderLookupRequest {
 }
 
 impl ProviderLookupResponse {
-    pub fn sign(nonce: u64, providers: Vec<ProviderProfile>, sk: &SigningKey) -> Self {
+    pub fn sign(
+        nonce: u64,
+        providers: Vec<ProviderProfile>,
+        path: Vec<[u8; 32]>,
+        ttl: u8,
+        sk: &SigningKey,
+    ) -> Self {
+        let ttl = ttl.max(1).min(MAX_QUERY_PATH as u8);
         let body = ProviderLookupResponseBody {
             nonce,
             responder: sk.verifying_key().to_bytes(),
             providers: &providers,
+            path: &path,
+            ttl,
         };
         let bytes = serialize_lookup_response_body(&body);
         let sig = sk.sign(&bytes);
@@ -196,11 +238,19 @@ impl ProviderLookupResponse {
             nonce,
             responder: body.responder,
             providers,
+            path,
+            ttl,
             signature: Bytes::from(sig.to_bytes().to_vec()),
         }
     }
 
     pub fn verify(&self) -> bool {
+        if self.ttl == 0 || self.ttl > MAX_QUERY_PATH as u8 {
+            return false;
+        }
+        if self.path.len() > MAX_QUERY_PATH {
+            return false;
+        }
         let vk = match VerifyingKey::from_bytes(&self.responder) {
             Ok(vk) => vk,
             Err(_) => return false,
@@ -209,6 +259,8 @@ impl ProviderLookupResponse {
             nonce: self.nonce,
             responder: self.responder,
             providers: &self.providers,
+            path: &self.path,
+            ttl: self.ttl,
         };
         let bytes = serialize_lookup_response_body(&body);
         let sig_bytes: [u8; crypto_suite::signatures::ed25519::SIGNATURE_LENGTH] =
@@ -225,37 +277,77 @@ pub struct NetworkProviderDirectory {
     market: StorageMarketHandle,
     cache: MutexT<HashMap<String, ProviderProfile>>,
     ttl_secs: u64,
-    seen_publishers: MutexT<HashSet<[u8; 32]>>,
-    seen_requests: MutexT<HashSet<(u64, [u8; 32])>>,
-    seen_responses: MutexT<HashSet<(u64, [u8; 32])>>,
+    store: MutexT<SimpleDb>,
+    seen_publishers: MutexT<HashMap<[u8; 32], u64>>,
+    seen_requests: MutexT<HashMap<(u64, [u8; 32]), u64>>,
+    seen_responses: MutexT<HashMap<(u64, [u8; 32]), u64>>,
     last_request_from_origin: MutexT<HashMap<[u8; 32], u64>>,
 }
 
 impl NetworkProviderDirectory {
-    pub fn new(market: StorageMarketHandle, ttl_secs: u64) -> Self {
+    pub fn new(market: StorageMarketHandle, ttl_secs: u64, store: SimpleDb) -> Self {
         Self {
             market,
             cache: mutex(HashMap::new()),
             ttl_secs,
-            seen_publishers: mutex(HashSet::new()),
-            seen_requests: mutex(HashSet::new()),
-            seen_responses: mutex(HashSet::new()),
+            store: mutex(store),
+            seen_publishers: mutex(HashMap::new()),
+            seen_requests: mutex(HashMap::new()),
+            seen_responses: mutex(HashMap::new()),
             last_request_from_origin: mutex(HashMap::new()),
         }
     }
 
+    fn load_persisted(&self) {
+        let now = now();
+        let entries = self
+            .store
+            .guard()
+            .scan_prefix("advert|")
+            .unwrap_or_default();
+        for (_, bytes) in entries {
+            if bytes.len() > MAX_ADVERT_BYTES {
+                continue;
+            }
+            if let Ok(advert) =
+                foundation_serialization::json::from_slice::<ProviderAdvertisement>(&bytes)
+            {
+                if advert.expires_at > now {
+                    self.ingest_advertisement(advert);
+                }
+            }
+        }
+    }
+
     pub fn ingest_advertisement(&self, advert: ProviderAdvertisement) {
-        if advert.expires_at <= now() || !advert.verify() {
+        let ts = now();
+        if advert.expires_at <= ts || !advert.verify() {
             #[cfg(feature = "telemetry")]
             STORAGE_PROVIDER_STALE_REJECT_TOTAL.inc();
+            return;
+        }
+        if advert.ttl_secs > self.ttl_secs.saturating_mul(2) {
+            #[cfg(feature = "telemetry")]
+            STORAGE_PROVIDER_STALE_REJECT_TOTAL.inc();
+            return;
+        }
+        if let Ok(bytes) = foundation_serialization::json::to_vec(&advert) {
+            if bytes.len() > MAX_ADVERT_BYTES {
+                #[cfg(feature = "telemetry")]
+                STORAGE_PROVIDER_STALE_REJECT_TOTAL.inc();
+                return;
+            }
+        }
+        if self.publisher_rate_limited(advert.publisher, ts) {
             return;
         }
         let mut profile = advert.profile.clone();
         profile.mark_version(advert.version);
         profile.set_expiry(advert.expires_at);
         if let Some(updated) = self.cache_profile(profile.clone()) {
-            self.track_publisher(advert.publisher);
+            self.track_publisher(advert.publisher, ts);
             let _ = self.market.guard().cache_provider_profile(updated);
+            self.persist_advertisement(&advert);
             #[cfg(feature = "telemetry")]
             STORAGE_PROVIDER_ADVERT_SEEN_TOTAL.inc();
         } else {
@@ -269,27 +361,39 @@ impl NetworkProviderDirectory {
         request: ProviderLookupRequest,
         responder: Option<SocketAddr>,
     ) {
+        let mut request = request;
         if !request.verify() {
             return;
         }
+        let ts = now();
         {
             let mut guard = self.seen_requests.guard();
-            if guard.contains(&(request.nonce, request.origin)) {
+            prune_seen_map(&mut guard, ts);
+            if guard.contains_key(&(request.nonce, request.origin)) {
                 return;
             }
-            guard.insert((request.nonce, request.origin));
+            guard.insert((request.nonce, request.origin), ts);
+        }
+        if request.path.len() > MAX_QUERY_PATH {
+            return;
         }
         if self.rate_limited(request.origin, request.issued_at) {
             return;
         }
+        let self_pk = load_net_key().verifying_key().to_bytes();
+        if request.path.contains(&self_pk) {
+            return;
+        }
+        if request.path.len() < MAX_QUERY_PATH {
+            request.path.push(self_pk);
+        }
+        let ttl_exhausted = request.path.len() > request.ttl as usize;
 
         let matches = self.discover(&request.request).unwrap_or_default();
-        if let Some(addr) = responder {
-            self.send_lookup_response(request.nonce, matches.clone(), addr);
-        }
+        self.send_lookup_response(&request, matches.clone(), responder);
 
-        if request.ttl > 0 {
-            self.forward_lookup(request);
+        if !ttl_exhausted {
+            self.forward_lookup(request, responder);
         }
     }
 
@@ -299,19 +403,24 @@ impl NetworkProviderDirectory {
         }
         {
             let mut guard = self.seen_responses.guard();
-            if guard.contains(&(response.nonce, response.responder)) {
+            let ts = now();
+            prune_seen_map(&mut guard, ts);
+            if guard.contains_key(&(response.nonce, response.responder)) {
                 return;
             }
-            guard.insert((response.nonce, response.responder));
+            guard.insert((response.nonce, response.responder), ts);
         }
-        for profile in response.providers {
+        let forward = response.clone();
+        for profile in response.providers.into_iter().take(MAX_PROVIDER_RESULTS) {
             let _ = self.cache_profile(profile.clone());
             let _ = self.market.guard().cache_provider_profile(profile);
         }
+        self.forward_response(forward);
     }
 
     fn rate_limited(&self, origin: [u8; 32], issued_at: u64) -> bool {
         let mut guard = self.last_request_from_origin.guard();
+        prune_seen_map(&mut guard, issued_at);
         let last = guard.get(&origin).copied().unwrap_or(0);
         if issued_at.saturating_sub(last) < LOOKUP_RATE_LIMIT_SECS {
             return true;
@@ -320,9 +429,28 @@ impl NetworkProviderDirectory {
         false
     }
 
-    fn track_publisher(&self, publisher: [u8; 32]) {
+    fn publisher_rate_limited(&self, publisher: [u8; 32], ts: u64) -> bool {
         let mut guard = self.seen_publishers.guard();
-        guard.insert(publisher);
+        prune_seen_map(&mut guard, ts);
+        if let Some(last) = guard.get(&publisher) {
+            if ts.saturating_sub(*last) < ADVERT_RATE_LIMIT_SECS {
+                return true;
+            }
+        }
+        if guard.len() > MAX_SEEN_ENTRIES {
+            let mut entries: Vec<_> = guard.iter().map(|(k, t)| (*k, *t)).collect();
+            entries.sort_by_key(|(_, t)| *t);
+            let surplus = guard.len().saturating_sub(MAX_SEEN_ENTRIES);
+            for (key, _) in entries.into_iter().take(surplus) {
+                guard.remove(&key);
+            }
+        }
+        false
+    }
+
+    fn track_publisher(&self, publisher: [u8; 32], ts: u64) {
+        let mut guard = self.seen_publishers.guard();
+        guard.insert(publisher, ts);
     }
 
     fn cache_profile(&self, profile: ProviderProfile) -> Option<ProviderProfile> {
@@ -341,6 +469,16 @@ impl NetworkProviderDirectory {
             Some(profile)
         } else {
             None
+        }
+    }
+
+    fn persist_advertisement(&self, advert: &ProviderAdvertisement) {
+        if let Ok(bytes) = foundation_serialization::json::to_vec(advert) {
+            if bytes.len() > MAX_ADVERT_BYTES {
+                return;
+            }
+            let key = format!("advert|{}", advert.profile.provider_id);
+            let _ = self.store.guard().insert(&key, bytes);
         }
     }
 
@@ -426,6 +564,16 @@ impl ProviderDirectory for NetworkProviderDirectory {
             STORAGE_PROVIDER_CANDIDATE_GAUGE.set(out.len() as i64);
             STORAGE_PROVIDER_DISCOVERY_LATENCY_SECONDS.observe(started.elapsed().as_secs_f64());
         }
+        out.sort_by(|a, b| {
+            a.price_per_block
+                .cmp(&b.price_per_block)
+                .then_with(|| b.last_seen_block.cmp(&a.last_seen_block))
+                .then_with(|| b.version.cmp(&a.version))
+                .then_with(|| a.provider_id.cmp(&b.provider_id))
+        });
+        if out.len() > MAX_PROVIDER_RESULTS {
+            out.truncate(MAX_PROVIDER_RESULTS);
+        }
         if out.is_empty() {
             self.broadcast_lookup(request.clone());
         }
@@ -438,13 +586,86 @@ type DirectoryHandle = Arc<MutexT<Option<Arc<NetworkProviderDirectory>>>>;
 static DIRECTORY: concurrency::Lazy<DirectoryHandle> =
     concurrency::Lazy::new(|| Arc::new(mutex(None)));
 
+fn provider_store_path() -> PathBuf {
+    if let Ok(path) = std::env::var("TB_STORAGE_PROVIDER_DB") {
+        return PathBuf::from(path);
+    }
+    if let Ok(path) = std::env::var("TB_STORAGE_MARKET_DIR") {
+        return PathBuf::from(path).join("provider_directory");
+    }
+    PathBuf::from("storage_provider_directory")
+}
+
+fn prune_seen_map<K>(map: &mut HashMap<K, u64>, now: u64)
+where
+    K: Eq + Hash + Clone,
+{
+    map.retain(|_, ts| now.saturating_sub(*ts) <= LOOKUP_MAX_AGE_SECS);
+    if map.len() > MAX_SEEN_ENTRIES {
+        let mut entries: Vec<_> = map.iter().map(|(k, ts)| (k.clone(), *ts)).collect();
+        entries.sort_by_key(|(_, ts)| *ts);
+        let surplus = map.len().saturating_sub(MAX_SEEN_ENTRIES);
+        for (key, _) in entries.into_iter().take(surplus) {
+            map.remove(&key);
+        }
+    }
+}
+
+fn routing_key(request: &DiscoveryRequest, origin: [u8; 32]) -> [u8; 32] {
+    let mut buf = Vec::with_capacity(64);
+    buf.extend_from_slice(&origin);
+    buf.extend_from_slice(&request.object_size.to_le_bytes());
+    buf.extend_from_slice(&request.shares.to_le_bytes());
+    if let Some(region) = &request.region {
+        buf.extend_from_slice(region.as_bytes());
+    }
+    if let Some(price) = request.max_price_per_block {
+        buf.extend_from_slice(&price.to_le_bytes());
+    }
+    let digest = hash(&buf);
+    let mut out = [0u8; 32];
+    out.copy_from_slice(digest.as_bytes());
+    out
+}
+
+fn peer_distance(addr: &SocketAddr, key: [u8; 32]) -> u128 {
+    if let Some(pk) = pk_from_addr(addr) {
+        let mut dist = [0u8; 16];
+        for i in 0..16 {
+            dist[i] = pk[i] ^ key[i];
+        }
+        return u128::from_be_bytes(dist);
+    }
+    let hashed = hash(addr.to_string().as_bytes());
+    let mut dist = [0u8; 16];
+    dist.copy_from_slice(&hashed.as_bytes()[..16]);
+    u128::from_le_bytes(dist)
+}
+
+fn previous_hop(path: &[[u8; 32]], self_pk: &[u8; 32]) -> Option<[u8; 32]> {
+    path.iter()
+        .position(|pk| pk == self_pk)
+        .and_then(|idx| idx.checked_sub(1))
+        .and_then(|idx| path.get(idx).copied())
+}
+
 pub fn install_directory(market: StorageMarketHandle) {
-    let dir = Arc::new(NetworkProviderDirectory::new(market.clone(), 15 * 60));
+    let store_path = provider_store_path();
+    let store = SimpleDb::open_named(
+        names::STORAGE_PROVIDER_DIRECTORY,
+        &store_path.to_string_lossy(),
+    );
+    let dir = Arc::new(NetworkProviderDirectory::new(
+        market.clone(),
+        15 * 60,
+        store,
+    ));
     if let Ok(profiles) = market.guard().provider_profiles() {
         for profile in profiles {
             let _ = dir.cache_profile(profile.clone());
         }
     }
+    dir.load_persisted();
     *DIRECTORY.guard() = Some(dir.clone());
     storage_market::install_provider_directory(dir);
 }
@@ -647,6 +868,33 @@ fn serialize_lookup_response_body(body: &ProviderLookupResponseBody<'_>) -> Vec<
                 .collect(),
         ),
     );
+    map.insert(
+        "path".to_string(),
+        foundation_serialization::json::Value::Array(
+            body.path
+                .iter()
+                .map(|hop| {
+                    foundation_serialization::json::value_from_slice(hop).unwrap_or(
+                        foundation_serialization::json::Value::Array(
+                            hop.iter()
+                                .map(|b| {
+                                    foundation_serialization::json::Value::Number(
+                                        foundation_serialization::json::Number::from(*b as u64),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                    )
+                })
+                .collect(),
+        ),
+    );
+    map.insert(
+        "ttl".to_string(),
+        foundation_serialization::json::Value::Number(
+            foundation_serialization::json::Number::from(body.ttl),
+        ),
+    );
     foundation_serialization::json::to_vec_value(&foundation_serialization::json::Value::Object(
         map,
     ))
@@ -656,30 +904,105 @@ impl NetworkProviderDirectory {
     fn broadcast_lookup(&self, request: DiscoveryRequest) {
         let sk = load_net_key();
         let lookup = ProviderLookupRequest::sign(request, 2, &sk);
-        if let Ok(msg) =
-            crate::net::Message::new(crate::net::Payload::StorageProviderLookup(lookup), &sk)
-        {
-            self.broadcast(msg);
-        }
+        self.forward_lookup(lookup, None);
     }
 
-    fn send_lookup_response(&self, nonce: u64, providers: Vec<ProviderProfile>, addr: SocketAddr) {
+    fn send_lookup_response(
+        &self,
+        request: &ProviderLookupRequest,
+        providers: Vec<ProviderProfile>,
+        responder: Option<SocketAddr>,
+    ) {
         let sk = load_net_key();
-        let response = ProviderLookupResponse::sign(nonce, providers, &sk);
-        if let Ok(msg) = crate::net::Message::new(
-            crate::net::Payload::StorageProviderLookupResponse(response),
+        let mut providers = providers;
+        if providers.len() > MAX_PROVIDER_RESULTS {
+            providers.truncate(MAX_PROVIDER_RESULTS);
+        }
+        let response = ProviderLookupResponse::sign(
+            request.nonce,
+            providers,
+            request.path.clone(),
+            request.ttl,
             &sk,
-        ) {
-            let _ = send_msg(addr, &msg);
+        );
+        if let Some(addr) = responder {
+            if let Ok(msg) = crate::net::Message::new(
+                crate::net::Payload::StorageProviderQueryResponse(response.clone()),
+                &sk,
+            ) {
+                let _ = send_msg(addr, &msg);
+                return;
+            }
+        }
+        let self_pk = sk.verifying_key().to_bytes();
+        if let Some(prev) = previous_hop(&response.path, &self_pk).and_then(|pk| addr_for_pk(&pk)) {
+            if let Ok(msg) = crate::net::Message::new(
+                crate::net::Payload::StorageProviderQueryResponse(response),
+                &sk,
+            ) {
+                let _ = send_msg(prev, &msg);
+            }
         }
     }
 
-    fn forward_lookup(&self, request: ProviderLookupRequest) {
-        let sk = load_net_key();
-        if let Ok(msg) =
-            crate::net::Message::new(crate::net::Payload::StorageProviderLookup(request), &sk)
-        {
-            self.broadcast(msg);
+    fn forward_lookup(&self, request: ProviderLookupRequest, responder: Option<SocketAddr>) {
+        let key = routing_key(&request.request, request.origin);
+        let mut peers = self.fanout_peers(key, responder);
+        peers.retain(|(addr, _, _)| {
+            if let Some(pk) = pk_from_addr(addr) {
+                return !request.path.iter().any(|hop| hop == &pk);
+            }
+            true
+        });
+        for (addr, transport, cert) in peers {
+            let sk = load_net_key();
+            if let Ok(msg) = crate::net::Message::new(
+                crate::net::Payload::StorageProviderQuery(request.clone()),
+                &sk,
+            ) {
+                match transport {
+                    Transport::Tcp => {
+                        let _ = send_msg(addr, &msg);
+                    }
+                    Transport::Quic => {
+                        #[cfg(feature = "quic")]
+                        if let Some(c) = cert.as_ref() {
+                            let _ = send_quic_msg(addr, c, &msg);
+                        }
+                        #[cfg(not(feature = "quic"))]
+                        let _ = send_msg(addr, &msg);
+                    }
+                }
+            }
         }
+    }
+
+    fn forward_response(&self, response: ProviderLookupResponse) {
+        let sk = load_net_key();
+        let self_pk = sk.verifying_key().to_bytes();
+        if let Some(prev) = previous_hop(&response.path, &self_pk).and_then(|pk| addr_for_pk(&pk)) {
+            if let Ok(msg) = crate::net::Message::new(
+                crate::net::Payload::StorageProviderQueryResponse(response),
+                &sk,
+            ) {
+                let _ = send_msg(prev, &msg);
+            }
+        }
+    }
+
+    fn fanout_peers(
+        &self,
+        key: [u8; 32],
+        exclude: Option<SocketAddr>,
+    ) -> Vec<(SocketAddr, Transport, Option<Bytes>)> {
+        let mut peers = known_peers_with_info();
+        if let Some(addr) = exclude {
+            peers.retain(|(a, _, _)| *a != addr);
+        }
+        peers.sort_by_key(|(addr, _, _)| peer_distance(addr, key));
+        if peers.len() > MAX_QUERY_FANOUT {
+            peers.truncate(MAX_QUERY_FANOUT);
+        }
+        peers
     }
 }
