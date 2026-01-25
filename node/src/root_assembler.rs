@@ -4,11 +4,7 @@ use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
 
-use crate::{
-    simple_db::SimpleDb as Db,
-    transaction::FeeLane,
-    util::binary_codec,
-};
+use crate::{simple_db::SimpleDb as Db, transaction::FeeLane, util::binary_codec};
 
 const L2_CADENCE_MILLIS: u64 = 4_000;
 const L3_CADENCE_MILLIS: u64 = 16_000;
@@ -164,11 +160,7 @@ impl RootAssembler {
         }
     }
 
-    pub fn enqueue(
-        &mut self,
-        entry: MicroShardRootEntry,
-        size_class: RootSizeClass,
-    ) {
+    pub fn enqueue(&mut self, entry: MicroShardRootEntry, size_class: RootSizeClass) {
         let queue = match size_class {
             RootSizeClass::L2 => &mut self.l2_queue,
             RootSizeClass::L3 => &mut self.l3_queue,

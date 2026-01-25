@@ -15,11 +15,30 @@ use the_block::telemetry::{
     RANGE_BOOST_ENQUEUE_ERROR_TOTAL, RANGE_BOOST_FORWARDER_FAIL_TOTAL,
     RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
 };
+use the_block::relay::RelayJob;
+
+fn stub_job() -> RelayJob {
+    RelayJob {
+        job_id: "job".into(),
+        provider: "provider".into(),
+        campaign_id: None,
+        creative_id: None,
+        mesh_peer: None,
+        mesh_transport: None,
+        mesh_latency_ms: None,
+        clearing_price_usd_micros: 0,
+        resource_floor_usd_micros: 0,
+        price_per_mib_usd_micros: 0,
+        total_usd_micros: 0,
+        bytes: 0,
+        offered_at_micros: 0,
+    }
+}
 
 #[test]
 fn bundle_queue_works() {
     let mut rb = RangeBoost::new();
-    rb.enqueue(vec![0u8; 4]);
+    rb.enqueue(vec![0u8; 4], stub_job());
     rb.record_proof(
         0,
         HopProof {
@@ -70,7 +89,7 @@ fn range_boost_fault_injection_counts_failures() {
     range_boost::spawn_forwarder(&queue);
     range_boost::set_enabled(true);
     range_boost::set_forwarder_fault_mode(FaultMode::ForceEncode);
-    queue.lock().unwrap().enqueue(vec![1, 2, 3, 4]);
+    queue.lock().unwrap().enqueue(vec![1, 2, 3, 4], stub_job());
     for _ in 0..20 {
         if RANGE_BOOST_FORWARDER_FAIL_TOTAL.value() > baseline {
             break;
@@ -88,7 +107,7 @@ fn range_boost_enqueue_injection_drops_bundle() {
     let baseline = RANGE_BOOST_ENQUEUE_ERROR_TOTAL.value();
     range_boost::inject_enqueue_error();
     let mut rb = RangeBoost::new();
-    rb.enqueue(vec![9]);
+    rb.enqueue(vec![9], stub_job());
     assert_eq!(rb.pending(), 0);
     assert_eq!(RANGE_BOOST_ENQUEUE_ERROR_TOTAL.value(), baseline + 1);
 }

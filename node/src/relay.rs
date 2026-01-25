@@ -9,13 +9,14 @@ use crate::config::{
     relay_economics_mode, relay_max_ack_age_secs, relay_max_bytes_per_bundle,
     relay_max_bytes_per_epoch,
 };
-use crate::{EPOCH_BLOCKS, ReadAck};
+use crate::market_gates::{self, MarketMode};
 use crate::receipts::RelayReceipt;
+use crate::{ReadAck, EPOCH_BLOCKS};
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    LABEL_REGISTRATION_ERR, RELAY_JOB_REJECTED_TOTAL, RELAY_RECEIPT_BYTES_TOTAL,
-    RELAY_RECEIPTS_TOTAL,
+    LABEL_REGISTRATION_ERR, RELAY_JOB_REJECTED_TOTAL, RELAY_RECEIPTS_TOTAL,
+    RELAY_RECEIPT_BYTES_TOTAL,
 };
 
 #[derive(Clone, Debug)]
@@ -87,7 +88,11 @@ static RELAY_CONFIG: Lazy<RelayConfig> = Lazy::new(RelayConfig::from_env);
 static RELAY_STATE: Lazy<Mutex<RelayState>> = Lazy::new(|| Mutex::new(RelayState::default()));
 
 fn relay_mode() -> RelayEconomicsMode {
-    RELAY_CONFIG.mode
+    if market_gates::storage_mode() == MarketMode::Trade {
+        RELAY_CONFIG.mode
+    } else {
+        RelayEconomicsMode::Shadow
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -143,10 +148,7 @@ pub fn offer_job(
 
     {
         let mut state = RELAY_STATE.lock().unwrap();
-        let epoch = now
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        let epoch = now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
             / crate::EPOCH_BLOCKS.max(1);
         if state.epoch_id != epoch {
             state.epoch_id = epoch;
@@ -155,7 +157,9 @@ pub fn offer_job(
         if state.bytes_this_epoch + bytes > config.max_bytes_per_epoch {
             let err = RelayOfferError::BudgetExceeded {
                 bytes,
-                available: config.max_bytes_per_epoch.saturating_sub(state.bytes_this_epoch),
+                available: config
+                    .max_bytes_per_epoch
+                    .saturating_sub(state.bytes_this_epoch),
             };
             record_rejection(&err);
             return Err(err);

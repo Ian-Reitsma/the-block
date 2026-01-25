@@ -53,7 +53,13 @@ pub fn set_energy_mode(mode: MarketMode) {
 
 /// Align gate state with the persisted governance params.
 pub fn sync_from_params(params: &crate::governance::Params) {
-    set_storage_mode(MarketMode::from_enabled(params.launch_storage_autopilot != 0));
-    set_compute_mode(MarketMode::from_enabled(params.launch_compute_autopilot != 0));
-    set_energy_mode(MarketMode::from_enabled(params.launch_energy_autopilot != 0));
+    set_storage_mode(MarketMode::from_enabled(
+        params.launch_storage_autopilot != 0,
+    ));
+    set_compute_mode(MarketMode::from_enabled(
+        params.launch_compute_autopilot != 0,
+    ));
+    set_energy_mode(MarketMode::from_enabled(
+        params.launch_energy_autopilot != 0,
+    ));
 }

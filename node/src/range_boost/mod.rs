@@ -16,13 +16,13 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::relay::RelayJob;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     MESH_PEER_CONNECTED_TOTAL, MESH_PEER_LATENCY_MS, RANGE_BOOST_ENQUEUE_ERROR_TOTAL,
     RANGE_BOOST_FORWARDER_DROP_TOTAL, RANGE_BOOST_FORWARDER_FAIL_TOTAL,
     RANGE_BOOST_FORWARDER_RETRY_TOTAL, RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
 };
-use crate::relay::RelayJob;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HopProof {

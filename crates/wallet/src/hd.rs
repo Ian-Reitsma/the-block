@@ -1,5 +1,5 @@
-use crate::signatures::ed25519::{SigningKey, VerifyingKey, SECRET_KEY_LENGTH};
-use crate::signatures::ed25519_inhouse::sha512::Sha512;
+use crypto_suite::signatures::ed25519::{SigningKey, VerifyingKey, SECRET_KEY_LENGTH};
+use crypto_suite::signatures::internal::Sha512;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use std::fmt;
@@ -16,19 +16,10 @@ pub fn generate_master() -> [u8; SECRET_KEY_LENGTH] {
 }
 
 /// Derived signing/verifying key material for a pseudo HD path.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Keypair {
     pub secret: SigningKey,
     pub public: VerifyingKey,
-}
-
-impl Keypair {
-    fn from_extended(key: &ExtendedKey) -> Self {
-        Self {
-            secret: key.secret.clone(),
-            public: key.public.clone(),
-        }
-    }
 }
 
 /// Errors surfaced while parsing HD paths or deriving hardened children.

@@ -4,7 +4,6 @@ use std::thread;
 
 const DEFAULT_MODULUS_HEX: &str =
     "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F";
-const VDF_KEY: &[u8] = b"vdf-modulus";
 
 static MODULUS: OnceLock<BigUint> = OnceLock::new();
 

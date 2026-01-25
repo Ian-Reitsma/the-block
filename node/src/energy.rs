@@ -34,6 +34,13 @@ const KEY_DISPUTES: &str = "disputes";
 const KEY_RECEIPTS: &str = "receipts";
 const KEY_SLASHES: &str = "slashes";
 
+fn ensure_energy_trade() -> Result<(), EnergyMarketError> {
+    if market_gates::energy_mode() == MarketMode::Rehearsal {
+        return Err(EnergyMarketError::Rehearsal);
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct GovernanceEnergyParams {
     pub min_stake: u64,
@@ -127,6 +134,8 @@ pub enum DisputeError {
     UnknownDispute { dispute_id: u64 },
     #[error("dispute {dispute_id} already resolved")]
     AlreadyResolved { dispute_id: u64 },
+    #[error("energy market in rehearsal mode")]
+    Rehearsal,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -415,6 +424,7 @@ pub fn register_provider(
     jurisdiction: String,
     stake: u64,
 ) -> Result<EnergyProvider, EnergyMarketError> {
+    ensure_energy_trade()?;
     let mut guard = store();
     let provider_id = guard.market.register_energy_provider(
         owner,
@@ -441,6 +451,7 @@ pub fn update_provider(
     capacity_kwh: Option<u64>,
     jurisdiction: Option<String>,
 ) -> Result<EnergyProvider, EnergyMarketError> {
+    ensure_energy_trade()?;
     let mut guard = store();
     let jurisdiction = jurisdiction.map(|j| j.into());
     let provider = guard.market.update_provider_terms(
@@ -457,6 +468,7 @@ pub fn submit_meter_reading(
     reading: MeterReading,
     block: u64,
 ) -> Result<EnergyCredit, EnergyMarketError> {
+    ensure_energy_trade()?;
     // Governance-level expiry: reject meter readings older than the configured window.
     let params = governance_params();
     if params.oracle_timeout_blocks > 0 {
@@ -518,6 +530,7 @@ pub fn settle_energy_delivery(
     block: u64,
     meter_hash: H256,
 ) -> Result<EnergyReceipt, EnergyMarketError> {
+    ensure_energy_trade()?;
     let mut guard = store();
     let receipt = match guard.market.settle_energy_delivery(
         buyer,
@@ -916,6 +929,7 @@ pub fn flag_dispute(
     reason: String,
     block: u64,
 ) -> Result<EnergyDispute, DisputeError> {
+    ensure_energy_trade().map_err(|_| DisputeError::Rehearsal)?;
     let mut guard = store();
     let dispute = flag_dispute_inner(&mut guard, reporter, meter_hash, reason, block)?;
     persist_or_warn(&mut guard);
@@ -928,6 +942,7 @@ pub fn resolve_dispute(
     resolution_note: Option<String>,
     block: u64,
 ) -> Result<EnergyDispute, DisputeError> {
+    ensure_energy_trade().map_err(|_| DisputeError::Rehearsal)?;
     let mut guard = store();
     let dispute = resolve_dispute_inner(&mut guard, dispute_id, resolver, resolution_note, block)?;
     persist_or_warn(&mut guard);

@@ -127,6 +127,7 @@ pub fn derive_market_metrics_from_chain(
                     ad_state.settlement_count += 1;
                     ad_state.providers.insert(r.publisher.clone());
                 }
+                Receipt::Relay(_) => {}
             }
         }
     }

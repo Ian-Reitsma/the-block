@@ -5,14 +5,14 @@ use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 
 use crate::receipts::BlockTorchReceiptMetadata;
 use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
-use crate::transaction::{binary as tx_binary, FeeLane};
+use crate::root_assembler::{MicroShardRootEntry, RootBundle, RootSizeClass};
 use crate::transaction::binary::{EncodeError, EncodeResult};
+use crate::transaction::{binary as tx_binary, FeeLane};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{
     AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, ComputeSlashReceipt, EnergyReceipt,
-    EnergySlashReceipt, RelayReceipt, Receipt, SignedTransaction, StorageReceipt, TokenAmount,
+    EnergySlashReceipt, Receipt, RelayReceipt, SignedTransaction, StorageReceipt, TokenAmount,
 };
-use crate::root_assembler::{RootBundle, RootSizeClass, MicroShardRootEntry};
 
 /// Encode a [`Block`] into the canonical binary layout.
 pub fn encode_block(block: &Block) -> EncodeResult<Vec<u8>> {
@@ -602,12 +602,12 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                             writer.write_string(proof);
                             Ok(())
                         })
+                        .expect("hop proofs encode")
                     });
                 }
                 struct_writer.field_with("provider_signature", |field_writer| {
                     write_bytes(field_writer, &r.provider_signature, "provider_signature")
                         .expect("signature length fits");
-                    Ok(())
                 });
                 struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
@@ -777,61 +777,43 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 })?;
                 assign_once(&mut device_links, links, "device_links")
             }
-            "total_usd_micros" => {
-                assign_once(
-                    &mut total_usd_micros,
-                    reader.read_u64()?,
-                    "total_usd_micros",
-                )
-            }
-            "price_per_mib_usd_micros" => {
-                assign_once(
-                    &mut price_per_mib_usd_micros,
-                    reader.read_u64()?,
-                    "price_per_mib_usd_micros",
-                )
-            }
-            "clearing_price_usd_micros" => {
-                assign_once(
-                    &mut clearing_price_usd_micros,
-                    reader.read_u64()?,
-                    "clearing_price_usd_micros",
-                )
-            }
-            "resource_floor_usd_micros" => {
-                assign_once(
-                    &mut resource_floor_usd_micros,
-                    reader.read_u64()?,
-                    "resource_floor_usd_micros",
-                )
-            }
-            "delivered_at_micros" => {
-                assign_once(
-                    &mut delivered_at_micros,
-                    reader.read_u64()?,
-                    "delivered_at_micros",
-                )
-            }
+            "total_usd_micros" => assign_once(
+                &mut total_usd_micros,
+                reader.read_u64()?,
+                "total_usd_micros",
+            ),
+            "price_per_mib_usd_micros" => assign_once(
+                &mut price_per_mib_usd_micros,
+                reader.read_u64()?,
+                "price_per_mib_usd_micros",
+            ),
+            "clearing_price_usd_micros" => assign_once(
+                &mut clearing_price_usd_micros,
+                reader.read_u64()?,
+                "clearing_price_usd_micros",
+            ),
+            "resource_floor_usd_micros" => assign_once(
+                &mut resource_floor_usd_micros,
+                reader.read_u64()?,
+                "resource_floor_usd_micros",
+            ),
+            "delivered_at_micros" => assign_once(
+                &mut delivered_at_micros,
+                reader.read_u64()?,
+                "delivered_at_micros",
+            ),
             "payload_digest" => {
-                assign_once(
-                    &mut payload_digest,
-                    read_fixed(reader)?,
-                    "payload_digest",
-                )
+                assign_once(&mut payload_digest, read_fixed(reader)?, "payload_digest")
             }
             "hop_proofs" => {
-                let proofs = read_vec(reader, |reader| reader.read_string())?;
+                let proofs = read_vec(reader, |reader| Ok(reader.read_string()?))?;
                 assign_once(&mut hop_proofs, proofs, "hop_proofs")
             }
-            "mesh_peer" => {
-                assign_once(&mut mesh_peer, reader.read_string()?, "mesh_peer")
-            }
+            "mesh_peer" => assign_once(&mut mesh_peer, reader.read_string()?, "mesh_peer"),
             "mesh_transport" => {
                 assign_once(&mut mesh_transport, reader.read_string()?, "mesh_transport")
             }
-            "latency_ms" => {
-                assign_once(&mut latency_ms, reader.read_u64()?, "latency_ms")
-            }
+            "latency_ms" => assign_once(&mut latency_ms, reader.read_u64()?, "latency_ms"),
             "provider_signature" => assign_once(
                 &mut provider_signature,
                 read_bytes_field(reader, "provider_signature")?,
@@ -1196,7 +1178,7 @@ fn read_root_bundles(reader: &mut Reader<'_>) -> Result<Vec<RootBundle>, DecodeE
             let payload_bytes = reader.read_u32()?;
             Ok(MicroShardRootEntry {
                 root_hash,
-                shard_id,
+                shard_id: shard_id.into(),
                 lane,
                 available_until,
                 payload_bytes,

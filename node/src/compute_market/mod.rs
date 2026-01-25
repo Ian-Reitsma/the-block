@@ -1,10 +1,9 @@
 use self::snark::{SnarkBackend, SnarkError};
+use crate::market_gates::{self, MarketMode};
 use crate::receipts::BlockTorchReceiptMetadata;
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
 use crate::transaction::FeeLane;
-use crate::market_gates::{self, MarketMode};
-use crate::market_gates::{self, MarketMode};
 use concurrency::{mutex, MutexExt, MutexT};
 use foundation_serialization::{Deserialize, Serialize};
 use settlement::{SlaOutcome, SlaResolutionKind};
@@ -382,6 +381,13 @@ impl Market {
         market_gates::compute_mode() == MarketMode::Trade
     }
 
+    fn ensure_trade_mode() -> Result<(), MarketError> {
+        if market_gates::compute_mode() == MarketMode::Rehearsal {
+            return Err(MarketError::Rehearsal);
+        }
+        Ok(())
+    }
+
     /// Create an empty market.
     pub fn new() -> Self {
         admission::record_available_shards(100);
@@ -507,6 +513,12 @@ impl Market {
 
     /// Post an offer from a provider.
     pub fn post_offer(&mut self, offer: Offer) -> Result<(), &'static str> {
+        if let Err(err) = Self::ensure_trade_mode() {
+            return Err(match err {
+                MarketError::Rehearsal => "compute market rehearsal",
+                _ => "compute gate rejected offer",
+            });
+        }
         let mut offer = offer;
         offer.validate()?;
         if offer.price_per_unit == 0 {
@@ -541,6 +553,7 @@ impl Market {
 
     /// Submit a job from the consumer side, matching an existing offer.
     pub fn submit_job(&mut self, job: Job) -> Result<(), MarketError> {
+        Self::ensure_trade_mode()?;
         self.sweep_overdue_jobs();
         if job.consumer_bond < MIN_BOND {
             return Err(MarketError::InvalidWorkload);
@@ -644,14 +657,16 @@ impl Market {
             state.job.priority,
             expected,
         );
-        settlement::Settlement::track_sla(
-            &state.job.job_id,
-            &state.provider,
-            &state.job.buyer,
-            state.provider_bond,
-            state.job.consumer_bond,
-            state.job.deadline,
-        );
+        if Self::settlement_allowed() {
+            settlement::Settlement::track_sla(
+                &state.job.job_id,
+                &state.provider,
+                &state.job.buyer,
+                state.provider_bond,
+                state.job.consumer_bond,
+                state.job.deadline,
+            );
+        }
         self.jobs.insert(state.job.job_id.clone(), state);
         self.seen_jobs.insert(offer.job_id);
         #[cfg(feature = "telemetry")]
@@ -728,6 +743,12 @@ impl Market {
         proof: ExecutionReceipt,
     ) -> Result<u64, &'static str> {
         use std::time::{SystemTime, UNIX_EPOCH};
+        if let Err(err) = Self::ensure_trade_mode() {
+            return Err(match err {
+                MarketError::Rehearsal => "compute market rehearsal",
+                _ => "compute gate rejected slice",
+            });
+        }
         self.sweep_overdue_jobs();
         let state = self.jobs.get_mut(job_id).ok_or("unknown job")?;
         let now = SystemTime::now()
@@ -794,7 +815,9 @@ impl Market {
         if let (Workload::Snark(_), Some(bundle)) = (workload, &proof.proof) {
             #[cfg(feature = "telemetry")]
             crate::telemetry::SNARK_VERIFICATIONS_TOTAL.inc();
-            settlement::Settlement::record_proof(job_id, bundle.clone());
+            if Self::settlement_allowed() {
+                settlement::Settlement::record_proof(job_id, bundle.clone());
+            }
         }
         let slice_units = workload.units();
         let total_expected = slice_units

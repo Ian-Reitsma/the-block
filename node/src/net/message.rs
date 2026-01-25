@@ -437,9 +437,11 @@ fn write_provider_advertisement(
         });
         struct_writer.field_with("signature", |field_writer| {
             if result.is_ok() {
-                if let Err(err) =
-                    write_bytes(field_writer, &Bytes::from(advert.signature.clone()), "signature")
-                {
+                if let Err(err) = write_bytes(
+                    field_writer,
+                    &Bytes::from(advert.signature.clone()),
+                    "signature",
+                ) {
                     result = Err(err);
                 }
             }
@@ -469,19 +471,22 @@ fn read_provider_advertisement(
     })?;
 
     let profile_bytes = profile.ok_or(DecodeError::MissingField("profile"))?;
-    let profile = storage_market::codec::deserialize_provider_profile(&profile_bytes)
-        .map_err(|err| DecodeError::InvalidFieldValue {
-            field: "profile",
-            reason: err.to_string(),
+    let profile =
+        storage_market::codec::deserialize_provider_profile(&profile_bytes).map_err(|err| {
+            DecodeError::InvalidFieldValue {
+                field: "profile",
+                reason: err.to_string(),
+            }
         })?;
     let publisher_bytes = publisher.ok_or(DecodeError::MissingField("publisher"))?;
-    let publisher_arr: [u8; 32] = publisher_bytes
-        .as_ref()
-        .try_into()
-        .map_err(|_| DecodeError::InvalidFieldValue {
-            field: "publisher",
-            reason: "expected 32 bytes".into(),
-        })?;
+    let publisher_arr: [u8; 32] =
+        publisher_bytes
+            .as_ref()
+            .try_into()
+            .map_err(|_| DecodeError::InvalidFieldValue {
+                field: "publisher",
+                reason: "expected 32 bytes".into(),
+            })?;
 
     Ok(ProviderAdvertisement {
         profile,
@@ -489,9 +494,7 @@ fn read_provider_advertisement(
         ttl_secs: ttl_secs.ok_or(DecodeError::MissingField("ttl_secs"))?,
         expires_at: expires_at.ok_or(DecodeError::MissingField("expires_at"))?,
         publisher: publisher_arr,
-        signature: signature
-            .ok_or(DecodeError::MissingField("signature"))?
-            .into_vec(),
+        signature: signature.ok_or(DecodeError::MissingField("signature"))?,
     })
 }
 
@@ -501,13 +504,14 @@ fn write_provider_lookup_request(
 ) -> EncodeResult<()> {
     writer.write_struct(|struct_writer| {
         struct_writer.field_u64("object_size", request.request.object_size);
-        struct_writer.field_u16("shares", request.request.shares);
-        struct_writer.field_option_string("region", request.request.region.as_ref());
-        struct_writer.field_option_u64("max_price_per_block", request.request.max_price_per_block);
-        struct_writer.field_option_u64(
-            "min_success_rate_ppm",
-            request.request.min_success_rate_ppm,
+        struct_writer.field_u32("shares", request.request.shares as u32);
+        struct_writer.field_option_string(
+            "region",
+            request.request.region.as_ref().map(|s| s.as_str()),
         );
+        struct_writer.field_option_u64("max_price_per_block", request.request.max_price_per_block);
+        struct_writer
+            .field_option_u64("min_success_rate_ppm", request.request.min_success_rate_ppm);
         struct_writer.field_u64("limit", request.request.limit as u64);
         struct_writer.field_u64("nonce", request.nonce);
         struct_writer.field_u64("issued_at", request.issued_at);
@@ -517,6 +521,7 @@ fn write_provider_lookup_request(
         });
         struct_writer.field_with("signature", |field_writer| {
             write_bytes(field_writer, &request.signature, "signature")
+                .expect("signature fits");
         });
     });
     Ok(())
@@ -539,16 +544,23 @@ fn read_provider_lookup_request(
 
     decode_struct(reader, Some(6), |key, reader| match key {
         "object_size" => assign_once(&mut object_size, reader.read_u64()?, "object_size"),
-        "shares" => assign_once(&mut shares, reader.read_u16()?, "shares"),
-        "region" => assign_once(&mut region, reader.read_option_string()?, "region"),
+        "shares" => assign_once(&mut shares, reader.read_u32()?, "shares"),
+        "region" => assign_once(
+            &mut region,
+            reader
+                .read_option_with(|reader| reader.read_string().map_err(DecodeError::from))?,
+            "region",
+        ),
         "max_price_per_block" => assign_once(
             &mut max_price_per_block,
-            reader.read_option_u64()?,
+            reader
+                .read_option_with(|reader| reader.read_u64().map_err(DecodeError::from))?,
             "max_price_per_block",
         ),
         "min_success_rate_ppm" => assign_once(
             &mut min_success_rate_ppm,
-            reader.read_option_u64()?,
+            reader
+                .read_option_with(|reader| reader.read_u64().map_err(DecodeError::from))?,
             "min_success_rate_ppm",
         ),
         "limit" => assign_once(&mut limit, reader.read_u64()?, "limit"),
@@ -562,10 +574,16 @@ fn read_provider_lookup_request(
 
     let req = storage_market::DiscoveryRequest {
         object_size: object_size.ok_or(DecodeError::MissingField("object_size"))?,
-        shares: shares.ok_or(DecodeError::MissingField("shares"))?,
-        region,
-        max_price_per_block,
-        min_success_rate_ppm,
+        shares: shares
+            .ok_or(DecodeError::MissingField("shares"))?
+            .try_into()
+            .map_err(|_| DecodeError::InvalidFieldValue {
+                field: "shares",
+                reason: "shares exceeds u16".to_string(),
+            })?,
+        region: region.unwrap_or(None),
+        max_price_per_block: max_price_per_block.unwrap_or(None),
+        min_success_rate_ppm: min_success_rate_ppm.unwrap_or(None),
         limit: limit.ok_or(DecodeError::MissingField("limit"))? as usize,
     };
 
@@ -589,15 +607,17 @@ fn write_provider_lookup_response(
             write_fixed(field_writer, &response.responder);
         });
         struct_writer.field_with("providers", |field_writer| {
-            write_vec(
-                field_writer,
-                &response.providers,
-                "providers",
-                |writer, profile| storage_market::codec::write_provider_profile(writer, profile),
-            )
+            write_vec(field_writer, &response.providers, "providers", |writer, profile| {
+                let bytes = storage_market::codec::serialize_provider_profile(profile).map_err(
+                    |_| EncodeError::LengthOverflow("provider_profile_encode_fail"),
+                )?;
+                write_bytes(writer, &Bytes::from(bytes), "provider_profile")
+            })
+            .expect("provider profiles encode")
         });
         struct_writer.field_with("signature", |field_writer| {
             write_bytes(field_writer, &response.signature, "signature")
+                .expect("signature fits");
         });
     });
     Ok(())
@@ -614,11 +634,18 @@ fn read_provider_lookup_response(
     decode_struct(reader, Some(4), |key, reader| match key {
         "nonce" => assign_once(&mut nonce, reader.read_u64()?, "nonce"),
         "responder" => assign_once(&mut responder, read_fixed(reader)?, "responder"),
-        "providers" => assign_once(
-            &mut providers,
-            read_vec(reader, |reader| storage_market::codec::read_provider_profile(reader))?,
-            "providers",
-        ),
+        "providers" => {
+            let parsed = read_vec(reader, |reader| {
+                let bytes = read_bytes(reader)?;
+                storage_market::codec::deserialize_provider_profile(bytes.as_ref()).map_err(
+                    |err| DecodeError::InvalidFieldValue {
+                        field: "provider_profile",
+                        reason: err.to_string(),
+                    },
+                )
+            })?;
+            assign_once(&mut providers, parsed, "providers")
+        }
         "signature" => assign_once(&mut signature, read_bytes(reader)?, "signature"),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;

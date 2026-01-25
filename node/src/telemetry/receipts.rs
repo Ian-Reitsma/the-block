@@ -422,6 +422,9 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
                 ad_settlement += settlement;
                 RECEIPTS_AD.inc();
             }
+            Receipt::Relay(_) => {
+                // Relay receipts currently aggregate separately; count only totals for economics.
+            }
         }
     }
 

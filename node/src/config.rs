@@ -721,7 +721,8 @@ pub fn relay_max_ack_age_secs() -> u64 {
 
 /// Returns the relay economics gate controlled by `TB_RELAY_ECONOMICS_MODE`.
 pub fn relay_economics_mode() -> String {
-    std::env::var("TB_RELAY_ECONOMICS_MODE").unwrap_or_else(|_| default_relay_economics_mode().to_string())
+    std::env::var("TB_RELAY_ECONOMICS_MODE")
+        .unwrap_or_else(|_| default_relay_economics_mode().to_string())
 }
 
 fn default_relay_max_bytes_per_bundle() -> u64 {

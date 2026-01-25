@@ -11,8 +11,8 @@ use crate::net::Bytes;
 #[cfg(feature = "quic")]
 use crate::p2p::handshake::validate_quic_certificate;
 use crate::p2p::handshake::{Hello, Transport};
-use crate::storage::provider_directory;
 use crate::simple_db::{names, SimpleDb};
+use crate::storage::provider_directory;
 use crate::{Block, Blockchain};
 use concurrency::{Lazy, MutexExt, OrderedMap};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};

@@ -424,6 +424,8 @@ pub enum EnergyMarketError {
         tolerance_secs: u64,
         observed_skew: u64,
     },
+    #[error("energy market in rehearsal mode")]
+    Rehearsal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

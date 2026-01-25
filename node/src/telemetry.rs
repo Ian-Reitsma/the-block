@@ -26,7 +26,7 @@ use httpd::{BlockingClient, Method};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
-    self, Collector, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle, HistogramOpts,
+    self, exponential_buckets, Collector, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle, HistogramOpts,
     HistogramVec, IntCounter, IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle,
     IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
 };
@@ -4400,7 +4400,7 @@ pub static STORAGE_PROVIDER_DISCOVERY_LATENCY_SECONDS: Lazy<Histogram> = Lazy::n
             "storage_provider_discovery_latency_seconds",
             "Latency for network-backed storage provider discovery",
         )
-        .buckets(exponential_buckets(0.001, 2.0, 12).unwrap()),
+        .buckets(exponential_buckets(0.001, 2.0, 12)),
     )
     .unwrap_or_else(|e| panic!("histogram storage_provider_discovery_latency_seconds: {e}"));
     REGISTRY

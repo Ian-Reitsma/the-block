@@ -19,11 +19,11 @@ use crate::consensus::constants::DIFFICULTY_WINDOW;
 #[cfg(feature = "telemetry")]
 use crate::consensus::observer;
 use crate::governance::{DisbursementStatus, NODE_GOV_STORE};
-#[cfg(feature = "telemetry")]
-use crate::telemetry::MemoryComponent;
 use crate::root_assembler::{
     MicroShardRootEntry, RootAssembler, RootBundle, RootBundleSummary, RootManifest, RootSizeClass,
 };
+#[cfg(feature = "telemetry")]
+use crate::telemetry::MemoryComponent;
 use crate::transaction::{TxSignature, TxVersion};
 use ad_market::{DeliveryChannel, SettlementBreakdown};
 use concurrency::cache::LruCache;
@@ -144,9 +144,9 @@ pub mod light_client;
 pub mod liquidity;
 pub mod localnet;
 pub mod market_gates;
-pub mod relay;
 pub mod net;
 pub mod partition_recover;
+pub mod relay;
 pub use net::peer_metrics_store;
 pub mod drive;
 pub mod p2p;
@@ -1345,6 +1345,7 @@ impl Blockchain {
                         Receipt::Energy(_) => has_energy_receipts = true,
                         Receipt::EnergySlash(_) => {}
                         Receipt::Ad(_) => has_ad_receipts = true,
+                        Receipt::Relay(_) => {}
                     }
                     if has_storage_receipts
                         && has_compute_receipts
@@ -3208,7 +3209,9 @@ impl Blockchain {
             ..Block::default()
         };
         self.chain.push(g);
-        self.update_root_slots_for_block(&self.chain.last().unwrap());
+        if let Some(last) = self.chain.last().cloned() {
+            self.update_root_slots_for_block(&last);
+        }
         self.recent_timestamps.push_back(0);
         self.block_height = 1;
         self.persist_chain()
@@ -7157,7 +7160,8 @@ impl Blockchain {
             if bundle.entries.is_empty() {
                 return Err(py_value_err("root bundle contains no entries"));
             }
-            let computed = RootBundle::compute_hash(bundle.slot, bundle.size_class, &bundle.entries);
+            let computed =
+                RootBundle::compute_hash(bundle.slot, bundle.size_class, &bundle.entries);
             if computed != bundle.bundle_hash {
                 return Err(py_value_err("root bundle hash mismatch"));
             }
@@ -7213,7 +7217,8 @@ impl Blockchain {
     fn recompute_root_slots(&mut self) {
         self.last_root_slot_l2 = None;
         self.last_root_slot_l3 = None;
-        for block in &self.chain {
+        let snapshot = self.chain.clone();
+        for block in &snapshot {
             self.update_root_slots_for_block(block);
         }
     }

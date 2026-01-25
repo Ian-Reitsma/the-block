@@ -1,7 +1,7 @@
 use crate::ledger_binary;
 use crate::receipts_validation::ReceiptHeader;
-use crate::util::binary_struct;
 use crate::root_assembler::RootBundleSummary;
+use crate::util::binary_struct;
 use foundation_serialization::{Deserialize, Serialize};
 use ledger::address::ShardId;
 use std::collections::HashMap;

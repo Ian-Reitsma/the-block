@@ -10,6 +10,7 @@ use std::thread;
 use std::time::Duration;
 use sys::tempfile::tempdir;
 use the_block::range_boost;
+use the_block::relay::RelayJob;
 
 #[test]
 fn unix_mesh_prefers_low_latency() {
@@ -74,7 +75,7 @@ fn tcp_forwarder_delivers_bundle() {
     range_boost::spawn_forwarder(&queue);
     {
         let mut guard = queue.lock().unwrap();
-        guard.enqueue(b"mesh-test".to_vec());
+        guard.enqueue(b"mesh-test".to_vec(), stub_job());
     }
 
     assert!(rx.recv_timeout(Duration::from_millis(200)).is_err());
@@ -85,4 +86,22 @@ fn tcp_forwarder_delivers_bundle() {
     let bundle: range_boost::Bundle = json::from_slice(&payload).unwrap();
     assert_eq!(bundle.payload, b"mesh-test");
     range_boost::set_enabled(false);
+}
+
+fn stub_job() -> RelayJob {
+    RelayJob {
+        job_id: "mesh".into(),
+        provider: "provider".into(),
+        campaign_id: None,
+        creative_id: None,
+        mesh_peer: None,
+        mesh_transport: None,
+        mesh_latency_ms: None,
+        clearing_price_usd_micros: 0,
+        resource_floor_usd_micros: 0,
+        price_per_mib_usd_micros: 0,
+        total_usd_micros: 0,
+        bytes: 0,
+        offered_at_micros: 0,
+    }
 }

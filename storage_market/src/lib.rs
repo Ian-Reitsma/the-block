@@ -23,9 +23,9 @@ use codec::{
 };
 use engine::{Engine, Tree};
 use foundation_serialization::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::SystemTime;
-use std::path::Path;
 use storage::StorageContract;
 use thiserror::Error;
 
@@ -194,7 +194,8 @@ impl ProviderProfile {
 }
 
 /// Request that powers DHT provider discovery.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct DiscoveryRequest {
     pub object_size: u64,
     pub shares: u16,
@@ -209,7 +210,7 @@ impl DiscoveryRequest {
         self.limit.clamp(1, 200)
     }
 
-    fn required_capacity_bytes(&self) -> u64 {
+    pub fn required_capacity_bytes(&self) -> u64 {
         let shares = (self.shares.max(1)) as u128;
         let bytes = (self.object_size.max(1)) as u128;
         let chunk = (bytes + shares - 1) / shares;
@@ -450,10 +451,7 @@ impl StorageMarket {
             let existing_profile = deserialize_provider_profile(&existing)?;
             let newer = profile.version > existing_profile.version
                 || (profile.version == existing_profile.version
-                    && profile
-                        .expires_at
-                        .unwrap_or(0)
-                        > existing_profile.expires_at.unwrap_or(0));
+                    && profile.expires_at.unwrap_or(0) > existing_profile.expires_at.unwrap_or(0));
             if !newer {
                 return Ok(None);
             }

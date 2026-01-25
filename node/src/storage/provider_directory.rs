@@ -1,10 +1,16 @@
 #![forbid(unsafe_code)]
 
-use crate::net::{known_peers_with_info, load_net_key, send_msg, Transport};
 #[cfg(feature = "quic")]
 use crate::net::send_quic_msg;
-use crate::rpc::storage::StorageMarketHandle;
-use concurrency::{mutex, MutexExt, MutexT};
+use crate::net::{load_net_key, send_msg, Transport};
+use crate::net::peer::known_peers_with_info;
+#[cfg(feature = "telemetry")]
+use crate::telemetry::{
+    STORAGE_PROVIDER_ADVERT_SEEN_TOTAL, STORAGE_PROVIDER_CANDIDATE_GAUGE,
+    STORAGE_PROVIDER_DISCOVERY_LATENCY_SECONDS, STORAGE_PROVIDER_PUBLISH_TOTAL,
+    STORAGE_PROVIDER_STALE_REJECT_TOTAL,
+};
+use concurrency::{mutex, Bytes, MutexExt, MutexT};
 use crypto_suite::signatures::ed25519::{Signature, SigningKey, VerifyingKey};
 use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
@@ -12,48 +18,50 @@ use rand::RngCore;
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use storage_market::{DiscoveryRequest, ProviderDirectory, ProviderProfile};
-#[cfg(feature = "telemetry")]
-use crate::telemetry::{
-    STORAGE_PROVIDER_ADVERT_SEEN_TOTAL, STORAGE_PROVIDER_CANDIDATE_GAUGE,
-    STORAGE_PROVIDER_DISCOVERY_LATENCY_SECONDS, STORAGE_PROVIDER_PUBLISH_TOTAL,
-    STORAGE_PROVIDER_STALE_REJECT_TOTAL,
-};
 use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::convert::TryFrom;
+use storage_market::{DiscoveryRequest, ProviderDirectory, ProviderProfile, StorageMarket};
+
+type StorageMarketHandle = Arc<MutexT<StorageMarket>>;
 
 const LOOKUP_MAX_AGE_SECS: u64 = 30;
 const LOOKUP_RATE_LIMIT_SECS: u64 = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderAdvertisement {
     pub profile: ProviderProfile,
     pub version: u64,
     pub ttl_secs: u64,
     pub expires_at: u64,
     pub publisher: [u8; 32],
-    pub signature: Vec<u8>,
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub signature: Bytes,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderLookupRequest {
     pub request: DiscoveryRequest,
     pub nonce: u64,
     pub issued_at: u64,
     pub ttl: u8,
     pub origin: [u8; 32],
-    pub signature: Vec<u8>,
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub signature: Bytes,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderLookupResponse {
     pub nonce: u64,
     pub responder: [u8; 32],
     pub providers: Vec<ProviderProfile>,
-    pub signature: Vec<u8>,
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub signature: Bytes,
 }
 
-#[derive(Serialize)]
 struct ProviderAdvertisementBody {
     profile: ProviderProfile,
     version: u64,
@@ -62,7 +70,6 @@ struct ProviderAdvertisementBody {
     publisher: [u8; 32],
 }
 
-#[derive(Serialize)]
 struct ProviderLookupBody<'a> {
     request: &'a DiscoveryRequest,
     nonce: u64,
@@ -71,7 +78,6 @@ struct ProviderLookupBody<'a> {
     origin: [u8; 32],
 }
 
-#[derive(Serialize)]
 struct ProviderLookupResponseBody<'a> {
     nonce: u64,
     responder: [u8; 32],
@@ -97,7 +103,7 @@ impl ProviderAdvertisement {
             ttl_secs,
             expires_at,
             publisher: body.publisher,
-            signature: sig.to_bytes().to_vec(),
+            signature: Bytes::from(sig.to_bytes().to_vec()),
         }
     }
 
@@ -117,10 +123,12 @@ impl ProviderAdvertisement {
             publisher: self.publisher,
         };
         let bytes = serialize_body(&body);
-        let sig = match Signature::from_bytes(&self.signature) {
-            Ok(sig) => sig,
-            Err(_) => return false,
-        };
+        let sig_bytes: [u8; crypto_suite::signatures::ed25519::SIGNATURE_LENGTH] =
+            match TryFrom::try_from(self.signature.as_ref()) {
+                Ok(arr) => arr,
+                Err(_) => return false,
+            };
+        let sig = Signature::from_bytes(&sig_bytes);
         vk.verify(&bytes, &sig).is_ok()
     }
 }
@@ -140,12 +148,12 @@ impl ProviderLookupRequest {
         let bytes = serialize_lookup_body(&body);
         let sig = sk.sign(&bytes);
         Self {
-            request,
+            request: request.clone(),
             nonce,
             issued_at: body.issued_at,
             ttl,
             origin: body.origin,
-            signature: sig.to_bytes().to_vec(),
+            signature: Bytes::from(sig.to_bytes().to_vec()),
         }
     }
 
@@ -165,10 +173,12 @@ impl ProviderLookupRequest {
             origin: self.origin,
         };
         let bytes = serialize_lookup_body(&body);
-        let sig = match Signature::from_bytes(&self.signature) {
-            Ok(sig) => sig,
-            Err(_) => return false,
-        };
+        let sig_bytes: [u8; crypto_suite::signatures::ed25519::SIGNATURE_LENGTH] =
+            match TryFrom::try_from(self.signature.as_ref()) {
+                Ok(arr) => arr,
+                Err(_) => return false,
+            };
+        let sig = Signature::from_bytes(&sig_bytes);
         vk.verify(&bytes, &sig).is_ok()
     }
 }
@@ -186,7 +196,7 @@ impl ProviderLookupResponse {
             nonce,
             responder: body.responder,
             providers,
-            signature: sig.to_bytes().to_vec(),
+            signature: Bytes::from(sig.to_bytes().to_vec()),
         }
     }
 
@@ -201,10 +211,12 @@ impl ProviderLookupResponse {
             providers: &self.providers,
         };
         let bytes = serialize_lookup_response_body(&body);
-        let sig = match Signature::from_bytes(&self.signature) {
-            Ok(sig) => sig,
-            Err(_) => return false,
-        };
+        let sig_bytes: [u8; crypto_suite::signatures::ed25519::SIGNATURE_LENGTH] =
+            match TryFrom::try_from(self.signature.as_ref()) {
+                Ok(arr) => arr,
+                Err(_) => return false,
+            };
+        let sig = Signature::from_bytes(&sig_bytes);
         vk.verify(&bytes, &sig).is_ok()
     }
 }
@@ -338,8 +350,10 @@ impl NetworkProviderDirectory {
         if let Some(updated) = self.cache_profile(advert.profile.clone()) {
             let _ = self.market.guard().cache_provider_profile(updated);
         }
-        let payload =
-            crate::net::Message::new(crate::net::Payload::StorageProviderAdvertisement(advert), &sk);
+        let payload = crate::net::Message::new(
+            crate::net::Payload::StorageProviderAdvertisement(advert),
+            &sk,
+        );
         let label = if let Ok(msg) = payload {
             self.broadcast(msg);
             "ok"
@@ -421,7 +435,8 @@ impl ProviderDirectory for NetworkProviderDirectory {
 
 type DirectoryHandle = Arc<MutexT<Option<Arc<NetworkProviderDirectory>>>>;
 
-static DIRECTORY: concurrency::Lazy<DirectoryHandle> = concurrency::Lazy::new(|| mutex(None));
+static DIRECTORY: concurrency::Lazy<DirectoryHandle> =
+    concurrency::Lazy::new(|| Arc::new(mutex(None)));
 
 pub fn install_directory(market: StorageMarketHandle) {
     let dir = Arc::new(NetworkProviderDirectory::new(market.clone(), 15 * 60));
@@ -529,18 +544,22 @@ fn serialize_lookup_body(body: &ProviderLookupBody<'_>) -> Vec<u8> {
         "max_price_per_block".into(),
         body.request
             .max_price_per_block
-            .map(|p| foundation_serialization::json::Value::Number(
-                foundation_serialization::json::Number::from(p),
-            ))
+            .map(|p| {
+                foundation_serialization::json::Value::Number(
+                    foundation_serialization::json::Number::from(p),
+                )
+            })
             .unwrap_or(foundation_serialization::json::Value::Null),
     );
     req.insert(
         "min_success_rate_ppm".into(),
         body.request
             .min_success_rate_ppm
-            .map(|p| foundation_serialization::json::Value::Number(
-                foundation_serialization::json::Number::from(p),
-            ))
+            .map(|p| {
+                foundation_serialization::json::Value::Number(
+                    foundation_serialization::json::Number::from(p),
+                )
+            })
             .unwrap_or(foundation_serialization::json::Value::Null),
     );
     req.insert(
@@ -616,14 +635,17 @@ fn serialize_lookup_response_body(body: &ProviderLookupResponseBody<'_>) -> Vec<
     );
     map.insert(
         "providers".to_string(),
-        foundation_serialization::json::value_from_slice(
-            &body
-                .providers
+        foundation_serialization::json::Value::Array(
+            body.providers
                 .iter()
-                .map(|p| storage_market::codec::serialize_provider_profile(p).unwrap_or_default())
-                .collect::<Vec<_>>(),
-        )
-        .unwrap_or(foundation_serialization::json::Value::Null),
+                .map(|p| {
+                    let bytes = storage_market::codec::serialize_provider_profile(p)
+                        .unwrap_or_default();
+                    foundation_serialization::json::value_from_slice(&bytes)
+                        .unwrap_or(foundation_serialization::json::Value::Null)
+                })
+                .collect(),
+        ),
     );
     foundation_serialization::json::to_vec_value(&foundation_serialization::json::Value::Object(
         map,

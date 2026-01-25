@@ -1,12 +1,10 @@
 use std::path::PathBuf;
 
-use concurrency::{mutex, MutexT};
+use concurrency::{mutex, MutexExt, MutexT};
 use storage_market::{DiscoveryRequest, ProviderProfile, StorageMarket};
 use sys::tempfile::tempdir;
 use the_block::net::load_net_key;
-use the_block::storage::provider_directory::{
-    self, ProviderAdvertisement, ProviderLookupResponse,
-};
+use the_block::storage::provider_directory::{self, ProviderAdvertisement};
 
 type MarketHandle = std::sync::Arc<MutexT<StorageMarket>>;
 

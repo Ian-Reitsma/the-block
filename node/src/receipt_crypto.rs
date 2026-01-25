@@ -361,6 +361,7 @@ pub fn verify_receipt_signature(
             &r.publisher_signature,
             r.signature_nonce,
         ),
+        Receipt::Relay(_) => return Ok(()),
     };
 
     // Get provider's public key

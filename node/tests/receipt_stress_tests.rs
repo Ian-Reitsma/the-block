@@ -39,7 +39,7 @@ fn derive_test_signing_key() -> SigningKey {
                 Receipt::Compute(cr) => build_compute_preimage(cr),
                 Receipt::Energy(er) => build_energy_preimage(er),
                 Receipt::Ad(ar) => build_ad_preimage(ar),
-                Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => Vec::new(),
+                Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_) => Vec::new(),
             };
             let sig = sk.sign(&preimage);
             vk.verify(&preimage, &sig).is_ok()
@@ -423,7 +423,7 @@ fn signature_round_trip_single_case() {
         Receipt::Compute(r) => build_compute_preimage(r),
         Receipt::Energy(r) => build_energy_preimage(r),
         Receipt::Ad(r) => build_ad_preimage(r),
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => Vec::new(),
+        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_) => Vec::new(),
     };
     let sig = sk.sign(&preimage);
     assert!(
@@ -471,12 +471,16 @@ fn receipt_provider_id(receipt: &Receipt) -> &str {
         Receipt::Compute(r) => r.provider.as_str(),
         Receipt::Energy(r) => r.provider.as_str(),
         Receipt::Ad(r) => r.publisher.as_str(),
+        Receipt::Relay(r) => r.provider.as_str(),
         Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => "",
     }
 }
 
 fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
-    if matches!(receipt, Receipt::ComputeSlash(_) | Receipt::EnergySlash(_)) {
+    if matches!(
+        receipt,
+        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_)
+    ) {
         return;
     }
     let preimage = match receipt {
@@ -484,7 +488,7 @@ fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
         Receipt::Compute(r) => build_compute_preimage(r),
         Receipt::Energy(r) => build_energy_preimage(r),
         Receipt::Ad(r) => build_ad_preimage(r),
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
+        Receipt::Relay(_) | Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
     };
     let signature = sk.sign(&preimage).to_bytes().to_vec();
     match receipt {
@@ -492,7 +496,7 @@ fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
         Receipt::Compute(r) => r.provider_signature = signature.clone(),
         Receipt::Energy(r) => r.provider_signature = signature.clone(),
         Receipt::Ad(r) => r.publisher_signature = signature,
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
+        Receipt::Relay(_) | Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
     }
 }
 

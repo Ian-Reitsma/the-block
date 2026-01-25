@@ -18,6 +18,7 @@ use cli_core::{
     command::{Command, CommandBuilder, CommandId},
     parse::Matches,
 };
+use crypto_suite::hex;
 use crypto_suite::signatures::ed25519::SigningKey;
 use diagnostics::{anyhow, Context, Result};
 use foundation_serialization::json::{Map as JsonMap, Value};
@@ -129,6 +130,16 @@ pub struct RootBundlesArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+struct RootBundleSummaryJson {
+    slot: u64,
+    size_class: String,
+    bundle_hash: Vec<u8>,
+    entry_count: u32,
+    available_until: u64,
+}
+
 impl LightClientCmd {
     pub fn command() -> Command {
         CommandBuilder::new(
@@ -221,10 +232,13 @@ impl LightClientCmd {
             "root-bundles" => {
                 let url = take_string(sub_matches, "url")
                     .unwrap_or_else(|| "http://localhost:26658".to_string());
-                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?
-                    .unwrap_or(5);
+                let limit = parse_usize(take_string(sub_matches, "limit"), "limit")?.unwrap_or(5);
                 let json = sub_matches.get_flag("json");
-                Ok(LightClientCmd::RootBundles(RootBundlesArgs { url, limit, json }))
+                Ok(LightClientCmd::RootBundles(RootBundlesArgs {
+                    url,
+                    limit,
+                    json,
+                }))
             }
             "did" => {
                 let action = DidCmd::from_matches(sub_matches)?;
@@ -667,11 +681,16 @@ fn query_root_bundles(client: &RpcClient, args: &RootBundlesArgs) -> Result<()> 
         println!("No micro-shard root bundles recorded.");
     } else {
         for summary in summaries {
+            let bundle_hash = if summary.bundle_hash.len() == 32 {
+                hex::encode(&summary.bundle_hash)
+            } else {
+                format!("{:?}", summary.bundle_hash)
+            };
             println!(
                 "Slot {} ({}) – hash {} entries {} available_until {}",
                 summary.slot,
                 summary.size_class,
-                summary.bundle_hash,
+                bundle_hash,
                 summary.entry_count,
                 summary.available_until,
             );

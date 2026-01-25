@@ -28,8 +28,8 @@ use sys::signals::{Signals, SIGHUP};
 use crate::gateway::dns;
 use crate::web::rate_limit::RateLimitFilter;
 use crate::{
-    ad_quality, ad_readiness::AdReadinessHandle, drive, net, range_boost,
-    range_boost::RangeBoost, relay, service_badge, storage::pipeline, vm::wasm, ReadAck,
+    ad_quality, ad_readiness::AdReadinessHandle, drive, net, range_boost, range_boost::RangeBoost,
+    relay, service_badge, storage::pipeline, vm::wasm, ReadAck,
 };
 use foundation_serialization::{
     binary,
@@ -1169,16 +1169,15 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
         let holdout = outcome.uplift_assignment.in_holdout;
         let delivery_channel = outcome.delivery_channel;
         let mesh_payload = outcome.mesh_payload.clone();
-        ack.campaign_id = Some(outcome.campaign_id);
-        ack.creative_id = Some(outcome.creative_id);
-        ack.selection_receipt = Some(outcome.selection_receipt);
+        ack.campaign_id = Some(outcome.campaign_id.clone());
+        ack.creative_id = Some(outcome.creative_id.clone());
+        ack.selection_receipt = Some(outcome.selection_receipt.clone());
         ack.delivery_channel = delivery_channel;
         if ack.delivery_channel != DeliveryChannel::Mesh {
             ack.mesh = None;
         } else if !holdout {
             if let Some(payload) = mesh_payload {
-                if let Ok(job) =
-                    relay::offer_job(&ack, &outcome, ack.mesh.as_ref(), payload.len())
+                if let Ok(job) = relay::offer_job(&ack, &outcome, ack.mesh.as_ref(), payload.len())
                 {
                     let mut queue = state.mesh_queue.lock().unwrap();
                     queue.enqueue(payload, job);
@@ -1188,9 +1187,7 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
                             if !hop.is_empty() {
                                 queue.record_proof(
                                     idx,
-                                    range_boost::HopProof {
-                                        relay: hop.clone(),
-                                    },
+                                    range_boost::HopProof { relay: hop.clone() },
                                 );
                             }
                         }

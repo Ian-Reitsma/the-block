@@ -1176,7 +1176,7 @@ fn write_root_summaries(writer: &mut Writer, summaries: &[RootBundleSummary]) ->
 }
 
 fn read_root_summaries(reader: &mut Reader<'_>) -> binary_struct::Result<Vec<RootBundleSummary>> {
-    read_vec(reader, |reader| {
+    read_vec(reader, "root_summaries", |reader: &mut Reader<'_>| {
         let slot = reader.read_u64()?;
         let size_class_raw = reader.read_u64()?;
         let size_class = match size_class_raw {

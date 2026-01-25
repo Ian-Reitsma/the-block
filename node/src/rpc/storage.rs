@@ -10,12 +10,12 @@ use storage_market::{
 };
 
 use crate::drive::DriveStore;
-use crate::storage::provider_directory;
+use crate::market_gates::{self, MarketMode};
 use crate::storage::marketplace::SearchOptions;
 use crate::storage::pipeline::StoragePipeline;
+use crate::storage::provider_directory;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
-use crate::market_gates::{self, MarketMode};
 
 fn json_object(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();

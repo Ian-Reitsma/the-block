@@ -725,6 +725,7 @@ pub fn derive_receipt_header(
             Receipt::EnergySlash(r) => (r.provider.as_str(), None, None),
             Receipt::ComputeSlash(r) => (r.provider.as_str(), None, None),
             Receipt::Ad(r) => (r.publisher.as_str(), None, None),
+            Receipt::Relay(r) => (r.provider.as_str(), None, None),
         };
         let record = registry.get_provider_record(id);
         let region = region_hint

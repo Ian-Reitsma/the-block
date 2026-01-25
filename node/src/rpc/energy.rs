@@ -315,6 +315,10 @@ fn map_energy_error(err: EnergyMarketError) -> RpcError {
                 "timestamp skew {observed_skew}s exceeds tolerance {tolerance_secs}s"
             ),
         ),
+        EnergyMarketError::Rehearsal => energy_rpc_error(
+            ERR_PROVIDER_INACTIVE,
+            "energy market in rehearsal mode; trade not yet enabled",
+        ),
     }
 }
 
@@ -335,6 +339,10 @@ fn map_dispute_error(err: DisputeError) -> RpcError {
         DisputeError::AlreadyResolved { dispute_id } => energy_rpc_error(
             ERR_SETTLEMENT_CONFLICT,
             format!("dispute {dispute_id} already resolved"),
+        ),
+        DisputeError::Rehearsal => energy_rpc_error(
+            ERR_SETTLEMENT_CONFLICT,
+            "energy market in rehearsal mode; disputes disabled",
         ),
     }
 }
