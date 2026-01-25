@@ -1,13 +1,10 @@
-use runtime::net::TcpListener;
 use std::io;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
 
 pub const LOCAL_BIND_ADDR: &str = "127.0.0.1:0";
 
-pub async fn bind_runtime_listener(addr: &str) -> Option<TcpListener> {
-    let socket = addr.parse::<SocketAddr>().expect("valid socket address");
-    match TcpListener::bind(socket).await {
+pub fn bind_std_listener(addr: &str) -> Option<std::net::TcpListener> {
+    match std::net::TcpListener::bind(addr) {
         Ok(listener) => Some(listener),
         Err(err) => handle_bind_error(addr, err),
     }

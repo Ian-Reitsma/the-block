@@ -1,9 +1,11 @@
 use contract_cli::light_client::{
-    anchor_envelope_value_to_record, anchor_record_from_value, anchor_request_params,
-    latest_header_value_to_header, resolved_did_from_value, resolved_did_value_to_record,
+    anchor_record_from_value, anchor_request_params, resolved_did_from_value, AnchorRecord,
+    LightHeader, ResolvedDid,
 };
 use contract_cli::tx::{TxDidAnchor, TxDidAnchorAttestation};
-use foundation_serialization::json::{Map as JsonMap, Number as JsonNumber, Value as JsonValue};
+use foundation_serialization::json::{
+    from_value, Map as JsonMap, Number as JsonNumber, Value as JsonValue,
+};
 
 fn json_string(value: &str) -> JsonValue {
     JsonValue::String(value.to_owned())
@@ -23,6 +25,42 @@ fn json_object(entries: impl IntoIterator<Item = (&'static str, JsonValue)>) -> 
         map.insert(key.to_string(), value);
     }
     JsonValue::Object(map)
+}
+
+fn anchor_envelope_value_to_record(value: JsonValue) -> AnchorRecord {
+    let envelope = value.as_object().expect("anchor envelope object");
+    if let Some(error) = envelope.get("error") {
+        panic!("anchor error response: {error:?}");
+    }
+    let result = envelope
+        .get("result")
+        .cloned()
+        .expect("anchor envelope contains result payload");
+    anchor_record_from_value(result).expect("anchor record parse")
+}
+
+fn latest_header_value_to_header(value: JsonValue) -> LightHeader {
+    let envelope = value.as_object().expect("latest_header envelope object");
+    if let Some(error) = envelope.get("error") {
+        panic!("latest_header error response: {error:?}");
+    }
+    let result = envelope
+        .get("result")
+        .cloned()
+        .expect("latest_header envelope contains result payload");
+    from_value(result).expect("latest_header result parse")
+}
+
+fn resolved_did_value_to_record(value: JsonValue) -> ResolvedDid {
+    let envelope = value.as_object().expect("resolve envelope object");
+    if let Some(error) = envelope.get("error") {
+        panic!("resolve error response: {error:?}");
+    }
+    let result = envelope
+        .get("result")
+        .cloned()
+        .expect("resolve envelope contains result payload");
+    resolved_did_from_value(result).expect("resolved did parsing")
 }
 
 fn sample_anchor_record_value() -> JsonValue {
@@ -153,7 +191,7 @@ fn anchor_envelope_value_to_record_parses_envelope() {
         ("id", json_number_u64(1)),
         ("result", sample_anchor_record_value()),
     ]);
-    let record = anchor_envelope_value_to_record(envelope).expect("parsed record");
+    let record = anchor_envelope_value_to_record(envelope);
     assert_eq!(record.address, "addr1");
     assert_eq!(record.hash, "hash1");
 }
@@ -179,7 +217,7 @@ fn resolved_did_value_to_record_parses_envelope() {
         ("id", json_number_u64(1)),
         ("result", sample_resolved_did_value()),
     ]);
-    let record = resolved_did_value_to_record(envelope).expect("resolved DID record");
+    let record = resolved_did_value_to_record(envelope);
     assert_eq!(record.address, "addr1");
     assert_eq!(record.hash.as_deref(), Some("hash2"));
 }
@@ -197,7 +235,7 @@ fn latest_header_value_to_header_parses_result() {
         ("result", header),
         ("error", json_null()),
     ]);
-    let parsed = latest_header_value_to_header(envelope).expect("light header");
+    let parsed = latest_header_value_to_header(envelope);
     assert_eq!(parsed.height, 55);
     assert_eq!(parsed.hash, "hash-55");
     assert_eq!(parsed.difficulty, 9000);

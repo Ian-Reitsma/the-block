@@ -1,3 +1,4 @@
+#[path = "support_http.rs"]
 mod support;
 
 use std::time::Duration;

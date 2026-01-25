@@ -282,6 +282,10 @@ impl StorageMarket {
         std::mem::take(&mut self.pending_receipts)
     }
 
+    pub fn push_receipt_for_test(&mut self, receipt: receipts::StorageSettlementReceipt) {
+        self.pending_receipts.push(receipt);
+    }
+
     pub fn register_contract(
         &self,
         mut contract: StorageContract,

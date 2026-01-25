@@ -553,12 +553,6 @@ impl DisputeHistory {
         }
     }
 
-    #[allow(dead_code)]
-    fn remove(&mut self, commitment: &[u8; 32]) {
-        self.records
-            .retain(|record| record.commitment != *commitment);
-    }
-
     fn iter(&self) -> impl Iterator<Item = &DisputeAuditRecord> {
         self.records.iter()
     }
@@ -651,7 +645,6 @@ mod state_codec {
         CodecError::InvalidType { field, expected }
     }
 
-    #[allow(dead_code)]
     fn invalid_value(field: &'static str, reason: impl Into<String>) -> CodecError {
         CodecError::InvalidValue {
             field,
@@ -686,14 +679,6 @@ mod state_codec {
         value
             .as_u64()
             .ok_or_else(|| invalid_type(field, "an integer"))
-    }
-
-    #[allow(dead_code)]
-    fn require_bool(value: &Value, field: &'static str) -> Result<bool, CodecError> {
-        match value {
-            Value::Bool(flag) => Ok(*flag),
-            _ => Err(invalid_type(field, "a boolean")),
-        }
     }
 
     fn encode_accounting_record(record: &RelayerAccounting) -> Value {
@@ -2409,6 +2394,7 @@ impl Bridge {
         }
         let removed = self.remove_pending_reward(asset, delta);
         if removed > 0 {
+            #[cfg(feature = "telemetry")]
             crate::telemetry::adjust_bridge_rewards_pending(-(removed as i64));
         }
         let record = SlashRecord {
@@ -2635,6 +2621,7 @@ impl Bridge {
         };
         self.state.next_accrual_id = self.state.next_accrual_id.saturating_add(1);
         self.add_pending_reward(&record.asset, amount);
+        #[cfg(feature = "telemetry")]
         crate::telemetry::record_bridge_reward_accrual(&record.asset, amount);
         self.state.reward_accruals.push_back(record);
         while self.state.reward_accruals.len() > REWARD_ACCRUAL_RETENTION {
@@ -2770,6 +2757,7 @@ impl Bridge {
             status: DutyStatus::Pending,
         };
         let id = self.state.duties.assign(record);
+        #[cfg(feature = "telemetry")]
         crate::telemetry::increment_bridge_pending_duties();
         self.accounting_mut(relayer).assign_duty();
         id
@@ -2788,6 +2776,7 @@ impl Bridge {
                 telemetry_record_dispute(kind_label, "success");
             }
             let relayer_id = record.relayer.clone();
+            #[cfg(feature = "telemetry")]
             crate::telemetry::decrement_bridge_pending_duties();
             let accounting = self.accounting_mut(&relayer_id);
             accounting.complete_duty();
@@ -2818,6 +2807,7 @@ impl Bridge {
                 telemetry_record_dispute(kind_label, reason_label);
             }
             let relayer_id = record.relayer.clone();
+            #[cfg(feature = "telemetry")]
             crate::telemetry::decrement_bridge_pending_duties();
             let accounting = self.accounting_mut(&relayer_id);
             accounting.fail_duty();
@@ -2875,6 +2865,7 @@ impl Bridge {
         let claimed_amount = pending_before.saturating_sub(pending_after);
         let drained = self.consume_pending_rewards(claimed_amount);
         if drained > 0 {
+            #[cfg(feature = "telemetry")]
             crate::telemetry::adjust_bridge_rewards_pending(-(drained as i64));
         }
         let record = RewardClaimRecord {

@@ -20,9 +20,9 @@ use the_block::{
     runtime::net::TcpStream,
     Blockchain,
 };
-use util::timeout::expect_timeout;
-
-mod util;
+#[path = "util/timeout.rs"]
+mod timeout;
+use timeout::expect_timeout;
 
 fn peer_label(pk: impl AsRef<[u8]>) -> String {
     let bytes = pk.as_ref();

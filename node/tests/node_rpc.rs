@@ -23,9 +23,11 @@ use std::{
     fs,
     net::{SocketAddr, TcpStream as StdTcpStream},
 };
-use util::timeout::expect_timeout;
-
-mod util;
+#[path = "util/timeout.rs"]
+mod timeout;
+use timeout::expect_timeout;
+#[path = "util/temp.rs"]
+mod temp;
 
 const RPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 // Keep RPC I/O bounded so a stuck server can't hang the suite.
@@ -201,7 +203,7 @@ fn parse_content_length(header: &[u8]) -> io::Result<usize> {
 #[testkit::tb_serial]
 fn rpc_smoke() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_smoke");
+        let dir = temp::temp_dir("rpc_smoke");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
@@ -303,7 +305,7 @@ fn rpc_smoke() {
 
 #[testkit::tb_serial]
 fn rpc_nonce_replay_rejected() {
-    let dir = util::temp::temp_dir("rpc_nonce_replay");
+    let dir = temp::temp_dir("rpc_nonce_replay");
     let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
     {
         let mut guard = bc.lock().expect("bc lock");
@@ -378,7 +380,7 @@ fn rpc_nonce_replay_rejected() {
 #[testkit::tb_serial]
 fn rpc_light_client_rebate_status() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_rebate_status");
+        let dir = temp::temp_dir("rpc_rebate_status");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
@@ -425,7 +427,7 @@ fn rpc_light_client_rebate_status() {
 #[testkit::tb_serial]
 fn rpc_light_client_rebate_history() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_rebate_history");
+        let dir = temp::temp_dir("rpc_rebate_history");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
@@ -506,7 +508,7 @@ fn rpc_light_client_rebate_history() {
 #[testkit::tb_serial]
 fn rpc_concurrent_controls() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_concurrent");
+        let dir = temp::temp_dir("rpc_concurrent");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         {
             let mut guard = bc.lock().unwrap();
@@ -630,7 +632,7 @@ fn rpc_concurrent_controls() {
 #[testkit::tb_serial]
 fn rpc_error_responses() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_errors");
+        let dir = temp::temp_dir("rpc_errors");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();
@@ -695,7 +697,7 @@ fn rpc_error_responses() {
 #[testkit::tb_serial]
 fn rpc_fragmented_request() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_fragmented");
+        let dir = temp::temp_dir("rpc_fragmented");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();

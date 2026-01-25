@@ -1,6 +1,5 @@
 #![cfg(feature = "integration-tests")]
 mod settlement_util;
-mod util;
 use crypto_suite::hashing::blake3::Hasher;
 use settlement_util::SettlementCtx;
 use testkit::prop::Runner;

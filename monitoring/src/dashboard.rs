@@ -1,7 +1,6 @@
 use foundation_serialization::json::{self, Map, Value};
 use std::{collections::HashMap, fs, path::PathBuf};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Metric {
     pub name: String,
@@ -1536,7 +1535,6 @@ fn build_tls_scalar_panel(title: &str, expr: &str, metric: &Metric) -> Value {
 }
 
 /// Parse a Prometheus text-format payload into a metric/value map.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn parse_prometheus_snapshot(payload: &str) -> MetricSnapshot {
     let mut values = MetricSnapshot::new();
     for line in payload.lines() {
@@ -1570,7 +1568,6 @@ fn parse_metric_value(value: &str) -> Option<MetricValue> {
 }
 
 /// Render the in-house HTML snapshot used by the telemetry dashboard helpers.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn render_html_snapshot(
     endpoint: &str,
     metrics: &[Metric],
@@ -1616,7 +1613,6 @@ pub fn render_html_snapshot(
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn render_section(title: &str, metrics: &[&Metric], snapshot: &MetricSnapshot) -> String {
     if metrics.is_empty() {
         return String::new();
@@ -1646,7 +1642,6 @@ fn render_section(title: &str, metrics: &[&Metric], snapshot: &MetricSnapshot) -
     )
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn html_escape(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for ch in input.chars() {
@@ -1662,7 +1657,6 @@ fn html_escape(input: &str) -> String {
     out
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn format_metric_value(value: &MetricValue) -> String {
     match value {
         MetricValue::Float(v) => format_float(*v),
@@ -1688,7 +1682,6 @@ fn format_float(value: f64) -> String {
     formatted
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy)]
 enum MetricCategory {
     Dex,
@@ -1698,7 +1691,6 @@ enum MetricCategory {
     Other,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 fn categorize_metric(metric: &Metric) -> MetricCategory {
     let name = metric.name.as_str();
     if name.starts_with("dex_") {

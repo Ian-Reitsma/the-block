@@ -25,8 +25,6 @@ enum Command {
     },
     Apply {
         data_dir: String,
-        #[allow(dead_code)]
-        db_path: Option<String>,
     },
     List {
         data_dir: String,
@@ -60,7 +58,6 @@ fn main() {
         }
         Command::Apply {
             data_dir,
-            db_path: _,
         } => {
             let mgr = SnapshotManager::new(data_dir, 0);
             if let Ok(Some((h, _, root))) = mgr.load_latest() {
@@ -98,25 +95,20 @@ fn build_command() -> CliCommand {
             .build(),
         )
         .subcommand(
-            CommandBuilder::new(
-                CommandId("snapshot.apply"),
-                "apply",
-                "Apply the latest snapshot and print its root",
-            )
-            .arg(ArgSpec::Positional(PositionalSpec::new(
-                "data_dir",
-                "Data directory",
-            )))
-            .arg(ArgSpec::Option(OptionSpec::new(
-                "db_path",
-                "db-path",
-                "Custom database path",
-            )))
-            .build(),
+        CommandBuilder::new(
+            CommandId("snapshot.apply"),
+            "apply",
+            "Apply the latest snapshot and print its root",
         )
-        .subcommand(
-            CommandBuilder::new(
-                CommandId("snapshot.list"),
+        .arg(ArgSpec::Positional(PositionalSpec::new(
+            "data_dir",
+            "Data directory",
+        )))
+        .build(),
+    )
+    .subcommand(
+        CommandBuilder::new(
+            CommandId("snapshot.list"),
                 "list",
                 "List available snapshot heights",
             )
@@ -141,7 +133,6 @@ fn build_cli(matches: Matches) -> Result<Cli, String> {
         },
         "apply" => Command::Apply {
             data_dir: require_positional(sub_matches, "data_dir")?,
-            db_path: sub_matches.get_string("db_path"),
         },
         "list" => Command::List {
             data_dir: require_positional(sub_matches, "data_dir")?,

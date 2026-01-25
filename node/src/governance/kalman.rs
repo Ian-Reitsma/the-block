@@ -8,18 +8,6 @@ pub struct KalmanLqg {
 }
 
 impl KalmanLqg {
-    #[allow(dead_code)]
-    pub fn new(theta: &[f64; 4]) -> Self {
-        let mut x = Vector::<8>::zeros();
-        for (idx, value) in theta.iter().enumerate() {
-            x[idx] = *value;
-        }
-        KalmanLqg {
-            x,
-            p: Matrix::<8, 8>::identity().scale(1e-3),
-        }
-    }
-
     /// Perform one prediction/update step.
     pub fn step(&mut self, meas: &[f64; 4], tau_epoch: f64, risk_lambda: f64) {
         let d = 4;

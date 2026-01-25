@@ -39,7 +39,6 @@ pub struct Bundle {
 pub struct QueueEntry {
     bundle: Bundle,
     job: RelayJob,
-    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     enqueued_at: Instant,
     retry_attempts: u8,
 }
@@ -401,7 +400,6 @@ pub fn discover_peers() -> Vec<MeshPeer> {
 }
 
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 fn discover_bt_peers() -> Vec<MeshPeer> {
     let mut out = Vec::new();
     if let Ok(res) = Command::new("hcitool").arg("scan").output() {
@@ -420,14 +418,7 @@ fn discover_bt_peers() -> Vec<MeshPeer> {
     out
 }
 
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-fn discover_bt_peers() -> Vec<MeshPeer> {
-    Vec::new()
-}
-
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 fn discover_wifi_peers() -> Vec<MeshPeer> {
     let mut out = Vec::new();
     if let Ok(res) = Command::new("iwlist").arg("scan").output() {
@@ -447,12 +438,6 @@ fn discover_wifi_peers() -> Vec<MeshPeer> {
         }
     }
     out
-}
-
-#[cfg(not(target_os = "linux"))]
-#[allow(dead_code)]
-fn discover_wifi_peers() -> Vec<MeshPeer> {
-    Vec::new()
 }
 
 pub fn parse_discovery_packet(data: &[u8]) -> Option<MeshPeer> {

@@ -64,15 +64,12 @@ mod telemetry {
 
 #[cfg(not(feature = "telemetry"))]
 mod telemetry {
-    #[allow(dead_code)]
     pub fn record_error(_kind: &'static str) {}
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub fn reset_for_test() {}
 
     #[cfg(test)]
-    #[allow(dead_code)]
     pub fn value_for_test(_kind: &'static str) -> Option<u64> {
         None
     }

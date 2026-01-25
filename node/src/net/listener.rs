@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use diagnostics::tracing::warn;
 use runtime::net::TcpListener as RuntimeTcpListener;
 use std::io;

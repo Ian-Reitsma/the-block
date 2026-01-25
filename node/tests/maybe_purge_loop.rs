@@ -11,8 +11,9 @@ use the_block::{
     generate_keypair, maybe_spawn_purge_loop, sign_tx, Blockchain, RawTxPayload, ShutdownFlag,
 };
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");

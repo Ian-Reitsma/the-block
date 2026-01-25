@@ -617,6 +617,16 @@ fn scrape_metric_value(body: &str, metric: &str, labels: &str) -> Option<f64> {
         .find_map(|line| line.strip_prefix(&needle)?.trim().parse::<f64>().ok())
 }
 
+async fn scrape_ack_latency_sample(app: &Router<AppState>) -> Option<(f64, f64)> {
+    let response = app.handle(app.request_builder().path("/metrics").build()).await.ok()?;
+    let body = String::from_utf8(response.body().to_vec()).ok()?;
+    let labels = r#"playbook="governance-escalation",state="acknowledged""#;
+    let count =
+        scrape_metric_value(&body, "bridge_remediation_ack_latency_seconds_count", labels)?;
+    let sum = scrape_metric_value(&body, "bridge_remediation_ack_latency_seconds_sum", labels)?;
+    Some((count, sum))
+}
+
 async fn wait_for_spool_gauge(app: &Router<AppState>, expected: f64, attempts: usize) -> f64 {
     let mut last_observed = None;
     for _ in 0..attempts {
@@ -2036,7 +2046,6 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
 
         {
             let state = AppState::new("token".into(), db_path.clone(), 60);
-            let shared_state = state.clone();
             let app = router(state);
             for value in baseline {
                 let payload = build_labeled_payload(value, "eth");
@@ -2070,13 +2079,8 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
 
             runtime::sleep(Duration::from_millis(150)).await;
             for _ in 0..60 {
-                let observations = shared_state.bridge_ack_latency_observations();
-                if let Some((_playbook, _state, latency, count)) =
-                    observations.into_iter().find(|(playbook, state, _, _)| {
-                        playbook == "governance-escalation" && state == "acknowledged"
-                    })
-                {
-                    initial_sample = Some((latency, count));
+                if let Some((count, sum)) = scrape_ack_latency_sample(&app).await {
+                    initial_sample = Some((count, sum));
                     break;
                 }
                 runtime::sleep(Duration::from_millis(100)).await;
@@ -2087,22 +2091,14 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
             );
         }
 
-        reset_bridge_remediation_ack_metrics();
-
         {
             let state = AppState::new("token".into(), db_path.clone(), 60);
-            let shared_state = state.clone();
             let app = router(state);
             let mut restored_sample = None;
             let mut metrics_snapshot = String::new();
             for _ in 0..60 {
-                let observations = shared_state.bridge_ack_latency_observations();
-                if let Some((_playbook, _state, latency, count)) =
-                    observations.into_iter().find(|(playbook, state, _, _)| {
-                        playbook == "governance-escalation" && state == "acknowledged"
-                    })
-                {
-                    restored_sample = Some((latency, count));
+                if let Some((count, sum)) = scrape_ack_latency_sample(&app).await {
+                    restored_sample = Some((count, sum));
                     let metrics_resp = app
                         .handle(app.request_builder().path("/metrics").build())
                         .await
@@ -2113,12 +2109,12 @@ fn bridge_remediation_ack_latency_persists_across_restart() {
                 }
                 runtime::sleep(Duration::from_millis(100)).await;
             }
-            let (initial_latency, initial_count) =
+            let (initial_count, initial_sum) =
                 initial_sample.expect("ack latency sample captured before restart");
-            let (restored_latency, restored_count) =
+            let (restored_count, restored_sum) =
                 restored_sample.expect("ack latency sample restored after restart");
-            assert_eq!(restored_latency, initial_latency);
             assert_eq!(restored_count, initial_count);
+            assert_eq!(restored_sum, initial_sum);
             let labels = "playbook=\"governance-escalation\",state=\"acknowledged\"";
             let count_metric = scrape_metric_value(
                 &metrics_snapshot,

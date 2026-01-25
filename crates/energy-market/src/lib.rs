@@ -188,15 +188,12 @@ pub struct BayesianReputation {
     pub composite_score: f64,
 }
 
-#[allow(dead_code)] // Used by serde default attribute
 fn default_beta_alpha() -> f64 {
     1.0
 }
-#[allow(dead_code)] // Used by serde default attribute
 fn default_beta_beta() -> f64 {
     1.0
 }
-#[allow(dead_code)] // Used by serde default attribute
 fn default_score() -> f64 {
     0.5
 }

@@ -11,8 +11,8 @@ mod dashboard;
 mod metrics;
 
 pub use alert_validator::{
-    validate_all_alerts, validate_bridge_alerts, validate_chain_health_alerts,
-    validate_dependency_registry_alerts, validate_treasury_alerts,
+    validate_ad_readiness_alerts, validate_all_alerts, validate_bridge_alerts,
+    validate_chain_health_alerts, validate_dependency_registry_alerts, validate_treasury_alerts,
     ValidationError as BridgeAlertValidationError,
 };
 pub use chaos::{

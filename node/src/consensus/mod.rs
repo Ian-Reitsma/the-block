@@ -41,8 +41,7 @@ consensus!(
     "hard-coded genesis block hash"
 );
 
-#[allow(dead_code)]
-const fn assert_genesis_hash() {
+const _: () = {
     let a = GENESIS_HASH.as_bytes();
     let b = hash_genesis::calculate_genesis_hash().as_bytes();
     if a.len() != b.len() {
@@ -55,8 +54,7 @@ const fn assert_genesis_hash() {
         }
         i += 1;
     }
-}
-const _: () = assert_genesis_hash();
+};
 
 use codec::{profiles, BinaryConfig};
 use std::sync::LazyLock;

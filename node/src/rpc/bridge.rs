@@ -86,12 +86,10 @@ fn encode_hex(bytes: &[u8]) -> String {
     crypto_suite::hex::encode(bytes)
 }
 
-#[allow(dead_code)]
 fn default_asset() -> String {
     "native".to_string()
 }
 
-#[allow(dead_code)]
 fn default_limit() -> u64 {
     100
 }

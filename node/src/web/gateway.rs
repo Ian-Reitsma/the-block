@@ -477,18 +477,6 @@ fn provider_crm_lists(provider: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-fn set_crm_lists(provider: &str, lists: &[&str]) {
-    CRM_MEMBERSHIPS
-        .write()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .insert(
-            provider.to_string(),
-            lists.iter().map(|entry| entry.to_string()).collect(),
-        );
-}
-
-#[cfg(test)]
 fn clear_crm_lists() {
     CRM_MEMBERSHIPS
         .write()

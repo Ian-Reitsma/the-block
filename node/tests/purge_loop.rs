@@ -8,9 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
 use sys::tempfile::TempDir;
-use util::temp::temp_dir;
+use temp::temp_dir;
 
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;

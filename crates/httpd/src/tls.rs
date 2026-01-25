@@ -508,31 +508,7 @@ impl ClientHello {
         })
     }
 
-    #[allow(dead_code)]
-    fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(4 + 1 + 32 + 32 + 1);
-        out.extend_from_slice(&self.magic);
-        out.push(self.version);
-        out.extend_from_slice(&self.client_ephemeral);
-        out.extend_from_slice(&self.client_nonce);
-        let mut flags = 0u8;
-        if self.certificate.is_some() {
-            flags |= 0x01;
-        }
-        if self.signature.is_some() {
-            flags |= 0x02;
-        }
-        out.push(flags);
-        if let Some(cert) = &self.certificate {
-            out.extend_from_slice(&(cert.len() as u32).to_be_bytes());
-            out.extend_from_slice(cert);
-        }
-        if let Some(sig) = &self.signature {
-            out.extend_from_slice(&(sig.len() as u32).to_be_bytes());
-            out.extend_from_slice(sig);
-        }
-        out
-    }
+    // Note: only decoding is needed for server-side handshakes right now.
 }
 
 impl ServerHello {
@@ -552,47 +528,7 @@ impl ServerHello {
         out
     }
 
-    #[allow(dead_code)]
-    fn decode(frame: &[u8]) -> Result<Self, Error> {
-        let mut cursor = 0usize;
-        if frame.len() < 4 + 1 + 32 + 32 + 4 + 4 + 1 {
-            return Err(Error::InvalidHandshake("server handshake frame too small"));
-        }
-        let mut magic = [0u8; 4];
-        magic.copy_from_slice(&frame[cursor..cursor + 4]);
-        cursor += 4;
-        let version = frame[cursor];
-        cursor += 1;
-        let mut server_ephemeral = [0u8; 32];
-        server_ephemeral.copy_from_slice(&frame[cursor..cursor + 32]);
-        cursor += 32;
-        let mut server_nonce = [0u8; 32];
-        server_nonce.copy_from_slice(&frame[cursor..cursor + 32]);
-        cursor += 32;
-        let cert_len = read_len(frame, &mut cursor, "server certificate length")?;
-        let certificate = read_bytes(frame, &mut cursor, cert_len, "server certificate")?;
-        let sig_len = read_len(frame, &mut cursor, "server signature length")?;
-        let signature = read_bytes(frame, &mut cursor, sig_len, "server signature")?;
-        if cursor >= frame.len() {
-            return Err(Error::InvalidHandshake("missing server auth flag"));
-        }
-        let auth_flag = frame[cursor];
-        cursor += 1;
-        if cursor != frame.len() {
-            return Err(Error::InvalidHandshake(
-                "unexpected trailing server handshake bytes",
-            ));
-        }
-        Ok(ServerHello {
-            magic,
-            version,
-            server_ephemeral,
-            server_nonce,
-            certificate,
-            signature,
-            client_auth_required: auth_flag != 0,
-        })
-    }
+    // Note: only encoding is needed for server-side handshakes right now.
 }
 
 fn read_len(frame: &[u8], cursor: &mut usize, label: &'static str) -> Result<usize, Error> {

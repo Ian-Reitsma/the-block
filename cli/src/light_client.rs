@@ -1043,13 +1043,6 @@ fn anchor_envelope_to_record(envelope: RpcEnvelope<Value>) -> Result<AnchorRecor
     anchor_record_from_value(result)
 }
 
-#[allow(dead_code)]
-pub fn anchor_envelope_value_to_record(value: Value) -> Result<AnchorRecord> {
-    let envelope = parse_value_envelope(&value, "identity.anchor")
-        .context("invalid identity.anchor envelope")?;
-    anchor_envelope_to_record(envelope)
-}
-
 fn latest_header_from_envelope(envelope: RpcEnvelope<LightHeader>) -> Result<LightHeader> {
     if let Some(err) = envelope.error {
         return Err(anyhow!(
@@ -1061,12 +1054,6 @@ fn latest_header_from_envelope(envelope: RpcEnvelope<LightHeader>) -> Result<Lig
     envelope
         .result
         .ok_or_else(|| anyhow!("missing light.latest_header result"))
-}
-
-#[allow(dead_code)]
-pub fn latest_header_value_to_header(value: Value) -> Result<LightHeader> {
-    let envelope = parse_header_envelope(&value).context("invalid light.latest_header envelope")?;
-    latest_header_from_envelope(envelope)
 }
 
 pub fn resolved_did_from_value(result: Value) -> Result<ResolvedDid> {
@@ -1091,13 +1078,6 @@ fn resolved_did_envelope_to_record(envelope: RpcEnvelope<Value>) -> Result<Resol
         ));
     }
     resolved_did_from_value(result)
-}
-
-#[allow(dead_code)]
-pub fn resolved_did_value_to_record(value: Value) -> Result<ResolvedDid> {
-    let envelope = parse_value_envelope(&value, "identity.resolve")
-        .context("invalid identity.resolve envelope")?;
-    resolved_did_envelope_to_record(envelope)
 }
 
 pub fn submit_anchor(client: &RpcClient, url: &str, tx: &TxDidAnchor) -> Result<AnchorRecord> {
@@ -1229,85 +1209,6 @@ fn parse_anchor_record(value: &Value) -> Result<AnchorRecord> {
         public_key,
         remote_attestation,
     })
-}
-
-fn parse_optional_error(value: Option<&Value>) -> Result<Option<RpcErrorBody>> {
-    match value {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::Object(map)) => {
-            let context = "RPC error";
-            let code_value = map
-                .get("code")
-                .ok_or_else(|| anyhow!("{context} missing field 'code'"))?;
-            let code = if let Some(value) = code_value.as_i64() {
-                value
-            } else if let Some(value) = code_value.as_u64() {
-                if value <= i64::MAX as u64 {
-                    value as i64
-                } else {
-                    return Err(anyhow!(
-                        "{context} field 'code' exceeds supported range for signed integers"
-                    ));
-                }
-            } else {
-                return Err(anyhow!("{context} field 'code' must be a signed integer"));
-            };
-            let message = map
-                .get("message")
-                .ok_or_else(|| anyhow!("{context} missing field 'message'"))?
-                .as_str()
-                .ok_or_else(|| anyhow!("{context} field 'message' must be a string"))?
-                .to_owned();
-            Ok(Some(RpcErrorBody { code, message }))
-        }
-        Some(other) => Err(anyhow!(
-            "RPC error body must be an object or null, got {}",
-            value_kind(other)
-        )),
-    }
-}
-
-fn parse_value_envelope(value: &Value, method: &str) -> Result<RpcEnvelope<Value>> {
-    let context = format!("{method} envelope");
-    let map = value
-        .as_object()
-        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
-    let error = parse_optional_error(map.get("error"))?;
-    let result = match map.get("result") {
-        None | Some(Value::Null) => None,
-        Some(other) => Some(other.clone()),
-    };
-    Ok(RpcEnvelope { result, error })
-}
-
-fn parse_light_header(value: &Value) -> Result<LightHeader> {
-    let context = "light.latest_header result";
-    let map = value
-        .as_object()
-        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
-    let height = parse_u64_field(map, "height", context)?;
-    let hash = parse_string_field(map, "hash", context)?;
-    let difficulty = parse_u64_field(map, "difficulty", context)?;
-    Ok(LightHeader {
-        height,
-        hash,
-        difficulty,
-    })
-}
-
-fn parse_header_envelope(value: &Value) -> Result<RpcEnvelope<LightHeader>> {
-    let context = "light.latest_header envelope";
-    let map = value
-        .as_object()
-        .ok_or_else(|| anyhow!("{context} must be an object, got {}", value_kind(value)))?;
-    let error = parse_optional_error(map.get("error"))?;
-    let result = match map.get("result") {
-        None | Some(Value::Null) => None,
-        Some(other) => {
-            Some(parse_light_header(other).context("invalid light.latest_header result payload")?)
-        }
-    };
-    Ok(RpcEnvelope { result, error })
 }
 
 fn parse_resolved_did(value: &Value) -> Result<ResolvedDid> {

@@ -43,7 +43,8 @@ use the_block::{
 use verifier_selection::{self, CommitteeConfig as CommitteePolicy, StakeEntry, StakeSnapshot};
 use zkp::selection::{self, SelectionProofPublicInputs};
 
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
 
 fn parse_json(src: &str) -> Value {
     json_mod::from_str(src).expect("json value")
@@ -105,7 +106,7 @@ fn build_in_memory_harness(
     name: &str,
     config: MarketplaceConfig,
 ) -> (TempDir, Arc<RpcHarness>, AdReadinessHandle) {
-    let dir = util::temp::temp_dir(name);
+    let dir = temp::temp_dir(name);
     let chain_path = dir.path().join("chain");
     fs::create_dir_all(&chain_path).expect("chain path");
     let bc = Arc::new(Mutex::new(Blockchain::new(
@@ -329,7 +330,7 @@ fn make_reservation_key(seed: u64) -> ReservationKey {
 
 #[testkit::tb_serial]
 fn ad_market_rpc_endpoints_round_trip() {
-    let dir = util::temp::temp_dir("ad_market_rpc");
+    let dir = temp::temp_dir("ad_market_rpc");
     let chain_path = dir.path().join("chain");
     fs::create_dir_all(&chain_path).expect("chain path");
     let bc = Arc::new(Mutex::new(Blockchain::new(
@@ -624,7 +625,7 @@ fn ad_market_rpc_endpoints_round_trip() {
 
 #[testkit::tb_serial]
 fn governance_updates_distribution_policy() {
-    let dir = util::temp::temp_dir("ad_market_gov_sync");
+    let dir = temp::temp_dir("ad_market_gov_sync");
     let chain_path = dir.path().join("chain");
     fs::create_dir_all(&chain_path).expect("chain path");
     let bc = Arc::new(Mutex::new(Blockchain::new(

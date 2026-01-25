@@ -1072,13 +1072,6 @@ pub struct ExplorerExecutorReport {
     dependency_blocks: Vec<ExplorerExecutorDependency>,
 }
 
-#[allow(dead_code)] // Reserved for future API endpoint
-#[derive(Serialize)]
-#[serde(crate = "foundation_serialization::serde")]
-struct AdPolicySnapshotListResponse {
-    snapshots: Vec<AdPolicySnapshotSummary>,
-}
-
 impl ExplorerExecutorReport {
     pub fn lease_released(&self) -> bool {
         self.lease_released

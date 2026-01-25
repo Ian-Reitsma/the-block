@@ -12,8 +12,9 @@ use the_block::{
     SignedTransaction, TxAdmissionError,
 };
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 static PY_INIT: Once = Once::new();
 

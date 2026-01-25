@@ -12,14 +12,12 @@ use std::fmt;
 use the_block::transaction::binary::encode_raw_payload as encode_node_raw_payload;
 use the_block::RawTxPayload as NodeRawTxPayload;
 
-#[allow(dead_code)]
 const CHAIN_ID: u32 = 1;
 
 static SIGNER: Lazy<TransactionSigner> = Lazy::new(|| TransactionSigner::from_chain_id(CHAIN_ID));
 
 /// Signature version for transactions.
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Default)]
-#[allow(dead_code)]
 pub enum TxVersion {
     #[default]
     Ed25519Only,
@@ -46,7 +44,6 @@ pub struct TxSignature {
 #[derive(
     Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Default,
 )]
-#[allow(dead_code)]
 pub enum FeeLane {
     #[default]
     Consumer,
@@ -54,7 +51,6 @@ pub enum FeeLane {
 }
 
 impl FeeLane {
-    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             FeeLane::Consumer => "consumer",
@@ -180,7 +176,6 @@ impl TxDidAnchor {
 }
 
 /// Generate a new Ed25519 keypair (private, public).
-#[allow(dead_code)]
 pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
     let mut rng = OsRng::default();
     let mut priv_bytes = [0u8; 32];
@@ -191,7 +186,6 @@ pub fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
 }
 
 /// Sign a transaction payload with the provided Ed25519 private key.
-#[allow(dead_code)]
 pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransaction> {
     let sk_bytes = to_array_32(sk_bytes)?;
     let payload_bytes = canonical_payload_bytes(payload);
@@ -214,12 +208,10 @@ pub fn sign_tx(sk_bytes: &[u8], payload: &RawTxPayload) -> Option<SignedTransact
     })
 }
 
-#[allow(dead_code)]
 fn to_array_32(bytes: &[u8]) -> Option<[u8; 32]> {
     bytes.try_into().ok()
 }
 
-#[allow(dead_code)]
 fn canonical_payload_bytes(payload: &RawTxPayload) -> Vec<u8> {
     let node_payload = NodeRawTxPayload {
         from_: payload.from_.clone(),

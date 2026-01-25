@@ -120,10 +120,8 @@ impl RpcClient {
         }
     }
 
-    #[allow(dead_code)]
     pub fn mempool_stats(&self, url: &str, lane: FeeLane) -> Result<MempoolStats, RpcClientError> {
         #[derive(Deserialize)]
-        #[allow(dead_code)]
         struct Envelope<T> {
             result: T,
         }
@@ -155,14 +153,12 @@ impl RpcClient {
         extract_rpc_result(envelope)
     }
 
-    #[allow(dead_code)]
     pub fn record_wallet_qos_event(
         &self,
         url: &str,
         event: WalletQosEvent<'_>,
     ) -> Result<(), WalletQosError> {
         #[derive(Deserialize)]
-        #[allow(dead_code)]
         struct WalletQosAck {
             status: Option<String>,
         }
@@ -244,7 +240,6 @@ impl From<HttpClientError> for RpcClientError {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct MempoolStats {
     #[serde(default = "foundation_serialization::defaults::default")]
     pub size: u64,
@@ -261,14 +256,12 @@ pub struct MempoolStats {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct RpcErrorBody {
     code: i64,
     message: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct RpcEnvelope<T> {
     result: Option<T>,
     error: Option<RpcErrorBody>,
@@ -291,7 +284,6 @@ fn extract_rpc_result(envelope: RpcEnvelope<Value>) -> Result<Value, RpcClientEr
 }
 
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub struct WalletQosEvent<'a> {
     pub event: &'a str,
     pub lane: &'a str,
@@ -300,7 +292,6 @@ pub struct WalletQosEvent<'a> {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum WalletQosError {
     Transport(RpcClientError),
     Rpc { code: i64, message: String },

@@ -10,8 +10,9 @@ use the_block::{
     generate_keypair, mempool_cmp, sign_tx, Blockchain, RawTxPayload, SignedTransaction,
 };
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 fn init() {
     let _ = fs::remove_dir_all("chain_db");

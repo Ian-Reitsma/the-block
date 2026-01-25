@@ -146,7 +146,6 @@ fn log_suspicious(path: &str) {
 }
 
 #[cfg(not(feature = "telemetry"))]
-#[allow(dead_code)]
 fn log_suspicious(_path: &str) {}
 
 fn overlay_peer_label(pk: &[u8; 32]) -> String {
@@ -1498,7 +1497,6 @@ pub enum HandshakeError {
 }
 
 impl HandshakeError {
-    #[allow(dead_code)]
     pub fn as_str(&self) -> &'static str {
         match self {
             HandshakeError::Tls => "tls",
@@ -1576,7 +1574,6 @@ impl Default for PeerReputation {
     }
 }
 
-#[allow(dead_code)] // New API methods not yet wired into full system
 impl PeerReputation {
     /// Adaptive decay that adjusts based on network health
     ///
@@ -1612,6 +1609,7 @@ impl PeerReputation {
     }
 
     /// Record invalid/malformed message
+    #[cfg(test)]
     fn record_invalid_message(&mut self, network_health: f64) {
         self.invalid_messages = self.invalid_messages.saturating_add(1);
 
@@ -1629,6 +1627,7 @@ impl PeerReputation {
     }
 
     /// Record slow/timed-out response
+    #[cfg(test)]
     fn record_slow_response(&mut self, latency_ms: u64, network_health: f64) {
         self.slow_responses = self.slow_responses.saturating_add(1);
 
@@ -1655,6 +1654,7 @@ impl PeerReputation {
     }
 
     /// Record protocol violation
+    #[cfg(test)]
     fn record_protocol_violation(&mut self, severity: ViolationSeverity) {
         self.protocol_violations = self.protocol_violations.saturating_add(1);
 
@@ -1672,6 +1672,7 @@ impl PeerReputation {
     }
 
     /// Record good behavior (reward)
+    #[cfg(test)]
     fn record_good_behavior(&mut self, category: BehaviorCategory, bonus: f64) {
         let reward = 1.0 + bonus.clamp(0.0, 0.1); // Max 10% boost per event
 
@@ -1718,6 +1719,7 @@ impl PeerReputation {
     /// Adaptive thresholds based on network health:
     /// - Healthy network: stricter (ban at 0.3)
     /// - Unhealthy network: lenient (ban at 0.1)
+    #[cfg(test)]
     fn should_ban(&self, network_health: f64) -> bool {
         let health_factor = network_health.clamp(0.0, 1.0);
         let ban_threshold = 0.1 + 0.2 * health_factor; // Range: [0.1, 0.3]
@@ -1726,6 +1728,7 @@ impl PeerReputation {
     }
 
     /// Get component with lowest score (for diagnostics)
+    #[cfg(test)]
     fn weakest_component(&self) -> &'static str {
         let min = self
             .message_validity
@@ -1824,7 +1827,6 @@ enum PeerErrorCode {
     Banned,
 }
 
-#[allow(dead_code)]
 impl PeerErrorCode {
     fn as_str(&self) -> &'static str {
         match self {
@@ -2327,7 +2329,6 @@ pub(crate) fn pk_from_addr(addr: &SocketAddr) -> Option<[u8; 32]> {
     ADDR_MAP.guard().get(addr).copied()
 }
 
-#[cfg_attr(not(any(test, feature = "integration-tests")), allow(dead_code))]
 pub fn inject_addr_mapping_for_tests(addr: SocketAddr, peer: super::OverlayPeerId) {
     let mut buf = [0u8; 32];
     let bytes = super::overlay_peer_to_bytes(&peer);
@@ -2966,7 +2967,6 @@ fn remove_peer_metrics(pk: &[u8; 32]) {
 }
 
 #[cfg(not(feature = "telemetry"))]
-#[allow(dead_code)]
 fn remove_peer_metrics(_pk: &[u8; 32]) {}
 
 #[cfg(test)]

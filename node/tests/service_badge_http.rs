@@ -6,9 +6,12 @@ use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
 
 use runtime::{io::BufferedTcpStream, net::TcpStream};
 use std::net::SocketAddr;
-use util::timeout::expect_timeout;
-
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
+#[path = "util/timeout.rs"]
+mod timeout;
+use temp::temp_dir;
+use timeout::expect_timeout;
 
 async fn read_http_body(stream: TcpStream) -> std::io::Result<Vec<u8>> {
     use std::io::{Error, ErrorKind};
@@ -46,7 +49,7 @@ async fn read_http_body(stream: TcpStream) -> std::io::Result<Vec<u8>> {
 #[test]
 fn badge_status_endpoint() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("badge_status");
+        let dir = temp_dir("badge_status");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();

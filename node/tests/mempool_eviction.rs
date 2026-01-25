@@ -5,8 +5,9 @@ use std::sync::Once;
 use the_block::Blockchain;
 use the_block::{generate_keypair, sign_tx, FeeLane, RawTxPayload, SignedTransaction};
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 static INIT: Once = Once::new();
 

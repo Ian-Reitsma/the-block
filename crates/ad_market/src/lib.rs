@@ -168,10 +168,6 @@ pub struct PresenceBucketRef {
 }
 
 impl PresenceBucketRef {
-    #[allow(dead_code)]
-    fn bucket_label(&self) -> &str {
-        self.bucket_id.as_str()
-    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -359,54 +355,6 @@ impl CostMedians {
             self.verifier_cost_usd_micros.median(),
             self.host_fee_usd_micros.median(),
         )
-    }
-}
-
-mod serde_optional_bytes {
-    use foundation_serialization::serde_bytes;
-    use serde::{Deserializer, Serializer};
-
-    #[allow(dead_code)]
-    pub fn serialize<S>(value: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match value {
-            Some(bytes) => serde_bytes::serialize(bytes, serializer),
-            None => serializer.serialize_none(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct OptionalBytes;
-
-        impl<'de> serde::de::Visitor<'de> for OptionalBytes {
-            type Value = Option<Vec<u8>>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("an optional byte array")
-            }
-
-            fn visit_none<E>(self) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(None)
-            }
-
-            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where
-                D: Deserializer<'de>,
-            {
-                serde_bytes::deserialize(deserializer).map(Some)
-            }
-        }
-
-        deserializer.deserialize_option(OptionalBytes)
     }
 }
 
@@ -839,22 +787,6 @@ impl CohortSelectors {
 }
 
 impl CohortKey {
-    #[allow(dead_code)]
-    fn new(domain: String, provider: Option<String>, badges: Vec<String>) -> Self {
-        Self::with_selectors(
-            domain,
-            DomainTier::default(),
-            None,
-            provider,
-            CohortSelectors {
-                badges,
-                interest_tags: Vec::new(),
-                presence_bucket: None,
-                selectors_version: COHORT_SELECTOR_VERSION_V1,
-            },
-        )
-    }
-
     fn from_context(ctx: &ImpressionContext) -> Self {
         Self::with_selectors(
             ctx.domain.clone(),
@@ -1896,11 +1828,7 @@ pub struct SelectionProofMetadata {
     pub proof_length: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Vec::is_empty",
-        with = "serde_bytes_vec"
-    )]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub witness_commitments: Vec<Vec<u8>>,
     pub public_inputs: SelectionProofPublicInputs,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1990,45 +1918,6 @@ impl SelectionProofMetadata {
             out.push(buf);
         }
         Some(out)
-    }
-}
-
-mod serde_bytes_vec {
-    use foundation_serialization::serde::{
-        ser::SerializeSeq, Deserialize, Deserializer, Serializer,
-    };
-
-    #[allow(dead_code)]
-    pub fn serialize<S>(values: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(values.len()))?;
-        for item in values {
-            seq.serialize_element(&ByteSlice(item))?;
-        }
-        seq.end()
-    }
-
-    #[allow(dead_code)]
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Deserialize directly as Vec<Vec<u8>>
-        // The serde_bytes optimization isn't critical for correctness
-        Vec::<Vec<u8>>::deserialize(deserializer)
-    }
-
-    struct ByteSlice<'a>(&'a [u8]);
-
-    impl foundation_serialization::serde::Serialize for ByteSlice<'_> {
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            foundation_serialization::serde_bytes::serialize(self.0, serializer)
-        }
     }
 }
 
@@ -5447,11 +5336,6 @@ impl SledMarketplace {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn persist_medians(&self) -> Result<(), PersistenceError> {
-        let snapshot = self.medians.read().unwrap().snapshot();
-        self.persist_medians_snapshot(snapshot)
-    }
     pub fn open<P: AsRef<Path>>(
         path: P,
         config: MarketplaceConfig,
@@ -6876,7 +6760,10 @@ mod tests {
                 med.record_verifier(222);
                 med.record_host(333);
             }
-            market.persist_medians().expect("persist medians");
+            let snapshot = market.medians.read().unwrap().snapshot();
+            market
+                .persist_medians_snapshot(snapshot)
+                .expect("persist medians");
         }
         let reopened = SledMarketplace::open(&path, config).expect("reopen market");
         let medians = reopened.medians.read().unwrap().snapshot();

@@ -1,11 +1,12 @@
 #![cfg(feature = "integration-tests")]
 use the_block::{Blockchain, TokenAmount};
 
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
 
 #[testkit::tb_serial]
 fn coinbase_tip_defaults_to_zero() {
-    let dir = util::temp::temp_dir("coinbase_tip");
+    let dir = temp::temp_dir("coinbase_tip");
     let mut bc = Blockchain::new(dir.path().to_str().expect("path"));
     bc.add_account("miner".into(), 0).expect("add miner");
 
@@ -15,7 +16,7 @@ fn coinbase_tip_defaults_to_zero() {
 
 #[testkit::tb_serial]
 fn coinbase_claims_proof_rebates() {
-    let dir = util::temp::temp_dir("coinbase_rebates");
+    let dir = temp::temp_dir("coinbase_rebates");
     let mut bc = Blockchain::new(dir.path().to_str().expect("path"));
     bc.add_account("miner".into(), 0).expect("add miner");
 

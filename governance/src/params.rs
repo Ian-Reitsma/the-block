@@ -2,7 +2,7 @@ use super::ParamKey;
 use crate::EnergySettlementMode;
 use bridge_types::BridgeIncentiveParameters;
 use foundation_math::linalg::{Matrix, Vector};
-use foundation_serialization::{binary, json, Deserialize, Serialize};
+use foundation_serialization::{json, Deserialize, Serialize};
 use std::time::Duration;
 use std::{fs, fs::OpenOptions, io::Write, path::Path};
 
@@ -2914,21 +2914,6 @@ pub struct Utilization {
     pub epoch_secs: f64,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
-#[serde(crate = "foundation_serialization::serde")]
-pub struct EncryptedUtilization(pub Vec<u8>);
-
-#[allow(dead_code)]
-impl EncryptedUtilization {
-    pub fn decrypt(&self, key: &[u8]) -> Utilization {
-        let mut buf = self.0.clone();
-        for (b, k) in buf.iter_mut().zip(key.iter().cycle()) {
-            *b ^= k;
-        }
-        binary::decode(&buf).unwrap_or_default()
-    }
-}
-
 pub fn retune_multipliers(
     params: &mut Params,
     supply: f64,
@@ -3193,27 +3178,4 @@ pub fn retune_multipliers(
     }
 
     raw
-}
-
-#[allow(dead_code)]
-pub fn retune_multipliers_encrypted(
-    params: &mut Params,
-    supply: f64,
-    enc: &EncryptedUtilization,
-    key: &[u8],
-    current_epoch: u64,
-    base_path: &Path,
-    rolling_inflation: f64,
-    rng_seed: Option<u64>,
-) -> [i64; 4] {
-    let stats = enc.decrypt(key);
-    retune_multipliers(
-        params,
-        supply,
-        &stats,
-        current_epoch,
-        base_path,
-        rolling_inflation,
-        rng_seed,
-    )
 }

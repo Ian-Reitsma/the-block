@@ -4,7 +4,8 @@ use sled::Config;
 use std::path::Path;
 use std::process::Command;
 
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
 
 fn seed_release_approval(path: &Path) {
     let db = Config::new()
@@ -36,8 +37,8 @@ fn seed_release_approval(path: &Path) {
 
 #[test]
 fn import_missing_key() {
-    let tmp = util::temp::temp_dir("missing_key_home");
-    let gov_dir = util::temp::temp_dir("missing_key_gov");
+    let tmp = temp::temp_dir("missing_key_home");
+    let gov_dir = temp::temp_dir("missing_key_gov");
     seed_release_approval(gov_dir.path());
     let gov_path = gov_dir.path().to_str().expect("gov path");
     let output = Command::new(env!("CARGO_BIN_EXE_node"))

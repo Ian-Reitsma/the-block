@@ -9,8 +9,12 @@ use the_block::{
     Blockchain,
 };
 
-mod util;
-use util::timeout::expect_timeout;
+#[path = "util/temp.rs"]
+mod temp;
+#[path = "util/timeout.rs"]
+mod timeout;
+use temp::temp_dir;
+use timeout::expect_timeout;
 
 fn configure_runtime() {
     static INIT: Once = Once::new();
@@ -121,7 +125,7 @@ async fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
 fn rpc_inflation_reports_industrial() {
     configure_runtime();
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_inflation");
+        let dir = temp_dir("rpc_inflation");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
         let mining = Arc::new(AtomicBool::new(false));

@@ -97,11 +97,6 @@ fn json_string(value: impl Into<String>) -> Value {
     Value::String(value.into())
 }
 
-#[allow(dead_code)]
-fn json_array(items: Vec<Value>) -> Value {
-    Value::Array(items)
-}
-
 fn json_map_from(pairs: Vec<(String, Value)>) -> JsonMap {
     let mut map = JsonMap::new();
     for (key, value) in pairs {
@@ -209,12 +204,6 @@ enum StatsCmd {
         path: String,
         /// RPC server address
         rpc: String,
-        /// Minimum reputation to include
-        #[allow(dead_code)]
-        min_reputation: Option<f64>,
-        /// Only include peers active within this many seconds
-        #[allow(dead_code)]
-        active_within: Option<u64>,
         /// Encrypt archive with the in-house envelope recipient
         recipient: Option<String>,
         /// Encrypt archive using a shared password
@@ -443,16 +432,6 @@ fn build_stats_command() -> CliCommand {
             OptionSpec::new("path", "path", "Destination path").required(true),
         ))
         .arg(rpc_option("rpc", "rpc"))
-        .arg(ArgSpec::Option(OptionSpec::new(
-            "min_reputation",
-            "min-reputation",
-            "Minimum reputation to include",
-        )))
-        .arg(ArgSpec::Option(OptionSpec::new(
-            "active_within",
-            "active-within",
-            "Only include peers active within this many seconds",
-        )))
         .arg(ArgSpec::Option(OptionSpec::new(
             "recipient",
             "recipient",
@@ -770,23 +749,6 @@ fn parse_stats_show(matches: &Matches) -> Result<StatsCmd, String> {
 }
 
 fn parse_stats_export(matches: &Matches) -> Result<StatsCmd, String> {
-    let min_reputation = matches
-        .get_string("min_reputation")
-        .map(|value| {
-            value
-                .parse::<f64>()
-                .map_err(|err| format!("invalid min-reputation: {err}"))
-        })
-        .transpose()?;
-    let active_within = matches
-        .get_string("active_within")
-        .map(|value| {
-            value
-                .parse::<u64>()
-                .map_err(|err| format!("invalid active-within: {err}"))
-        })
-        .transpose()?;
-
     Ok(StatsCmd::Export {
         peer_id: optional_positional(matches, "peer_id"),
         all: matches.get_flag("all"),
@@ -794,8 +756,6 @@ fn parse_stats_export(matches: &Matches) -> Result<StatsCmd, String> {
             .get_string("path")
             .ok_or_else(|| "missing --path".to_string())?,
         rpc: rpc_value(matches),
-        min_reputation,
-        active_within,
         recipient: matches.get_string("recipient"),
         password: matches.get_string("password"),
     })
@@ -1387,8 +1347,6 @@ fn main() {
                 all,
                 path,
                 rpc,
-                min_reputation: _,
-                active_within: _,
                 recipient,
                 password,
             } => {

@@ -8,10 +8,7 @@ use governance::{
 };
 use sys::tempfile::tempdir;
 
-#[allow(dead_code)]
 struct FeeFloorEvent {
-    epoch: u64,
-    proposal_id: u64,
     window: i64,
     percentile: i64,
 }
@@ -20,8 +17,6 @@ impl FeeFloorEvent {
     fn from_json(value: &Value) -> Option<Self> {
         let obj = value.as_object()?;
         Some(Self {
-            epoch: obj.get("epoch")?.as_u64()?,
-            proposal_id: obj.get("proposal_id")?.as_u64()?,
             window: obj.get("window")?.as_i64()?,
             percentile: obj.get("percentile")?.as_i64()?,
         })

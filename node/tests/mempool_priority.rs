@@ -4,8 +4,9 @@ use std::fs;
 use std::sync::Once;
 use the_block::{generate_keypair, sign_tx, Blockchain, RawTxPayload};
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 static PY_INIT: Once = Once::new();
 fn init() {

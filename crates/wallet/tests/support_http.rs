@@ -14,9 +14,6 @@ use httpd::{
 use runtime::{self, ws::Message};
 use wallet::{Wallet, WalletError, WalletSigner};
 
-mod tls;
-pub use tls::TlsWebSocketSignerMock;
-
 #[derive(Clone)]
 pub enum SignerBehavior {
     Success,

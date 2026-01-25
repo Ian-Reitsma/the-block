@@ -3,6 +3,7 @@ use httpd::{BlockingClient, HttpClient, Method};
 use std::io::Write;
 use std::thread;
 
+#[path = "support_std.rs"]
 mod support;
 use support::{LOCAL_BIND_ADDR, bind_std_listener};
 

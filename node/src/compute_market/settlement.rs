@@ -382,7 +382,7 @@ impl SettlementState {
         }
     }
 
-    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
+    #[cfg(feature = "telemetry")]
     fn next_deadline(&self) -> Option<u64> {
         self.sla.iter().map(|r| r.deadline).min()
     }

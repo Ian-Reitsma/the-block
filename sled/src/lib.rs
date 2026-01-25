@@ -97,13 +97,16 @@ pub fn open<P: AsRef<Path>>(path: P) -> Result<Db> {
 #[derive(Clone)]
 pub struct Db {
     engine: InhouseEngine,
-    #[allow(dead_code)]
     base: Option<PathBuf>,
-    #[allow(dead_code)]
     temp_dir: Option<Arc<TempDir>>,
 }
 
 impl Db {
+    fn keep_temp_dir_alive(&self) {
+        let _ = self.temp_dir.as_ref();
+        let _ = self.base.as_ref();
+    }
+
     fn open_with_base(base: Option<PathBuf>, temporary: bool) -> Result<Self> {
         if temporary {
             let temp_dir = TempDir::new()?;
@@ -136,6 +139,7 @@ impl Db {
     }
 
     pub fn open_tree<S: AsRef<str>>(&self, name: S) -> Result<Tree> {
+        self.keep_temp_dir_alive();
         let name = name.as_ref().to_string();
         self.engine.ensure_cf(&name)?;
         Ok(Tree {

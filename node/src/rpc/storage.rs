@@ -362,9 +362,12 @@ pub fn upload(
             ])
         }
         Err(err) => {
-            crate::telemetry::STORAGE_DISCOVERY_RESULTS_TOTAL
-                .with_label_values(&["error"])
-                .inc();
+            #[cfg(feature = "telemetry")]
+            {
+                crate::telemetry::STORAGE_DISCOVERY_RESULTS_TOTAL
+                    .with_label_values(&["error"])
+                    .inc();
+            }
             market_error_value(err)
         }
     }
@@ -836,6 +839,14 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
     }
 
     receipts
+}
+
+/// Test helper to enqueue a storage receipt in the global market queue.
+#[cfg(test)]
+pub fn enqueue_storage_receipt_for_test(
+    receipt: storage_market::receipts::StorageSettlementReceipt,
+) {
+    MARKET.guard().push_receipt_for_test(receipt);
 }
 
 #[cfg(test)]

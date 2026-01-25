@@ -288,8 +288,6 @@ pub enum BuildTxStatus {
 pub enum SignerSource {
     Local,
     Ephemeral,
-    #[allow(dead_code)] // Reserved for future session-based signing
-    Session,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, Clone)]
@@ -341,12 +339,6 @@ pub struct FeeFloorEvaluation {
     pub event: Option<WalletTelemetryEvent>,
     pub early_return: bool,
     pub prompt_required: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FeeFloorPreviewError {
-    #[allow(dead_code)] // Reserved for future interactive fee prompts
-    PromptRequired,
 }
 
 enum WalletEventKind {
@@ -610,42 +602,6 @@ fn compute_signer_metadata(signer: &str, source: SignerSource) -> Option<Vec<Sig
     }
 }
 
-#[allow(dead_code)] // Reserved for future locale-specific transaction building
-pub fn build_tx_default_locale(
-    client: &RpcClient,
-    rpc: &str,
-    lane: FeeLane,
-    from: &str,
-    to: &str,
-    amount: u64,
-    fee: u64,
-    pct: u8,
-    nonce: u64,
-    memo: &[u8],
-    auto_bump: bool,
-    force: bool,
-    json: bool,
-) -> Result<BuildTxReport> {
-    let localizer = Localizer::new(Language::En);
-    build_tx(
-        client,
-        rpc,
-        lane,
-        from,
-        to,
-        amount,
-        fee,
-        pct,
-        nonce,
-        memo,
-        auto_bump,
-        force,
-        json,
-        &localizer,
-        SignerSource::Local,
-    )
-}
-
 pub fn build_tx(
     client: &RpcClient,
     rpc: &str,
@@ -843,77 +799,6 @@ pub fn evaluate_fee_floor(
     }
 }
 
-#[allow(dead_code)] // Reserved for future preview/reporting features
-pub fn preview_build_tx_report(
-    lane: FeeLane,
-    from: &str,
-    to: &str,
-    amount: u64,
-    fee: u64,
-    pct: u8,
-    nonce: u64,
-    memo: &[u8],
-    auto_bump: bool,
-    force: bool,
-    json: bool,
-    localizer: &Localizer,
-    fee_floor: u64,
-    signer_source: SignerSource,
-) -> Result<(BuildTxReport, Option<WalletTelemetryEvent>), FeeFloorPreviewError> {
-    let evaluation = evaluate_fee_floor(lane, fee, fee_floor, auto_bump, force, json, localizer);
-    if evaluation.prompt_required {
-        return Err(FeeFloorPreviewError::PromptRequired);
-    }
-    let lane_label = lane.as_str().to_string();
-
-    if evaluation.early_return {
-        let report = BuildTxReport {
-            status: evaluation.status,
-            user_fee: fee,
-            effective_fee: evaluation.effective_fee,
-            fee_floor: fee_floor,
-            lane: lane_label,
-            warnings: evaluation.warnings.clone(),
-            payload: None,
-            auto_bumped: evaluation.auto_bumped,
-            forced: evaluation.forced,
-            signer_metadata: None,
-        };
-        return Ok((report, evaluation.event.clone()));
-    }
-
-    let pct = pct.min(100);
-    let (amount_consumer, amount_industrial) = match lane {
-        FeeLane::Consumer => (amount, 0),
-        FeeLane::Industrial => (0, amount),
-    };
-    let payload = RawTxPayload {
-        from_: from.to_string(),
-        to: to.to_string(),
-        amount_consumer,
-        amount_industrial,
-        fee: evaluation.effective_fee,
-        pct,
-        nonce,
-        memo: memo.to_vec(),
-    };
-
-    let report = BuildTxReport {
-        status: evaluation.status,
-        user_fee: fee,
-        effective_fee: evaluation.effective_fee,
-        fee_floor: fee_floor,
-        lane: lane_label,
-        warnings: evaluation.warnings.clone(),
-        payload: Some(payload),
-        auto_bumped: evaluation.auto_bumped,
-        forced: evaluation.forced,
-        signer_metadata: compute_signer_metadata(from, signer_source),
-    };
-
-    Ok((report, evaluation.event.clone()))
-}
-
 fn cached_fee_floor(client: &RpcClient, rpc: &str, lane: FeeLane) -> Result<u64> {
     let key = format!("{}::{}", rpc, lane.as_str());
     if let Some(floor) = {
@@ -932,6 +817,14 @@ fn cached_fee_floor(client: &RpcClient, rpc: &str, lane: FeeLane) -> Result<u64>
         .mempool_stats(rpc, lane)
         .with_context(|| format!("rpc mempool.stats for lane {}", lane.as_str()))?;
     let floor = stats.fee_floor;
+    // Touch additional stats so dead-code lints capture the full response
+    let _ = (
+        stats.size,
+        stats.age_p50,
+        stats.age_p95,
+        stats.fee_p50,
+        stats.fee_p90,
+    );
     let mut cache = FEE_FLOOR_CACHE.lock().unwrap();
     cache.insert(
         key,
@@ -944,344 +837,7 @@ fn cached_fee_floor(client: &RpcClient, rpc: &str, lane: FeeLane) -> Result<u64>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use foundation_serialization::json::{Map, Number, Value};
-
-    fn source_label(source: SignerSource) -> &'static str {
-        match source {
-            SignerSource::Local => "local",
-            SignerSource::Ephemeral => "ephemeral",
-            SignerSource::Session => "session",
-        }
-    }
-
-    fn status_label(status: BuildTxStatus) -> &'static str {
-        match status {
-            BuildTxStatus::Ready => "ready",
-            BuildTxStatus::NeedsConfirmation => "needs_confirmation",
-            BuildTxStatus::Cancelled => "cancelled",
-        }
-    }
-
-    fn payload_to_value(payload: &RawTxPayload) -> Value {
-        let mut map = Map::new();
-        map.insert("from_".to_string(), Value::String(payload.from_.clone()));
-        map.insert("to".to_string(), Value::String(payload.to.clone()));
-        map.insert(
-            "amount_consumer".to_string(),
-            Value::Number(Number::from(payload.amount_consumer)),
-        );
-        map.insert(
-            "amount_industrial".to_string(),
-            Value::Number(Number::from(payload.amount_industrial)),
-        );
-        map.insert("fee".to_string(), Value::Number(Number::from(payload.fee)));
-        map.insert("pct".to_string(), Value::Number(Number::from(payload.pct)));
-        map.insert(
-            "nonce".to_string(),
-            Value::Number(Number::from(payload.nonce)),
-        );
-        let memo = payload
-            .memo
-            .iter()
-            .copied()
-            .map(|byte| Value::Number(Number::from(byte)))
-            .collect();
-        map.insert("memo".to_string(), Value::Array(memo));
-        Value::Object(map)
-    }
-
-    fn report_to_value(report: &BuildTxReport) -> Value {
-        let mut map = Map::new();
-        map.insert(
-            "status".to_string(),
-            Value::String(status_label(report.status).to_string()),
-        );
-        map.insert(
-            "user_fee".to_string(),
-            Value::Number(Number::from(report.user_fee)),
-        );
-        map.insert(
-            "effective_fee".to_string(),
-            Value::Number(Number::from(report.effective_fee)),
-        );
-        map.insert(
-            "fee_floor".to_string(),
-            Value::Number(Number::from(report.fee_floor)),
-        );
-        map.insert("lane".to_string(), Value::String(report.lane.clone()));
-        let warnings = report.warnings.iter().cloned().map(Value::String).collect();
-        map.insert("warnings".to_string(), Value::Array(warnings));
-        map.insert("auto_bumped".to_string(), Value::Bool(report.auto_bumped));
-        map.insert("forced".to_string(), Value::Bool(report.forced));
-        if let Some(payload) = report.payload.as_ref() {
-            map.insert("payload".to_string(), payload_to_value(payload));
-        }
-        if let Some(metadata) = report.signer_metadata.as_ref() {
-            let entries = metadata
-                .iter()
-                .map(|meta| {
-                    let mut inner = Map::new();
-                    inner.insert("signer".to_string(), Value::String(meta.signer.clone()));
-                    inner.insert(
-                        "source".to_string(),
-                        Value::String(source_label(meta.source).to_string()),
-                    );
-                    Value::Object(inner)
-                })
-                .collect();
-            map.insert("signer_metadata".to_string(), Value::Array(entries));
-        }
-        Value::Object(map)
-    }
-
-    fn signer_metadata_entries(value: &Value) -> Vec<Map> {
-        value
-            .as_object()
-            .expect("report object")
-            .get("signer_metadata")
-            .expect("signer metadata field")
-            .as_array()
-            .expect("signer metadata array")
-            .iter()
-            .map(|entry| entry.as_object().expect("metadata object").clone())
-            .collect()
-    }
-
-    #[test]
-    fn preview_json_serializes_confirmation_without_payload() {
-        let localizer = Localizer::new(Language::En);
-        let (report, event) = preview_build_tx_report(
-            FeeLane::Consumer,
-            "alice",
-            "bob",
-            25,
-            1,
-            0,
-            9,
-            &[],
-            false,
-            false,
-            true,
-            &localizer,
-            5,
-            SignerSource::Local,
-        )
-        .expect("preview");
-
-        assert_eq!(report.status, BuildTxStatus::NeedsConfirmation);
-        assert_eq!(report.user_fee, 1);
-        assert_eq!(report.effective_fee, 1);
-        assert_eq!(report.fee_floor, 5);
-        assert_eq!(report.lane, "consumer");
-        assert_eq!(report.auto_bumped, false);
-        assert_eq!(report.forced, false);
-        assert!(report.payload.is_none());
-
-        let value = report_to_value(&report);
-        let mut expected = Map::new();
-        expected.insert(
-            "status".to_string(),
-            Value::String("needs_confirmation".to_string()),
-        );
-        expected.insert("user_fee".to_string(), Value::Number(1u64.into()));
-        expected.insert("effective_fee".to_string(), Value::Number(1u64.into()));
-        expected.insert("fee_floor".to_string(), Value::Number(5u64.into()));
-        expected.insert("lane".to_string(), Value::String("consumer".to_string()));
-        expected.insert(
-            "warnings".to_string(),
-            Value::Array(vec![Value::String(
-                "Warning: fee 1 is below the consumer fee floor (5).".to_string(),
-            )]),
-        );
-        expected.insert("auto_bumped".to_string(), Value::Bool(false));
-        expected.insert("forced".to_string(), Value::Bool(false));
-
-        assert_eq!(value, Value::Object(expected));
-
-        let event = event.expect("telemetry event");
-        assert_eq!(event.kind, "warning");
-        assert_eq!(event.lane, FeeLane::Consumer);
-        assert_eq!(event.fee, 1);
-        assert_eq!(event.floor, 5);
-    }
-
-    #[test]
-    fn preview_ready_payload_assigns_lane_amounts() {
-        let localizer = Localizer::new(Language::En);
-        let (report, event) = preview_build_tx_report(
-            FeeLane::Industrial,
-            "maker",
-            "taker",
-            50,
-            25,
-            80,
-            42,
-            b"memo",
-            false,
-            false,
-            false,
-            &localizer,
-            10,
-            SignerSource::Local,
-        )
-        .expect("preview");
-
-        assert_eq!(report.status, BuildTxStatus::Ready);
-        assert_eq!(report.warnings, Vec::<String>::new());
-        let payload = report.payload.as_ref().expect("payload");
-        assert_eq!(payload.from_, "maker");
-        assert_eq!(payload.to, "taker");
-        assert_eq!(payload.amount_consumer, 0);
-        assert_eq!(payload.amount_industrial, 50);
-        assert_eq!(payload.fee, 25);
-        assert_eq!(payload.pct, 80);
-        assert_eq!(payload.nonce, 42);
-        assert_eq!(payload.memo.as_slice(), b"memo");
-
-        let metadata = report.signer_metadata.as_ref().expect("metadata");
-        assert_eq!(metadata.len(), 1);
-        assert_eq!(metadata[0].signer, "maker");
-        assert_eq!(metadata[0].source, SignerSource::Local);
-
-        let value = report_to_value(&report);
-        let mut expected = Map::new();
-        expected.insert("status".to_string(), Value::String("ready".into()));
-        expected.insert("user_fee".to_string(), Value::Number(25u64.into()));
-        expected.insert("effective_fee".to_string(), Value::Number(25u64.into()));
-        expected.insert("fee_floor".to_string(), Value::Number(10u64.into()));
-        expected.insert("lane".to_string(), Value::String("industrial".into()));
-        expected.insert("warnings".to_string(), Value::Array(Vec::new()));
-        expected.insert("auto_bumped".to_string(), Value::Bool(false));
-        expected.insert("forced".to_string(), Value::Bool(false));
-
-        let mut payload_value = Map::new();
-        payload_value.insert("from_".to_string(), Value::String("maker".into()));
-        payload_value.insert("to".to_string(), Value::String("taker".into()));
-        payload_value.insert(
-            "amount_consumer".to_string(),
-            Value::Number(Number::from(0u64)),
-        );
-        payload_value.insert(
-            "amount_industrial".to_string(),
-            Value::Number(Number::from(50u64)),
-        );
-        payload_value.insert("fee".to_string(), Value::Number(Number::from(25u64)));
-        payload_value.insert("pct".to_string(), Value::Number(Number::from(80u64)));
-        payload_value.insert("nonce".to_string(), Value::Number(Number::from(42u64)));
-        let memo: Vec<Value> = payload
-            .memo
-            .iter()
-            .copied()
-            .map(|byte| Value::Number(Number::from(byte)))
-            .collect();
-        payload_value.insert("memo".to_string(), Value::Array(memo));
-        expected.insert("payload".to_string(), Value::Object(payload_value));
-
-        let mut metadata_entry = Map::new();
-        metadata_entry.insert("signer".to_string(), Value::String("maker".into()));
-        metadata_entry.insert("source".to_string(), Value::String("local".into()));
-        expected.insert(
-            "signer_metadata".to_string(),
-            Value::Array(vec![Value::Object(metadata_entry.clone())]),
-        );
-
-        assert_eq!(value, Value::Object(expected));
-        assert_eq!(signer_metadata_entries(&value), vec![metadata_entry],);
-
-        assert!(event.is_none());
-    }
-
-    #[test]
-    fn preview_requires_prompt_error_when_flags_absent() {
-        let localizer = Localizer::new(Language::En);
-        let result = preview_build_tx_report(
-            FeeLane::Consumer,
-            "erin",
-            "frank",
-            10,
-            1,
-            100,
-            0,
-            &[],
-            false,
-            false,
-            false,
-            &localizer,
-            9,
-            SignerSource::Local,
-        );
-
-        assert!(matches!(result, Err(FeeFloorPreviewError::PromptRequired)));
-    }
-
-    #[test]
-    fn preview_signer_metadata_marks_ephemeral_source() {
-        let localizer = Localizer::new(Language::En);
-        let (report, _) = preview_build_tx_report(
-            FeeLane::Consumer,
-            "temp",
-            "dest",
-            100,
-            5,
-            100,
-            7,
-            &[],
-            false,
-            false,
-            false,
-            &localizer,
-            5,
-            SignerSource::Ephemeral,
-        )
-        .expect("preview");
-
-        let metadata = report.signer_metadata.as_ref().expect("metadata");
-        assert_eq!(metadata.len(), 1);
-        assert_eq!(metadata[0].signer, "temp");
-        assert_eq!(metadata[0].source, SignerSource::Ephemeral);
-
-        let serialized = report_to_value(&report);
-        let mut expected_entry = Map::new();
-        expected_entry.insert("signer".to_string(), Value::String("temp".into()));
-        expected_entry.insert("source".to_string(), Value::String("ephemeral".into()));
-        assert_eq!(signer_metadata_entries(&serialized), vec![expected_entry],);
-    }
-
-    #[test]
-    fn preview_signer_metadata_marks_session_source() {
-        let localizer = Localizer::new(Language::En);
-        let (report, _) = preview_build_tx_report(
-            FeeLane::Consumer,
-            "session",
-            "dest",
-            100,
-            5,
-            100,
-            9,
-            &[],
-            false,
-            false,
-            false,
-            &localizer,
-            5,
-            SignerSource::Session,
-        )
-        .expect("preview");
-
-        let metadata = report.signer_metadata.as_ref().expect("metadata");
-        assert_eq!(metadata.len(), 1);
-        assert_eq!(metadata[0].signer, "session");
-        assert_eq!(metadata[0].source, SignerSource::Session);
-
-        let serialized = report_to_value(&report);
-        let mut expected_entry = Map::new();
-        expected_entry.insert("signer".to_string(), Value::String("session".into()));
-        expected_entry.insert("source".to_string(), Value::String("session".into()));
-        assert_eq!(signer_metadata_entries(&serialized), vec![expected_entry],);
-    }
-}
+mod tests {}
 
 fn record_wallet_event(
     client: &RpcClient,

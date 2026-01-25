@@ -238,7 +238,6 @@ pub struct RpcTreasuryHistoryResult {
     pub snapshots: Vec<TreasuryBalanceSnapshot>,
     #[serde(default)]
     pub next_cursor: Option<u64>,
-    #[allow(dead_code)]
     pub current_balance: u64,
 }
 
@@ -1662,18 +1661,23 @@ fn parse_param_key(name: &str) -> Option<ParamKey> {
     }
 }
 
+pub fn handle_with_writer(cmd: GovCmd, writer: &mut dyn Write) -> io::Result<()> {
+    match cmd {
+        GovCmd::Treasury { action } => handle_treasury(action, writer),
+        GovCmd::Disburse { action } => handle_disburse(action, writer),
+        _ => Err(io::Error::new(
+            io::ErrorKind::Other,
+            "handle_with_writer only supports treasury and disburse commands",
+        )),
+    }
+}
+
 pub fn handle(cmd: GovCmd) {
     match cmd {
-        GovCmd::Treasury { action } => {
+        GovCmd::Treasury { .. } | GovCmd::Disburse { .. } => {
             let mut stdout = io::stdout();
-            if let Err(err) = handle_treasury(action, &mut stdout) {
-                eprintln!("treasury command failed: {err}");
-            }
-        }
-        GovCmd::Disburse { action } => {
-            let mut stdout = io::stdout();
-            if let Err(err) = handle_disburse(action, &mut stdout) {
-                eprintln!("disburse command failed: {err}");
+            if let Err(err) = handle_with_writer(cmd, &mut stdout) {
+                eprintln!("treasury/disburse command failed: {err}");
             }
         }
         GovCmd::EnergySettlement {
@@ -1979,18 +1983,6 @@ pub fn handle(cmd: GovCmd) {
                 }
             }
         },
-    }
-}
-
-#[allow(dead_code)]
-pub fn handle_with_writer(cmd: GovCmd, out: &mut dyn Write) -> io::Result<()> {
-    match cmd {
-        GovCmd::Treasury { action } => handle_treasury(action, out),
-        GovCmd::Disburse { action } => handle_disburse(action, out),
-        other => {
-            handle(other);
-            Ok(())
-        }
     }
 }
 

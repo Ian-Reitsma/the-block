@@ -1229,12 +1229,7 @@ fn distribution_to_value(policy: DistributionPolicy) -> Value {
 
 // Error codes for presence/privacy operations
 const ERR_INVALID_PRESENCE_BUCKET: i32 = -32034;
-const ERR_UNKNOWN_SELECTOR: i32 = -32036;
 const ERR_INSUFFICIENT_PRIVACY_BUDGET: i32 = -32037;
-#[allow(dead_code)]
-const ERR_HOLDOUT_OVERLAP: i32 = -32038;
-#[allow(dead_code)]
-const ERR_SELECTOR_WEIGHT_MISMATCH: i32 = -32039;
 const ERR_INVALID_ROLE: i32 = -32040;
 
 fn err_invalid_presence_bucket() -> RpcError {
@@ -1242,11 +1237,6 @@ fn err_invalid_presence_bucket() -> RpcError {
         ERR_INVALID_PRESENCE_BUCKET,
         "invalid or expired presence bucket",
     )
-}
-
-#[allow(dead_code)]
-fn err_unknown_selector() -> RpcError {
-    RpcError::new(ERR_UNKNOWN_SELECTOR, "unknown interest tag or domain tier")
 }
 
 fn err_insufficient_privacy_budget() -> RpcError {

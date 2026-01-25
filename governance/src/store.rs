@@ -1252,66 +1252,6 @@ impl BinaryCodec for ExecutorLeaseRecord {
         })
     }
 }
-
-#[allow(dead_code)]
-fn executor_lease_to_json(record: &ExecutorLeaseRecord) -> Value {
-    let mut map = Map::new();
-    map.insert("holder".into(), Value::String(record.holder.clone()));
-    map.insert(
-        "expires_at".into(),
-        Value::Number(Number::from(record.expires_at)),
-    );
-    map.insert(
-        "renewed_at".into(),
-        Value::Number(Number::from(record.renewed_at)),
-    );
-    if let Some(nonce) = record.last_nonce {
-        map.insert("last_nonce".into(), Value::Number(Number::from(nonce)));
-    }
-    if record.released {
-        map.insert("released".into(), Value::Bool(true));
-    }
-    Value::Object(map)
-}
-
-#[allow(dead_code)]
-fn executor_lease_from_json(value: &Value) -> CodecResult<ExecutorLeaseRecord> {
-    let obj = value.as_object().ok_or_else(|| {
-        sled::Error::Unsupported("treasury executor lease JSON: expected object".into())
-    })?;
-    let holder = obj
-        .get("holder")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            sled::Error::Unsupported("treasury executor lease JSON: missing holder".into())
-        })?
-        .to_string();
-    let expires_at = obj
-        .get("expires_at")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            sled::Error::Unsupported("treasury executor lease JSON: missing expires_at".into())
-        })?;
-    let renewed_at = obj
-        .get("renewed_at")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            sled::Error::Unsupported("treasury executor lease JSON: missing renewed_at".into())
-        })?;
-    let last_nonce = obj.get("last_nonce").and_then(Value::as_u64);
-    let released = obj
-        .get("released")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    Ok(ExecutorLeaseRecord {
-        holder,
-        expires_at,
-        renewed_at,
-        last_nonce,
-        released,
-    })
-}
-
 fn execution_intents_to_json_array(intents: &[SignedExecutionIntent]) -> Value {
     Value::Array(intents.iter().map(execution_intent_to_json).collect())
 }
@@ -1802,25 +1742,6 @@ impl GovStore {
             return de(&raw).map(Some);
         }
         Ok(None)
-    }
-
-    #[allow(dead_code)]
-    fn persist_executor_lease(
-        &self,
-        expected: Option<Vec<u8>>,
-        record: &ExecutorLeaseRecord,
-    ) -> sled::Result<bool> {
-        let tree = self.treasury_executor_state_tree();
-        let new_bytes = ser(record)?;
-        let result = tree.compare_and_swap(b"lease", expected, Some(new_bytes))?;
-        Ok(result.is_ok())
-    }
-
-    #[allow(dead_code)]
-    fn remove_executor_lease(&self, expected: Option<Vec<u8>>) -> sled::Result<bool> {
-        let tree = self.treasury_executor_state_tree();
-        let result = tree.compare_and_swap(b"lease", expected, None)?;
-        Ok(result.is_ok())
     }
 
     fn load_balance_history(&self) -> sled::Result<Vec<TreasuryBalanceSnapshot>> {

@@ -684,6 +684,13 @@ pub fn drain_energy_slash_receipts() -> Vec<EnergySlash> {
     slashes
 }
 
+/// Test helper to stage an energy receipt for drain pipelines.
+#[cfg(test)]
+pub fn enqueue_energy_receipt_for_test(receipt: EnergyReceipt) {
+    let mut guard = store();
+    guard.receipts.push(receipt);
+}
+
 fn record_treasury_fee(amount: u64) {
     if amount == 0 {
         return;

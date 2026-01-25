@@ -27,11 +27,6 @@ fn py_value_err(msg: impl Into<String>) -> PyError {
     PyError::value(msg)
 }
 
-#[allow(dead_code)]
-fn py_type_err(msg: impl Into<String>) -> PyError {
-    PyError::value(msg)
-}
-
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum TxVersion {
     Ed25519Only,
@@ -233,16 +228,38 @@ impl RawTxPayload {
     }
 
     // Python alias property: expose `from` alongside `from_` for ergonomics
-    #[cfg_attr(feature = "python-bindings", getter(from))]
-    #[allow(dead_code)]
-    fn get_from_alias(&self) -> String {
+    #[cfg(feature = "python-bindings")]
+    #[getter(from)]
+    pub fn get_from_alias(&self) -> String {
         self.from_.clone()
     }
 
-    #[cfg_attr(feature = "python-bindings", setter(from))]
-    #[allow(dead_code)]
-    fn set_from_alias(&mut self, val: String) {
+    #[cfg(feature = "python-bindings")]
+    #[setter(from)]
+    pub fn set_from_alias(&mut self, val: String) {
         self.from_ = val;
+    }
+}
+
+#[cfg(all(test, feature = "python-bindings"))]
+mod python_alias_tests {
+    use super::RawTxPayload;
+
+    #[test]
+    fn from_alias_round_trips() {
+        let mut payload = RawTxPayload::new(
+            "from".into(),
+            "to".into(),
+            1,
+            2,
+            3,
+            4,
+            5,
+            vec![],
+        );
+        assert_eq!(payload.get_from_alias(), "from");
+        payload.set_from_alias("updated".into());
+        assert_eq!(payload.get_from_alias(), "updated");
     }
 }
 

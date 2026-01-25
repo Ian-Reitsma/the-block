@@ -947,11 +947,13 @@ mod tests {
     }
 
     fn sample_cohort() -> CohortKey {
-        CohortKey::new(
-            "example.com".into(),
-            Some("wallet".into()),
-            vec!["badge-1".into(), "badge-2".into()],
-        )
+        CohortKeySnapshot {
+            domain: "example.com".into(),
+            provider: Some("wallet".into()),
+            badges: vec!["badge-1".into(), "badge-2".into()],
+            ..Default::default()
+        }
+        .into_key()
     }
 
     #[test]

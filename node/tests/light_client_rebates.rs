@@ -2,7 +2,8 @@
 
 use the_block::{light_client::proof_tracker::ProofTracker, Blockchain, TokenAmount};
 
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
 
 struct PreserveGuard;
 
@@ -16,7 +17,7 @@ impl Drop for PreserveGuard {
 fn rebate_persistence_across_restart() {
     std::env::set_var("TB_PRESERVE", "1");
     let _reset = PreserveGuard;
-    let dir = util::temp::temp_dir("rebate_restart");
+    let dir = temp::temp_dir("rebate_restart");
     let path = dir.path().to_str().expect("path");
     {
         let mut bc = Blockchain::new(path);
@@ -41,7 +42,7 @@ fn rebate_persistence_across_restart() {
 
 #[testkit::tb_serial]
 fn rebate_rollback_restores_pending_balances() {
-    let dir = util::temp::temp_dir("rebate_reorg_state");
+    let dir = temp::temp_dir("rebate_reorg_state");
     let path = dir.path().to_str().expect("path");
     let mut bc = Blockchain::new(path);
     bc.add_account("miner".into(), 0).expect("add miner");
@@ -65,7 +66,7 @@ fn rebate_rollback_restores_pending_balances() {
 
 #[testkit::tb_serial]
 fn rebate_double_claim_rejected_after_restart() {
-    let dir = util::temp::temp_dir("rebate_double_claim");
+    let dir = temp::temp_dir("rebate_double_claim");
     let path = dir.path().join("rebates");
     {
         let mut tracker = ProofTracker::open(&path);

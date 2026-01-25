@@ -24,8 +24,6 @@ use std::sync::{
 };
 use std::time::Duration;
 
-#[allow(dead_code)]
-const MAX_HISTORY: usize = 64;
 const INTENT_PREFIX: &str = "intent/";
 const LOG_LIMIT: usize = 64;
 
@@ -2597,29 +2595,15 @@ mod tests {
     use crate::economics::{MarketMetric, MarketMetrics};
     use sys::tempfile::tempdir;
 
-    #[allow(dead_code)] // Test utility struct for future test expansion
     struct MockProvider {
-        chain_samples: VecDeque<ChainSample>,
-        dns_samples: VecDeque<DnsSample>,
         economics_samples: VecDeque<EconomicsSample>,
     }
 
-    #[allow(dead_code)] // Test utility methods for future test expansion
     impl MockProvider {
         fn new() -> Self {
             Self {
-                chain_samples: VecDeque::new(),
-                dns_samples: VecDeque::new(),
                 economics_samples: VecDeque::new(),
             }
-        }
-
-        fn push_chain(&mut self, sample: ChainSample) {
-            self.chain_samples.push_back(sample);
-        }
-
-        fn push_dns(&mut self, sample: DnsSample) {
-            self.dns_samples.push_back(sample);
         }
 
         fn push_economics(&mut self, sample: EconomicsSample) {
@@ -2629,11 +2613,11 @@ mod tests {
 
     impl SignalProvider for MockProvider {
         fn chain_sample(&self, _window_secs: u64) -> ChainSample {
-            self.chain_samples.front().cloned().unwrap_or_default()
+            ChainSample::default()
         }
 
         fn dns_sample(&self, _window_secs: u64) -> DnsSample {
-            self.dns_samples.front().cloned().unwrap_or_default()
+            DnsSample::default()
         }
 
         fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {

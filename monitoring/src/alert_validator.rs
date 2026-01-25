@@ -191,7 +191,6 @@ pub fn validate_treasury_alerts() -> Result<(), ValidationError> {
     validate_treasury_alerts_from_str(&content)
 }
 
-#[allow(dead_code)]
 pub fn validate_ad_readiness_alerts() -> Result<(), ValidationError> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let path = manifest_dir.join(ALERT_FILE);

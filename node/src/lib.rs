@@ -1496,7 +1496,7 @@ impl Blockchain {
         None
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(crate) fn read_shard_state(&self, shard: ShardId, key: &str) -> Option<Vec<u8>> {
         let cache_key = (shard, key.as_bytes().to_vec());
         if let Some(value) = {
@@ -4363,13 +4363,10 @@ impl Blockchain {
         self.pending_blob_bytes += tx.blob_size;
         let shard = address::shard_id(&tx.owner);
         let lane = FeeLane::Consumer;
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_else(|_| Duration::from_secs(0))
-            .as_secs();
+        let current_height = self.chain.len() as u64;
         let available_until = tx
             .expiry
-            .unwrap_or(now_secs.saturating_add(self.receipt_blob_da_window_secs));
+            .unwrap_or(current_height.saturating_add(self.receipt_blob_da_window_secs));
         let payload_bytes = u32::try_from(tx.blob_size).unwrap_or(u32::MAX);
         let entry = MicroShardRootEntry {
             root_hash: tx.blob_root,
@@ -5224,7 +5221,7 @@ impl Blockchain {
         let root = crate::blockchain::snapshot::state_root(&shadow_accounts);
 
         let diff = self.difficulty;
-        let ready_bundles = self.root_assembler.ready_bundles(timestamp_millis);
+        let ready_bundles = self.root_assembler.ready_bundles(index);
         let mut ready_root_hashes: HashSet<[u8; 32]> = HashSet::new();
         for bundle in &ready_bundles {
             for entry in &bundle.entries {
@@ -6338,7 +6335,6 @@ impl Blockchain {
         Self::open(path).unwrap_or_else(|e| panic!("DB open: {e}"))
     }
 
-    #[allow(dead_code)]
     fn is_valid_chain_rust(&self, chain: &[Block]) -> bool {
         Self::validate_chain_with_params(chain, &self.params).is_ok()
     }
@@ -7146,8 +7142,8 @@ mod market_metric_tests {
 }
 
 impl Blockchain {
-    fn slot_for_timestamp(timestamp: u64, class: RootSizeClass) -> u64 {
-        timestamp / class.cadence_millis()
+    fn slot_for_timestamp_millis(timestamp_millis: u64, class: RootSizeClass) -> u64 {
+        timestamp_millis / class.cadence_millis()
     }
 
     fn verify_root_bundles_with_slots(
@@ -7165,7 +7161,8 @@ impl Blockchain {
             if computed != bundle.bundle_hash {
                 return Err(py_value_err("root bundle hash mismatch"));
             }
-            let expected_slot = Self::slot_for_timestamp(timestamp_millis, bundle.size_class);
+            let expected_slot =
+                Self::slot_for_timestamp_millis(timestamp_millis, bundle.size_class);
             if bundle.slot != expected_slot {
                 return Err(py_value_err("root bundle slot mismatch"));
             }
@@ -7329,7 +7326,6 @@ fn calculate_hash_with_cached_receipts(
 
 /// Legacy calculate_hash function for backwards compatibility.
 /// Encodes receipts on each call - use calculate_hash_with_cached_receipts instead.
-#[allow(dead_code)]
 fn calculate_hash(
     index: u64,
     prev: &str,

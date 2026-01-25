@@ -42,22 +42,6 @@ impl Value {
             _ => None,
         }
     }
-
-    #[allow(dead_code)]
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Value::Bytes(bytes) => Some(bytes.as_slice()),
-            _ => None,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn as_array(&self) -> Option<&[Value]> {
-        match self {
-            Value::Array(values) => Some(values.as_slice()),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

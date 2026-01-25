@@ -103,34 +103,6 @@ impl AdMarketDriftController {
         }
     }
 
-    /// Drift splits toward target (for when we have measured actual splits)
-    #[allow(dead_code)]
-    fn drift_splits(&self, current_platform_bps: u16, current_user_bps: u16) -> AdMarketSnapshot {
-        let k = self.params.drift_rate;
-
-        // Drift platform take
-        let t_current = (current_platform_bps as f64) / 10_000.0;
-        let t_target = (self.params.platform_take_target_bps as f64) / 10_000.0;
-        let t_next = t_current + k * (t_target - t_current);
-
-        // Drift user share
-        let u_current = (current_user_bps as f64) / 10_000.0;
-        let u_target = (self.params.user_share_target_bps as f64) / 10_000.0;
-        let u_next = u_current + k * (u_target - u_current);
-
-        // Convert to bps
-        let t_next_bps = (t_next * 10_000.0).round() as u16;
-        let u_next_bps = (u_next * 10_000.0).round() as u16;
-        let p_next_bps = 10_000u16
-            .saturating_sub(t_next_bps)
-            .saturating_sub(u_next_bps);
-
-        AdMarketSnapshot {
-            platform_take_bps: t_next_bps,
-            user_share_bps: u_next_bps,
-            publisher_share_bps: p_next_bps,
-        }
-    }
 }
 
 pub struct TariffController {
@@ -216,34 +188,6 @@ mod tests {
 
         let splits = controller.compute_next_splits(1_000_000);
 
-        assert_eq!(
-            splits.platform_take_bps as u32
-                + splits.user_share_bps as u32
-                + splits.publisher_share_bps as u32,
-            10_000
-        );
-    }
-
-    #[test]
-    fn test_ad_market_drift() {
-        let params = AdMarketParams {
-            platform_take_target_bps: 2800,
-            user_share_target_bps: 2200,
-            drift_rate: 0.10, // 10% drift for faster test
-        };
-        let controller = AdMarketDriftController::new(params);
-
-        // Start at different splits
-        let current_platform = 3000; // 30%
-        let current_user = 2000; // 20%
-
-        let splits = controller.drift_splits(current_platform, current_user);
-
-        // Should drift toward targets
-        assert!(splits.platform_take_bps < current_platform); // Moving down toward 28%
-        assert!(splits.user_share_bps > current_user); // Moving up toward 22%
-
-        // Should sum to 10000
         assert_eq!(
             splits.platform_take_bps as u32
                 + splits.user_share_bps as u32

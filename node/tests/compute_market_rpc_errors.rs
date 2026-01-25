@@ -12,10 +12,11 @@ use the_block::{
     rpc::{fuzz_dispatch_request, fuzz_runtime_config},
     Blockchain,
 };
-use util::temp::temp_dir;
+use temp::temp_dir;
 
 mod settlement_util;
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
 use settlement_util::SettlementCtx;
 
 #[testkit::tb_serial]

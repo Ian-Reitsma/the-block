@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 #[test]
 fn temp_dir_auto_cleans_on_drop() {

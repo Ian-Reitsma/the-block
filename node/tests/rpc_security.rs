@@ -5,9 +5,12 @@ use foundation_serialization::json::Value;
 use runtime::{io::BufferedTcpStream, net::TcpStream};
 use std::net::SocketAddr;
 use the_block::{config::RpcConfig, rpc::run_rpc_server, Blockchain};
-use util::timeout::expect_timeout;
-
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
+#[path = "util/timeout.rs"]
+mod timeout;
+use temp::temp_dir;
+use timeout::expect_timeout;
 
 async fn rpc(addr: &str, body: &str, token: Option<&str>) -> Value {
     let addr: SocketAddr = addr.parse().unwrap();
@@ -98,7 +101,7 @@ async fn read_http_response(stream: TcpStream) -> std::io::Result<(String, Vec<u
 #[test]
 fn rpc_auth_and_host_filters() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_security");
+        let dir = temp_dir("rpc_security");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();
@@ -158,7 +161,7 @@ fn rpc_auth_and_host_filters() {
 #[test]
 fn relay_only_rejects_start_mining() {
     runtime::block_on(async {
-        let dir = util::temp::temp_dir("rpc_relay_only");
+        let dir = temp_dir("rpc_relay_only");
         let bc = Arc::new(Mutex::new(Blockchain::new(dir.path().to_str().unwrap())));
         let mining = Arc::new(AtomicBool::new(false));
         let (tx, rx) = runtime::sync::oneshot::channel();

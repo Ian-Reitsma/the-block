@@ -948,13 +948,6 @@ pub fn handle(action: BridgeCmd) {
     }
 }
 
-#[allow(dead_code)]
-pub fn handle_with_writer(action: BridgeCmd, out: &mut dyn Write) -> io::Result<()> {
-    let client = RpcClient::from_env();
-    let transport = RpcClientTransport { client: &client };
-    handle_with_transport(action, &transport, out)
-}
-
 pub fn handle_with_transport(
     action: BridgeCmd,
     transport: &dyn BridgeRpcTransport,

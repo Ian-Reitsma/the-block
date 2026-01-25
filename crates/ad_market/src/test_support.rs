@@ -3,11 +3,9 @@
 use foundation_metrics::Recorder;
 use std::sync::{Arc, Mutex, OnceLock};
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct RecordedMetric {
     pub name: String,
-    pub value: f64,
     pub labels: Vec<(String, String)>,
 }
 
@@ -54,29 +52,26 @@ impl TestMetricsRecorder {
 }
 
 impl Recorder for TestMetricsRecorder {
-    fn increment_counter(&self, name: &str, value: f64, labels: &[(String, String)]) {
+    fn increment_counter(&self, name: &str, _value: f64, labels: &[(String, String)]) {
         let mut guard = self.counters.lock().expect("counter guard");
         guard.push(RecordedMetric {
             name: name.to_string(),
-            value,
             labels: labels.to_vec(),
         });
     }
 
-    fn record_histogram(&self, name: &str, value: f64, labels: &[(String, String)]) {
+    fn record_histogram(&self, name: &str, _value: f64, labels: &[(String, String)]) {
         let mut guard = self.histograms.lock().expect("hist guard");
         guard.push(RecordedMetric {
             name: name.to_string(),
-            value,
             labels: labels.to_vec(),
         });
     }
 
-    fn record_gauge(&self, name: &str, value: f64, labels: &[(String, String)]) {
+    fn record_gauge(&self, name: &str, _value: f64, labels: &[(String, String)]) {
         let mut guard = self.gauges.lock().expect("gauge guard");
         guard.push(RecordedMetric {
             name: name.to_string(),
-            value,
             labels: labels.to_vec(),
         });
     }

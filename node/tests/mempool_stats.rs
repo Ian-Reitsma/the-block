@@ -12,9 +12,9 @@ use the_block::{
     },
     sign_tx, Blockchain, RawTxPayload,
 };
-use util::timeout::expect_timeout;
-
-mod util;
+#[path = "util/timeout.rs"]
+mod timeout;
+use timeout::expect_timeout;
 
 fn rpc(addr: &str, body: &str) -> foundation_serialization::json::Value {
     runtime::block_on(async {

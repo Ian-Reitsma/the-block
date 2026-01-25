@@ -117,8 +117,6 @@ pub struct NetworkHealthTracker {
 struct PeerMetadata {
     region: Option<String>,
     client_version: Option<String>,
-    #[allow(dead_code)] // Reserved for future peer uptime tracking
-    connected_at: Instant,
 }
 
 use std::collections::VecDeque;
@@ -162,7 +160,6 @@ impl NetworkHealthTracker {
                 self.peer_metadata.entry(peer_id).or_insert(PeerMetadata {
                     region: None,
                     client_version: None,
-                    connected_at: Instant::now(),
                 });
             }
             PeerEventType::Disconnected => {

@@ -14,7 +14,6 @@ use the_block::{
     Blockchain,
 };
 
-mod util;
 
 struct EnvVarGuard {
     key: &'static str,

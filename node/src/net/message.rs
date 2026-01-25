@@ -110,7 +110,6 @@ pub struct ChainRequest {
 // ReputationUpdate defined in peer.rs
 
 /// Attempt to decode a [`Message`] from raw bytes.
-#[allow(dead_code)]
 pub fn decode(bytes: &[u8]) -> binary_struct::Result<Message> {
     let mut reader = BinaryReader::new(bytes);
     let message = read_message(&mut reader)?;

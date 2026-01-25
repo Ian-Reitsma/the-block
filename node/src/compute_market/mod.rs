@@ -1027,6 +1027,12 @@ pub fn drain_compute_slash_receipts(block_height: u64) -> Vec<crate::ComputeSlas
     receipts
 }
 
+/// Test helper to stage a compute receipt for drain pipelines.
+#[cfg(test)]
+pub fn enqueue_compute_receipt_for_test(receipt: crate::ComputeReceipt) {
+    compute_market().pending_receipts.push(receipt);
+}
+
 fn prefer_gpu_backend(capability: &scheduler::Capability) -> bool {
     capability
         .gpu

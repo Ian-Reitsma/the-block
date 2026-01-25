@@ -18,17 +18,14 @@ fn now_ts() -> u64 {
         .as_secs()
 }
 
-#[allow(dead_code)]
 const fn default_vote_window_epochs() -> u64 {
     4
 }
 
-#[allow(dead_code)]
 const fn default_timelock_epochs() -> u64 {
     2
 }
 
-#[allow(dead_code)]
 const fn default_rollback_epochs() -> u64 {
     1
 }

@@ -96,7 +96,6 @@ pub struct RepairRequest {
     pub force: bool,
 }
 
-#[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
 fn manifest_algorithms(db: &SimpleDb, manifest_hex: &str) -> (String, String) {
     let defaults = settings::algorithms();
     let key = format!("manifest/{manifest_hex}");
@@ -383,7 +382,6 @@ pub enum RepairErrorKind {
 }
 
 impl RepairErrorKind {
-    #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     fn label(&self) -> &'static str {
         match self {
             RepairErrorKind::Manifest => "manifest",

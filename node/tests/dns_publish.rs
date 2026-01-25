@@ -12,9 +12,12 @@ use the_block::{
     rpc::run_rpc_server,
     Blockchain,
 };
-use util::{temp::temp_dir, timeout::expect_timeout};
-
-mod util;
+#[path = "util/temp.rs"]
+mod temp;
+#[path = "util/timeout.rs"]
+mod timeout;
+use temp::temp_dir;
+use timeout::expect_timeout;
 
 async fn rpc(addr: &str, body: &str) -> Value {
     let addr: SocketAddr = addr.parse().unwrap();

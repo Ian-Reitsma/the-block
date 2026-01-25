@@ -94,13 +94,11 @@ fn http_client() -> HttpClient {
     env_http_client(&["TB_AGGREGATOR_TLS", "TB_HTTP_TLS"], "metrics-aggregator")
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct BridgeHttpOverrideResponse {
     pub status: StatusCode,
     pub body: Vec<u8>,
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub trait BridgeHttpClientOverride: Send + Sync {
     fn send(&self, url: &str, payload: &Value) -> Result<BridgeHttpOverrideResponse, String>;
 }
@@ -117,7 +115,6 @@ fn bridge_http_client_override() -> Option<BridgeHttpOverrideHandle> {
         .and_then(|guard| guard.as_ref().map(Arc::clone))
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct BridgeHttpClientOverrideGuard {
     previous: Option<BridgeHttpOverrideHandle>,
 }
@@ -130,7 +127,6 @@ impl Drop for BridgeHttpClientOverrideGuard {
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn install_bridge_http_client_override(
     client: BridgeHttpOverrideHandle,
 ) -> BridgeHttpClientOverrideGuard {
@@ -1255,38 +1251,6 @@ impl AppState {
                     .collect()
             })
             .unwrap_or_default()
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn bridge_ack_latency_observations(&self) -> Vec<(String, String, u64, u64)> {
-        self.bridge_remediation
-            .lock()
-            .map(|engine| {
-                engine
-                    .ack_latency_observations()
-                    .into_iter()
-                    .map(|sample| {
-                        (
-                            sample.playbook.as_str().to_string(),
-                            sample.state.as_str().to_string(),
-                            sample.latency,
-                            sample.count,
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    #[doc(hidden)]
-    pub fn bridge_hook_counts(&self) -> (usize, usize, usize, usize) {
-        (
-            self.bridge_hooks.page.len(),
-            self.bridge_hooks.throttle.len(),
-            self.bridge_hooks.quarantine.len(),
-            self.bridge_hooks.escalate.len(),
-        )
     }
 
     fn record_bridge_dispatch(
@@ -4204,9 +4168,11 @@ fn aggregator_metrics() -> &'static AggregatorMetrics {
 pub fn metrics_registry_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: concurrency::Lazy<std::sync::Mutex<()>> =
         concurrency::Lazy::new(|| std::sync::Mutex::new(()));
-    GUARD
+    let guard = GUARD
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    reset_bridge_remediation_ack_metrics();
+    guard
 }
 
 static TLS_WARNING_SNAPSHOTS: Lazy<Mutex<HashMap<(String, String), TlsWarningSnapshot>>> =
@@ -4332,7 +4298,6 @@ async fn fetch_explorer_sla_snapshot(
     Ok(snapshot)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn reset_bridge_remediation_ack_metrics() {
     let metrics = aggregator_metrics();
     for playbook in BridgeRemediationPlaybook::variants() {
@@ -4454,24 +4419,6 @@ struct BridgeRemediationDispatchRecord {
 }
 
 impl BridgeRemediationDispatchRecord {
-    #[allow(dead_code)]
-    fn new(
-        action: BridgeRemediationAction,
-        target: &str,
-        status: &str,
-        dispatched_at: u64,
-        acknowledgement: Option<BridgeDispatchAckRecord>,
-    ) -> Self {
-        Self {
-            action,
-            target: target.to_string(),
-            status: status.to_string(),
-            dispatched_at,
-            acknowledgement,
-            test_session: current_test_session(),
-        }
-    }
-
     fn new_with_session(
         action: BridgeRemediationAction,
         target: &str,

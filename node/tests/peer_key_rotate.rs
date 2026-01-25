@@ -8,9 +8,9 @@ use sys::tempfile::tempdir;
 use the_block::compute_market::settlement::{SettleMode, Settlement};
 use the_block::net::{self, Hello, Message, Payload, PeerSet, Transport, PROTOCOL_VERSION};
 use the_block::{generate_keypair, rpc::run_rpc_server, Blockchain};
-use util::timeout::expect_timeout;
-
-mod util;
+#[path = "util/timeout.rs"]
+mod timeout;
+use timeout::expect_timeout;
 
 fn init_env() -> sys::tempfile::TempDir {
     let dir = tempdir().unwrap();

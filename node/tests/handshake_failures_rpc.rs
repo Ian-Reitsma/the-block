@@ -6,7 +6,6 @@ use the_block::net::{self, Hello, Message, Payload, PROTOCOL_VERSION};
 use the_block::p2p::handshake::Transport;
 use the_block::{generate_keypair, Blockchain};
 
-mod util;
 
 fn init_env() -> sys::tempfile::TempDir {
     let dir = sys::tempfile::tempdir().unwrap();

@@ -177,6 +177,14 @@ fn handle_intents(
             entry.id, entry.gate, entry.action, entry.epoch_apply, entry.state
         );
         println!("  reason: {}", entry.reason);
+        if !entry.params_patch.is_null() {
+            let patch = json_to_string_pretty(&entry.params_patch).unwrap_or_else(|_| {
+                json_to_string(&entry.params_patch).unwrap_or_else(|_| "<invalid params>".into())
+            });
+            for line in patch.lines() {
+                println!("  params_patch: {line}");
+            }
+        }
         if !entry.snapshot_hash_hex.is_empty() {
             println!("  snapshot_hash={}", entry.snapshot_hash_hex);
         }
@@ -214,6 +222,9 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
         view.autopilot_enabled,
         view.shadow_only
     );
+    if !view.pending.is_empty() {
+        println!("pending intents: {}", view.pending.len());
+    }
     println!("gates:");
     for gate in &view.gates {
         println!(
@@ -240,6 +251,34 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
             sample.epoch_treasury_inflow,
             sample.block_reward
         );
+        if let Some(util) = sample.storage_util {
+            println!(
+                "  storage util={} margin={}",
+                util,
+                sample.storage_margin.unwrap_or_default()
+            );
+        }
+        if let Some(util) = sample.compute_util {
+            println!(
+                "  compute util={} margin={}",
+                util,
+                sample.compute_margin.unwrap_or_default()
+            );
+        }
+        if let Some(util) = sample.energy_util {
+            println!(
+                "  energy util={} margin={}",
+                util,
+                sample.energy_margin.unwrap_or_default()
+            );
+        }
+        if let Some(util) = sample.ad_util {
+            println!(
+                "  ad util={} margin={}",
+                util,
+                sample.ad_margin.unwrap_or_default()
+            );
+        }
         if !sample.market_metrics.is_empty() {
             println!("  persisted market metrics (ppm):");
             for metric in sample.market_metrics {
@@ -277,7 +316,6 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
     Ok(())
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct GovernorStatusView {
     enabled: bool,
@@ -308,7 +346,6 @@ struct GateSnapshotView {
     last_reason: String,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct EconomicsSampleView {
     #[serde(default)]
@@ -364,7 +401,6 @@ struct BlockTorchView {
     aggregator_trace: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct IntentSummaryView {
     id: String,

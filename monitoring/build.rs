@@ -1,5 +1,6 @@
 use foundation_serialization::json::{self, Value};
 use std::fs;
+#[allow(dead_code)]
 mod gen {
     include!("src/dashboard.rs");
 }

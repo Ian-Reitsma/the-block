@@ -4,8 +4,9 @@
 use std::fs;
 use the_block::SimpleDb;
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 #[test]
 fn wal_recovers_unflushed_ops() {

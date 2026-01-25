@@ -9,7 +9,8 @@ cli_core = { path = "../../crates/cli_core" }
 log_index = { path = "../../crates/log_index" }
 
 [features]
-default = []
+default = ["log_indexer_cli_binary"]
+log_indexer_cli_binary = []
 sqlite-migration = ["log_index/sqlite-migration"]
 telemetry = []
 

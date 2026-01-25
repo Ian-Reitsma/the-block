@@ -4,8 +4,9 @@
 
 use the_block::Blockchain;
 
-mod util;
-use util::temp::temp_dir;
+#[path = "util/temp.rs"]
+mod temp;
+use temp::temp_dir;
 
 fn init() {
     static ONCE: std::sync::Once = std::sync::Once::new();

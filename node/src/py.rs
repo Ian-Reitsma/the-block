@@ -1,9 +1,5 @@
-#![allow(dead_code)]
-
 #[cfg(feature = "python-bindings")]
 pub type PyError = python_bridge::Error;
-#[cfg(feature = "python-bindings")]
-pub type PyErrorKind = python_bridge::ErrorKind;
 #[cfg(feature = "python-bindings")]
 pub type PyResult<T> = python_bridge::Result<T>;
 
@@ -11,10 +7,7 @@ pub type PyResult<T> = python_bridge::Result<T>;
 pub use python_bridge::{getter, new, setter, staticmethod};
 
 #[cfg(feature = "python-bindings")]
-#[allow(unused_imports)]
-pub use python_bridge::{
-    ensure_enabled, prepare_freethreaded_python, report_disabled, with_interpreter, Interpreter,
-};
+pub use python_bridge::prepare_freethreaded_python;
 
 #[cfg(not(feature = "python-bindings"))]
 mod stub {
@@ -33,9 +26,6 @@ mod stub {
         kind: PyErrorKind,
         message: String,
     }
-
-    #[derive(Debug, Default, Clone, Copy)]
-    pub struct Interpreter;
 
     impl PyError {
         pub fn feature_disabled() -> Self {
@@ -90,40 +80,10 @@ mod stub {
 
     pub type PyResult<T> = Result<T, PyError>;
 
-    impl Interpreter {
-        pub fn run(&self, _code: &str) -> PyResult<()> {
-            Err(PyError::feature_disabled())
-        }
-    }
-
-    pub fn ensure_enabled() -> PyResult<()> {
+    pub fn prepare_freethreaded_python() -> PyResult<()> {
         Err(PyError::feature_disabled())
     }
-
-    pub fn prepare_freethreaded_python() -> PyResult<()> {
-        ensure_enabled()
-    }
-
-    pub fn with_interpreter<F, T>(f: F) -> PyResult<T>
-    where
-        F: FnOnce(&Interpreter) -> PyResult<T>,
-    {
-        ensure_enabled().and_then(|()| f(&Interpreter))
-    }
-
-    pub fn report_disabled() -> PyError {
-        PyError::feature_disabled()
-    }
-
-    pub use PyError as Error;
-    pub use PyErrorKind as ErrorKind;
 }
 
 #[cfg(not(feature = "python-bindings"))]
-#[allow(unused_imports)]
-pub use stub::{
-    ensure_enabled, prepare_freethreaded_python, report_disabled, with_interpreter, Interpreter,
-};
-#[cfg(not(feature = "python-bindings"))]
-#[allow(unused_imports)]
-pub use stub::{Error as PyError, ErrorKind as PyErrorKind, PyResult};
+pub use stub::{prepare_freethreaded_python, PyError, PyErrorKind, PyResult};
