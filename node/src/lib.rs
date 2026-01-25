@@ -88,7 +88,7 @@ use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use receipts::{
     AdReceipt, ComputeReceipt, ComputeSlashReceipt, EnergyReceipt, EnergySlashReceipt, Receipt,
-    StorageReceipt,
+    RelayReceipt, StorageReceipt,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,6 +143,7 @@ pub mod launch_governor;
 pub mod light_client;
 pub mod liquidity;
 pub mod localnet;
+pub mod relay;
 pub mod net;
 pub mod partition_recover;
 pub use net::peer_metrics_store;
@@ -4854,6 +4855,9 @@ impl Blockchain {
                 publisher_signature: vec![],
                 signature_nonce: index,
             }));
+        }
+        for receipt in crate::relay::drain_relay_receipts(index) {
+            block_receipts.push(Receipt::Relay(receipt));
         }
         for receipt in crate::energy::drain_energy_receipts() {
             block_receipts.push(Receipt::Energy(EnergyReceipt {

@@ -227,6 +227,7 @@ pub fn replay_economics_to_height(
         // At epoch boundaries, execute economics control laws
         if block_height > 0 && block_height % EPOCH_BLOCKS == 0 {
             let epoch = block_height / EPOCH_BLOCKS;
+            crate::relay::reset_epoch(epoch);
 
             // MARKET METRICS: Derived from Block.receipts (settlement records)
             // derive_market_metrics_from_chain processes Receipt::Storage, Receipt::Compute,

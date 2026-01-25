@@ -140,8 +140,8 @@ pub mod treasury;
 
 #[cfg(feature = "telemetry")]
 pub use bridges::{
-    BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_PENDING_DUTIES_TOTAL,
-    BRIDGE_REWARDS_PENDING_TOTAL, BRIDGE_REWARD_ACCRUALS_TOTAL,
+    BRIDGE_CAPACITY_EXHAUSTED_TOTAL, BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL,
+    BRIDGE_PENDING_DUTIES_TOTAL, BRIDGE_REWARDS_PENDING_TOTAL, BRIDGE_REWARD_ACCRUALS_TOTAL,
     BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL, BRIDGE_REWARD_CLAIMS_TOTAL,
     BRIDGE_SETTLEMENT_RESULTS_TOTAL, BRIDGE_SLASHES_TOTAL,
 };
@@ -1437,6 +1437,28 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         &[],
         LOCALNET_RECEIPT_INSERT_FAILURE_TOTAL.get().get() as f64,
     );
+    push_metric(
+        &mut metrics,
+        "relay_receipts_total",
+        &[],
+        RELAY_RECEIPTS_TOTAL.get().get() as f64,
+    );
+    push_metric(
+        &mut metrics,
+        "relay_receipt_bytes_total",
+        &[],
+        RELAY_RECEIPT_BYTES_TOTAL.get().get() as f64,
+    );
+    for reason in ["payload_too_large", "ack_stale", "budget_exhausted"] {
+        if let Ok(counter) = RELAY_JOB_REJECTED_TOTAL.handle_for_label_values(&[reason]) {
+            push_metric(
+                &mut metrics,
+                "relay_job_rejected_total",
+                &[("reason", reason)],
+                counter.get() as f64,
+            );
+        }
+    }
 
     // Energy market metrics (guards, disputes, and aggregator spans).
     push_metric(
@@ -6786,6 +6808,50 @@ pub static RANGE_BOOST_FORWARDER_DROP_TOTAL: Lazy<IntCounterHandle> = Lazy::new(
         .register(Box::new(c.clone()))
         .unwrap_or_else(|e| panic!("registry range boost forwarder drop: {e}"));
     c.handle()
+});
+
+pub static RELAY_RECEIPTS_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "relay_receipts_total",
+        "Total relay receipts emitted by RangeBoost mesh deliveries",
+    )
+    .unwrap_or_else(|e| panic!("counter relay receipts total: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry relay receipts total: {e}"));
+    c.handle()
+});
+
+pub static RELAY_RECEIPT_BYTES_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {
+    let c = IntCounter::new(
+        "relay_receipt_bytes_total",
+        "Total bytes credited to relay receipts",
+    )
+    .unwrap_or_else(|e| panic!("counter relay receipt bytes: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry relay receipt bytes: {e}"));
+    c.handle()
+});
+
+pub static RELAY_JOB_REJECTED_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {
+    let c = IntCounterVec::new(
+        Opts::new(
+            "relay_job_rejected_total",
+            "Relay job offers rejected due to guardrail violations",
+        ),
+        &["reason"],
+    )
+    .unwrap_or_else(|e| panic!("counter relay job rejected: {e}"));
+    REGISTRY
+        .register(Box::new(c.clone()))
+        .unwrap_or_else(|e| panic!("registry relay job rejected: {e}"));
+    for reason in ["payload_too_large", "ack_stale", "budget_exhausted"] {
+        c.ensure_handle_for_label_values(&[reason])
+            .expect(LABEL_REGISTRATION_ERR)
+            .inc_by(0);
+    }
+    c
 });
 
 pub static LOCALNET_RECEIPT_INSERT_ATTEMPT_TOTAL: Lazy<IntCounterHandle> = Lazy::new(|| {

@@ -185,14 +185,15 @@ fn wrappers_schema_hash_is_stable() {
     storage_success_labels.insert("status".into(), "success".into());
     let mut storage_error_labels = HashMap::new();
     storage_error_labels.insert("status".into(), "error".into());
+    let mut relay_reason_payload = HashMap::new();
+    relay_reason_payload.insert("reason".into(), "payload_too_large".into());
+    let mut relay_reason_ack = HashMap::new();
+    relay_reason_ack.insert("reason".into(), "ack_stale".into());
+    let mut relay_reason_budget = HashMap::new();
+    relay_reason_budget.insert("reason".into(), "budget_exhausted".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
-            metrics: vec![WrapperMetricEntry {
-                metric: "governance.treasury.executor.last_submitted_nonce".into(),
-                labels: HashMap::new(),
-                value: 7.0,
-            }],
             metrics: vec![
                 WrapperMetricEntry {
                     metric: "governance.treasury.executor.last_submitted_nonce".into(),
@@ -213,6 +214,31 @@ fn wrappers_schema_hash_is_stable() {
                     metric: "storage_discovery_results_total".into(),
                     labels: storage_error_labels.clone(),
                     value: 3.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_receipts_total".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_receipt_bytes_total".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_job_rejected_total".into(),
+                    labels: relay_reason_payload.clone(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_job_rejected_total".into(),
+                    labels: relay_reason_ack.clone(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_job_rejected_total".into(),
+                    labels: relay_reason_budget.clone(),
+                    value: 0.0,
                 },
             ],
             governance: Some(GovernanceWrapperEntry {
@@ -248,7 +274,7 @@ fn wrappers_schema_hash_is_stable() {
     let hash_hex = hash.to_hex().to_string();
     assert_eq!(
         hash_hex.as_str(),
-        "e6982a8b84b28b043f1470eafbb8ae77d12e79a9059e21eec518beeb03566595",
+        "1555b291699841ec7fb2f19e296737d8b629124db2f72136769f21c395af0a1d",
         "wrappers schema or field set drifted; update consumers or refresh the expected hash intentionally"
     );
 }

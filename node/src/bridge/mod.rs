@@ -2,8 +2,9 @@
 
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
-    BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL, BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL,
-    BRIDGE_REWARD_CLAIMS_TOTAL, BRIDGE_SETTLEMENT_RESULTS_TOTAL,
+    BRIDGE_CAPACITY_EXHAUSTED_TOTAL, BRIDGE_CHALLENGES_TOTAL, BRIDGE_DISPUTE_OUTCOMES_TOTAL,
+    BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL, BRIDGE_REWARD_CLAIMS_TOTAL,
+    BRIDGE_SETTLEMENT_RESULTS_TOTAL,
 };
 use crate::{governance, simple_db::names, SimpleDb};
 use bridge_types::{
@@ -115,6 +116,11 @@ pub enum BridgeError {
         required: u64,
         available: u64,
     },
+    CapacityExhausted {
+        relayer: String,
+        pending: u64,
+        limit: u64,
+    },
     RewardClaimRejected(String),
     RewardClaimAmountZero,
     RewardInsufficientPending {
@@ -164,6 +170,14 @@ impl fmt::Display for BridgeError {
             } => write!(
                 f,
                 "relayer {relayer} bond {available} below required {required}"
+            ),
+            BridgeError::CapacityExhausted {
+                relayer,
+                pending,
+                limit,
+            } => write!(
+                f,
+                "relayer {relayer} pending duties {pending} exceed capacity {limit}"
             ),
             BridgeError::RewardClaimRejected(reason) => {
                 write!(f, "reward claim authorization rejected: {reason}")
@@ -2514,6 +2528,66 @@ impl Bridge {
             .unwrap_or_default()
     }
 
+    fn relayer_capacity_limit(&self, relayer: &str) -> u64 {
+        let bond = self
+            .state
+            .relayer_bonds
+            .get(relayer)
+            .copied()
+            .unwrap_or_default();
+        let min_bond = self.incentives().min_bond.max(1);
+        let baseline = bond / min_bond;
+        baseline.saturating_add(1).max(1)
+    }
+
+    fn ensure_relayer_capacity(&self, relayer: &str, asset: &str) -> Result<(), BridgeError> {
+        let pending = self.state.duties.pending_count_for_relayer(relayer) as u64;
+        let limit = self.relayer_capacity_limit(relayer);
+        if pending >= limit {
+            #[cfg(feature = "telemetry")]
+            {
+                if let Ok(handle) = BRIDGE_CAPACITY_EXHAUSTED_TOTAL
+                    .ensure_handle_for_label_values(&[relayer, asset])
+                {
+                    handle.inc();
+                }
+            }
+            return Err(BridgeError::CapacityExhausted {
+                relayer: relayer.to_string(),
+                pending,
+                limit,
+            });
+        }
+        Ok(())
+    }
+
+    fn expire_overdue_duties(&mut self) -> Result<(), BridgeError> {
+        let now = now_secs();
+        let penalty = self.incentives().failure_slash;
+        let expired: Vec<u64> = self
+            .state
+            .duties
+            .records()
+            .into_iter()
+            .filter(|record| record.is_pending() && now > record.deadline)
+            .map(|record| record.id)
+            .collect();
+        let mut changed = false;
+        for duty_id in expired {
+            if let Some(record) = self.state.duties.get(duty_id).cloned() {
+                if penalty > 0 {
+                    self.apply_slash(&record.relayer, &record.asset, penalty);
+                }
+                self.record_duty_failure(duty_id, penalty, DutyFailureReason::Expired);
+                changed = true;
+            }
+        }
+        if changed {
+            self.persist()?;
+        }
+        Ok(())
+    }
+
     fn push_reward_claim(&mut self, record: RewardClaimRecord) {
         self.state.reward_claims.push_back(record);
         while self.state.reward_claims.len() > REWARD_CLAIM_RETENTION {
@@ -2775,8 +2849,14 @@ impl Bridge {
         approval_key: &str,
     ) -> Result<RewardClaimRecord, BridgeError> {
         self.refresh_incentives();
+        self.expire_overdue_duties()?;
         if amount == 0 {
             return Err(BridgeError::RewardClaimAmountZero);
+        }
+        if self.state.duties.pending_count_for_relayer(relayer) > 0 {
+            return Err(BridgeError::RewardClaimRejected(
+                "pending_duties_not_settled".into(),
+            ));
         }
         let pending_before = self.accounting_snapshot(relayer).rewards_pending;
         if pending_before < amount {
@@ -2824,7 +2904,9 @@ impl Bridge {
         bundle: &RelayerBundle,
     ) -> Result<DepositReceipt, BridgeError> {
         self.refresh_incentives();
+        self.expire_overdue_duties()?;
         self.ensure_min_bond(relayer)?;
+        self.ensure_relayer_capacity(relayer, asset)?;
         let fingerprint = Self::fingerprint(header, proof);
         {
             let channel = self.ensure_channel(asset);
@@ -2921,6 +3003,7 @@ impl Bridge {
         bundle: &RelayerBundle,
     ) -> Result<[u8; 32], BridgeError> {
         self.refresh_incentives();
+        self.expire_overdue_duties()?;
         let commitment = bundle.aggregate_commitment(user, amount);
         {
             let channel = self
@@ -2938,10 +3021,12 @@ impl Bridge {
         for signer in &signer_list {
             if unique_signers.insert(signer.clone()) {
                 self.ensure_min_bond(signer)?;
+                self.ensure_relayer_capacity(signer, asset)?;
             }
         }
         if unique_signers.insert(relayer.to_string()) {
             self.ensure_min_bond(relayer)?;
+            self.ensure_relayer_capacity(relayer, asset)?;
         }
         {
             let channel = self
@@ -3032,10 +3117,12 @@ impl Bridge {
         proof: ExternalSettlementProof,
     ) -> Result<SettlementRecord, BridgeError> {
         self.refresh_incentives();
+        self.expire_overdue_duties()?;
         if let Err(err) = self.ensure_min_bond(relayer) {
             telemetry_record_settlement_failure("insufficient_bond");
             return Err(err);
         }
+        self.ensure_relayer_capacity(relayer, asset)?;
         let (bundle_relayers, user, amount, required_chain) = match self.state.channels.get(asset) {
             Some(channel) => {
                 if !channel.config.requires_settlement_proof {
@@ -3165,6 +3252,7 @@ impl Bridge {
         commitment: [u8; 32],
         challenger: &str,
     ) -> Result<ChallengeRecord, BridgeError> {
+        self.expire_overdue_duties()?;
         {
             let channel = self
                 .state
@@ -3235,6 +3323,7 @@ impl Bridge {
         asset: &str,
         commitment: [u8; 32],
     ) -> Result<(), BridgeError> {
+        self.expire_overdue_duties()?;
         let channel = self
             .state
             .channels

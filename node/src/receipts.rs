@@ -23,6 +23,7 @@ pub enum Receipt {
     Energy(EnergyReceipt),
     EnergySlash(EnergySlashReceipt),
     Ad(AdReceipt),
+    Relay(RelayReceipt),
 }
 
 /// Storage market settlement receipt.
@@ -211,6 +212,36 @@ pub struct AdRoleBreakdown {
     pub clearing_price_usd_micros: u64,
 }
 
+/// Relay receipt capturing mesh deliveries handled through Range Boost.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct RelayReceipt {
+    pub job_id: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub campaign_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creative_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_peer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    pub payload_digest: [u8; 32],
+    pub bytes: u64,
+    pub price_per_mib_usd_micros: u64,
+    pub total_usd_micros: u64,
+    pub clearing_price_usd_micros: u64,
+    pub resource_floor_usd_micros: u64,
+    pub hop_proofs: Vec<String>,
+    pub delivered_at_micros: u64,
+    pub block_height: u64,
+    #[serde(with = "foundation_serialization::serde_bytes")]
+    pub provider_signature: Vec<u8>,
+    pub signature_nonce: u64,
+}
+
 impl Receipt {
     /// Get the market domain name for telemetry labeling.
     pub fn market_name(&self) -> &'static str {
@@ -221,6 +252,7 @@ impl Receipt {
             Receipt::Energy(_) => "energy",
             Receipt::EnergySlash(_) => "energy",
             Receipt::Ad(_) => "ad",
+            Receipt::Relay(_) => "relay",
         }
     }
 
@@ -233,6 +265,7 @@ impl Receipt {
             Receipt::Energy(r) => r.price,
             Receipt::EnergySlash(r) => r.slash_amount,
             Receipt::Ad(r) => r.spend,
+            Receipt::Relay(r) => r.total_usd_micros,
         }
     }
 
@@ -245,6 +278,7 @@ impl Receipt {
             Receipt::Energy(r) => r.block_height,
             Receipt::EnergySlash(r) => r.block_height,
             Receipt::Ad(r) => r.block_height,
+            Receipt::Relay(r) => r.block_height,
         }
     }
 }

@@ -217,6 +217,14 @@ impl ReceiptId {
                 hasher.update(&r.block_height.to_le_bytes());
                 hasher.update(&r.signature_nonce.to_le_bytes());
             }
+            Receipt::Relay(r) => {
+                hasher.update(b"relay");
+                hasher.update(r.provider.as_bytes());
+                hasher.update(r.job_id.as_bytes());
+                hasher.update(&r.payload_digest);
+                hasher.update(&r.block_height.to_le_bytes());
+                hasher.update(&r.signature_nonce.to_le_bytes());
+            }
         }
 
         ReceiptId(hasher.finalize().into())
@@ -268,6 +276,7 @@ fn receipt_provider_and_nonce(receipt: &Receipt) -> (&str, u64) {
         Receipt::Energy(r) => (r.provider.as_str(), r.signature_nonce),
         Receipt::EnergySlash(r) => (r.provider.as_str(), 0),
         Receipt::Ad(r) => (r.publisher.as_str(), r.signature_nonce),
+        Receipt::Relay(r) => (r.provider.as_str(), r.signature_nonce),
     }
 }
 
@@ -433,6 +442,20 @@ pub fn validate_receipt(
                 return Err(ValidationError::EmptySignature);
             }
         }
+        Receipt::Relay(r) => {
+            validate_string_field("job_id", &r.job_id)?;
+            validate_string_field("provider", &r.provider)?;
+            if r.bytes == 0 {
+                return Err(ValidationError::ZeroValue {
+                    field: "bytes".to_string(),
+                });
+            }
+            if r.total_usd_micros == 0 {
+                return Err(ValidationError::ZeroValue {
+                    field: "total_usd_micros".to_string(),
+                });
+            }
+        }
     }
 
     // Cryptographic signature verification
@@ -574,6 +597,9 @@ pub fn receipt_verify_units(receipt: &Receipt) -> u64 {
             // Ad receipts can batch many impressions; cap per-receipt verify units.
             units += (r.impressions / 10_000).min(10) as u64;
         }
+        Receipt::Relay(r) => {
+            units += (r.bytes / 2_000).min(10) as u64;
+        }
     }
     units
 }
@@ -599,6 +625,7 @@ fn signature_bytes_for_receipt(receipt: &Receipt) -> &[u8] {
         Receipt::ComputeSlash(_) => &[],
         Receipt::EnergySlash(_) => &[],
         Receipt::Ad(r) => r.publisher_signature.as_slice(),
+        Receipt::Relay(r) => r.provider_signature.as_slice(),
     }
 }
 
@@ -866,6 +893,7 @@ pub fn shard_for_receipt(receipt: &Receipt, shard_count: u16) -> u16 {
         Receipt::EnergySlash(r) => hasher.update(r.provider.as_bytes()),
         Receipt::ComputeSlash(r) => hasher.update(r.provider.as_bytes()),
         Receipt::Ad(r) => hasher.update(r.publisher.as_bytes()),
+        Receipt::Relay(r) => hasher.update(r.provider.as_bytes()),
     }
     let hash = hasher.finalize();
     let mut bytes = [0u8; 2];
@@ -936,6 +964,15 @@ pub fn receipt_leaf_hash(receipt: &Receipt) -> [u8; 32] {
             hasher.update(&r.signature_nonce.to_le_bytes());
             hasher.update(&r.impressions.to_le_bytes());
             hasher.update(&r.spend.to_le_bytes());
+        }
+        Receipt::Relay(r) => {
+            hasher.update(r.provider.as_bytes());
+            hasher.update(r.job_id.as_bytes());
+            hasher.update(&r.block_height.to_le_bytes());
+            hasher.update(&r.signature_nonce.to_le_bytes());
+            hasher.update(&r.bytes.to_le_bytes());
+            hasher.update(&r.total_usd_micros.to_le_bytes());
+            hasher.update(&r.clearing_price_usd_micros.to_le_bytes());
         }
     }
     hasher.finalize().into()

@@ -110,6 +110,15 @@ fn bridge_slashes_counter() -> Counter {
 }
 
 #[cfg(feature = "telemetry")]
+fn bridge_capacity_exhausted_counter() -> CounterVec {
+    counter_vec(
+        "bridge_capacity_exhausted_total",
+        "Relayer capacity violations grouped by relayer and asset",
+        &["relayer", "asset"],
+    )
+}
+
+#[cfg(feature = "telemetry")]
 fn bridge_reward_claims_counter() -> Counter {
     counter(
         "bridge_reward_claims_total",
@@ -236,6 +245,10 @@ pub static BRIDGE_REWARD_CLAIMS_TOTAL: Lazy<Counter> = Lazy::new(bridge_reward_c
 #[cfg(feature = "telemetry")]
 pub static BRIDGE_REWARD_APPROVALS_CONSUMED_TOTAL: Lazy<Counter> =
     Lazy::new(bridge_reward_approvals_consumed_counter);
+
+#[cfg(feature = "telemetry")]
+pub static BRIDGE_CAPACITY_EXHAUSTED_TOTAL: Lazy<CounterVec> =
+    Lazy::new(bridge_capacity_exhausted_counter);
 
 #[cfg(feature = "telemetry")]
 pub static BRIDGE_REWARD_ACCRUALS_TOTAL: Lazy<CounterVec> =

@@ -28,8 +28,8 @@ use sys::signals::{Signals, SIGHUP};
 use crate::gateway::dns;
 use crate::web::rate_limit::RateLimitFilter;
 use crate::{
-    ad_quality, ad_readiness::AdReadinessHandle, drive, net, range_boost, range_boost::RangeBoost,
-    service_badge, storage::pipeline, vm::wasm, ReadAck,
+    ad_quality, ad_readiness::AdReadinessHandle, drive, net, range_boost,
+    range_boost::RangeBoost, relay, service_badge, storage::pipeline, vm::wasm, ReadAck,
 };
 use foundation_serialization::{
     binary,
@@ -1177,13 +1177,22 @@ fn attach_campaign_metadata(state: &GatewayState, ack: &mut ReadAck) {
             ack.mesh = None;
         } else if !holdout {
             if let Some(payload) = mesh_payload {
-                let mut queue = state.mesh_queue.lock().unwrap();
-                queue.enqueue(payload);
-                let idx = queue.pending().saturating_sub(1);
-                if let Some(mesh) = ack.mesh.as_ref() {
-                    for hop in &mesh.hop_proofs {
-                        if !hop.is_empty() {
-                            queue.record_proof(idx, range_boost::HopProof { relay: hop.clone() });
+                if let Ok(job) =
+                    relay::offer_job(&ack, &outcome, ack.mesh.as_ref(), payload.len())
+                {
+                    let mut queue = state.mesh_queue.lock().unwrap();
+                    queue.enqueue(payload, job);
+                    let idx = queue.pending().saturating_sub(1);
+                    if let Some(mesh) = ack.mesh.as_ref() {
+                        for hop in &mesh.hop_proofs {
+                            if !hop.is_empty() {
+                                queue.record_proof(
+                                    idx,
+                                    range_boost::HopProof {
+                                        relay: hop.clone(),
+                                    },
+                                );
+                            }
                         }
                     }
                 }
@@ -2783,11 +2792,15 @@ mod tests {
         let (state, _rx) = state_with_market(&["mesh.test"], Some(market), None);
         let queue = state.mesh_queue.clone();
 
+        let ack_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("ts since epoch")
+            .as_millis() as u64;
         let mut ack = ReadAck {
             manifest: [11u8; 32],
             path_hash: [22u8; 32],
             bytes: 3_072,
-            ts: 1_234,
+            ts: ack_ts,
             client_hash: [33u8; 32],
             pk: [44u8; 32],
             sig: vec![55u8; 64],

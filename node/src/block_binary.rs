@@ -10,7 +10,7 @@ use crate::transaction::binary::{EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{
     AdReceipt, Block, BlockTreasuryEvent, ComputeReceipt, ComputeSlashReceipt, EnergyReceipt,
-    EnergySlashReceipt, Receipt, SignedTransaction, StorageReceipt, TokenAmount,
+    EnergySlashReceipt, RelayReceipt, Receipt, SignedTransaction, StorageReceipt, TokenAmount,
 };
 use crate::root_assembler::{RootBundle, RootSizeClass, MicroShardRootEntry};
 
@@ -567,6 +567,50 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 });
                 struct_writer.field_u64("signature_nonce", r.signature_nonce);
             }
+            Receipt::Relay(r) => {
+                struct_writer.field_string("type", "relay");
+                struct_writer.field_string("job_id", &r.job_id);
+                if let Some(campaign_id) = &r.campaign_id {
+                    struct_writer.field_string("campaign_id", campaign_id);
+                }
+                if let Some(creative_id) = &r.creative_id {
+                    struct_writer.field_string("creative_id", creative_id);
+                }
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_u64("bytes", r.bytes);
+                struct_writer.field_u64("total_usd_micros", r.total_usd_micros);
+                struct_writer.field_u64("price_per_mib_usd_micros", r.price_per_mib_usd_micros);
+                struct_writer.field_u64("clearing_price_usd_micros", r.clearing_price_usd_micros);
+                struct_writer.field_u64("resource_floor_usd_micros", r.resource_floor_usd_micros);
+                struct_writer.field_u64("delivered_at_micros", r.delivered_at_micros);
+                struct_writer.field_u64("block_height", r.block_height);
+                struct_writer.field_with("payload_digest", |field_writer| {
+                    write_fixed(field_writer, &r.payload_digest);
+                });
+                if let Some(mesh_peer) = &r.mesh_peer {
+                    struct_writer.field_string("mesh_peer", mesh_peer);
+                }
+                if let Some(transport) = &r.transport {
+                    struct_writer.field_string("mesh_transport", transport);
+                }
+                if let Some(latency) = r.latency_ms {
+                    struct_writer.field_u64("latency_ms", latency);
+                }
+                if !r.hop_proofs.is_empty() {
+                    struct_writer.field_with("hop_proofs", |field_writer| {
+                        write_vec(field_writer, &r.hop_proofs, "hop_proofs", |writer, proof| {
+                            writer.write_string(proof);
+                            Ok(())
+                        })
+                    });
+                }
+                struct_writer.field_with("provider_signature", |field_writer| {
+                    write_bytes(field_writer, &r.provider_signature, "provider_signature")
+                        .expect("signature length fits");
+                    Ok(())
+                });
+                struct_writer.field_u64("signature_nonce", r.signature_nonce);
+            }
         });
         Ok(())
     })
@@ -612,6 +656,16 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut blocktorch_benchmark_commit = None;
         let mut blocktorch_tensor_profile_epoch = None;
         let mut blocktorch_proof_latency_ms = None;
+        let mut total_usd_micros = None;
+        let mut price_per_mib_usd_micros = None;
+        let mut clearing_price_usd_micros = None;
+        let mut resource_floor_usd_micros = None;
+        let mut delivered_at_micros = None;
+        let mut payload_digest = None;
+        let mut hop_proofs: Option<Vec<String>> = None;
+        let mut mesh_peer = None;
+        let mut mesh_transport = None;
+        let mut latency_ms = None;
 
         decode_struct(reader, None, |key, reader| match key {
             "type" => assign_once(&mut receipt_type, reader.read_string()?, "type"),
@@ -722,6 +776,61 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                     })
                 })?;
                 assign_once(&mut device_links, links, "device_links")
+            }
+            "total_usd_micros" => {
+                assign_once(
+                    &mut total_usd_micros,
+                    reader.read_u64()?,
+                    "total_usd_micros",
+                )
+            }
+            "price_per_mib_usd_micros" => {
+                assign_once(
+                    &mut price_per_mib_usd_micros,
+                    reader.read_u64()?,
+                    "price_per_mib_usd_micros",
+                )
+            }
+            "clearing_price_usd_micros" => {
+                assign_once(
+                    &mut clearing_price_usd_micros,
+                    reader.read_u64()?,
+                    "clearing_price_usd_micros",
+                )
+            }
+            "resource_floor_usd_micros" => {
+                assign_once(
+                    &mut resource_floor_usd_micros,
+                    reader.read_u64()?,
+                    "resource_floor_usd_micros",
+                )
+            }
+            "delivered_at_micros" => {
+                assign_once(
+                    &mut delivered_at_micros,
+                    reader.read_u64()?,
+                    "delivered_at_micros",
+                )
+            }
+            "payload_digest" => {
+                assign_once(
+                    &mut payload_digest,
+                    read_fixed(reader)?,
+                    "payload_digest",
+                )
+            }
+            "hop_proofs" => {
+                let proofs = read_vec(reader, |reader| reader.read_string())?;
+                assign_once(&mut hop_proofs, proofs, "hop_proofs")
+            }
+            "mesh_peer" => {
+                assign_once(&mut mesh_peer, reader.read_string()?, "mesh_peer")
+            }
+            "mesh_transport" => {
+                assign_once(&mut mesh_transport, reader.read_string()?, "mesh_transport")
+            }
+            "latency_ms" => {
+                assign_once(&mut latency_ms, reader.read_u64()?, "latency_ms")
             }
             "provider_signature" => assign_once(
                 &mut provider_signature,
@@ -860,6 +969,32 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                     .ok_or(DecodeError::MissingField("publisher_signature"))?,
                 signature_nonce: signature_nonce
                     .ok_or(DecodeError::MissingField("signature_nonce"))?,
+            })),
+            "relay" => Ok(Receipt::Relay(RelayReceipt {
+                job_id: job_id.ok_or(DecodeError::MissingField("job_id"))?,
+                campaign_id,
+                creative_id,
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                mesh_peer,
+                transport: mesh_transport,
+                latency_ms,
+                bytes: bytes.ok_or(DecodeError::MissingField("bytes"))?,
+                total_usd_micros: total_usd_micros
+                    .ok_or(DecodeError::MissingField("total_usd_micros"))?,
+                price_per_mib_usd_micros: price_per_mib_usd_micros
+                    .ok_or(DecodeError::MissingField("price_per_mib_usd_micros"))?,
+                clearing_price_usd_micros: clearing_price_usd_micros
+                    .ok_or(DecodeError::MissingField("clearing_price_usd_micros"))?,
+                resource_floor_usd_micros: resource_floor_usd_micros
+                    .ok_or(DecodeError::MissingField("resource_floor_usd_micros"))?,
+                delivered_at_micros: delivered_at_micros
+                    .ok_or(DecodeError::MissingField("delivered_at_micros"))?,
+                payload_digest: payload_digest
+                    .ok_or(DecodeError::MissingField("payload_digest"))?,
+                hop_proofs: hop_proofs.unwrap_or_default(),
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                provider_signature: provider_signature.unwrap_or_default(),
+                signature_nonce: signature_nonce.unwrap_or_default(),
             })),
             _ => Err(DecodeError::InvalidFieldValue {
                 field: "type",

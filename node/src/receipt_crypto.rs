@@ -327,7 +327,10 @@ pub fn verify_receipt_signature(
     nonce_tracker: &mut NonceTracker,
     current_block: u64,
 ) -> Result<(), CryptoError> {
-    if matches!(receipt, Receipt::EnergySlash(_) | Receipt::ComputeSlash(_)) {
+    if matches!(
+        receipt,
+        Receipt::EnergySlash(_) | Receipt::ComputeSlash(_) | Receipt::Relay(_)
+    ) {
         return Ok(());
     }
     // Get preimage and provider info based on receipt type

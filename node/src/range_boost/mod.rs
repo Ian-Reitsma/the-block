@@ -22,6 +22,7 @@ use crate::telemetry::{
     RANGE_BOOST_FORWARDER_DROP_TOTAL, RANGE_BOOST_FORWARDER_FAIL_TOTAL,
     RANGE_BOOST_FORWARDER_RETRY_TOTAL, RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
 };
+use crate::relay::RelayJob;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HopProof {
@@ -37,6 +38,7 @@ pub struct Bundle {
 #[derive(Clone, Debug)]
 pub struct QueueEntry {
     bundle: Bundle,
+    job: RelayJob,
     #[cfg_attr(not(feature = "telemetry"), allow(dead_code))]
     enqueued_at: Instant,
     retry_attempts: u8,
@@ -193,7 +195,19 @@ fn forwarder_loop(shutdown: Arc<AtomicBool>, weak_queue: Weak<Mutex<RangeBoost>>
         };
         match entry {
             Some(mut entry) => match forward_bundle(&entry.bundle) {
-                Ok(()) => {}
+                Ok(()) => {
+                    let hop_relays = entry
+                        .bundle
+                        .proofs
+                        .iter()
+                        .map(|proof| proof.relay.clone())
+                        .collect::<Vec<_>>();
+                    crate::relay::record_delivery(
+                        entry.job.clone(),
+                        &hop_relays,
+                        &entry.bundle.payload,
+                    );
+                }
                 Err(err) => {
                     let drop_due_to_budget = entry.retry_attempts >= MAX_FORWARD_RETRIES;
                     {
@@ -456,7 +470,7 @@ impl RangeBoost {
         Self { queue }
     }
 
-    pub fn enqueue(&mut self, payload: Vec<u8>) {
+    pub fn enqueue(&mut self, payload: Vec<u8>, job: RelayJob) {
         if ENQUEUE_ERROR.swap(false, Ordering::SeqCst) {
             #[cfg(feature = "telemetry")]
             RANGE_BOOST_ENQUEUE_ERROR_TOTAL.inc();
@@ -467,6 +481,7 @@ impl RangeBoost {
                 payload,
                 proofs: vec![],
             },
+            job,
             enqueued_at: Instant::now(),
             retry_attempts: 0,
         });
@@ -591,15 +606,34 @@ pub fn spawn_forwarder(queue: &Arc<Mutex<RangeBoost>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::relay::RelayJob;
 
     #[test]
     fn queue_roundtrip() {
         let mut rb = RangeBoost::new();
-        rb.enqueue(vec![1, 2, 3]);
+        rb.enqueue(vec![1, 2, 3], stub_job());
         assert_eq!(rb.pending(), 1);
         rb.record_proof(0, HopProof { relay: "r1".into() });
         let b = rb.dequeue().unwrap();
         assert_eq!(b.bundle.payload, vec![1, 2, 3]);
         assert_eq!(b.bundle.proofs.len(), 1);
+    }
+
+    fn stub_job() -> RelayJob {
+        RelayJob {
+            job_id: "job".into(),
+            provider: "range-host".into(),
+            campaign_id: None,
+            creative_id: None,
+            mesh_peer: None,
+            mesh_transport: None,
+            mesh_latency_ms: None,
+            clearing_price_usd_micros: 0,
+            resource_floor_usd_micros: 0,
+            price_per_mib_usd_micros: 0,
+            total_usd_micros: 0,
+            bytes: 3,
+            offered_at_micros: 0,
+        }
     }
 }

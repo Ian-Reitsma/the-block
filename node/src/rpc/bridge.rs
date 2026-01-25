@@ -58,6 +58,7 @@ fn convert_err(err: BridgeError) -> RpcError {
         BridgeError::SettlementProofHeightReplay { .. } => {
             (-32023, "settlement proof height replay")
         }
+        BridgeError::CapacityExhausted { .. } => (-32024, "relayer capacity exhausted"),
     };
     RpcError::new(code, message)
 }

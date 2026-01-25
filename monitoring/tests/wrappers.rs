@@ -40,6 +40,12 @@ fn wrappers_snapshot_hash_is_pinned() {
     storage_success_labels.insert("status".into(), "success".into());
     let mut storage_error_labels = HashMap::new();
     storage_error_labels.insert("status".into(), "error".into());
+    let mut relay_reason_payload = HashMap::new();
+    relay_reason_payload.insert("reason".into(), "payload_too_large".into());
+    let mut relay_reason_ack = HashMap::new();
+    relay_reason_ack.insert("reason".into(), "ack_stale".into());
+    let mut relay_reason_budget = HashMap::new();
+    relay_reason_budget.insert("reason".into(), "budget_exhausted".into());
     map.insert(
         "node-a".into(),
         WrapperSummaryEntry {
@@ -200,6 +206,31 @@ fn wrappers_snapshot_hash_is_pinned() {
                     value: 1.0,
                 },
                 WrapperMetricEntry {
+                    metric: "relay_receipts_total".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_receipt_bytes_total".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_job_rejected_total".into(),
+                    labels: relay_reason_payload.clone(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_job_rejected_total".into(),
+                    labels: relay_reason_ack.clone(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "relay_job_rejected_total".into(),
+                    labels: relay_reason_budget.clone(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
                     metric: "range_boost_enqueue_error_total".into(),
                     labels: HashMap::new(),
                     value: 3.0,
@@ -327,7 +358,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "5b1ae521870e1edbc2c51640bdbae2abfb3b825194dc9d447c45cde8bb40f90a",
+        "f156c98a6c47f5991af9404d6ee131102a50bf8a270bb7bf130b77cfcf7a86d5",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

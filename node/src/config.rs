@@ -695,6 +695,51 @@ fn default_peer_metrics_db() -> String {
     std::env::var("PEER_METRICS_DB").unwrap_or_else(|_| "state/peer_metrics.db".into())
 }
 
+/// Returns the maximum relay bundle size (bytes) driven by `TB_RELAY_MAX_BYTES_PER_BUNDLE`.
+pub fn relay_max_bytes_per_bundle() -> u64 {
+    std::env::var("TB_RELAY_MAX_BYTES_PER_BUNDLE")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_else(default_relay_max_bytes_per_bundle)
+}
+
+/// Returns the per-epoch relay byte budget configured via `TB_RELAY_MAX_BYTES_PER_EPOCH`.
+pub fn relay_max_bytes_per_epoch() -> u64 {
+    std::env::var("TB_RELAY_MAX_BYTES_PER_EPOCH")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_else(default_relay_max_bytes_per_epoch)
+}
+
+/// Returns the oldest ACK age allowed for relay jobs from `TB_RELAY_MAX_ACK_AGE_SECS`.
+pub fn relay_max_ack_age_secs() -> u64 {
+    std::env::var("TB_RELAY_MAX_ACK_AGE_SECS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or_else(default_relay_max_ack_age_secs)
+}
+
+/// Returns the relay economics gate controlled by `TB_RELAY_ECONOMICS_MODE`.
+pub fn relay_economics_mode() -> String {
+    std::env::var("TB_RELAY_ECONOMICS_MODE").unwrap_or_else(|_| default_relay_economics_mode().to_string())
+}
+
+fn default_relay_max_bytes_per_bundle() -> u64 {
+    2 * 1024 * 1024
+}
+
+fn default_relay_max_bytes_per_epoch() -> u64 {
+    64 * 1024 * 1024
+}
+
+fn default_relay_max_ack_age_secs() -> u64 {
+    60
+}
+
+fn default_relay_economics_mode() -> &'static str {
+    "shadow"
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ComputeMarketConfig {
     pub settle_mode: crate::compute_market::settlement::SettleMode,

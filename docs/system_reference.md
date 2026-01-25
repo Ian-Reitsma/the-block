@@ -495,6 +495,8 @@ SimpleDb uses named column families (CFs) declared in `node/src/simple_db/mod.rs
   1. `bridge.request_withdrawal` locks the relayer bond (`bridge_min_bond`, sourced from governance `BridgeIncentiveParameters`) and schedules a duty (`DutyRecord`) with deadline `initiated_at + bridge_duty_window_secs`.
   2. Challengers call `bridge.challenge_withdrawal { commitment, challenger }`. If accepted, `BridgeError::AlreadyChallenged` prevents duplicates and `bridge_challenge_slash` refunds challengers after burning the bond.
   3. If no challenge arrives before `deadline`, `bridge.finalize_withdrawal` releases funds and credits `bridge_duty_reward`.
+- Pending duties that exceed `bridge_duty_window_secs` are auto-marked `Expired`, slashed by `bridge_failure_slash`, and exposed via `bridge.duty_log` and `bridge.dispute_audit`. Reward claims are blocked until those expirations are processed so operators can reconcile receipts before funds move.
+- Relayer capacity is bond-backed: each relayer can hold at most `max(1, bond / bridge_min_bond)` pending duties. Capacity violations return `bridge_capacity_exhausted` and increment the telemetry counter `bridge_capacity_exhausted_total{relayer,asset}` so spam without stake cannot starve a channel.
 - Error surface (`BridgeError`):
   - `InvalidProof`, `SettlementProofHashMismatch`, `SettlementProofChainMismatch` return `-32071` style RPC codes.
   - `ChallengeWindowOpen` / `AlreadyChallenged` bubble to clients so they know whether to retry later.
@@ -777,6 +779,7 @@ See Appendix B for detailed metric descriptions. Key highlights:
 | `MOBILE_CACHE_*` | Cache hits/misses/sweeps | action | count | Alert on sustained misses and queue overflows. |
 | `compute_sla_violations_total` | SLA breaches | n/a | count | Alert >0 while in `SettleMode::Real`. |
 | `bridge_dispute_outcomes_total` | Bridge disputes | asset | count | Alert if >0 without operator action. |
+| `bridge_capacity_exhausted_total` | Relayer duty capacity hit | relayer,asset | count | Alert on sustained growth; indicates bond-backed limits are throttling new work. |
 | `treasury_balance_current` | Treasury BLOCK balance | n/a | BLOCK | Alert if drops >X% per day outside scheduled disbursements. |
 | `dependency_policy_violation_total` | Dependency drift | wrapper | count | Alert immediately; governance override required. |
 
