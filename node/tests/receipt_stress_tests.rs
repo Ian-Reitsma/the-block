@@ -39,7 +39,9 @@ fn derive_test_signing_key() -> SigningKey {
                 Receipt::Compute(cr) => build_compute_preimage(cr),
                 Receipt::Energy(er) => build_energy_preimage(er),
                 Receipt::Ad(ar) => build_ad_preimage(ar),
-                Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_) => Vec::new(),
+                Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_) => {
+                    Vec::new()
+                }
             };
             let sig = sk.sign(&preimage);
             vk.verify(&preimage, &sig).is_ok()

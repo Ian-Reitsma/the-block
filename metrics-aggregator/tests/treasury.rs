@@ -274,7 +274,7 @@ fn wrappers_schema_hash_is_stable() {
     let hash_hex = hash.to_hex().to_string();
     assert_eq!(
         hash_hex.as_str(),
-        "1555b291699841ec7fb2f19e296737d8b629124db2f72136769f21c395af0a1d",
+        "f766ed3e71bf125cfc50a9df666fee536bba71d534abc9e08e0f2c2c73aa38c5",
         "wrappers schema or field set drifted; update consumers or refresh the expected hash intentionally"
     );
 }

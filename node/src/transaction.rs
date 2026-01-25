@@ -247,16 +247,7 @@ mod python_alias_tests {
 
     #[test]
     fn from_alias_round_trips() {
-        let mut payload = RawTxPayload::new(
-            "from".into(),
-            "to".into(),
-            1,
-            2,
-            3,
-            4,
-            5,
-            vec![],
-        );
+        let mut payload = RawTxPayload::new("from".into(), "to".into(), 1, 2, 3, 4, 5, vec![]);
         assert_eq!(payload.get_from_alias(), "from");
         payload.set_from_alias("updated".into());
         assert_eq!(payload.get_from_alias(), "updated");

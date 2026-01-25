@@ -519,8 +519,7 @@ fn write_provider_lookup_request(
             write_fixed(field_writer, &request.origin);
         });
         struct_writer.field_with("signature", |field_writer| {
-            write_bytes(field_writer, &request.signature, "signature")
-                .expect("signature fits");
+            write_bytes(field_writer, &request.signature, "signature").expect("signature fits");
         });
     });
     Ok(())
@@ -546,20 +545,17 @@ fn read_provider_lookup_request(
         "shares" => assign_once(&mut shares, reader.read_u32()?, "shares"),
         "region" => assign_once(
             &mut region,
-            reader
-                .read_option_with(|reader| reader.read_string().map_err(DecodeError::from))?,
+            reader.read_option_with(|reader| reader.read_string().map_err(DecodeError::from))?,
             "region",
         ),
         "max_price_per_block" => assign_once(
             &mut max_price_per_block,
-            reader
-                .read_option_with(|reader| reader.read_u64().map_err(DecodeError::from))?,
+            reader.read_option_with(|reader| reader.read_u64().map_err(DecodeError::from))?,
             "max_price_per_block",
         ),
         "min_success_rate_ppm" => assign_once(
             &mut min_success_rate_ppm,
-            reader
-                .read_option_with(|reader| reader.read_u64().map_err(DecodeError::from))?,
+            reader.read_option_with(|reader| reader.read_u64().map_err(DecodeError::from))?,
             "min_success_rate_ppm",
         ),
         "limit" => assign_once(&mut limit, reader.read_u64()?, "limit"),
@@ -606,17 +602,20 @@ fn write_provider_lookup_response(
             write_fixed(field_writer, &response.responder);
         });
         struct_writer.field_with("providers", |field_writer| {
-            write_vec(field_writer, &response.providers, "providers", |writer, profile| {
-                let bytes = storage_market::codec::serialize_provider_profile(profile).map_err(
-                    |_| EncodeError::LengthOverflow("provider_profile_encode_fail"),
-                )?;
-                write_bytes(writer, &Bytes::from(bytes), "provider_profile")
-            })
+            write_vec(
+                field_writer,
+                &response.providers,
+                "providers",
+                |writer, profile| {
+                    let bytes = storage_market::codec::serialize_provider_profile(profile)
+                        .map_err(|_| EncodeError::LengthOverflow("provider_profile_encode_fail"))?;
+                    write_bytes(writer, &Bytes::from(bytes), "provider_profile")
+                },
+            )
             .expect("provider profiles encode")
         });
         struct_writer.field_with("signature", |field_writer| {
-            write_bytes(field_writer, &response.signature, "signature")
-                .expect("signature fits");
+            write_bytes(field_writer, &response.signature, "signature").expect("signature fits");
         });
     });
     Ok(())
@@ -636,12 +635,12 @@ fn read_provider_lookup_response(
         "providers" => {
             let parsed = read_vec(reader, |reader| {
                 let bytes = read_bytes(reader)?;
-                storage_market::codec::deserialize_provider_profile(bytes.as_ref()).map_err(
-                    |err| DecodeError::InvalidFieldValue {
+                storage_market::codec::deserialize_provider_profile(bytes.as_ref()).map_err(|err| {
+                    DecodeError::InvalidFieldValue {
                         field: "provider_profile",
                         reason: err.to_string(),
-                    },
-                )
+                    }
+                })
             })?;
             assign_once(&mut providers, parsed, "providers")
         }

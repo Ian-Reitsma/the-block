@@ -6,7 +6,6 @@ use the_block::net::{self, Hello, Message, Payload, PROTOCOL_VERSION};
 use the_block::p2p::handshake::Transport;
 use the_block::{generate_keypair, Blockchain};
 
-
 fn init_env() -> sys::tempfile::TempDir {
     let dir = sys::tempfile::tempdir().unwrap();
     net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());

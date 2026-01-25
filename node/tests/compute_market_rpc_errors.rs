@@ -7,12 +7,12 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex};
 
 use foundation_rpc::{Request as RpcRequest, Response as RpcResponse};
 use foundation_serialization::json::{Map, Value};
+use temp::temp_dir;
 use the_block::{
     identity::{did::DidRegistry, handle_registry::HandleRegistry},
     rpc::{fuzz_dispatch_request, fuzz_runtime_config},
     Blockchain,
 };
-use temp::temp_dir;
 
 mod settlement_util;
 #[path = "util/temp.rs"]

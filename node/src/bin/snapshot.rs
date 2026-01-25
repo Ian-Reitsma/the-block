@@ -56,9 +56,7 @@ fn main() {
                 .write_snapshot(bc.block_height, bc.accounts())
                 .expect("snapshot");
         }
-        Command::Apply {
-            data_dir,
-        } => {
+        Command::Apply { data_dir } => {
             let mgr = SnapshotManager::new(data_dir, 0);
             if let Ok(Some((h, _, root))) = mgr.load_latest() {
                 println!("{h}:{root}");
@@ -95,20 +93,20 @@ fn build_command() -> CliCommand {
             .build(),
         )
         .subcommand(
-        CommandBuilder::new(
-            CommandId("snapshot.apply"),
-            "apply",
-            "Apply the latest snapshot and print its root",
+            CommandBuilder::new(
+                CommandId("snapshot.apply"),
+                "apply",
+                "Apply the latest snapshot and print its root",
+            )
+            .arg(ArgSpec::Positional(PositionalSpec::new(
+                "data_dir",
+                "Data directory",
+            )))
+            .build(),
         )
-        .arg(ArgSpec::Positional(PositionalSpec::new(
-            "data_dir",
-            "Data directory",
-        )))
-        .build(),
-    )
-    .subcommand(
-        CommandBuilder::new(
-            CommandId("snapshot.list"),
+        .subcommand(
+            CommandBuilder::new(
+                CommandId("snapshot.list"),
                 "list",
                 "List available snapshot heights",
             )

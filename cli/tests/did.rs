@@ -29,7 +29,7 @@ fn json_object(entries: impl IntoIterator<Item = (&'static str, JsonValue)>) -> 
 
 fn anchor_envelope_value_to_record(value: JsonValue) -> AnchorRecord {
     let envelope = value.as_object().expect("anchor envelope object");
-    if let Some(error) = envelope.get("error") {
+    if let Some(error) = envelope.get("error").filter(|value| !value.is_null()) {
         panic!("anchor error response: {error:?}");
     }
     let result = envelope
@@ -41,7 +41,7 @@ fn anchor_envelope_value_to_record(value: JsonValue) -> AnchorRecord {
 
 fn latest_header_value_to_header(value: JsonValue) -> LightHeader {
     let envelope = value.as_object().expect("latest_header envelope object");
-    if let Some(error) = envelope.get("error") {
+    if let Some(error) = envelope.get("error").filter(|value| !value.is_null()) {
         panic!("latest_header error response: {error:?}");
     }
     let result = envelope
@@ -53,7 +53,7 @@ fn latest_header_value_to_header(value: JsonValue) -> LightHeader {
 
 fn resolved_did_value_to_record(value: JsonValue) -> ResolvedDid {
     let envelope = value.as_object().expect("resolve envelope object");
-    if let Some(error) = envelope.get("error") {
+    if let Some(error) = envelope.get("error").filter(|value| !value.is_null()) {
         panic!("resolve error response: {error:?}");
     }
     let result = envelope

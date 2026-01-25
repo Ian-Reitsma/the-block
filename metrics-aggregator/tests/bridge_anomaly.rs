@@ -618,11 +618,17 @@ fn scrape_metric_value(body: &str, metric: &str, labels: &str) -> Option<f64> {
 }
 
 async fn scrape_ack_latency_sample(app: &Router<AppState>) -> Option<(f64, f64)> {
-    let response = app.handle(app.request_builder().path("/metrics").build()).await.ok()?;
+    let response = app
+        .handle(app.request_builder().path("/metrics").build())
+        .await
+        .ok()?;
     let body = String::from_utf8(response.body().to_vec()).ok()?;
     let labels = r#"playbook="governance-escalation",state="acknowledged""#;
-    let count =
-        scrape_metric_value(&body, "bridge_remediation_ack_latency_seconds_count", labels)?;
+    let count = scrape_metric_value(
+        &body,
+        "bridge_remediation_ack_latency_seconds_count",
+        labels,
+    )?;
     let sum = scrape_metric_value(&body, "bridge_remediation_ack_latency_seconds_sum", labels)?;
     Some((count, sum))
 }

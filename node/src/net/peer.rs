@@ -1233,6 +1233,7 @@ impl PeerSet {
                     }
                 }
                 let fast_mine = std::env::var("TB_FAST_MINE").as_deref() == Ok("1");
+                let broadcast_chain = new_chain.clone();
                 if fast_mine {
                     let mut bc = chain.guard();
                     let current_len = bc.chain.len();
@@ -1242,7 +1243,7 @@ impl PeerSet {
                         match bc.import_chain(new_chain.clone()) {
                             Ok(()) => {
                                 drop(bc);
-                                self.schedule_chain_broadcast(new_chain);
+                                self.schedule_chain_broadcast(broadcast_chain.clone());
                                 #[cfg(feature = "telemetry")]
                                 observer::observe_convergence(start);
                                 return;
@@ -1258,41 +1259,48 @@ impl PeerSet {
                 }
                 let response_addr = addr_from_peer_key(&peer_key).or(addr);
                 let new_len = new_chain.len();
-                let current_len = {
+                let (mut params_snapshot, mut chain_snapshot) = {
                     let bc = chain.guard();
-                    bc.chain.len()
-                };
-                if new_len <= current_len {
-                    if new_len < current_len {
-                        let chain_snapshot = {
-                            let bc = chain.guard();
-                            bc.chain.clone()
-                        };
-                        send_chain_snapshot(self, response_addr, chain_snapshot);
-                    }
-                    return;
-                }
-                let mut params = {
-                    let bc = chain.guard();
-                    bc.params.clone()
+                    (bc.params.clone(), bc.chain.clone())
                 };
                 loop {
-                    let replayed =
-                        match crate::Blockchain::validate_chain_with_params(&new_chain, &params) {
-                            Ok(state) => state,
-                            Err(reason) => {
-                                diagnostics::tracing::warn!(
-                                    target = "net",
-                                    peer = %overlay_peer_label(&peer_key),
-                                    reason,
-                                    "chain_validation_failed"
-                                );
-                                return;
-                            }
-                        };
+                    let current_len = chain_snapshot.len();
+                    if new_len <= current_len {
+                        if new_len < current_len {
+                            send_chain_snapshot(self, response_addr, chain_snapshot.clone());
+                        }
+                        return;
+                    }
+                    let lca = chain_snapshot
+                        .iter()
+                        .zip(&new_chain)
+                        .take_while(|(a, b)| a.hash == b.hash)
+                        .count();
+                    let depth = current_len.saturating_sub(lca);
+                    let rollback_indices = chain_snapshot
+                        .iter()
+                        .rev()
+                        .take(depth)
+                        .map(|b| b.index)
+                        .collect::<Vec<_>>();
+                    let replayed = match crate::Blockchain::validate_chain_with_params(
+                        &new_chain,
+                        &params_snapshot,
+                    ) {
+                        Ok(state) => state,
+                        Err(reason) => {
+                            diagnostics::tracing::warn!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                reason,
+                                "chain_validation_failed"
+                            );
+                            return;
+                        }
+                    };
                     let import_state = match crate::Blockchain::build_chain_import_state(
                         new_chain.clone(),
-                        &params,
+                        &params_snapshot,
                         &replayed,
                     ) {
                         Ok(state) => state,
@@ -1307,43 +1315,47 @@ impl PeerSet {
                         }
                     };
                     let mut bc = chain.guard();
-                    let current_len = bc.chain.len();
-                    if new_len <= current_len {
-                        if new_len < current_len {
+                    let chain_changed = bc.chain.len() != chain_snapshot.len()
+                        || bc
+                            .chain
+                            .last()
+                            .map(|b| b.hash.as_str())
+                            != chain_snapshot
+                                .last()
+                                .map(|b| b.hash.as_str());
+                    if chain_changed || bc.params != params_snapshot {
+                        params_snapshot = bc.params.clone();
+                        chain_snapshot = bc.chain.clone();
+                        drop(bc);
+                        continue;
+                    }
+                    if new_len <= bc.chain.len() {
+                        if new_len < bc.chain.len() {
                             let chain_snapshot = bc.chain.clone();
                             drop(bc);
                             send_chain_snapshot(self, response_addr, chain_snapshot);
                         }
                         return;
                     }
-                    if bc.params != params {
-                        params = bc.params.clone();
-                        drop(bc);
-                        continue;
-                    }
-                    let lca = bc
-                        .chain
-                        .iter()
-                        .zip(&import_state.chain)
-                        .take_while(|(a, b)| a.hash == b.hash)
-                        .count();
-                    let depth = current_len.saturating_sub(lca);
-                    let rollback_indices = bc
-                        .chain
-                        .iter()
-                        .rev()
-                        .take(depth)
-                        .map(|b| b.index)
-                        .collect::<Vec<_>>();
                     #[cfg(feature = "telemetry")]
                     let start = Instant::now();
                     let applied = bc.apply_import_state(import_state, replayed, &rollback_indices);
                     #[cfg(feature = "telemetry")]
-                    observer::observe_convergence(start);
+                    {
+                        observer::observe_convergence(start);
+                        if start.elapsed() > Duration::from_millis(500) {
+                            diagnostics::tracing::info!(
+                                target = "net",
+                                peer = %overlay_peer_label(&peer_key),
+                                elapsed_ms = start.elapsed().as_millis(),
+                                "chain_apply_slow"
+                            );
+                        }
+                    }
                     match applied {
                         Ok(()) => {
                             drop(bc);
-                            self.schedule_chain_broadcast(new_chain);
+                            self.schedule_chain_broadcast(broadcast_chain.clone());
                         }
                         Err(err) => {
                             diagnostics::tracing::warn!(

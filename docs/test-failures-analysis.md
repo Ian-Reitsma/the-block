@@ -156,6 +156,12 @@ Payload::Chain(new_chain) => {
 | lib.rs:5654 | Loop iterates all blocks | Parallelize block validation |
 | chaos.rs:85 | 20ms poll interval | Increase to 100ms, reduce contention |
 
+#### Status
+- Listener accept path now keeps sockets non-blocking with a short idle/overall deadline so peers that never close cannot pin the worker thread.
+- Chain import handler stages validation + import-state building outside the mutex, refreshes snapshots if params/chain shift before applying, and emits a slow-apply trace when `apply_import_state` runs longer than 500ms.
+- Fast-mine still short-circuits for test fixtures, but broadcasts only after the import completes.
+- WAN-scale chaos replay still needs to be re-run to confirm the convergence hang is resolved.
+
 ---
 
 ## Category 3: Endianness/Ordering Failures

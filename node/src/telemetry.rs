@@ -26,9 +26,9 @@ use httpd::{BlockingClient, Method};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
-    self, exponential_buckets, Collector, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle, HistogramOpts,
-    HistogramVec, IntCounter, IntCounterHandle, IntCounterVec, IntGauge, IntGaugeHandle,
-    IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
+    self, exponential_buckets, Collector, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle,
+    HistogramOpts, HistogramVec, IntCounter, IntCounterHandle, IntCounterVec, IntGauge,
+    IntGaugeHandle, IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};

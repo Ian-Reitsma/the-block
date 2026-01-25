@@ -2,6 +2,7 @@
 #[path = "util/fork.rs"]
 mod fork;
 use crypto_suite::signatures::ed25519::SigningKey;
+use fork::inject_fork;
 use foundation_serialization::binary;
 use rand::{OsRng, RngCore};
 use std::fs;
@@ -16,7 +17,6 @@ use the_block::{
     p2p::handshake::{Hello, Transport},
     sign_tx, Block, Blockchain, RawTxPayload, ShutdownFlag,
 };
-use fork::inject_fork;
 
 fn send(addr: SocketAddr, sk: &SigningKey, body: Payload) {
     let msg = Message::new(body, sk).expect("sign payload");

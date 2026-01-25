@@ -2660,12 +2660,6 @@ pub struct Explorer {
 }
 
 fn ensure_receipt_columns(conn: &Connection) -> DbResult<()> {
-    let mut stmt = conn.prepare("PRAGMA table_info(receipts)")?;
-    let mut existing: HashSet<String> = HashSet::new();
-    let rows = stmt.query_map(params![], |row| row.get::<_, String>(1))?;
-    for row in rows {
-        existing.insert(row?);
-    }
     for (name, kind) in [
         ("kernel_digest", "TEXT"),
         ("descriptor_digest", "TEXT"),
@@ -2674,11 +2668,16 @@ fn ensure_receipt_columns(conn: &Connection) -> DbResult<()> {
         ("tensor_profile_epoch", "TEXT"),
         ("proof_latency_ms", "INTEGER"),
     ] {
-        if !existing.contains(name) {
-            conn.execute(
-                &format!("ALTER TABLE receipts ADD COLUMN {name} {kind}"),
-                params![],
-            )?;
+        let check_sql = format!("SELECT {name} FROM receipts LIMIT 1");
+        match conn.prepare(&check_sql) {
+            Ok(_) => continue,
+            Err(SqlError::UnknownColumn(_)) => {
+                conn.execute(
+                    &format!("ALTER TABLE receipts ADD COLUMN {name} {kind}"),
+                    params![],
+                )?;
+            }
+            Err(err) => return Err(err),
         }
     }
     Ok(())

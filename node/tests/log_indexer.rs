@@ -34,14 +34,7 @@ fn parse_and_index() {
     )
     .unwrap();
     let db_path = dir.path().join("logs.db");
-    index_logs_with_options(
-        &log_path,
-        &db_path,
-        IndexOptions {
-            passphrase: None,
-        },
-    )
-    .unwrap();
+    index_logs_with_options(&log_path, &db_path, IndexOptions { passphrase: None }).unwrap();
 
     let rows = search_logs(&db_path, &LogFilter::default()).unwrap();
     assert_eq!(rows.len(), 2);
@@ -65,14 +58,7 @@ fn surfaces_decryption_errors() {
         r#"{"timestamp":1,"level":"INFO","message":"hello","correlation_id":"x"}"#
     )
     .unwrap();
-    index_logs_with_options(
-        &log_path,
-        &db_path,
-        IndexOptions {
-            passphrase: None,
-        },
-    )
-    .unwrap();
+    index_logs_with_options(&log_path, &db_path, IndexOptions { passphrase: None }).unwrap();
 
     let db = sled::open(&db_path).unwrap();
     let tree = db.open_tree("entries").unwrap();

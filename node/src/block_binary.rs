@@ -598,10 +598,15 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 }
                 if !r.hop_proofs.is_empty() {
                     struct_writer.field_with("hop_proofs", |field_writer| {
-                        write_vec(field_writer, &r.hop_proofs, "hop_proofs", |writer, proof| {
-                            writer.write_string(proof);
-                            Ok(())
-                        })
+                        write_vec(
+                            field_writer,
+                            &r.hop_proofs,
+                            "hop_proofs",
+                            |writer, proof| {
+                                writer.write_string(proof);
+                                Ok(())
+                            },
+                        )
                         .expect("hop proofs encode")
                     });
                 }

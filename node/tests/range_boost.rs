@@ -10,12 +10,12 @@ use std::time::Duration;
 use the_block::range_boost::{self as range_boost, FaultMode};
 use the_block::range_boost::{HopProof, RangeBoost};
 
+use the_block::relay::RelayJob;
 #[cfg(feature = "telemetry")]
 use the_block::telemetry::{
     RANGE_BOOST_ENQUEUE_ERROR_TOTAL, RANGE_BOOST_FORWARDER_FAIL_TOTAL,
     RANGE_BOOST_TOGGLE_LATENCY_SECONDS,
 };
-use the_block::relay::RelayJob;
 
 fn stub_job() -> RelayJob {
     RelayJob {

@@ -1126,7 +1126,12 @@ mod prover_benches;
 mod tests {
     use super::*;
     use crypto_suite::hashing::blake3::Hasher;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::{Mutex, MutexGuard, Once, OnceLock};
+
+    fn ensure_compute_trade_mode() {
+        static COMPUTE_TRADE_INIT: Once = Once::new();
+        COMPUTE_TRADE_INIT.call_once(|| market_gates::set_compute_mode(MarketMode::Trade));
+    }
 
     static SETTLEMENT_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
@@ -1137,6 +1142,7 @@ mod tests {
 
     impl SettlementGuard {
         fn new() -> Self {
+            ensure_compute_trade_mode();
             let lock = SETTLEMENT_TEST_LOCK
                 .get_or_init(|| Mutex::new(()))
                 .lock()

@@ -1892,107 +1892,105 @@ impl Node {
                         let task = move || {
                             let addr = Some(addr);
                             let mut buf = Vec::new();
-                            // Listener is non-blocking; switch accepted sockets back to blocking mode
-                            // so read_to_end can wait for EOF without spurious WouldBlock errors.
-                            let _ = stream.set_nonblocking(false);
-                            // Avoid blocking indefinitely on peers that never close the socket.
-                            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                            match stream.read_to_end(&mut buf) {
-                                Ok(_) => {
-                                    #[cfg(feature = "integration-tests")]
-                                    match local {
-                                        Some(local) => eprintln!(
-                                            "listener: READ {} bytes local {} from {:?}",
-                                            buf.len(),
-                                            local,
-                                            addr
-                                        ),
-                                        None => eprintln!(
-                                            "listener: READ {} bytes from {:?}",
-                                            buf.len(),
-                                            addr
-                                        ),
+                            // Keep the socket non-blocking and bail once we stop making progress so a
+                            // slow or silent peer can't pin a worker.
+                            let _ = stream.set_nonblocking(true);
+                            let start = Instant::now();
+                            let mut last_progress = start;
+                            let idle_budget = Duration::from_millis(200);
+                            let max_budget = Duration::from_secs(2);
+                            let mut tmp = [0u8; 8192];
+                            loop {
+                                match stream.read(&mut tmp) {
+                                    Ok(0) => break,
+                                    Ok(n) => {
+                                        buf.extend_from_slice(&tmp[..n]);
+                                        last_progress = Instant::now();
                                     }
-                                    #[cfg(feature = "telemetry")]
-                                    if crate::telemetry::should_log("p2p") {
-                                        let trace = crate::telemetry::log_context();
-                                        let span = crate::log_context!(
-                                            tx = *blake3::hash(&buf).as_bytes()
+                                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                                        let now = Instant::now();
+                                        if now.duration_since(last_progress) >= idle_budget
+                                            || now.duration_since(start) >= max_budget
+                                        {
+                                            break;
+                                        }
+                                        std::thread::sleep(Duration::from_millis(5));
+                                    }
+                                    Err(err) => {
+                                        diagnostics::tracing::warn!(
+                                            target = "net",
+                                            reason = ?err,
+                                            "recv_msg_failed"
                                         );
-                                        span.in_scope(|| {
-                                            diagnostics::tracing::info!(
-                                                parent: &trace,
-                                                peer = ?addr,
-                                                len = buf.len(),
-                                                "recv_msg"
-                                            );
-                                        });
-                                    }
-                                    match message::decode(&buf) {
-                                        Ok(msg) => {
-                                            #[cfg(feature = "integration-tests")]
-                                            {
-                                                let payload_name = match &msg.body {
-                                                    Payload::Chain(c) => {
-                                                        format!("Chain(len={})", c.len())
-                                                    }
-                                                    Payload::Handshake(_) => {
-                                                        "Handshake".to_string()
-                                                    }
-                                                    Payload::Hello(_) => "Hello".to_string(),
-                                                    Payload::ChainRequest(_) => {
-                                                        "ChainRequest".to_string()
-                                                    }
-                                                    _ => "Other".to_string(),
-                                                };
-                                                match local {
-                                                    Some(local) => eprintln!(
-                                                        "listener: DECODED {} local {} from {:?}",
-                                                        payload_name, local, addr
-                                                    ),
-                                                    None => eprintln!(
-                                                        "listener: DECODED {} from {:?}",
-                                                        payload_name, addr
-                                                    ),
-                                                }
-                                            }
-                                            peers.handle_message(msg, addr, &chain);
-                                        }
-                                        Err(err) => {
-                                            #[cfg(feature = "integration-tests")]
-                                            eprintln!(
-                                                "listener: DECODE FAILED from {:?}: {:?}",
-                                                addr, err
-                                            );
-                                            diagnostics::tracing::warn!(
-                                                target = "net",
-                                                peer = ?addr,
-                                                reason = ?err,
-                                                "message_decode_failed"
-                                            );
-                                        }
+                                        return;
                                     }
                                 }
-                                Err(err) => {
-                                    #[cfg(feature = "integration-tests")]
-                                    match local {
-                                        Some(local) => eprintln!(
-                                            "listener: READ ERROR local {} from {:?}: {}",
-                                            local, addr, err
-                                        ),
-                                        None => {
-                                            eprintln!(
-                                                "listener: READ ERROR from {:?}: {}",
-                                                addr, err
-                                            )
-                                        }
-                                    }
-                                    diagnostics::tracing::warn!(
+                            }
+                            if buf.is_empty() {
+                                let elapsed = Instant::now().saturating_duration_since(start);
+                                if elapsed >= max_budget {
+                                    diagnostics::tracing::debug!(
                                         target = "net",
                                         peer = ?addr,
-                                        reason = %err,
-                                        "message_read_failed"
+                                        elapsed_ms = elapsed.as_millis(),
+                                        "recv_msg_idle_timeout"
                                     );
+                                }
+                                return;
+                            }
+                            #[cfg(feature = "integration-tests")]
+                            match local {
+                                Some(local) => eprintln!(
+                                    "listener: READ {} bytes local {} from {:?}",
+                                    buf.len(),
+                                    local,
+                                    addr
+                                ),
+                                None => {
+                                    eprintln!("listener: READ {} bytes from {:?}", buf.len(), addr)
+                                }
+                            }
+                            #[cfg(feature = "telemetry")]
+                            if crate::telemetry::should_log("p2p") {
+                                let trace = crate::telemetry::log_context();
+                                let span = crate::log_context!(tx = *blake3::hash(&buf).as_bytes());
+                                span.in_scope(|| {
+                                    diagnostics::tracing::info!(parent: &trace, peer = ?addr, len = buf.len(), "recv_msg");
+                                });
+                            }
+                            match message::decode(&buf) {
+                                Ok(msg) => {
+                                    #[cfg(feature = "integration-tests")]
+                                    {
+                                        let payload_name = match &msg.body {
+                                            Payload::Handshake(_) => "Handshake",
+                                            Payload::Hello(_) => "Hello",
+                                            Payload::Tx(_) => "Tx",
+                                            Payload::BlobTx(_) => "BlobTx",
+                                            Payload::Block(_, _) => "Block",
+                                            Payload::Chain(_) => "Chain",
+                                            Payload::ChainRequest(_) => "ChainRequest",
+                                            Payload::BlobChunk(_) => "BlobChunk",
+                                            Payload::Reputation(_) => "Reputation",
+                                            Payload::StorageProviderAdvertisement(_) => {
+                                                "StorageProviderAdvertisement"
+                                            }
+                                            Payload::StorageProviderLookup(_) => {
+                                                "StorageProviderLookup"
+                                            }
+                                            Payload::StorageProviderLookupResponse(_) => {
+                                                "StorageProviderLookupResponse"
+                                            }
+                                        };
+                                        eprintln!(
+                                            "listener: decoded {} from {:?}",
+                                            payload_name, addr
+                                        );
+                                    }
+                                    peers.handle_message(msg, addr, &chain);
+                                }
+                                Err(err) => {
+                                    diagnostics::tracing::warn!(target = "net", reason = %err, "recv_msg_parse_failed");
                                 }
                             }
                         };

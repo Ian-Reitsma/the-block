@@ -167,8 +167,7 @@ pub struct PresenceBucketRef {
     pub expires_at_micros: Option<u64>,
 }
 
-impl PresenceBucketRef {
-}
+impl PresenceBucketRef {}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]

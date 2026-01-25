@@ -895,7 +895,7 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | --- | --- | --- | --- |
 | `bridge.relayer_status` | `RelayerStatusRequest` | `RelayerInfo {relayer,bond,pending_rewards,duty_state}` | bridge error codes |
 | `bridge.bond_relayer` | `BondRelayerRequest` | `{status:"ok"}` | `-32014` insufficient bond, storage errors |
-| `bridge.claim_rewards` | `ClaimRewardsRequest` | `{claimed, pending}` | `-32015/-32017` reward validation errors |
+| `bridge.claim_rewards` | `ClaimRewardsRequest` | `{claimed, pending}` | `-32015/-32017` reward validation errors; fails with `RewardClaimRejected("pending_duties_not_settled")` if the relayer still has pending duties |
 | `bridge.verify_deposit` | `VerifyDepositRequest` | `DepositReceipt` (+ emission details) when proof checks succeed | proof errors `-32002`, replay `-32006`, storage `-32013` |
 | `bridge.request_withdrawal` | `RequestWithdrawalRequest` | `PendingWithdrawalInfo` plus commitment hash | duplicates `-32007`, insufficient bond `-32014` |
 | `bridge.challenge_withdrawal` | `ChallengeWithdrawalRequest` | `{status:"ok", challenge:ChallengeRecord}` | `-32008` missing withdrawal, `-32009` already challenged |
@@ -915,6 +915,8 @@ Additional selector-specific errors: `-32034` invalid presence bucket (expired/u
 | `bridge.slash_log` | `SlashLogRequest` | `{items:[SlashRecord], next_cursor?}` | none |
 | `bridge.assets` | `AssetsRequest` | `{assets:[BridgeAssetSnapshot]}` | none |
 | `bridge.configure_asset` | `ConfigureAssetRequest` | `{status:"ok"}` after writing channel config | governance rejects via bridge error codes |
+
+> **Bridge claim guard:** `bridge.claim_rewards` returns `RewardClaimRejected("pending_duties_not_settled")` if the requested relayer still has pending duties; finalize or expire every pending withdrawal/settlement duty before calling this RPC so the reward claim can proceed deterministically.
 
 #### Domain registry and gateway surfaces (`node/src/gateway/dns.rs`, `node/src/service_badge.rs`, `node/src/gateway/mobile_cache.rs`)
 DNS methods share the JSON schema under `docs/spec/dns_record.schema.json`. Auctions/stakes use sled-backed objects `{domain, owner, reserve, bidders[], expires_at}`.

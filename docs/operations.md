@@ -36,6 +36,11 @@
 - **New gate**: The BlockTorch governor now manages `proof_verification_budget_ms` (default 100 ms). Settlement inspects the recorded `ProofBundle::latency_ms` values in `SlaRecord::proofs` and flips `SlaOutcome::Completed` into `SlaOutcome::Violated { reason: "proof_latency_budget" }` whenever the max latency breaches the budget, triggering the normal slash/refund/telemetry flow. Reference `docs/system_reference.md#6.3`, cite the BlockTorch timeline (`tb-cli compute stats` / `tb-cli governor status`), and record any manual budget tweaks (or rollback steps) in this runbook.
 - **Operator note**: During incidents, query `tb-cli governor status --rpc <endpoint>` (the `telemetry gauges (ppm)` section now includes BlockTorch metrics). Correlate `proof_verification_latency` with the Grafana panel `blocktorch-proofs-latency` and the aggregator trace ID recorded in `/wrappers`.
 
+### Bridge remediation ack latency persistence
+
+- The aggregator now persists only the latest `bridge_remediation_ack_latency_seconds` observation per `(playbook,state)` so restart/replay cycles do not double-count the same acknowledgement. After restarting, reload the snapshot and observe the same `count`/`sum` that were captured before the outage.
+- When this wiring changes, rerun `WRITE_WRAPPERS_SNAPSHOT=1 cargo test -p metrics-aggregator --test wrappers`, refresh `monitoring/grafana/telemetry.json` (and related dashboard exports) to include the `bridge_remediation_ack_latency_seconds (p50/p95)` histogram, and document the dedup guarantees in your PR notes so operators know `bridge_remediation_ack_latency_seconds_count` remains idempotent across the restart boundary.
+
 ### Runtime Reactor
 
 - `runtime_read_without_ready_total` increments when reads succeed without a readiness event (missed IO wakeups). Sustained growth indicates reactor/event-mapping issues.

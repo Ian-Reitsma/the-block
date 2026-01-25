@@ -37,7 +37,8 @@ pub fn formatted_blocktorch_timeline(
     }
     if let Some(latency) = proof_latency_ms {
         lines.push(format!(
-            "  proof latency (ms, last measurement): {latency:.2}"
+            "  proof latency (ms, last measurement): {}",
+            format_proof_latency(latency)
         ));
     }
     if let Some(trace) = aggregator_trace {
@@ -45,6 +46,23 @@ pub fn formatted_blocktorch_timeline(
     }
 
     Some(lines)
+}
+
+fn format_proof_latency(latency: f64) -> String {
+    let scaled = (latency * 1_000.0).round() as i64;
+    let remainder = (scaled.abs() % 10) as i64;
+    let base = scaled / 10;
+    let adjusted = if remainder >= 5 {
+        if scaled >= 0 {
+            base + 1
+        } else {
+            base - 1
+        }
+    } else {
+        base
+    };
+    let value = (adjusted as f64) / 100.0;
+    format!("{value:.2}")
 }
 
 #[cfg(test)]

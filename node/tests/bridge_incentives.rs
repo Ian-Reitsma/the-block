@@ -856,6 +856,10 @@ fn telemetry_tracks_bridge_flows() {
         dispute_settlement_before + 1
     );
 
+    bridge
+        .finalize_withdrawal("native", commitment)
+        .expect("finalize withdrawal before claim");
+
     let approval = RewardClaimApproval::new("approval-r1", "r1", params.duty_reward * 2);
     {
         let store = GovStore::open(&gov_path);

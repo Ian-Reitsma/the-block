@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 
+use crate::net::peer::known_peers_with_info;
 #[cfg(feature = "quic")]
 use crate::net::send_quic_msg;
 use crate::net::{load_net_key, send_msg, Transport};
-use crate::net::peer::known_peers_with_info;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     STORAGE_PROVIDER_ADVERT_SEEN_TOTAL, STORAGE_PROVIDER_CANDIDATE_GAUGE,
@@ -16,11 +16,11 @@ use foundation_serialization::json;
 use foundation_serialization::{Deserialize, Serialize};
 use rand::RngCore;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::convert::TryFrom;
 use storage_market::{DiscoveryRequest, ProviderDirectory, ProviderProfile, StorageMarket};
 
 type StorageMarketHandle = Arc<MutexT<StorageMarket>>;
@@ -639,8 +639,8 @@ fn serialize_lookup_response_body(body: &ProviderLookupResponseBody<'_>) -> Vec<
             body.providers
                 .iter()
                 .map(|p| {
-                    let bytes = storage_market::codec::serialize_provider_profile(p)
-                        .unwrap_or_default();
+                    let bytes =
+                        storage_market::codec::serialize_provider_profile(p).unwrap_or_default();
                     foundation_serialization::json::value_from_slice(&bytes)
                         .unwrap_or(foundation_serialization::json::Value::Null)
                 })

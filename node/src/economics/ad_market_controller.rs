@@ -102,7 +102,6 @@ impl AdMarketDriftController {
             publisher_share_bps: p_target_bps,
         }
     }
-
 }
 
 pub struct TariffController {

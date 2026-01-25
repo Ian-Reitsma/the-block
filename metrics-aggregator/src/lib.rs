@@ -6580,30 +6580,34 @@ struct BridgeAckLatencyObservation {
 
 #[derive(Default, Clone)]
 struct AckLatencySeries {
-    counts: BTreeMap<u64, u64>,
+    latest: Option<(u64, u64)>,
 }
 
 impl AckLatencySeries {
     fn observe(&mut self, latency: u64) {
-        *self.counts.entry(latency).or_insert(0) += 1;
+        match self.latest {
+            Some((_, count)) => {
+                self.latest = Some((latency, count.saturating_add(1)));
+            }
+            None => {
+                self.latest = Some((latency, 1));
+            }
+        }
     }
 
     fn to_value(&self) -> Value {
-        let items: Vec<Value> = self
-            .counts
-            .iter()
-            .map(|(latency, count)| {
-                let mut map = Map::new();
-                map.insert("latency_seconds".to_string(), Value::from(*latency));
-                map.insert("count".to_string(), Value::from(*count));
-                Value::Object(map)
-            })
-            .collect();
-        Value::Array(items)
+        if let Some((latency, count)) = self.latest {
+            let mut map = Map::new();
+            map.insert("latency_seconds".to_string(), Value::from(latency));
+            map.insert("count".to_string(), Value::from(count));
+            Value::Array(vec![Value::Object(map)])
+        } else {
+            Value::Array(Vec::new())
+        }
     }
 
     fn restore(&mut self, value: &Value) {
-        self.counts.clear();
+        self.latest = None;
         let Some(array) = value.as_array() else {
             return;
         };
@@ -6613,10 +6617,14 @@ impl AckLatencySeries {
                     object.get("latency_seconds").and_then(Value::as_u64),
                     object.get("count").and_then(Value::as_u64),
                 ) {
-                    self.counts.insert(latency, count);
+                    self.latest = Some((latency, count));
                 }
             }
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.latest.is_none()
     }
 }
 
@@ -6681,7 +6689,7 @@ impl BridgeAckLatencyStore {
                 ) {
                     let mut series = AckLatencySeries::default();
                     series.restore(series_value);
-                    if !series.counts.is_empty() {
+                    if !series.is_empty() {
                         self.series.insert((playbook, state), series);
                     }
                 }
@@ -6692,12 +6700,12 @@ impl BridgeAckLatencyStore {
     fn observations(&self) -> Vec<BridgeAckLatencyObservation> {
         let mut out = Vec::new();
         for ((playbook, state), series) in &self.series {
-            for (latency, count) in &series.counts {
+            if let Some((latency, count)) = series.latest {
                 out.push(BridgeAckLatencyObservation {
                     playbook: *playbook,
                     state: *state,
-                    latency: *latency,
-                    count: *count,
+                    latency,
+                    count,
                 });
             }
         }

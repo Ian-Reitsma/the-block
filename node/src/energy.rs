@@ -1136,10 +1136,17 @@ mod tests {
     use crypto_suite::hashing::blake3::Hasher as Blake3;
     use crypto_suite::signatures::ed25519::SigningKey;
     use std::fs;
+    use std::sync::Once;
     use std::time::{SystemTime, UNIX_EPOCH};
     use sys::tempfile::tempdir;
 
+    fn ensure_energy_trade_mode() {
+        static ENERGY_TRADE_INIT: Once = Once::new();
+        ENERGY_TRADE_INIT.call_once(|| market_gates::set_energy_mode(MarketMode::Trade));
+    }
+
     fn temp_store() -> (sys::tempfile::TempDir, EnergyMarketStore) {
+        ensure_energy_trade_mode();
         let dir = tempdir().expect("temp dir");
         let path = dir.path().join("energy");
         fs::create_dir_all(&path).expect("create dir");

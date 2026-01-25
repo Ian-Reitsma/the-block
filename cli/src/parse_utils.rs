@@ -92,10 +92,7 @@ where
         .transpose()
 }
 
-pub fn parse_required<T: std::str::FromStr>(
-    value: Option<String>,
-    name: &str,
-) -> Result<T, String>
+pub fn parse_required<T: std::str::FromStr>(value: Option<String>, name: &str) -> Result<T, String>
 where
     T::Err: std::fmt::Display,
 {

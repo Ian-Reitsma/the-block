@@ -860,6 +860,11 @@ mod tests {
     use storage::{StorageContract, StorageOffer};
     use sys::tempfile::tempdir;
 
+    fn ensure_storage_trade_mode() {
+        static STORAGE_TRADE_INIT: Once = Once::new();
+        STORAGE_TRADE_INIT.call_once(|| market_gates::set_storage_mode(MarketMode::Trade));
+    }
+
     static INIT_MARKET: Once = Once::new();
 
     fn json_string(value: &str) -> JsonValue {
@@ -871,6 +876,7 @@ mod tests {
     }
 
     fn ensure_market_dir() {
+        ensure_storage_trade_mode();
         INIT_MARKET.call_once(|| {
             let dir = tempdir().expect("tempdir");
             std::env::set_var("TB_STORAGE_MARKET_DIR", dir.path());
