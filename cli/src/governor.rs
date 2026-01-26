@@ -298,6 +298,51 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
             }
         }
     }
+    if let Some(provenance) = &view.release_provenance {
+        println!("release provenance:");
+        println!(
+            "  epoch={} hash={}",
+            provenance.epoch,
+            provenance
+                .snapshot_hash
+                .as_deref()
+                .unwrap_or("<missing snapshot hash>")
+        );
+        if let Some(att) = &provenance.attestation {
+            println!(
+                "  attestation pubkey={} payload_hash={} signature={}",
+                att.pubkey_hex.as_deref().unwrap_or("<no pubkey>"),
+                att.payload_hash_hex
+                    .as_deref()
+                    .unwrap_or("<no payload hash>"),
+                att.signature_hex.as_deref().unwrap_or("<no signature>")
+            );
+        } else {
+            println!("  attestation: none");
+        }
+        println!("  hint: {}", release_provenance_hint(provenance));
+    }
+    println!("receipt health summary:");
+    println!(
+        "  signatures={} headers={} diversity={}",
+        view.receipt_health.signature_mismatch_total,
+        view.receipt_health.header_mismatch_total,
+        view.receipt_health.diversity_violation_total
+    );
+    println!(
+        "  validation={} decoding={}",
+        view.receipt_health.validation_failure_total, view.receipt_health.decoding_failure_total
+    );
+    println!(
+        "  pending (storage/compute/energy)={}/{}/{}",
+        view.receipt_health.pending_storage,
+        view.receipt_health.pending_compute,
+        view.receipt_health.pending_energy
+    );
+    println!("  drain depth={}", view.receipt_health.drain_depth);
+    for hint in receipt_health_hints(&view.receipt_health) {
+        println!("  hint: {hint}");
+    }
     if let Some(blocktorch) = &view.blocktorch {
         if let Some(lines) = formatted_blocktorch_timeline(
             blocktorch.kernel_digest.as_deref(),
@@ -314,6 +359,91 @@ fn print_status_summary(view: &GovernorStatusView) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn release_provenance_hint(provenance: &ReleaseProvenanceView) -> String {
+    let has_snapshot = provenance
+        .snapshot_hash
+        .as_deref()
+        .map(|s| !s.is_empty())
+        .unwrap_or(false);
+    if !has_snapshot {
+        return format!(
+            "Epoch {} has no snapshot hash yet; rerun the release automation to persist and sign the payload.",
+            provenance.epoch
+        );
+    }
+    if let Some(att) = &provenance.attestation {
+        if att.payload_hash_hex.as_deref() != provenance.snapshot_hash.as_deref() {
+            return format!(
+                "Snapshot hash != attestation payload for epoch {}; review `governor.decisions` and rollback to the last attested intent before reapplying.",
+                provenance.epoch
+            );
+        }
+        if att
+            .signature_hex
+            .as_deref()
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
+        {
+            return format!(
+                "Attestation lacks a signature; enable TB_GOVERNOR_SIGN=1 and rerun `tb-cli governor snapshot --epoch {}` before unlocking trade.",
+                provenance.epoch
+            );
+        }
+        return format!(
+            "Attestation matches; verify the snapshot with `tb-cli governor snapshot --epoch {}` and cross-check telemetry before applying trade.",
+            provenance.epoch
+        );
+    }
+    format!(
+        "No attestation recorded for epoch {}; enable TB_GOVERNOR_SIGN=1 and re-export the snapshot so operators can replay+audit the release.",
+        provenance.epoch
+    )
+}
+
+fn receipt_health_hints(view: &ReceiptHealthView) -> Vec<String> {
+    let mut hints = Vec::new();
+    if view.signature_mismatch_total > 0 {
+        hints.push(format!(
+            "Signature mismatches: {} → verify provider keys and replay the receipts to confirm authenticity.",
+            view.signature_mismatch_total
+        ));
+    }
+    if view.header_mismatch_total > 0 {
+        hints.push(format!(
+            "Header mismatches: {} → inspect shard root recalculations before trusting economics.",
+            view.header_mismatch_total
+        ));
+    }
+    if view.diversity_violation_total > 0 {
+        hints.push(format!(
+            "Diversity violations: {} → rebalance provider assignments or reroute failing slots.",
+            view.diversity_violation_total
+        ));
+    }
+    if view.validation_failure_total > 0 || view.decoding_failure_total > 0 {
+        hints.push(
+            "Receipt validation/decoding failures detected; check the logs and rerun `tb-cli governor decisions` before promoting a gate."
+                .into(),
+        );
+    }
+    if view.pending_storage + view.pending_compute + view.pending_energy > 0 {
+        hints.push(format!(
+            "Replay backlog (storage={}, compute={}, energy={}) indicates receipts are still queued; keep draining before trusting reprized metrics.",
+            view.pending_storage, view.pending_compute, view.pending_energy
+        ));
+    }
+    if view.drain_depth > 0 {
+        hints.push(format!(
+            "Receipt drain depth {} suggests replay retries; monitor `receipt_drain` telemetry before unlocking trade.",
+            view.drain_depth
+        ));
+    }
+    if hints.is_empty() {
+        hints.push("Receipt health looks nominal; continue monitoring the wrappers telemetry before flipping gates.".into());
+    }
+    hints
 }
 
 #[derive(Debug, Deserialize)]
@@ -334,6 +464,10 @@ struct GovernorStatusView {
     shadow_only: bool,
     #[serde(default)]
     blocktorch: Option<BlockTorchView>,
+    #[serde(default)]
+    receipt_health: ReceiptHealthView,
+    #[serde(default)]
+    release_provenance: Option<ReleaseProvenanceView>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,6 +533,47 @@ struct BlockTorchView {
     proof_latency_ms: Option<f64>,
     #[serde(default)]
     aggregator_trace: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseProvenanceView {
+    epoch: u64,
+    #[serde(default)]
+    snapshot_hash: Option<String>,
+    #[serde(default)]
+    attestation: Option<AttestationView>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AttestationView {
+    #[serde(default)]
+    pubkey_hex: Option<String>,
+    #[serde(default)]
+    payload_hash_hex: Option<String>,
+    #[serde(default)]
+    signature_hex: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ReceiptHealthView {
+    #[serde(default)]
+    signature_mismatch_total: u64,
+    #[serde(default)]
+    header_mismatch_total: u64,
+    #[serde(default)]
+    diversity_violation_total: u64,
+    #[serde(default)]
+    validation_failure_total: u64,
+    #[serde(default)]
+    decoding_failure_total: u64,
+    #[serde(default)]
+    pending_storage: i64,
+    #[serde(default)]
+    pending_compute: i64,
+    #[serde(default)]
+    pending_energy: i64,
+    #[serde(default)]
+    drain_depth: i64,
 }
 
 #[derive(Debug, Deserialize)]

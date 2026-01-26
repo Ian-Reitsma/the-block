@@ -8,6 +8,8 @@ use crate::governor_snapshot;
 use crate::simple_db::{names, SimpleDb};
 #[cfg(feature = "telemetry")]
 use crate::telemetry;
+#[cfg(feature = "telemetry")]
+use crate::telemetry::receipts;
 use crate::Blockchain;
 use crypto_suite::hex;
 use foundation_serialization::json::{
@@ -214,6 +216,41 @@ pub struct GateSnapshot {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(crate = "foundation_serialization::serde")]
+pub struct AttestationSummary {
+    #[serde(default)]
+    pub pubkey_hex: Option<String>,
+    #[serde(default)]
+    pub payload_hash_hex: Option<String>,
+    #[serde(default)]
+    pub signature_hex: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ReleaseProvenance {
+    pub epoch: u64,
+    #[serde(default)]
+    pub snapshot_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation: Option<AttestationSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Default)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ReceiptHealthSummary {
+    pub signature_mismatch_total: u64,
+    pub header_mismatch_total: u64,
+    pub diversity_violation_total: u64,
+    pub validation_failure_total: u64,
+    pub decoding_failure_total: u64,
+    pub pending_storage: i64,
+    pub pending_compute: i64,
+    pub pending_energy: i64,
+    pub drain_depth: i64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
 pub struct BlockTorchStatus {
     #[serde(skip_serializing_if = "foundation_serialization::skip::option_is_none")]
     pub kernel_digest: Option<String>,
@@ -245,6 +282,9 @@ pub struct GovernorStatus {
     pub shadow_only: bool,
     #[serde(default)]
     pub blocktorch: Option<BlockTorchStatus>,
+    pub receipt_health: ReceiptHealthSummary,
+    #[serde(default)]
+    pub release_provenance: Option<ReleaseProvenance>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -621,6 +661,7 @@ struct SharedState {
     autopilot_enabled: AtomicBool,
     schema_version: AtomicU64,
     last_snapshot_hash: Mutex<Option<String>>,
+    release_provenance: Mutex<Option<ReleaseProvenance>>,
 }
 
 impl SharedState {
@@ -659,6 +700,7 @@ impl SharedState {
             autopilot_enabled: AtomicBool::new(false),
             schema_version: AtomicU64::new(0),
             last_snapshot_hash: Mutex::new(None),
+            release_provenance: Mutex::new(None),
         }
     }
 
@@ -685,6 +727,8 @@ impl SharedState {
             last_economics_snapshot_hash: self.last_snapshot_hash(),
             shadow_only: self.shadow_only,
             blocktorch: blocktorch_status_snapshot(),
+            receipt_health: gather_receipt_health_summary(),
+            release_provenance: self.release_provenance(),
         }
     }
 
@@ -727,6 +771,26 @@ impl SharedState {
     fn set_last_snapshot_hash(&self, hash: String) {
         if let Ok(mut guard) = self.last_snapshot_hash.lock() {
             *guard = Some(hash);
+        }
+    }
+
+    fn release_provenance(&self) -> Option<ReleaseProvenance> {
+        if let Ok(guard) = self.release_provenance.lock() {
+            guard.clone()
+        } else {
+            None
+        }
+    }
+
+    fn record_release_provenance(&self, epoch: u64, hash_hex: String) {
+        let attestation = load_attestation_summary(&self.base_path, epoch);
+        let provenance = ReleaseProvenance {
+            epoch,
+            snapshot_hash: Some(hash_hex),
+            attestation,
+        };
+        if let Ok(mut guard) = self.release_provenance.lock() {
+            *guard = Some(provenance);
         }
     }
 
@@ -1192,6 +1256,7 @@ fn process_intent(intent: IntentRecord, chain: &Arc<Mutex<Blockchain>>, shared: 
     shared.record(intent.clone());
     if intent.gate == "economics" {
         shared.set_last_snapshot_hash(intent.snapshot_hash_hex.clone());
+        shared.record_release_provenance(intent.epoch_apply, intent.snapshot_hash_hex.clone());
     }
     if shared.shadow_only() {
         return;
@@ -2614,6 +2679,46 @@ impl AdTierController {
     fn eval(&self) -> &GateEval {
         &self.last_eval
     }
+}
+
+fn load_attestation_summary(base_path: &str, epoch: u64) -> Option<AttestationSummary> {
+    let snapshot = governor_snapshot::load_snapshot(base_path, epoch)?;
+    let map = snapshot.as_object()?;
+    let attestation = map.get("attestation")?.as_object()?;
+    Some(AttestationSummary {
+        pubkey_hex: attestation
+            .get("pubkey_hex")
+            .and_then(JsonValue::as_str)
+            .map(String::from),
+        payload_hash_hex: attestation
+            .get("payload_hash_hex")
+            .and_then(JsonValue::as_str)
+            .map(String::from),
+        signature_hex: attestation
+            .get("signature_hex")
+            .and_then(JsonValue::as_str)
+            .map(String::from),
+    })
+}
+
+#[cfg(feature = "telemetry")]
+fn gather_receipt_health_summary() -> ReceiptHealthSummary {
+    ReceiptHealthSummary {
+        signature_mismatch_total: receipts::RECEIPT_AGG_SIG_MISMATCH_TOTAL.value(),
+        header_mismatch_total: receipts::RECEIPT_HEADER_MISMATCH_TOTAL.value(),
+        diversity_violation_total: receipts::RECEIPT_SHARD_DIVERSITY_VIOLATION_TOTAL.value(),
+        validation_failure_total: receipts::RECEIPT_VALIDATION_FAILURES_TOTAL.value(),
+        decoding_failure_total: receipts::RECEIPT_DECODING_FAILURES_TOTAL.value(),
+        pending_storage: receipts::PENDING_RECEIPTS_STORAGE.value(),
+        pending_compute: receipts::PENDING_RECEIPTS_COMPUTE.value(),
+        pending_energy: receipts::PENDING_RECEIPTS_ENERGY.value(),
+        drain_depth: receipts::RECEIPT_DRAIN_DEPTH.get().get() as i64,
+    }
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn gather_receipt_health_summary() -> ReceiptHealthSummary {
+    ReceiptHealthSummary::default()
 }
 
 #[cfg(test)]
