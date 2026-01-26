@@ -84,7 +84,7 @@ pub mod receipt_crypto;
 pub mod receipts;
 pub mod receipts_validation;
 pub mod simple_db;
-use crate::receipt_crypto::{NonceTracker, ProviderRegistry};
+use crate::receipt_crypto::{NonceTracker, ProviderRegistrationSource, ProviderRegistry};
 use config::{NodeConfig, ReceiptProviderConfig};
 pub use read_receipt::{ReadAck, ReadBatcher};
 pub use receipts::{
@@ -1017,6 +1017,8 @@ pub struct ChainDisk {
     pub base_fee: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub params: Params,
+    #[serde(default)]
+    pub provider_registry: ProviderRegistry,
     #[serde(default = "foundation_serialization::defaults::default")]
     pub epoch_storage_bytes: u64,
     #[serde(default = "foundation_serialization::defaults::default")]
@@ -1299,12 +1301,15 @@ impl Blockchain {
                 )
             })?;
             self.provider_registry
-                .register_provider_with_metadata(
+                .register_provider_with_source(
                     provider.provider_id.clone(),
                     verifying_key,
                     self.block_height,
                     provider.region.clone(),
                     provider.asn,
+                    ProviderRegistrationSource::Config {
+                        config_path: "node_config.receipt_providers".to_string(),
+                    },
                 )
                 .map_err(|err| {
                     format!(
@@ -2118,10 +2123,11 @@ impl Blockchain {
             econ_epoch_storage_payout,
             econ_epoch_compute_payout,
             econ_epoch_ad_payout,
+            provider_registry,
         ) = if let Some(raw) = db.get(DB_CHAIN) {
             match ledger_binary::decode_chain_disk(&raw) {
                 Ok(mut disk) => {
-                    if disk.schema_version > 11 {
+                    if disk.schema_version > 12 {
                         return Err(py_value_err("DB schema too new"));
                     }
                     if disk.schema_version < 3 {
@@ -2236,6 +2242,7 @@ impl Blockchain {
                             economics_baseline_tx_count: disk.economics_baseline_tx_count,
                             economics_baseline_tx_volume: disk.economics_baseline_tx_volume,
                             economics_baseline_miners: disk.economics_baseline_miners,
+                            provider_registry: ProviderRegistry::new(),
                         };
                         db.insert(
                             DB_CHAIN,
@@ -2264,6 +2271,7 @@ impl Blockchain {
                             migrated.economics_epoch_storage_payout_block,
                             migrated.economics_epoch_compute_payout_block,
                             migrated.economics_epoch_ad_payout_block,
+                            migrated.provider_registry.clone(),
                         )
                     } else {
                         if disk.emission == 0 && !disk.chain.is_empty() {
@@ -2424,6 +2432,14 @@ impl Blockchain {
                                     .unwrap_or_else(|e| panic!("serialize: {e}")),
                             );
                         }
+                        if disk.schema_version < 12 {
+                            disk.schema_version = 12;
+                            db.insert(
+                                DB_CHAIN,
+                                ledger_binary::encode_chain_disk(&disk)
+                                    .unwrap_or_else(|e| panic!("serialize: {e}")),
+                            );
+                        }
                         (
                             disk.chain,
                             disk.accounts,
@@ -2444,6 +2460,7 @@ impl Blockchain {
                             disk.economics_epoch_storage_payout_block,
                             disk.economics_epoch_compute_payout_block,
                             disk.economics_epoch_ad_payout_block,
+                            disk.provider_registry.clone(),
                         )
                     }
                 }
@@ -2560,6 +2577,7 @@ impl Blockchain {
                         economics_baseline_tx_count: 100,
                         economics_baseline_tx_volume: 10_000,
                         economics_baseline_miners: 10,
+                        provider_registry: ProviderRegistry::new(),
                     };
                     db.insert(
                         DB_CHAIN,
@@ -2588,6 +2606,7 @@ impl Blockchain {
                         0,
                         0,
                         0,
+                        disk_new.provider_registry.clone(),
                     )
                 }
             }
@@ -2612,6 +2631,7 @@ impl Blockchain {
                 0,
                 0,
                 0,
+                ProviderRegistry::new(),
             )
         };
 
@@ -2712,6 +2732,7 @@ impl Blockchain {
         bc.block_height = bh;
         bc.recent_miners = VecDeque::new();
         bc.recent_timestamps = VecDeque::from(recent_ts);
+        bc.provider_registry = provider_registry;
         bc.economics_block_reward_per_block = econ_block_reward;
         bc.economics_prev_annual_issuance_block = econ_prev_annual;
         bc.economics_prev_subsidy = econ_prev_subsidy;
@@ -3085,7 +3106,7 @@ impl Blockchain {
     pub fn schema_version(&self) -> usize {
         // Bump this constant whenever the serialized `ChainDisk` format changes.
         // Older binaries must refuse to open newer databases.
-        11
+        12
     }
 
     /// Persist the entire chain + state under the current schema
@@ -3156,6 +3177,7 @@ impl Blockchain {
             economics_baseline_tx_count: self.economics_baseline_tx_count,
             economics_baseline_tx_volume: self.economics_baseline_tx_volume,
             economics_baseline_miners: self.economics_baseline_miners,
+            provider_registry: self.provider_registry.clone(),
         };
         let bytes = ledger_binary::encode_chain_disk(&disk)
             .map_err(|e| py_value_err(format!("Serialization error: {e}")))?;

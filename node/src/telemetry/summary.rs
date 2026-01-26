@@ -20,6 +20,8 @@ pub struct TelemetrySummary {
     pub memory: HashMap<String, crate::telemetry::MemorySnapshot>,
     pub wrappers: crate::telemetry::WrapperSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub finality: Option<crate::telemetry::FinalityTelemetrySnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub ad_readiness: Option<foundation_telemetry::AdReadinessTelemetry>,
 }
 
@@ -74,6 +76,7 @@ fn build_summary(seq: u64) -> TelemetrySummary {
         node_id: NODE_LABEL.clone(),
         memory,
         wrappers: crate::telemetry::wrapper_metrics_snapshot(),
+        finality: crate::telemetry::finality_snapshot_summary(),
         ad_readiness: crate::ad_readiness::global_snapshot().map(|snapshot| {
             foundation_telemetry::AdReadinessTelemetry {
                 ready: snapshot.ready,

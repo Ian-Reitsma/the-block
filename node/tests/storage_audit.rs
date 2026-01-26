@@ -30,6 +30,7 @@ impl Provider for DummyProvider {
 #[test]
 fn audit_reports_missing_chunks_trigger_slash() {
     Settlement::init("", SettleMode::Real);
+    Settlement::accrue_split("lane", 1_000_000, 0); // seed the lane ledger so rent checks pass
 
     let dir = tempdir().unwrap();
     env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path());

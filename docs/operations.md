@@ -638,6 +638,12 @@ energy_active_disputes_total > 20
 
 ### Diagnosis
 
+### Provider key provenance & replay guard
+
+- Provider keys now live inside the ledger snapshot (`ChainDisk.provider_registry`). Each entry records the `ProviderRegistrationSource` (config path, governance intent, signed announcement, stake-linked policy), the region/ASN hints used for shard diversity, and the full `ProviderKeyVersion` history with `registered_at_block`/`retired_at_block` timestamps. Decode the latest `chain_db/chain` (the same payload you inspect for treasury audits) to confirm where the key came from and whether it is still active for the block range you are replaying.
+- Replay prevention depends on the per-receipt `signature_nonce` and the `receipt_crypto::NonceTracker` that records every `(provider_id, nonce)` pair for the configured `RECEIPT_NONCE_FINALITY` window. A `replayed_nonce` error means you are seeing a duplicate nonce within the finality window; look up the offending provider in the persisted registry to see which key was active at the time and whether a rotation happened since.
+- When a receipt header reports `receipt_header_mismatch`/`receipt_aggregate_sig_mismatch`, recompute the BLAKE3 digest encoded by `ReceiptAggregateScheme::BatchEd25519`: aggregate the per-shard leaf hashes, write each signature length + bytes, and run the same `receipt_crypto::aggregate_signature_digest` routine to confirm every node sees the same commitment even though we do not yet have a true aggregated signature backend.
+
 **Step 1**: Check emission rates by market
 
 ```bash

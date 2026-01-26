@@ -7,6 +7,7 @@ fn receipt_meta(
     nonce: u64,
     block_height: u64,
     region: Option<&str>,
+    chunk_hash: Option<[u8; 32]>,
 ) -> ReceiptMetadata {
     ReceiptMetadata {
         provider: provider.to_string(),
@@ -14,7 +15,7 @@ fn receipt_meta(
         block_height,
         contract_id: "contract-1".to_string(),
         region: region.map(str::to_string),
-        chunk_hash: None,
+        chunk_hash,
     }
 }
 
@@ -62,10 +63,11 @@ fn missing_repairs_emit_slash() {
 fn replayed_nonces_trigger_slash() {
     let mut controller = SlashingController::new(Config::default());
 
-    let first = controller.record_receipt(receipt_meta("provider-b", 42, 5, Some("us-west")));
+    let first = controller.record_receipt(receipt_meta("provider-b", 42, 5, Some("us-west"), None));
     assert!(first.is_empty());
 
-    let second = controller.record_receipt(receipt_meta("provider-b", 42, 9, Some("us-west")));
+    let second =
+        controller.record_receipt(receipt_meta("provider-b", 42, 9, Some("us-west"), None));
     assert_eq!(second.len(), 1);
     assert!(matches!(
         second[0].reason,
@@ -80,7 +82,7 @@ fn dark_region_reroutes_mark_dark() {
         dark_threshold: 3,
     };
     let mut controller = SlashingController::new(config);
-    controller.record_receipt(receipt_meta("provider-c", 1, 7, Some("eu-central")));
+    controller.record_receipt(receipt_meta("provider-c", 1, 7, Some("eu-central"), None));
 
     let slashes = controller.drain_slashes(11);
     assert!(slashes.iter().any(|slash| matches!(
@@ -93,4 +95,65 @@ fn dark_region_reroutes_mark_dark() {
         .expect("region tracked");
     assert!(status.is_dark());
     assert_eq!(status.dark_since, Some(11));
+}
+
+#[test]
+fn colluding_providers_duplicate_nonce_slash_all() {
+    let mut controller = SlashingController::new(Config::default());
+    let chunk_hash = [42u8; 32];
+    controller.record_receipt(receipt_meta(
+        "provider-a",
+        12,
+        20,
+        Some("us-west"),
+        Some(chunk_hash),
+    ));
+
+    let slashes = controller.record_receipt(receipt_meta(
+        "provider-b",
+        12,
+        21,
+        Some("us-west"),
+        Some(chunk_hash),
+    ));
+
+    assert_eq!(slashes.len(), 2);
+    let providers: std::collections::HashSet<_> = slashes
+        .iter()
+        .map(|slash| slash.provider.as_str())
+        .collect();
+    assert!(providers.contains("provider-a"));
+    assert!(providers.contains("provider-b"));
+    assert!(slashes
+        .iter()
+        .all(|slash| matches!(slash.reason, SlashingReason::ReplayedNonce { nonce: 12 })));
+}
+
+#[test]
+fn repair_deadline_clears_when_chunk_returns() {
+    let config = Config {
+        repair_window: 4,
+        dark_threshold: 20,
+    };
+    let mut controller = SlashingController::new(config);
+    let key = repair_key("contract-1", "provider-d");
+    controller.report_missing_chunk(RepairReport {
+        key: key.clone(),
+        block_height: 100,
+        missing_bytes: 8,
+        provider_escrow: 15,
+        rent_per_byte: 3,
+        region: Some("ap-south".into()),
+    });
+
+    controller.record_receipt(receipt_meta(
+        "provider-d",
+        99,
+        102,
+        Some("ap-south"),
+        Some(key.chunk_hash),
+    ));
+
+    let slashes = controller.drain_slashes(110);
+    assert!(slashes.is_empty());
 }

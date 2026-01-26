@@ -1,7 +1,7 @@
 use crate::ad_readiness;
 use crate::blockchain::process::validate_and_apply;
-use crate::economics::{deterministic_metrics, MarketMetrics};
 use crate::economics::replay::replay_economics_to_tip;
+use crate::economics::{deterministic_metrics, MarketMetrics};
 use crate::gateway::dns;
 use crate::governance::Runtime;
 use crate::governor_snapshot;

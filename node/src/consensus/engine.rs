@@ -1,4 +1,6 @@
 use super::{finality::FinalityGadget, unl::Unl};
+#[cfg(feature = "telemetry")]
+use crate::telemetry;
 
 /// Federated consensus engine combining UNL and finality gadget.
 pub struct ConsensusEngine {
@@ -15,7 +17,10 @@ impl ConsensusEngine {
 
     /// Cast a vote. Returns true if finalized.
     pub fn vote(&mut self, validator: &str, block_hash: &str) -> bool {
-        self.gadget.vote(validator, block_hash)
+        let finalized = self.gadget.vote(validator, block_hash);
+        #[cfg(feature = "telemetry")]
+        telemetry::record_finality_snapshot(self.snapshot());
+        finalized
     }
 
     /// Inspect the current voting state for auditing/tests.

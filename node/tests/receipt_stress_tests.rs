@@ -12,7 +12,10 @@ use rand::rngs::StdRng;
 use rand::Rng;
 use std::time::Instant;
 use the_block::block_binary::encode_receipts;
-use the_block::receipt_crypto::{NonceTracker, ProviderRegistry};
+use the_block::receipt_crypto::{
+    build_ad_preimage, build_compute_preimage, build_energy_preimage, build_storage_preimage,
+    NonceTracker, ProviderRegistry,
+};
 use the_block::receipts::{
     AdReceipt, BlockTorchReceiptMetadata, ComputeReceipt, EnergyReceipt, Receipt, StorageReceipt,
 };
@@ -518,70 +521,6 @@ fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
         | Receipt::EnergySlash(_)
         | Receipt::StorageSlash(_) => unreachable!(),
     }
-}
-
-fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
-    let mut hasher = Hasher::new();
-    hasher.update(b"storage");
-    hasher.update(&receipt.block_height.to_le_bytes());
-    hasher.update(receipt.contract_id.as_bytes());
-    hasher.update(receipt.provider.as_bytes());
-    hasher.update(&receipt.bytes.to_le_bytes());
-    hasher.update(&receipt.price.to_le_bytes());
-    hasher.update(&receipt.provider_escrow.to_le_bytes());
-    hasher.update(&receipt.signature_nonce.to_le_bytes());
-    hasher.finalize().as_bytes().to_vec()
-}
-
-fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
-    let mut hasher = Hasher::new();
-    hasher.update(b"compute");
-    hasher.update(&receipt.block_height.to_le_bytes());
-    hasher.update(receipt.job_id.as_bytes());
-    hasher.update(receipt.provider.as_bytes());
-    hasher.update(&receipt.compute_units.to_le_bytes());
-    hasher.update(&receipt.payment.to_le_bytes());
-    hasher.update(&[u8::from(receipt.verified)]);
-    hasher.update(&receipt.signature_nonce.to_le_bytes());
-    if let Some(meta) = &receipt.blocktorch {
-        hasher.update(&meta.kernel_variant_digest);
-        if let Some(commit) = &meta.benchmark_commit {
-            hasher.update(commit.as_bytes());
-        }
-        if let Some(epoch) = &meta.tensor_profile_epoch {
-            hasher.update(epoch.as_bytes());
-        }
-        hasher.update(&meta.proof_latency_ms.to_le_bytes());
-    } else {
-        hasher.update(b"blocktorch:none");
-    }
-    hasher.finalize().as_bytes().to_vec()
-}
-
-fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
-    let mut hasher = Hasher::new();
-    hasher.update(b"energy");
-    hasher.update(&receipt.block_height.to_le_bytes());
-    hasher.update(receipt.contract_id.as_bytes());
-    hasher.update(receipt.provider.as_bytes());
-    hasher.update(&receipt.energy_units.to_le_bytes());
-    hasher.update(&receipt.price.to_le_bytes());
-    hasher.update(&receipt.proof_hash);
-    hasher.update(&receipt.signature_nonce.to_le_bytes());
-    hasher.finalize().as_bytes().to_vec()
-}
-
-fn build_ad_preimage(receipt: &AdReceipt) -> Vec<u8> {
-    let mut hasher = Hasher::new();
-    hasher.update(b"ad");
-    hasher.update(&receipt.block_height.to_le_bytes());
-    hasher.update(receipt.campaign_id.as_bytes());
-    hasher.update(receipt.publisher.as_bytes());
-    hasher.update(&receipt.impressions.to_le_bytes());
-    hasher.update(&receipt.spend.to_le_bytes());
-    hasher.update(&receipt.conversions.to_le_bytes());
-    hasher.update(&receipt.signature_nonce.to_le_bytes());
-    hasher.finalize().as_bytes().to_vec()
 }
 
 #[test]

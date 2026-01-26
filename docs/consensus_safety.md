@@ -11,6 +11,7 @@ This document is the executable specification for the current federated consensu
 ## Promised Properties
 1) **Safety (conflict-free finality):** No two distinct block hashes can both finalize unless >1/3 of total stake equivocate.
 2) **Liveness under partial partitions:** If at least 2/3 stake can eventually communicate, some block will finalize once their votes are delivered (delivery may be delayed/jittered).
+2a) **Strict equivocation gating:** Conflicting votes immediately mark a validator as faulty and drop their stake from future tallies, but the finality threshold still requires 2/3 of the original UNL total. As a result, once >1/3 of stake has equivocated, finality stays stalled until the UNL is refreshed or enough new stake is added; mere reconnection is insufficient to finalize a block that mixed-conflicted history.
 3) **Equivocation accountability:** Any validator that emits conflicting votes is marked faulty and its stake is excluded from future tallies until the UNL is refreshed.
 4) **Auditable state transitions:** The voting state (votes, equivocators, finalized hash, total stake) is snapshot-able for tests, telemetry, and incident review.
 

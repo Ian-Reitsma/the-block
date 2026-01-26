@@ -43,7 +43,9 @@ fn discovers_remote_provider_from_advertisement() {
         .discover_providers(request)
         .expect("discover providers");
     assert!(
-        providers.iter().any(|p| p.provider_id == remote.provider_id),
+        providers
+            .iter()
+            .any(|p| p.provider_id == remote.provider_id),
         "remote provider not discovered"
     );
     let remote_entry = providers
@@ -84,7 +86,9 @@ fn hydrates_directory_from_lookup_response() {
         .discover_providers(request)
         .expect("discover providers");
     assert!(
-        providers.iter().any(|p| p.provider_id == remote.provider_id),
+        providers
+            .iter()
+            .any(|p| p.provider_id == remote.provider_id),
         "remote provider not discovered from lookup response"
     );
 }

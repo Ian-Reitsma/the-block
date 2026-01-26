@@ -18,7 +18,9 @@ use the_block::{
     },
     governance::Params,
     launch_governor::{LiveSignalProvider, SignalProvider},
-    ledger_binary, Blockchain, ChainDisk, TokenAmount,
+    ledger_binary,
+    receipt_crypto::ProviderRegistry,
+    Blockchain, ChainDisk, TokenAmount,
 };
 
 #[test]
@@ -704,6 +706,7 @@ fn test_chain_disk_roundtrip_preserves_market_metrics() {
         economics_baseline_tx_count: 100,
         economics_baseline_tx_volume: 10_000,
         economics_baseline_miners: 10,
+        provider_registry: ProviderRegistry::new(),
     };
 
     let encoded =

@@ -8,6 +8,7 @@ Failures: 17 targets / 26 tests. Root causes + fix plans below are written so th
 - **Symptom:** `the_block` fails to compile during `cargo xtask chaos`: unresolved import `crate::telemetry::consensus_metrics::BLOCK_HEIGHT` in `node/src/rpc/storage.rs:26` and `node/src/storage/repair.rs:8` when `telemetry` feature is off.
 - **Root cause:** Telemetry module is `#[cfg(feature="telemetry")]`, but the imports are unconditional. `xtask chaos` builds `the_block` without `telemetry`, so the gated module is missing and compile fails.
 - **What to change:** Gate those imports/usages or route through `runtime::telemetry` (which is always present) under `cfg(feature="telemetry")`. Verify no other paths reference `crate::telemetry::*` without the feature. Re-run `-p release_tests --test chaos_xtask`.
+- **Status:** `cargo test -p release_tests --test chaos_xtask --all-features` now succeeds; the new feature-matrix compile gate will flash telemetry-off import issues earlier if they recur.
 
 ## 2) storage::repair (3 tests)
 - **Tests:** `repairs_missing_shards_and_logs_success`, `applies_backoff_after_repeated_failures`, `repairs_sparse_manifest_metadata_end_to_end`.
@@ -81,6 +82,7 @@ Failures: 17 targets / 26 tests. Root causes + fix plans below are written so th
 - **Symptom:** `engine.vote("v4", "A")` returned `false`; finality never reached.
 - **Root cause:** After the partition, v3 already voted for B; when it switches to A, the engine treats the conflicting vote as equivocation or otherwise withholds finality, so the subsequent v4 vote still doesn’t finalize. The test assumes convergence to A should finalize despite the earlier conflicting vote.
 - **What to change:** Align consensus rules vs. test: either allow finality after enough weight on A even with an equivocator (update engine thresholds accordingly) or mark the test obsolete and document stricter equivocation handling. Update consensus docs and telemetry expectations either way.
+- **Protocol decision:** finality intentionally stalls until a fresh 2/3+ of the UNL votes the same hash; this test now asserts the stricter handling and documents the behaviour in `docs/consensus_safety.md`. Reran `cargo test -p the_block --test pos_finality --all-features`.
 
 ## 13) receipt_security (3 tests)
 - **Tests:** `accept_valid_storage_receipt`, `nonce_prevents_replay_across_multiple_receipts`, `reject_duplicate_receipt_across_blocks`.
@@ -104,6 +106,7 @@ Failures: 17 targets / 26 tests. Root causes + fix plans below are written so th
 - **Symptom:** Panics on `store blob: "ERR_RENT_ESCROW_INSUFFICIENT"`.
 - **Root cause:** Audit flow now enforces rent escrow funding before storing blobs. The test seeds no escrow, so storage admission fails before the audit path runs.
 - **What to change:** In the test harness, fund rent escrow (or configure a zero-cost lane) before calling `store_blob` so the audit can proceed. Alternatively, adjust the audit path to use a test stub for rent escrow when `TB_PRESERVE`/test mode is set. Update storage docs to reflect the escrow precondition.
+- **Fix:** Pre-fund the lane ledger with `Settlement::accrue_split("lane", 1_000_000, 0)` before `put_object`, keeping `set_rent_rate(0)` for zero rent, so the audit path can spider-off. Reran `cargo test -p the_block --test storage_audit --all-features`.
 
 ## 17) storage_provider_directory (2 tests)
 - **Tests:** `discovers_remote_provider_from_advertisement`, `hydrates_directory_from_lookup_response`.
@@ -117,3 +120,4 @@ Failures: 17 targets / 26 tests. Root causes + fix plans below are written so th
 - Add a shared integration-test bootstrap that: sets market gates to `Trade` (compute/energy/storage) unless overridden, initializes settlement in DryRun, and resets any global singletons. This would deflake many of the above tests.
 - Mirror all receipt-signing helpers to the canonical preimage builders to prevent future drift.
 - Update docs (AGENTS + referenced sections) before code changes per spec-first policy.
+- Add a feature-matrix compile gate (`no-default-features`, `cli`, `gateway+cli`, `telemetry+cli`) to `run-tests-verbose.sh` and verify each command (`cargo check -p the_block ...`) so telemetry-off + gateway/CLI combinations fail fast if they break.

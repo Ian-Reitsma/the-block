@@ -12,24 +12,47 @@ use std::collections::{HashMap, VecDeque};
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
 
-/// Provider registration tracking public keys for receipt verification
+/// Provenance for how a provider key entered the registry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
-pub struct ProviderRegistry {
-    /// Map of provider_id -> (public_key, registered_at_block)
-    pub providers: HashMap<String, ProviderRecord>,
+pub enum ProviderRegistrationSource {
+    Config { config_path: String },
+    SignedAnnouncement { tx_hash: String },
+    Governance { proposal_id: String },
+    StakeLinked { stake_id: String },
 }
 
-/// Provider metadata attached to a verifying key.
+/// A historical version of a provider verifying key.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ProviderKeyVersion {
+    pub verifying_key: VerifyingKey,
+    pub registered_at_block: u64,
+    pub retired_at_block: Option<u64>,
+    #[serde(default)]
+    pub evidence: Option<String>,
+}
+
+/// Provider metadata and key history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(crate = "foundation_serialization::serde")]
 pub struct ProviderRecord {
-    pub verifying_key: VerifyingKey,
-    pub registered_at_block: u64,
+    pub provider_id: String,
+    pub registration_source: ProviderRegistrationSource,
     #[serde(default)]
     pub region: Option<String>,
     #[serde(default)]
     pub asn: Option<u32>,
+    #[serde(default)]
+    pub key_versions: Vec<ProviderKeyVersion>,
+}
+
+/// Provider registration tracking public keys for receipt verification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct ProviderRegistry {
+    /// Map of provider_id -> metadata + key history
+    pub providers: HashMap<String, ProviderRecord>,
 }
 
 impl ProviderRegistry {
@@ -46,10 +69,55 @@ impl ProviderRegistry {
         verifying_key: VerifyingKey,
         block_height: u64,
     ) -> Result<(), String> {
-        self.register_provider_with_metadata(provider_id, verifying_key, block_height, None, None)
+        self.register_provider_with_source(
+            provider_id,
+            verifying_key,
+            block_height,
+            None,
+            None,
+            ProviderRegistrationSource::Config {
+                config_path: "default".to_string(),
+            },
+        )
     }
 
-    /// Register provider metadata (region/ASN optional).
+    /// Register provider metadata (region/ASN optional) with explicit provenance.
+    pub fn register_provider_with_source(
+        &mut self,
+        provider_id: String,
+        verifying_key: VerifyingKey,
+        block_height: u64,
+        region: Option<String>,
+        asn: Option<u32>,
+        source: ProviderRegistrationSource,
+    ) -> Result<(), String> {
+        if provider_id.is_empty() {
+            return Err("provider_id cannot be empty".into());
+        }
+        if provider_id.len() > 256 {
+            return Err("provider_id too long".into());
+        }
+        if self.providers.contains_key(&provider_id) {
+            return Err(format!("provider {} already registered", provider_id));
+        }
+        self.providers.insert(
+            provider_id.clone(),
+            ProviderRecord {
+                provider_id: provider_id.clone(),
+                registration_source: source,
+                region,
+                asn,
+                key_versions: vec![ProviderKeyVersion {
+                    verifying_key,
+                    registered_at_block: block_height,
+                    retired_at_block: None,
+                    evidence: None,
+                }],
+            },
+        );
+        Ok(())
+    }
+
     pub fn register_provider_with_metadata(
         &mut self,
         provider_id: String,
@@ -58,30 +126,65 @@ impl ProviderRegistry {
         region: Option<String>,
         asn: Option<u32>,
     ) -> Result<(), String> {
-        if provider_id.is_empty() {
-            return Err("provider_id cannot be empty".into());
-        }
-        if provider_id.len() > 256 {
-            return Err("provider_id too long".into());
-        }
-
-        self.providers.insert(
+        self.register_provider_with_source(
             provider_id,
-            ProviderRecord {
-                verifying_key,
-                registered_at_block: block_height,
-                region,
-                asn,
+            verifying_key,
+            block_height,
+            region,
+            asn,
+            ProviderRegistrationSource::Config {
+                config_path: "config".to_string(),
             },
-        );
+        )
+    }
+
+    /// Rotate to a new verifying key while preserving history for audit.
+    pub fn rotate_provider_key(
+        &mut self,
+        provider_id: &str,
+        new_verifying_key: VerifyingKey,
+        block_height: u64,
+        evidence: Option<String>,
+    ) -> Result<(), String> {
+        let record = self
+            .providers
+            .get_mut(provider_id)
+            .ok_or_else(|| format!("unknown provider {}", provider_id))?;
+        if let Some(last) = record.key_versions.last_mut() {
+            if block_height < last.registered_at_block {
+                return Err("rotation height must be monotonic".into());
+            }
+            last.retired_at_block = Some(block_height.saturating_sub(1));
+        }
+        record.key_versions.push(ProviderKeyVersion {
+            verifying_key: new_verifying_key,
+            registered_at_block: block_height,
+            retired_at_block: None,
+            evidence,
+        });
         Ok(())
     }
 
-    /// Retrieve provider's public key
+    /// Get provider's current verifying key (latest version).
     pub fn get_provider(&self, provider_id: &str) -> Option<VerifyingKey> {
-        self.providers
-            .get(provider_id)
-            .map(|record| record.verifying_key.clone())
+        self.key_for_block(provider_id, u64::MAX)
+    }
+
+    /// Get the key that should verify a receipt issued at `block_height`.
+    pub fn key_for_block(&self, provider_id: &str, block_height: u64) -> Option<VerifyingKey> {
+        self.providers.get(provider_id).and_then(|record| {
+            record
+                .key_versions
+                .iter()
+                .rev()
+                .find(|version| {
+                    version.registered_at_block <= block_height
+                        && version
+                            .retired_at_block
+                            .map_or(true, |retired| block_height <= retired)
+                })
+                .map(|version| version.verifying_key.clone())
+        })
     }
 
     pub fn get_provider_record(&self, provider_id: &str) -> Option<&ProviderRecord> {
@@ -90,6 +193,12 @@ impl ProviderRegistry {
 
     pub fn provider_registered(&self, provider_id: &str) -> bool {
         self.providers.contains_key(provider_id)
+    }
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -245,7 +354,7 @@ impl std::fmt::Display for CryptoError {
 impl std::error::Error for CryptoError {}
 
 /// Build deterministic preimage for storage receipt signature
-fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
+pub fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
     let mut hasher = blake3::Hasher::new();
 
     hasher.update(b"storage");
@@ -271,7 +380,7 @@ fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
 }
 
 /// Build deterministic preimage for compute receipt signature
-fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
+pub fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
     let mut hasher = blake3::Hasher::new();
 
     hasher.update(b"compute");
@@ -299,7 +408,7 @@ fn build_compute_preimage(receipt: &ComputeReceipt) -> Vec<u8> {
 }
 
 /// Build deterministic preimage for energy receipt signature
-fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
+pub fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
     let mut hasher = blake3::Hasher::new();
 
     hasher.update(b"energy");
@@ -315,7 +424,7 @@ fn build_energy_preimage(receipt: &EnergyReceipt) -> Vec<u8> {
 }
 
 /// Build deterministic preimage for ad receipt signature
-fn build_ad_preimage(receipt: &AdReceipt) -> Vec<u8> {
+pub fn build_ad_preimage(receipt: &AdReceipt) -> Vec<u8> {
     let mut hasher = blake3::Hasher::new();
 
     hasher.update(b"ad");
@@ -378,13 +487,11 @@ pub fn verify_receipt_signature(
         Receipt::Relay(_) => return Ok(()),
     };
 
-    // Get provider's public key
-    let verifying_key =
-        provider_registry
-            .get_provider(provider_id)
-            .ok_or(CryptoError::UnknownProvider {
-                provider_id: provider_id.to_owned(),
-            })?;
+    let verifying_key = provider_registry
+        .key_for_block(provider_id, receipt.block_height())
+        .ok_or(CryptoError::UnknownProvider {
+            provider_id: provider_id.to_owned(),
+        })?;
 
     // Check nonce hasn't been replayed
     nonce_tracker
@@ -581,5 +688,30 @@ mod tests {
         }
         assert!(tracker.seen_nonces.len() <= MAX_NONCES_TRACKED);
         assert!(tracker.ordered_keys.len() <= MAX_NONCES_TRACKED);
+    }
+
+    #[test]
+    fn rotation_respects_block_height() {
+        let (_, vk1) = create_test_keypair();
+        let (_, vk2) = create_test_keypair();
+        let mut registry = ProviderRegistry::new();
+        registry
+            .register_provider("rotating".into(), vk1.clone(), 0)
+            .unwrap();
+        registry
+            .rotate_provider_key("rotating", vk2.clone(), 100, None)
+            .unwrap();
+        assert_eq!(
+            registry.key_for_block("rotating", 50).unwrap().to_bytes(),
+            vk1.to_bytes()
+        );
+        assert_eq!(
+            registry.key_for_block("rotating", 100).unwrap().to_bytes(),
+            vk2.to_bytes()
+        );
+        assert_eq!(
+            registry.key_for_block("rotating", 200).unwrap().to_bytes(),
+            vk2.to_bytes()
+        );
     }
 }

@@ -8,10 +8,14 @@ use crate::block_binary;
 use crate::blockchain::macro_block::MacroBlock;
 use crate::economics;
 use crate::localnet::AssistReceipt;
+use crate::receipt_crypto::{
+    ProviderKeyVersion, ProviderRecord, ProviderRegistrationSource, ProviderRegistry,
+};
 use crate::root_assembler::{RootBundleSummary, RootSizeClass};
 use crate::transaction::binary::{self as tx_binary, EncodeError, EncodeResult};
 use crate::util::binary_struct::{self, assign_once, decode_struct, ensure_exhausted, DecodeError};
 use crate::{Account, Block, ChainDisk, MempoolEntryDisk, Params, TokenAmount, TokenBalance};
+use crypto_suite::signatures::ed25519::VerifyingKey;
 
 /// Encode an [`Account`] into the canonical binary layout.
 pub fn encode_account(account: &Account) -> EncodeResult<Vec<u8>> {
@@ -301,7 +305,7 @@ fn read_session(reader: &mut Reader<'_>) -> binary_struct::Result<SessionPolicy>
 }
 
 fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
-    writer.write_u64(30); // Updated to match the current number of encoded fields
+    writer.write_u64(31); // Updated to match the current number of encoded fields
     writer.write_string("schema_version");
     writer.write_u64(disk.schema_version as u64);
     writer.write_string("chain");
@@ -362,6 +366,98 @@ fn write_chain_disk(writer: &mut Writer, disk: &ChainDisk) -> EncodeResult<()> {
     writer.write_u64(disk.economics_baseline_tx_volume);
     writer.write_string("economics_baseline_miners");
     writer.write_u64(disk.economics_baseline_miners);
+    writer.write_string("provider_registry");
+    write_provider_registry(writer, &disk.provider_registry)?;
+    Ok(())
+}
+
+fn write_provider_registry(writer: &mut Writer, registry: &ProviderRegistry) -> EncodeResult<()> {
+    let mut entries: Vec<(&String, &ProviderRecord)> = registry.providers.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    let len = u64::try_from(entries.len())
+        .map_err(|_| EncodeError::LengthOverflow("provider_registry"))?;
+    writer.write_u64(len);
+    for (provider_id, record) in entries {
+        writer.write_string(provider_id);
+        write_provider_record(writer, record)?;
+    }
+    Ok(())
+}
+
+fn write_provider_record(writer: &mut Writer, record: &ProviderRecord) -> EncodeResult<()> {
+    write_registration_source(writer, &record.registration_source)?;
+    write_optional_string(writer, record.region.as_ref())?;
+    write_optional_u32(writer, record.asn)?;
+    write_vec(
+        writer,
+        &record.key_versions,
+        "key_versions",
+        write_provider_key_version,
+    )?;
+    Ok(())
+}
+
+fn write_registration_source(
+    writer: &mut Writer,
+    source: &ProviderRegistrationSource,
+) -> EncodeResult<()> {
+    match source {
+        ProviderRegistrationSource::Config { config_path } => {
+            writer.write_u8(0);
+            writer.write_string(config_path);
+        }
+        ProviderRegistrationSource::SignedAnnouncement { tx_hash } => {
+            writer.write_u8(1);
+            writer.write_string(tx_hash);
+        }
+        ProviderRegistrationSource::Governance { proposal_id } => {
+            writer.write_u8(2);
+            writer.write_string(proposal_id);
+        }
+        ProviderRegistrationSource::StakeLinked { stake_id } => {
+            writer.write_u8(3);
+            writer.write_string(stake_id);
+        }
+    }
+    Ok(())
+}
+
+fn write_provider_key_version(
+    writer: &mut Writer,
+    version: &ProviderKeyVersion,
+) -> EncodeResult<()> {
+    writer.write_bytes(&version.verifying_key.to_bytes());
+    writer.write_u64(version.registered_at_block);
+    if let Some(retired) = version.retired_at_block {
+        writer.write_u8(1);
+        writer.write_u64(retired);
+    } else {
+        writer.write_u8(0);
+    }
+    write_optional_string(writer, version.evidence.as_ref())?;
+    Ok(())
+}
+
+fn write_optional_string(writer: &mut Writer, value: Option<&String>) -> EncodeResult<()> {
+    match value {
+        Some(value) => {
+            writer.write_u8(1);
+            writer.write_string(value);
+        }
+        None => {
+            writer.write_u8(0);
+        }
+    }
+    Ok(())
+}
+
+fn write_optional_u32(writer: &mut Writer, value: Option<u32>) -> EncodeResult<()> {
+    if let Some(v) = value {
+        writer.write_u8(1);
+        writer.write_u32(v);
+    } else {
+        writer.write_u8(0);
+    }
     Ok(())
 }
 
@@ -401,6 +497,7 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
     let mut economics_baseline_tx_count = None;
     let mut economics_baseline_tx_volume = None;
     let mut economics_baseline_miners = None;
+    let mut provider_registry = None;
 
     decode_struct(reader, None, |key, reader| match key {
         // Changed from Some(18) to support both old (18) and new (16) field formats
@@ -549,6 +646,11 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
             reader.read_u64()?,
             "economics_baseline_miners",
         ),
+        "provider_registry" => assign_once(
+            &mut provider_registry,
+            read_provider_registry(reader)?,
+            "provider_registry",
+        ),
         other => Err(DecodeError::UnknownField(other.to_owned())),
     })?;
 
@@ -592,7 +694,113 @@ fn read_chain_disk(reader: &mut Reader<'_>) -> binary_struct::Result<ChainDisk> 
         economics_baseline_tx_count: economics_baseline_tx_count.unwrap_or(100),
         economics_baseline_tx_volume: economics_baseline_tx_volume.unwrap_or(10_000),
         economics_baseline_miners: economics_baseline_miners.unwrap_or(10),
+        provider_registry: provider_registry.unwrap_or_default(),
     })
+}
+
+fn read_provider_registry(reader: &mut Reader<'_>) -> binary_struct::Result<ProviderRegistry> {
+    let len = reader.read_u64()?;
+    let len = usize::try_from(len).map_err(|_| DecodeError::InvalidFieldValue {
+        field: "provider_registry",
+        reason: "length overflow".to_string(),
+    })?;
+    let mut providers = HashMap::with_capacity(len);
+    for _ in 0..len {
+        let provider_id = reader.read_string()?;
+        let record = read_provider_record(reader, provider_id.clone())?;
+        providers.insert(provider_id, record);
+    }
+    Ok(ProviderRegistry { providers })
+}
+
+fn read_provider_record(
+    reader: &mut Reader<'_>,
+    provider_id: String,
+) -> binary_struct::Result<ProviderRecord> {
+    let registration_source = read_registration_source(reader)?;
+    let region = read_optional_string(reader)?;
+    let asn = read_optional_u32(reader)?;
+    let key_versions = read_vec(reader, "key_versions", read_provider_key_version)?;
+    Ok(ProviderRecord {
+        provider_id,
+        registration_source,
+        region,
+        asn,
+        key_versions,
+    })
+}
+
+fn read_registration_source(
+    reader: &mut Reader<'_>,
+) -> binary_struct::Result<ProviderRegistrationSource> {
+    let discriminant = reader.read_u8()?;
+    match discriminant {
+        0 => Ok(ProviderRegistrationSource::Config {
+            config_path: reader.read_string()?,
+        }),
+        1 => Ok(ProviderRegistrationSource::SignedAnnouncement {
+            tx_hash: reader.read_string()?,
+        }),
+        2 => Ok(ProviderRegistrationSource::Governance {
+            proposal_id: reader.read_string()?,
+        }),
+        3 => Ok(ProviderRegistrationSource::StakeLinked {
+            stake_id: reader.read_string()?,
+        }),
+        other => Err(DecodeError::InvalidEnumDiscriminant {
+            ty: "ProviderRegistrationSource",
+            value: other as u32,
+        }),
+    }
+}
+
+fn read_provider_key_version(reader: &mut Reader<'_>) -> binary_struct::Result<ProviderKeyVersion> {
+    let bytes = reader.read_bytes()?;
+    let key_bytes: [u8; 32] =
+        bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| DecodeError::InvalidFieldValue {
+                field: "provider_key",
+                reason: "expected 32 bytes".into(),
+            })?;
+    let verifying_key =
+        VerifyingKey::from_bytes(&key_bytes).map_err(|err| DecodeError::InvalidFieldValue {
+            field: "verifying_key",
+            reason: err.to_string(),
+        })?;
+    let registered_at_block = reader.read_u64()?;
+    let retired_flag = reader.read_u8()?;
+    let retired_at_block = if retired_flag != 0 {
+        Some(reader.read_u64()?)
+    } else {
+        None
+    };
+    let evidence = read_optional_string(reader)?;
+    Ok(ProviderKeyVersion {
+        verifying_key,
+        registered_at_block,
+        retired_at_block,
+        evidence,
+    })
+}
+
+fn read_optional_string(reader: &mut Reader<'_>) -> binary_struct::Result<Option<String>> {
+    let flag = reader.read_u8()?;
+    if flag != 0 {
+        Ok(Some(reader.read_string()?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn read_optional_u32(reader: &mut Reader<'_>) -> binary_struct::Result<Option<u32>> {
+    let flag = reader.read_u8()?;
+    if flag != 0 {
+        Ok(Some(reader.read_u32()?))
+    } else {
+        Ok(None)
+    }
 }
 
 fn write_account_map(writer: &mut Writer, accounts: &HashMap<String, Account>) -> EncodeResult<()> {
@@ -1357,6 +1565,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::receipt_crypto::ProviderRegistry;
     use crate::transaction::{FeeLane, RawTxPayload, SignedTransaction, TxSignature, TxVersion};
     use crate::{Block, TokenAmount};
     use foundation_serialization::binary_cursor::{Reader, Writer};
@@ -1601,6 +1810,7 @@ mod tests {
             economics_baseline_tx_volume: 10_000,
             economics_baseline_miners: 10,
             economics_prev_market_metrics: crate::economics::MarketMetrics::default(),
+            provider_registry: ProviderRegistry::new(),
         };
         let bytes = encode_chain_disk(&disk).expect("encode");
         let decoded = decode_chain_disk(&bytes).expect("decode");

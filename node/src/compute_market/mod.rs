@@ -21,6 +21,7 @@ pub mod admission;
 pub mod cbm;
 pub mod courier;
 pub mod courier_store;
+pub mod dispute;
 pub mod errors;
 pub mod matcher;
 pub mod price_board;

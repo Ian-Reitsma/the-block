@@ -8,7 +8,7 @@
 
 use crate::block_binary;
 use crate::receipt_crypto::{
-    verify_receipt_signature, CryptoError, NonceTracker, ProviderRegistry,
+    build_storage_preimage, verify_receipt_signature, CryptoError, NonceTracker, ProviderRegistry,
 };
 use crate::receipts::Receipt;
 use crypto_suite::hashing::blake3;
@@ -1067,22 +1067,8 @@ mod tests {
             signature_nonce: nonce,
         };
 
-        // Build preimage
-        use crypto_suite::hashing::blake3;
-        let mut hasher = blake3::Hasher::new();
-        hasher.update(b"storage");
-        hasher.update(&receipt.block_height.to_le_bytes());
-        hasher.update(receipt.contract_id.as_bytes());
-        hasher.update(receipt.provider.as_bytes());
-        hasher.update(&receipt.bytes.to_le_bytes());
-        hasher.update(&receipt.price.to_le_bytes());
-        hasher.update(&receipt.provider_escrow.to_le_bytes());
-        hasher.update(b"chunk_hash:none");
-        hasher.update(b"region:none");
-        hasher.update(&receipt.signature_nonce.to_le_bytes());
-        let preimage = hasher.finalize();
-
-        let signature = sk.sign(preimage.as_bytes());
+        let preimage = build_storage_preimage(&receipt);
+        let signature = sk.sign(&preimage);
         receipt.provider_signature = signature.to_bytes().to_vec();
         receipt
     }

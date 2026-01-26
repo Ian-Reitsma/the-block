@@ -41,6 +41,18 @@ Everything below reflects what ships in `main` today. Paths reference the exact 
 - `node/src/consensus/finality.rs` collects validator attestations, rotates stakes, and records dispute evidence in sled (`state/`).
 - The DKG helper crate `dkg/` plus `node/src/dkg.rs` coordinates committee key refresh without exposing transcripts.
 
+Finality now treats conflicting votes as deliberate stake removal. Every time a validator casts a vote that contradicts a previous one, the gadget ejects that identity, recomputes the 2/3 supermajority over the remaining (effective) stake, and re-evaluates all outstanding vote tallies. Partitions and recovery flows therefore finish as soon as honest weight clears the new threshold, even if transient equivocations happened during the partition.
+
+Operators can monitor this process through the telemetry snapshot published via `telemetry.summary.finality` (and the `/wrappers` payload). It reports:
+
+1. `vote_support` per block hash so dashboards can show exactly how much non-equiv stake backs each candidate.
+2. `equivocated_validators` plus `equivocated_stakes` so security teams know who was discarded and how much stake they carried.
+3. `effective_total_stake`, `equivocated_stake`, and `finality_threshold` so liveness gaps are obvious; compare them to `finalized` to see whether any block has met the adjusted supermajority.
+
+When equivocations eat enough stake that `effective_total_stake` falls below `finality_threshold`, finality will pause until governance rotates the UNL (typically via slashing/ejecting the faulty identities and refreshing the validator snapshot). The Launch Governor (`node/src/launch_governor`) owns those transitions: operations should escalate through `governor.status` / `governor.intents` (and the `economics_prev_market_metrics_*` gauges) to wire a new UNL, verify `telemetry.summary.finality` reflects the reset threshold, and only then expect new votes to reach 2/3. These telemetry snapshots are deterministic clones of `FinalitySnapshot`, so the metrics aggregator, RPC layers, and dashboards all report the same state without drift.
+
+The behavior is locked in by the stability tests under `node/tests/pos_finality.rs` and `node/tests/consensus_finality.rs`: partitions now finalize once surviving stake exceeds the effective threshold, and the new regression ensures equivocated stake never contributes to a future supermajority. Any tuning that touches this path must keep the telemetry snapshot in sync so operators still have a clear picture of who was removed, how much stake was discarded, and what liveness budget remains.
+
 ## Transaction and Execution Pipeline
 
 > **Plain English:** When you want to send BLOCK or use a service, you create a "transaction" — a signed message saying what you want to do. Here's the journey:
@@ -243,6 +255,9 @@ Conversion events recorded via `ad_market.record_conversion` accumulate per `(ca
 - Shard-level and total budgets are enforced via `ReceiptShardAccumulator`; diversity checks cap receipts per provider/publisher per shard and require distinct regions/ASNs before proposal/validation succeeds. Validation recomputes roots/digest from delivered receipts and rejects expired headers.
 - Receipts missing region/ASN metadata are counted under an `unknown` placeholder so the baseline `min_region_diversity`/`min_asn_diversity` requirement of `1` does not reject empty registries; thresholds above `1` still require distinct populated values.
 - Aggregate signature is currently a batch-Ed25519 digest over high-volume receipts (ad/energy). Swap in a true aggregation backend under the existing `aggregate_scheme` enum when available.
+- Provider keys for receipt verification are recorded in the on-chain registry (`node/src/receipt_crypto::ProviderRegistry`). Every entry carries the source tag (`config`, `governance`, `signed announcement`, `stake-linked`), the region/ASN metadata used for diversity checks, and a sequence of `ProviderKeyVersion` records with `registered_at_block`/`retired_at_block` timestamps. The registry is serialized inside `ChainDisk.provider_registry`, so a full node can answer “where did this key come from?” simply by replaying the same snapshot. Rotations keep the former key valid only for receipts whose `block_height` is less than the recorded retirement block, preserving the continuity of past receipts while demanding new keys for future batches.
+- Each receipt type signs a canonical preimage (`receipt_crypto::build_storage_preimage`, `build_compute_preimage`, etc.) that concatenates every receipt field in a domain-separated order, injects sentinel values for absent chunk/region hints, and appends the per-receipt `signature_nonce`. Because both the signature data and the `signature_nonce` are part of the preimage, auditors can reproduce the exact hash that was in the block and confirm each signature without guessing field order or optional-value semantics.
+- The `BatchEd25519` scheme currently hashes the receipt leaf hash plus signature bytes for every batched ad/energy receipt using BLAKE3, then stores the digest in the header so validators can replay the same deterministic commitment even without a true aggregate signature backend. This digest, coupled with nonce tracking (`receipt_crypto::NonceTracker::check_and_record_nonce`) and the persisted registry, keeps replay prevention stable across restarts, architectures, and governance transitions.
 - Blob commitments are zero placeholders until the blob chain DA pointers land; the vector ordering matches shard roots so proofs can drop in without schema changes.
 
 ### Micro-shard Root Notarization

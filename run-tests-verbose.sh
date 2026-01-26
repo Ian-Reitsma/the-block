@@ -188,6 +188,7 @@ echo ""
 TOTAL_PASSED=0
 TOTAL_FAILED=0
 TOTAL_ERRORS=0
+FEATURE_GATES_FAILED=0
 
 # Track execution time
 START_TIME=$(date +%s)
@@ -231,6 +232,30 @@ track_progress() {
     done
 }
 
+run_feature_gate() {
+    local label="$1"
+    local cmd="$2"
+
+    echo "" >> "$PACKAGE_COMMANDS_LOG"
+    echo "# Feature gate: $label" >> "$PACKAGE_COMMANDS_LOG"
+    echo "$cmd" >> "$PACKAGE_COMMANDS_LOG"
+
+    echo "" >> "$FULL_LOG"
+    echo "═══════════════════════════════════════════════════════════════" >> "$FULL_LOG"
+    echo "  FEATURE GATE: $label" >> "$FULL_LOG"
+    echo "═══════════════════════════════════════════════════════════════" >> "$FULL_LOG"
+    echo "$cmd" >> "$FULL_LOG"
+
+    if eval "$cmd" 2>&1 | tee -a "$FULL_LOG"; then
+        echo "" >> "$FULL_LOG"
+        echo "Feature gate '$label' passed" >> "$FULL_LOG"
+    else
+        FEATURE_GATES_FAILED=$((FEATURE_GATES_FAILED + 1))
+        echo "" >> "$FULL_LOG"
+        echo "Feature gate '$label' FAILED" >> "$FULL_LOG"
+    fi
+}
+
 if eval "$TEST_CMD" 2>&1 | tee "$FULL_LOG" | track_progress; then
     TEST_EXIT_CODE=0
 else
@@ -240,6 +265,23 @@ fi
 # Update totals from tracking
 TOTAL_PASSED=$TESTS_PASSED
 TOTAL_FAILED=$TESTS_FAILED
+
+echo ""
+echo -e "${BLUE}Running feature-matrix compile gates...${NC}"
+GATE_ENV="FIRST_PARTY_ONLY=1 RUST_BACKTRACE=1"
+run_feature_gate "no-default-features" "$GATE_ENV cargo check -p the_block --no-default-features"
+run_feature_gate "cli" "$GATE_ENV cargo check -p the_block --features cli"
+run_feature_gate "gateway+cli" "$GATE_ENV cargo check -p the_block --features gateway,cli"
+run_feature_gate "telemetry+cli" "$GATE_ENV cargo check -p the_block --features telemetry,cli"
+if [[ "$FEATURE_GATES_FAILED" -gt 0 ]]; then
+    echo ""
+    echo -e "${RED}Feature gate checks failed (${FEATURE_GATES_FAILED})${NC}"
+    TOTAL_FAILED=$((TOTAL_FAILED + FEATURE_GATES_FAILED))
+    TEST_EXIT_CODE=1
+else
+    echo ""
+    echo -e "${GREEN}Feature gate checks passed${NC}"
+fi
 
 END_TIME=$(date +%s)
 TOTAL_DURATION=$((END_TIME - START_TIME))
@@ -432,6 +474,11 @@ echo ""
 echo -e "  Total duration:     ${CYAN}${DURATION_STR}${NC}"
 echo -e "  Tests passed:       ${GREEN}$TOTAL_PASSED${NC}"
 echo -e "  Tests failed:       ${RED}$TOTAL_FAILED${NC}"
+if [[ "$FEATURE_GATES_FAILED" -gt 0 ]]; then
+    echo -e "  Feature gates:      ${RED}FAILED (${FEATURE_GATES_FAILED})${NC}"
+else
+    echo -e "  Feature gates:      ${GREEN}PASSED${NC}"
+fi
 echo ""
 
 if [[ "$TOTAL_FAILED" -eq 0 && "$TEST_EXIT_CODE" -eq 0 ]]; then

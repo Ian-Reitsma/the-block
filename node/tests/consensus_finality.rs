@@ -22,25 +22,33 @@ fn finality_and_rollback() {
 }
 
 #[test]
-fn equivocation_removes_stake_and_blocks_conflicting_finality() {
+fn equivocation_stake_is_excluded_from_tally() {
     let mut unl = Unl::default();
-    unl.add_validator("v1".into(), 40);
-    unl.add_validator("v2".into(), 40);
-    unl.add_validator("v3".into(), 20);
+    unl.add_validator("v1".into(), 45);
+    unl.add_validator("v2".into(), 30);
+    unl.add_validator("v3".into(), 25);
     let mut engine = ConsensusEngine::new(unl);
 
-    // Honest votes for A from v1 and v2 would normally finalize.
     assert!(!engine.vote("v1", "A"));
     assert!(engine.vote("v2", "A"));
     assert_eq!(engine.gadget.finalized(), Some("A"));
 
-    // Roll back and have v1 equivocate; stake should be discarded.
     engine.rollback();
     assert!(!engine.vote("v1", "A"));
-    assert!(!engine.vote("v1", "B")); // equivocation, ignored
-    assert!(!engine.vote("v2", "B")); // remaining honest stake 40/100 < 2/3
+    assert!(!engine.vote("v1", "B"));
     assert_eq!(engine.gadget.finalized(), None);
-    let snap = engine.snapshot();
-    assert!(snap.equivocations.contains("v1"));
-    assert_eq!(snap.finalized, None);
+    let snapshot = engine.snapshot();
+    assert!(snapshot.equivocations.contains("v1"));
+    assert_eq!(snapshot.equivocated_stake, 45);
+    assert_eq!(
+        snapshot.effective_total_stake,
+        snapshot.total_stake - snapshot.equivocated_stake
+    );
+    assert_eq!(snapshot.finality_threshold, 37);
+
+    assert!(!engine.vote("v2", "B"));
+    assert!(engine.vote("v3", "B"));
+    assert_eq!(engine.gadget.finalized(), Some("B"));
+    let snapshot = engine.snapshot();
+    assert_eq!(snapshot.finalized.as_deref(), Some("B"));
 }

@@ -30,6 +30,9 @@ use runtime::telemetry::{
     HistogramOpts, HistogramVec, IntCounter, IntCounterHandle, IntCounterVec, IntGauge,
     IntGaugeHandle, IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
 };
+
+#[cfg(feature = "telemetry")]
+use crate::consensus::finality::FinalitySnapshot;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(feature = "telemetry"))]
@@ -116,6 +119,9 @@ struct LocalTlsWarning {
 
 #[cfg(feature = "telemetry")]
 static TLS_ENV_WARNINGS: Lazy<DashMap<(String, String), LocalTlsWarning>> = Lazy::new(DashMap::new);
+
+#[cfg(feature = "telemetry")]
+static FINALITY_SNAPSHOT: Lazy<RwLock<Option<FinalitySnapshot>>> = Lazy::new(|| RwLock::new(None));
 
 static GOV_WEBHOOK_CLIENT: Lazy<BlockingClient> =
     Lazy::new(|| crate::http_client::blocking_client());
@@ -451,6 +457,95 @@ pub struct WrapperSummary {
     #[cfg(feature = "telemetry")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub governance: Option<foundation_telemetry::GovernanceWrapperEntry>,
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct FinalityVoteSupport {
+    pub block_hash: String,
+    pub stake: u64,
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct FinalityEquivocatedStake {
+    pub validator: String,
+    pub stake: u64,
+}
+
+#[cfg(feature = "telemetry")]
+#[derive(Clone, Debug, Serialize)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct FinalityTelemetrySnapshot {
+    pub finalized: Option<String>,
+    pub total_stake: u64,
+    pub equivocated_stake: u64,
+    pub effective_total_stake: u64,
+    pub finality_threshold: u64,
+    pub vote_support: Vec<FinalityVoteSupport>,
+    pub equivocated_validators: Vec<String>,
+    pub equivocated_stakes: Vec<FinalityEquivocatedStake>,
+}
+
+#[cfg(feature = "telemetry")]
+impl From<&FinalitySnapshot> for FinalityTelemetrySnapshot {
+    fn from(snapshot: &FinalitySnapshot) -> Self {
+        let mut vote_support = snapshot
+            .vote_tallies
+            .iter()
+            .map(|(block_hash, stake)| FinalityVoteSupport {
+                block_hash: block_hash.clone(),
+                stake: *stake,
+            })
+            .collect::<Vec<_>>();
+        vote_support.sort_by(|a, b| a.block_hash.cmp(&b.block_hash));
+
+        let mut equivocated_validators = snapshot
+            .equivocated_stake_by_validator
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        equivocated_validators.sort();
+
+        let equivocated_stakes = equivocated_validators
+            .iter()
+            .map(|validator| FinalityEquivocatedStake {
+                validator: validator.clone(),
+                stake: *snapshot
+                    .equivocated_stake_by_validator
+                    .get(validator)
+                    .unwrap_or(&0),
+            })
+            .collect::<Vec<_>>();
+
+        FinalityTelemetrySnapshot {
+            finalized: snapshot.finalized.clone(),
+            total_stake: snapshot.total_stake,
+            equivocated_stake: snapshot.equivocated_stake,
+            effective_total_stake: snapshot.effective_total_stake,
+            finality_threshold: snapshot.finality_threshold,
+            vote_support,
+            equivocated_validators,
+            equivocated_stakes,
+        }
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn record_finality_snapshot(snapshot: FinalitySnapshot) {
+    if let Ok(mut guard) = FINALITY_SNAPSHOT.write() {
+        *guard = Some(snapshot);
+    }
+}
+
+#[cfg(feature = "telemetry")]
+pub fn finality_snapshot_summary() -> Option<FinalityTelemetrySnapshot> {
+    FINALITY_SNAPSHOT
+        .read()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(FinalityTelemetrySnapshot::from))
 }
 
 #[derive(Clone, Debug, Default)]

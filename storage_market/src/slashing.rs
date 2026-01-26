@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Reasons for storing a slash event.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,6 +94,28 @@ impl RegionStatus {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DuplicateKey {
+    contract_id: String,
+    nonce: u64,
+    chunk_hash: Option<[u8; 32]>,
+}
+
+#[derive(Clone, Debug)]
+struct DuplicateGroup {
+    providers: HashSet<String>,
+    slashed: HashSet<String>,
+}
+
+impl DuplicateGroup {
+    fn new() -> Self {
+        Self {
+            providers: HashSet::new(),
+            slashed: HashSet::new(),
+        }
+    }
+}
+
 /// Controller that wires auditor discoveries, receipts, and region indicators
 /// into a deterministic slashing history.
 pub struct SlashingController {
@@ -102,6 +124,8 @@ pub struct SlashingController {
     pending_repairs: HashMap<RepairKey, RepairRecord>,
     region_status: HashMap<String, RegionStatus>,
     provider_reputation: HashMap<String, i64>,
+    duplicate_index: HashMap<DuplicateKey, DuplicateGroup>,
+    provider_regions: HashMap<String, Option<String>>,
 }
 
 impl SlashingController {
@@ -112,6 +136,8 @@ impl SlashingController {
             pending_repairs: HashMap::new(),
             region_status: HashMap::new(),
             provider_reputation: HashMap::new(),
+            duplicate_index: HashMap::new(),
+            provider_regions: HashMap::new(),
         }
     }
 
@@ -131,6 +157,11 @@ impl SlashingController {
             status.last_seen_block = metadata.block_height;
             status.dark_since = None;
         }
+
+        self.provider_regions
+            .insert(metadata.provider.clone(), metadata.region.clone());
+
+        slashes.extend(self.collect_duplicate_slashes(&metadata));
 
         let key = (metadata.provider.clone(), metadata.signature_nonce);
         match self.seen_nonces.get(&key).copied() {
@@ -162,6 +193,51 @@ impl SlashingController {
             self.pending_repairs.remove(&repair_key);
         }
 
+        slashes
+    }
+
+    fn collect_duplicate_slashes(&mut self, metadata: &ReceiptMetadata) -> Vec<StorageSlash> {
+        let key = DuplicateKey {
+            contract_id: metadata.contract_id.clone(),
+            nonce: metadata.signature_nonce,
+            chunk_hash: metadata.chunk_hash,
+        };
+        let group = self
+            .duplicate_index
+            .entry(key)
+            .or_insert_with(DuplicateGroup::new);
+        group.providers.insert(metadata.provider.clone());
+        if group.providers.len() <= 1 {
+            return Vec::new();
+        }
+        let new_providers: Vec<String> = group
+            .providers
+            .iter()
+            .filter(|provider| !group.slashed.contains(*provider))
+            .cloned()
+            .collect();
+        if new_providers.is_empty() {
+            return Vec::new();
+        }
+
+        let mut slashes = Vec::new();
+        for provider in new_providers {
+            let region = self
+                .provider_regions
+                .get(&provider)
+                .cloned()
+                .unwrap_or(None);
+            slashes.push(StorageSlash {
+                provider: provider.clone(),
+                amount: 0,
+                region,
+                reason: SlashingReason::ReplayedNonce {
+                    nonce: metadata.signature_nonce,
+                },
+                block_height: metadata.block_height,
+            });
+            group.slashed.insert(provider);
+        }
         slashes
     }
 
