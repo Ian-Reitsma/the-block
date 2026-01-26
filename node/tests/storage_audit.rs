@@ -35,7 +35,7 @@ fn audit_reports_missing_chunks_trigger_slash() {
     env::set_var("TB_STORAGE_PIPELINE_DIR", dir.path());
 
     let mut pipeline = StoragePipeline::open(dir.path().to_str().unwrap());
-    pipeline.set_rent_rate(1);
+    pipeline.set_rent_rate(0);
 
     let mut catalog = NodeCatalog::new();
     catalog.register(DummyProvider {
@@ -77,12 +77,12 @@ fn audit_reports_missing_chunks_trigger_slash() {
         .into_iter()
         .find(|slash_entry| {
             matches!(
-        &slash_entry.reason,
-        SlashingReason::MissingRepair {
-            contract_id,
-            chunk_hash: hash
-        } if contract_id == &manifest_hex && *hash == chunk_hash
-            )
+            &slash_entry.reason,
+            SlashingReason::MissingRepair {
+                contract_id,
+                chunk_hash: hash
+            } if contract_id == &manifest_hex && *hash == chunk_hash
+                )
         })
         .expect("missing chunk slash emitted");
     assert_eq!(missing_slash.provider, "prov-1");

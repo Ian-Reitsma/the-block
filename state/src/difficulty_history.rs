@@ -10,9 +10,18 @@ fn open_engine(path: &Path) -> Option<InhouseEngine> {
 }
 
 pub fn append(path: &Path, height: u64, difficulty: u64) {
+    append_many(path, std::iter::once((height, difficulty)));
+}
+
+pub fn append_many<I>(path: &Path, entries: I)
+where
+    I: IntoIterator<Item = (u64, u64)>,
+{
     if let Some(db) = open_engine(path) {
         if db.ensure_cf(CF).is_ok() {
-            let _ = db.put(CF, &height.to_le_bytes(), &difficulty.to_le_bytes());
+            for (height, difficulty) in entries {
+                let _ = db.put(CF, &height.to_le_bytes(), &difficulty.to_le_bytes());
+            }
             let _ = db.flush();
         }
     }

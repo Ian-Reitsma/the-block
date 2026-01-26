@@ -33,19 +33,17 @@ fn derive_test_signing_key() -> SigningKey {
             create_test_receipt(3, 2),
             create_test_receipt(4, 3),
         ];
-            let all_ok = samples.iter().all(|r| {
-                let preimage = match r {
-                    Receipt::Storage(sr) => build_storage_preimage(sr),
-                    Receipt::Compute(cr) => build_compute_preimage(cr),
-                    Receipt::Energy(er) => build_energy_preimage(er),
-                    Receipt::Ad(ar) => build_ad_preimage(ar),
+        let all_ok = samples.iter().all(|r| {
+            let preimage = match r {
+                Receipt::Storage(sr) => build_storage_preimage(sr),
+                Receipt::Compute(cr) => build_compute_preimage(cr),
+                Receipt::Energy(er) => build_energy_preimage(er),
+                Receipt::Ad(ar) => build_ad_preimage(ar),
                 Receipt::ComputeSlash(_)
                 | Receipt::EnergySlash(_)
                 | Receipt::Relay(_)
-                | Receipt::StorageSlash(_) => {
-                    Vec::new()
-                }
-                };
+                | Receipt::StorageSlash(_) => Vec::new(),
+            };
             let sig = sk.sign(&preimage);
             vk.verify(&preimage, &sig).is_ok()
         });

@@ -6243,9 +6243,12 @@ impl Blockchain {
         self.recompute_root_slots();
 
         let diff_path = std::path::Path::new(&self.path).join("diff_history");
-        for block in &self.chain {
-            state::append_difficulty(&diff_path, block.index, block.difficulty);
-        }
+        let difficulties: Vec<(u64, u64)> = self
+            .chain
+            .iter()
+            .map(|block| (block.index, block.difficulty))
+            .collect();
+        state::difficulty_history::append_many(&diff_path, difficulties);
 
         Ok(())
     }

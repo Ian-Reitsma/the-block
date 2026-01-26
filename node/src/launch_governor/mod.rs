@@ -1,6 +1,6 @@
 use crate::ad_readiness;
 use crate::blockchain::process::validate_and_apply;
-use crate::economics::deterministic_metrics;
+use crate::economics::{deterministic_metrics, MarketMetrics};
 use crate::economics::replay::replay_economics_to_tip;
 use crate::gateway::dns;
 use crate::governance::Runtime;
@@ -436,6 +436,14 @@ impl SignalProvider for LiveSignalProvider {
         let guard = self.chain.lock().unwrap_or_else(|e| e.into_inner());
         let replay_state = replay_economics_to_tip(&guard.chain, &guard.params);
         let epoch_metrics = replay_state.latest_epoch_metrics.clone();
+        let stored_metrics = guard.economics_prev_market_metrics.clone();
+        let prev_market_metrics = if replay_state.prev_market_metrics == MarketMetrics::default()
+            && stored_metrics != MarketMetrics::default()
+        {
+            stored_metrics
+        } else {
+            replay_state.prev_market_metrics.clone()
+        };
         let (epoch_tx_count, epoch_tx_volume_block, epoch_treasury_inflow_block, market_metrics) =
             if let Some(metrics) = epoch_metrics {
                 (
@@ -449,7 +457,7 @@ impl SignalProvider for LiveSignalProvider {
                     guard.economics_epoch_tx_count,
                     guard.economics_epoch_tx_volume_block,
                     guard.economics_epoch_treasury_inflow_block,
-                    replay_state.prev_market_metrics.clone(),
+                    prev_market_metrics,
                 )
             };
         EconomicsSample {

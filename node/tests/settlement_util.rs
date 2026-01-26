@@ -1,6 +1,7 @@
 #![cfg(feature = "integration-tests")]
 use sys::tempfile::{tempdir, TempDir};
 use the_block::compute_market::settlement::{self, SettleMode};
+use the_block::market_gates::{self, MarketMode};
 
 pub struct SettlementCtx {
     _dir: TempDir,
@@ -15,6 +16,7 @@ impl SettlementCtx {
         let dir = tempdir().expect("settlement tempdir");
         let path = dir.path().join("settlement");
         let path_str = path.to_str().expect("settlement path must be valid UTF-8");
+        market_gates::set_compute_mode(MarketMode::Trade);
         settlement::Settlement::init(path_str, mode);
         Self { _dir: dir }
     }

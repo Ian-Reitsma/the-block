@@ -13,7 +13,6 @@ use foundation_sqlite::{
     params, Connection, Error as SqlError, OptionalExtension, Value as SqlValue,
 };
 use httpd::{HttpError, Request, Response, Router, StatusCode};
-use std::collections::HashSet;
 use std::env;
 use std::fmt;
 use std::fs;

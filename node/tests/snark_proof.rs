@@ -5,12 +5,14 @@ use the_block::compute_market::{
     settlement::{SettleMode, Settlement},
     snark, ExecutionReceipt, Job, Market, Offer, Workload,
 };
+use the_block::market_gates::{self, MarketMode};
 
 #[test]
 fn invalid_proof_rejected() {
     scheduler::reset_for_test();
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    market_gates::set_compute_mode(MarketMode::Trade);
     let mut market = Market::new();
     let offer = Offer {
         job_id: "job1".into(),

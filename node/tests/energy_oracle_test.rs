@@ -14,6 +14,7 @@ use the_block::energy::{
     GovernanceEnergyParams, ProviderKeyConfig,
 };
 use the_block::governance::{EnergySettlementMode, EnergySettlementPayload};
+use the_block::market_gates::{self, MarketMode};
 
 fn sign_meter_reading(
     sk: &SigningKey,
@@ -35,6 +36,7 @@ fn sign_meter_reading(
 
 #[tb_serial]
 fn energy_oracle_enforcement_and_disputes() {
+    market_gates::set_energy_mode(MarketMode::Trade);
     let dir = tempdir().expect("temp dir");
     env::set_var("TB_ENERGY_MARKET_DIR", dir.path());
 

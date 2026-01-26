@@ -5,9 +5,23 @@ use the_block::storage::repair::{self, RepairLog, RepairLogStatus, RepairRequest
 use the_block::storage::settings;
 use the_block::storage::types::{ChunkRef, ObjectManifest, ProviderChunkEntry, Redundancy};
 use the_block::SimpleDb;
+use the_block::{
+    compute_market::settlement::{SettleMode, Settlement},
+    market_gates::{self, MarketMode},
+};
 
 use sys::tempfile::tempdir;
 use the_block::storage::types::{CHACHA20_POLY1305_NONCE_LEN, CHACHA20_POLY1305_TAG_LEN};
+
+fn init_repair_runtime() -> sys::tempfile::TempDir {
+    let dir = tempdir().expect("settlement dir");
+    market_gates::set_compute_mode(MarketMode::Trade);
+    Settlement::init(
+        dir.path().join("compute_settlement").to_str().unwrap(),
+        SettleMode::DryRun,
+    );
+    dir
+}
 
 fn store_manifest(db: &mut SimpleDb, manifest: &mut ObjectManifest) -> [u8; 32] {
     let mut tmp = manifest.clone();
@@ -54,7 +68,7 @@ fn sample_manifest(chunk_bytes: usize) -> (ObjectManifest, Vec<Vec<u8>>) {
         id.copy_from_slice(h.finalize().as_bytes());
         chunks.push(ChunkRef {
             id,
-            nodes: Vec::new(),
+            nodes: vec!["provider-0".into()],
             provider_chunks: Vec::new(),
         });
     }
@@ -84,6 +98,7 @@ fn sample_manifest(chunk_bytes: usize) -> (ObjectManifest, Vec<Vec<u8>>) {
 
 #[test]
 fn repairs_missing_shards_and_logs_success() {
+    let _settle_dir = init_repair_runtime();
     let dir = tempdir().expect("dir");
     let path = dir.path().join("db");
     let mut db = SimpleDb::open(path.to_str().unwrap());
@@ -167,6 +182,7 @@ fn detects_corrupt_manifest_and_logs_failure() {
 
 #[test]
 fn applies_backoff_after_repeated_failures() {
+    let _settle_dir = init_repair_runtime();
     let dir = tempdir().expect("dir");
     let path = dir.path().join("db");
     let mut db = SimpleDb::open(path.to_str().unwrap());
@@ -213,6 +229,7 @@ fn applies_backoff_after_repeated_failures() {
 
 #[test]
 fn repairs_sparse_manifest_metadata_end_to_end() {
+    let _settle_dir = init_repair_runtime();
     let dir = tempdir().expect("dir");
     let path = dir.path().join("db");
     let mut db = SimpleDb::open(path.to_str().unwrap());

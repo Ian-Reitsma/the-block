@@ -1077,6 +1077,8 @@ mod tests {
         hasher.update(&receipt.bytes.to_le_bytes());
         hasher.update(&receipt.price.to_le_bytes());
         hasher.update(&receipt.provider_escrow.to_le_bytes());
+        hasher.update(b"chunk_hash:none");
+        hasher.update(b"region:none");
         hasher.update(&receipt.signature_nonce.to_le_bytes());
         let preimage = hasher.finalize();
 

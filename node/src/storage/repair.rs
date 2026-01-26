@@ -5,6 +5,7 @@ use crate::simple_db::{names, SimpleDb};
 use crate::storage::manifest_binary::{decode_manifest, encode_manifest};
 use crate::storage::settings;
 use crate::storage::slash;
+#[cfg(feature = "telemetry")]
 use crate::telemetry::consensus_metrics::BLOCK_HEIGHT;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
@@ -44,9 +45,9 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::panic;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::thread;
 use std::time::Duration;
-use std::sync::atomic::{AtomicI64, Ordering};
 const MAX_CONCURRENT_REPAIRS: usize = 4;
 const MAX_LOG_FILES: usize = 14;
 const FAILURE_PREFIX: &str = "repair/failures/";
@@ -455,7 +456,16 @@ struct ShardWrite {
 }
 
 fn report_missing_chunk_for(repair_key: &RepairKey, missing_bytes: u64, rent_per_byte: u64) {
-    let block_height = BLOCK_HEIGHT.get().value().max(0) as u64;
+    let block_height = {
+        #[cfg(feature = "telemetry")]
+        {
+            BLOCK_HEIGHT.get().value().max(0) as u64
+        }
+        #[cfg(not(feature = "telemetry"))]
+        {
+            0
+        }
+    };
     let provider_escrow = Settlement::balance(&repair_key.provider);
     let report = RepairReport {
         key: repair_key.clone(),

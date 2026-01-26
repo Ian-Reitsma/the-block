@@ -6,6 +6,7 @@ use the_block::compute_market::{
     settlement::{SettleMode, Settlement},
     Job, Market, Offer, Workload,
 };
+use the_block::market_gates::{self, MarketMode};
 
 fn sample_offer_job(id: &str) -> (Offer, Job) {
     let offer = Offer {
@@ -38,6 +39,7 @@ fn sample_offer_job(id: &str) -> (Offer, Job) {
 fn cancel_releases_resources() {
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    market_gates::set_compute_mode(MarketMode::Trade);
     scheduler::reset_for_test();
     let (offer, job) = sample_offer_job("j1");
     let mut m = Market::new();
@@ -53,6 +55,7 @@ fn cancel_releases_resources() {
 fn cancel_after_completion_noop() {
     let dir = tempdir().unwrap();
     Settlement::init(dir.path().to_str().unwrap(), SettleMode::DryRun);
+    market_gates::set_compute_mode(MarketMode::Trade);
     scheduler::reset_for_test();
     let (offer, job) = sample_offer_job("j2");
     let mut m = Market::new();

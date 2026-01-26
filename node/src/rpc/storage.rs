@@ -15,14 +15,15 @@ use storage_market::{
 use crate::compute_market::settlement::Settlement;
 use crate::drive::DriveStore;
 use crate::market_gates::{self, MarketMode};
-use crate::storage::types::ObjectManifest;
 use crate::storage::marketplace::SearchOptions;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::provider_directory;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
 use crate::storage::slash;
+use crate::storage::types::ObjectManifest;
 use crate::storage::types::{ChunkRef, ProviderChunkEntry};
+#[cfg(feature = "telemetry")]
 use crate::telemetry::consensus_metrics::BLOCK_HEIGHT;
 
 fn json_object(pairs: Vec<(&str, Value)>) -> Value {
@@ -72,6 +73,16 @@ fn pipeline_path() -> String {
 
 fn market_path() -> String {
     std::env::var("TB_STORAGE_MARKET_DIR").unwrap_or_else(|_| "storage_market".to_string())
+}
+
+#[inline]
+fn current_block_height() -> u64 {
+    #[cfg(feature = "telemetry")]
+    {
+        return BLOCK_HEIGHT.get().value().max(0) as u64;
+    }
+    #[allow(unreachable_code)]
+    0
 }
 
 use concurrency::{mutex, MutexExt, MutexT};
@@ -838,7 +849,7 @@ pub fn audit(
     };
 
     let rent_per_byte = pipeline.rent_rate_per_byte();
-    let block_height = BLOCK_HEIGHT.get().value().max(0) as u64;
+    let block_height = current_block_height();
     let mut reports = Vec::new();
 
     for manifest_hex in manifest_ids {
