@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LaneSeed};
+use the_block::compute_market::matcher::{self, Ask, Bid, LaneMetadata, LanePolicy, LaneSeed};
 use the_block::transaction::FeeLane;
 
 #[test]
@@ -68,6 +68,7 @@ fn seeding_respects_lane_capacity() {
     let metadata = LaneMetadata {
         fairness_window: Duration::from_millis(1),
         max_queue_depth: 1,
+        policy: LanePolicy::default(),
     };
     let err = matcher::seed_orders(vec![LaneSeed {
         lane: FeeLane::Consumer,

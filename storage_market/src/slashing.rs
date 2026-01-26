@@ -54,6 +54,47 @@ pub struct ReceiptMetadata {
     pub chunk_hash: Option<[u8; 32]>,
 }
 
+/// Audit event emitted by the slashing controller for replayable history.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SlashingAuditEvent {
+    RegionHeartbeat {
+        region: String,
+    },
+    RepairScheduled {
+        key: RepairKey,
+        due_block: u64,
+        missing_bytes: u64,
+    },
+    RepairCleared {
+        key: RepairKey,
+        cleared_at: u64,
+    },
+    OverdueRepair {
+        key: RepairKey,
+        amount: u64,
+    },
+    RegionDarkened {
+        region: String,
+        since: u64,
+    },
+    DuplicateNonce {
+        contract_id: String,
+        nonce: u64,
+        providers: Vec<String>,
+    },
+    ReplayedNonce {
+        provider: String,
+        nonce: u64,
+    },
+}
+
+/// A single slashing entry written for audit / replay purposes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuditEntry {
+    pub block_height: u64,
+    pub event: SlashingAuditEvent,
+}
+
 /// Unique key for a chunk that must be repaired.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RepairKey {
@@ -126,6 +167,7 @@ pub struct SlashingController {
     provider_reputation: HashMap<String, i64>,
     duplicate_index: HashMap<DuplicateKey, DuplicateGroup>,
     provider_regions: HashMap<String, Option<String>>,
+    audit_log: Vec<AuditEntry>,
 }
 
 impl SlashingController {
@@ -138,6 +180,7 @@ impl SlashingController {
             provider_reputation: HashMap::new(),
             duplicate_index: HashMap::new(),
             provider_regions: HashMap::new(),
+            audit_log: Vec::new(),
         }
     }
 
@@ -147,15 +190,22 @@ impl SlashingController {
         let mut slashes = Vec::new();
 
         if let Some(region) = metadata.region.as_deref() {
-            let status = self
-                .region_status
-                .entry(region.to_string())
-                .or_insert(RegionStatus {
-                    last_seen_block: metadata.block_height,
-                    dark_since: None,
-                });
-            status.last_seen_block = metadata.block_height;
-            status.dark_since = None;
+            let region_key = region.to_string();
+            {
+                let status = self
+                    .region_status
+                    .entry(region_key.clone())
+                    .or_insert(RegionStatus {
+                        last_seen_block: metadata.block_height,
+                        dark_since: None,
+                    });
+                status.last_seen_block = metadata.block_height;
+                status.dark_since = None;
+            }
+            self.record_event(
+                metadata.block_height,
+                SlashingAuditEvent::RegionHeartbeat { region: region_key },
+            );
         }
 
         self.provider_regions
@@ -178,6 +228,13 @@ impl SlashingController {
                     },
                     block_height: metadata.block_height,
                 });
+                self.record_event(
+                    metadata.block_height,
+                    SlashingAuditEvent::ReplayedNonce {
+                        provider: metadata.provider.clone(),
+                        nonce: metadata.signature_nonce,
+                    },
+                );
             }
             None => {
                 self.seen_nonces.insert(key.clone(), metadata.block_height);
@@ -190,7 +247,15 @@ impl SlashingController {
                 provider: metadata.provider.clone(),
                 chunk_hash,
             };
-            self.pending_repairs.remove(&repair_key);
+            if self.pending_repairs.remove(&repair_key).is_some() {
+                self.record_event(
+                    metadata.block_height,
+                    SlashingAuditEvent::RepairCleared {
+                        key: repair_key.clone(),
+                        cleared_at: metadata.block_height,
+                    },
+                );
+            }
         }
 
         slashes
@@ -221,6 +286,7 @@ impl SlashingController {
         }
 
         let mut slashes = Vec::new();
+        let logged_providers = new_providers.clone();
         for provider in new_providers {
             let region = self
                 .provider_regions
@@ -237,6 +303,16 @@ impl SlashingController {
                 block_height: metadata.block_height,
             });
             group.slashed.insert(provider);
+        }
+        if !logged_providers.is_empty() {
+            self.record_event(
+                metadata.block_height,
+                SlashingAuditEvent::DuplicateNonce {
+                    contract_id: metadata.contract_id.clone(),
+                    nonce: metadata.signature_nonce,
+                    providers: logged_providers,
+                },
+            );
         }
         slashes
     }
@@ -256,6 +332,14 @@ impl SlashingController {
                 due_block,
                 amount,
                 region: report.region,
+            },
+        );
+        self.record_event(
+            report.block_height,
+            SlashingAuditEvent::RepairScheduled {
+                key,
+                due_block,
+                missing_bytes: report.missing_bytes,
             },
         );
     }
@@ -282,6 +366,13 @@ impl SlashingController {
                 },
                 block_height: current_block,
             });
+            self.record_event(
+                current_block,
+                SlashingAuditEvent::OverdueRepair {
+                    key: key.clone(),
+                    amount: record.amount,
+                },
+            );
             self.pending_repairs.remove(&key);
         }
 
@@ -298,6 +389,15 @@ impl SlashingController {
                     darkened.push(region.clone());
                 }
             }
+        }
+        for region in &darkened {
+            self.record_event(
+                current_block,
+                SlashingAuditEvent::RegionDarkened {
+                    region: region.clone(),
+                    since: current_block,
+                },
+            );
         }
         darkened
     }
@@ -341,6 +441,28 @@ impl SlashingController {
             .entry(provider.to_string())
             .or_insert(1_000);
         *entry = entry.saturating_sub(amount as i64);
+    }
+
+    fn record_event(&mut self, block_height: u64, event: SlashingAuditEvent) {
+        self.audit_log.push(AuditEntry {
+            block_height,
+            event,
+        });
+    }
+
+    /// Return the audit log describing every slash/repair transition.
+    pub fn audit_log(&self) -> &[AuditEntry] {
+        &self.audit_log
+    }
+
+    /// Return whether the requested chunk is still flagged for repair/slash.
+    pub fn is_chunk_missing(&self, key: &RepairKey) -> bool {
+        self.pending_repairs.contains_key(key)
+    }
+
+    /// Return the repair deadline (if any) for the requested chunk.
+    pub fn repair_deadline(&self, key: &RepairKey) -> Option<u64> {
+        self.pending_repairs.get(key).map(|record| record.due_block)
     }
 }
 

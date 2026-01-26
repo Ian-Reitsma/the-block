@@ -30,6 +30,7 @@ pub struct Ask {
 pub struct LaneMetadata {
     pub fairness_window: Duration,
     pub max_queue_depth: usize,
+    pub policy: LanePolicy,
 }
 
 impl Default for LaneMetadata {
@@ -37,7 +38,67 @@ impl Default for LaneMetadata {
         Self {
             fairness_window: default_fairness_window(),
             max_queue_depth: default_lane_capacity(),
+            policy: LanePolicy::from_env(),
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LaneMode {
+    Normal,
+    Quarantine,
+    Strict,
+}
+
+#[derive(Clone, Debug)]
+pub struct LanePolicy {
+    pub mode: LaneMode,
+    pub quarantine_ms: u64,
+    pub strict_margin_ms: u64,
+    pub strict_max_hold_ms: u64,
+}
+
+const DEFAULT_QUARANTINE_MS: u64 = 300;
+const DEFAULT_STRICT_MARGIN_MS: u64 = 50;
+const DEFAULT_STRICT_MAX_HOLD_MS: u64 = 800;
+
+impl LanePolicy {
+    fn from_env() -> Self {
+        let mode = std::env::var("TB_COMPUTE_LANE_MODE")
+            .ok()
+            .map(|mode| match mode.to_ascii_lowercase().as_str() {
+                "quarantine" => LaneMode::Quarantine,
+                "strict" => LaneMode::Strict,
+                _ => LaneMode::Normal,
+            })
+            .unwrap_or(LaneMode::Normal);
+
+        let quarantine_ms = Self::parse_env_ms("TB_COMPUTE_QUARANTINE_MS", DEFAULT_QUARANTINE_MS);
+        let strict_margin_ms =
+            Self::parse_env_ms("TB_COMPUTE_STRICT_MARGIN_MS", DEFAULT_STRICT_MARGIN_MS);
+        let strict_max_hold_ms =
+            Self::parse_env_ms("TB_COMPUTE_STRICT_MAX_HOLD_MS", DEFAULT_STRICT_MAX_HOLD_MS);
+
+        LanePolicy {
+            mode,
+            quarantine_ms,
+            strict_margin_ms,
+            strict_max_hold_ms,
+        }
+    }
+
+    fn parse_env_ms(var: &str, default: u64) -> u64 {
+        std::env::var(var)
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|ms| *ms > 0)
+            .unwrap_or(default)
+    }
+}
+
+impl Default for LanePolicy {
+    fn default() -> Self {
+        Self::from_env()
     }
 }
 
@@ -137,6 +198,7 @@ struct LaneState {
     metadata: LaneMetadata,
     last_match_at: Option<Instant>,
     last_warning_at: Option<Instant>,
+    quarantined_until: Option<Instant>,
 }
 
 impl LaneState {
@@ -147,6 +209,7 @@ impl LaneState {
             metadata,
             last_match_at: None,
             last_warning_at: None,
+            quarantined_until: None,
         }
     }
 
@@ -226,6 +289,14 @@ impl OrderBook {
                     break;
                 }
                 if let Some(mut state) = self.lanes.get_mut(lane) {
+                    let policy = state.metadata.policy.clone();
+                    if matches!(policy.mode, LaneMode::Quarantine) {
+                        if let Some(until) = state.quarantined_until {
+                            if Instant::now() < until {
+                                continue;
+                            }
+                        }
+                    }
                     let fairness_window = state.metadata.fairness_window;
                     let deadline = if fairness_window.is_zero() {
                         None
@@ -242,6 +313,16 @@ impl OrderBook {
                         };
                         if bid.bid.price < ask.ask.price {
                             break;
+                        }
+                        if let LaneMode::Strict = policy.mode {
+                            let strict_margin = Duration::from_millis(policy.strict_margin_ms);
+                            let strict_ceiling = Duration::from_millis(policy.strict_max_hold_ms);
+                            let now = Instant::now();
+                            let bid_wait = now.saturating_duration_since(bid.enqueued_at);
+                            let ask_wait = now.saturating_duration_since(ask.enqueued_at);
+                            if bid_wait < strict_ceiling && bid_wait + strict_margin < ask_wait {
+                                break;
+                            }
                         }
                         if let Some(deadline) = deadline {
                             if lane_progress && Instant::now() > deadline {
@@ -261,6 +342,11 @@ impl OrderBook {
                     if lane_progress {
                         state.last_warning_at = None;
                         progressed = true;
+                        if matches!(policy.mode, LaneMode::Quarantine) {
+                            let quarantine_until =
+                                Instant::now() + Duration::from_millis(policy.quarantine_ms);
+                            state.quarantined_until = Some(quarantine_until);
+                        }
                     }
                 }
             }
@@ -352,6 +438,103 @@ struct MatchResult {
     lane: FeeLane,
     bid: Bid,
     ask: Ask,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread::sleep;
+    use std::time::Duration;
+
+    fn sample_bid() -> Bid {
+        Bid {
+            job_id: "attack-job".into(),
+            buyer: "attacker".into(),
+            price: 10,
+            lane: FeeLane::Consumer,
+        }
+    }
+
+    fn sample_ask() -> Ask {
+        Ask {
+            job_id: "attack-job".into(),
+            provider: "provider".into(),
+            price: 5,
+            lane: FeeLane::Consumer,
+        }
+    }
+
+    #[test]
+    fn quarantine_mode_defers_lane_reentry() {
+        std::env::set_var("TB_COMPUTE_LANE_MODE", "quarantine");
+        std::env::set_var("TB_COMPUTE_QUARANTINE_MS", "150");
+        let lane = FeeLane::Consumer;
+        let metadata = LaneMetadata::default();
+        let book = OrderBook::default();
+        book.replace(vec![LaneSeed {
+            lane,
+            bids: Vec::new(),
+            asks: Vec::new(),
+            metadata: metadata.clone(),
+        }])
+        .unwrap();
+
+        {
+            let mut state = book.lanes.get_mut(&lane).unwrap();
+            state.push_bid(sample_bid());
+            state.push_ask(sample_ask());
+        }
+
+        assert_eq!(book.match_batch(1).len(), 1);
+
+        {
+            let mut state = book.lanes.get_mut(&lane).unwrap();
+            state.push_bid(sample_bid());
+            state.push_ask(sample_ask());
+        }
+
+        assert!(book.match_batch(1).is_empty());
+        sleep(Duration::from_millis(200));
+        assert_eq!(book.match_batch(1).len(), 1);
+
+        std::env::remove_var("TB_COMPUTE_LANE_MODE");
+        std::env::remove_var("TB_COMPUTE_QUARANTINE_MS");
+    }
+
+    #[test]
+    fn strict_mode_blocks_until_holds_expire() {
+        std::env::set_var("TB_COMPUTE_LANE_MODE", "strict");
+        std::env::set_var("TB_COMPUTE_STRICT_MARGIN_MS", "50");
+        std::env::set_var("TB_COMPUTE_STRICT_MAX_HOLD_MS", "300");
+        let lane = FeeLane::Consumer;
+        let metadata = LaneMetadata::default();
+        let book = OrderBook::default();
+        book.replace(vec![LaneSeed {
+            lane,
+            bids: Vec::new(),
+            asks: Vec::new(),
+            metadata: metadata.clone(),
+        }])
+        .unwrap();
+
+        {
+            let mut state = book.lanes.get_mut(&lane).unwrap();
+            state.push_ask(sample_ask());
+        }
+        sleep(Duration::from_millis(120));
+        {
+            let mut state = book.lanes.get_mut(&lane).unwrap();
+            state.push_bid(sample_bid());
+        }
+
+        assert!(book.match_batch(1).is_empty());
+        sleep(Duration::from_millis(350));
+        assert_eq!(book.match_batch(1).len(), 1);
+
+        std::env::remove_var("TB_COMPUTE_LANE_MODE");
+        std::env::remove_var("TB_COMPUTE_STRICT_MARGIN_MS");
+        std::env::remove_var("TB_COMPUTE_STRICT_MAX_HOLD_MS");
+    }
 }
 
 static ORDER_BOOK: Lazy<OrderBook> = Lazy::new(OrderBook::default);
@@ -555,7 +738,7 @@ fn insert_ask(queue: &mut VecDeque<QueuedAsk>, ask: QueuedAsk) {
 }
 
 #[cfg(test)]
-mod tests {
+mod order_tests {
     use super::*;
     use std::time::Duration;
 
@@ -625,6 +808,7 @@ mod tests {
             metadata: LaneMetadata {
                 fairness_window: Duration::from_millis(1),
                 max_queue_depth: 1,
+                policy: LanePolicy::default(),
             },
         }])
         .unwrap_err();

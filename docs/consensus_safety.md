@@ -4,14 +4,14 @@ This document is the executable specification for the current federated consensu
 
 ## Model
 - Validators with stake weights (UNL) vote on block hashes.
-- Finality threshold: `stake_for(hash) >= 2/3 * total_stake`.
+- Finality threshold: `stake_for(hash) >= 2/3 * effective_total_stake` (where `effective_total_stake = total_stake - equivocated_stake`), so the gadget always measures a 2/3 supermajority over the live honest weight.
 - Conflicting votes from the same validator are treated as **equivocation** and their stake is removed from consideration until governance explicitly refreshes the UNL.
 - Rollback is operator-invoked only; it clears pending votes and equivocation flags.
 
 ## Promised Properties
 1) **Safety (conflict-free finality):** No two distinct block hashes can both finalize unless >1/3 of total stake equivocate.
-2) **Liveness under partial partitions:** If at least 2/3 stake can eventually communicate, some block will finalize once their votes are delivered (delivery may be delayed/jittered).
-2a) **Strict equivocation gating:** Conflicting votes immediately mark a validator as faulty and drop their stake from future tallies, but the finality threshold still requires 2/3 of the original UNL total. As a result, once >1/3 of stake has equivocated, finality stays stalled until the UNL is refreshed or enough new stake is added; mere reconnection is insufficient to finalize a block that mixed-conflicted history.
+2) **Liveness under partial partitions:** If at least 2/3 of the _effective_ stake (total minus equivocations) can eventually communicate, some block will finalize once their votes are delivered (delivery may be delayed/jittered).
+2a) **Strict equivocation gating:** Conflicting votes immediately mark a validator as faulty and drop their stake from future tallies, after which the gadget recomputes the 2/3 supermajority over the surviving stake. Finality therefore resumes as soon as 2/3 of the effective stake agrees again; only when the honest stake shrinks below the recalculated threshold (or reaches zero) do operators need to refresh the UNL via the Launch Governor. Telemetry exposes `effective_total_stake`, `equivocated_stake`, and `finality_threshold` so operators know exactly how much weight was ejected and whether the remaining honest weight can still reach a supermajority.
 3) **Equivocation accountability:** Any validator that emits conflicting votes is marked faulty and its stake is excluded from future tallies until the UNL is refreshed.
 4) **Auditable state transitions:** The voting state (votes, equivocators, finalized hash, total stake) is snapshot-able for tests, telemetry, and incident review.
 

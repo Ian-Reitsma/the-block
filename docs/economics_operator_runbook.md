@@ -394,6 +394,12 @@ grep "from_governance_params" <node-logs> | tail -1
 - Verify proposal activated (ACTIVATION_DELAY = 2 epochs)
 - Check node synced to latest block
 
+### Canonical issuance observability
+
+- **Primary engine:** `NetworkIssuanceController` (`node/src/economics/network_issuance.rs`) is the single source of truth for block rewards. The controller writes `economics_block_reward_per_block` plus the adaptive baselines (`economics_baseline_tx_count`, `economics_baseline_tx_volume`, `economics_baseline_miners`) so the governor, telemetry, and explorer all replay the same results.
+- **Telemetry check:** Inspect `economics_block_reward_per_block` in Prometheus or via `/wrappers` and match the governor snapshot hash in `tb-cli governor status --rpc <endpoint>` before calling the change “applied.” The logistic fairness factor recorded in `node/src/lib.rs` is only a post-controller fairness multiplier and should not be treated as a second issuance path.
+- **Legacy knobs:** `inflation_target_bps`, `inflation_controller_gain`, `min_annual_issuance_block`, and `max_annual_issuance_block` now only feed legacy dashboards (`EconomicSnapshot.inflation`). Do not tune them unless you are updating those dashboards; any change must explicitly keep them consistent with the canonical controller outputs so tooling and audits still see a single narrative.
+
 ---
 
 ## Manual Interventions

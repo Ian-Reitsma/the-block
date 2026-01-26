@@ -16,53 +16,44 @@ The Block's economic system now operates on **four adaptive control laws** inste
 
 If token price crashes, adoption explodes, energy costs spike, or ad volume changes → the system self-corrects within 30 epochs without governance intervention.
 
-### Important: Total Supply vs Annual Issuance
+### Important: Total Supply vs Network-Driven Issuance
 
 **⚠️ Common Confusion Alert:**
 
-- **Total Supply Hard Cap:** 20 trillion BLOCK (20,000,000,000,000)
-  - This is the MAXIMUM BLOCK that can ever exist
-  - Location: `node/src/lib.rs:373`
-  - Fixed constant, never changes
+- **Total Supply Hard Cap:** 40 million BLOCK (`MAX_SUPPLY_BLOCK`)
+  - The cap is enforced everywhere `MAX_SUPPLY_BLOCK` is referenced (`node/src/lib.rs` enforces it before minting or distributing rewards).
+  - This number never changes; the controller only adjusts the rate at which we approach it.
 
-- **Annual Issuance:** 40 million BLOCK/year (bootstrap value)
-  - This is how much BLOCK is MINTED per year
-  - Location: `node/src/economics/inflation_controller.rs:39`
-  - Formula-based, adjusts every epoch to maintain ~5% inflation
-  - Range: 50M - 300M BLOCK/year (governance-controlled bounds)
+- **Base reward:** Derived from `NetworkIssuanceController` (`node/src/economics/network_issuance.rs`), which distributes 90% of the cap across the expected block count while adapting to network activity, decentralization, and remaining supply.
+  - The controller writes `economics_block_reward_per_block` every epoch, and the `Launch Governor` audits the same value via `economics::replay::replay_economics_to_tip`.
+  - After computing the controller output, the node multiplies it by the miner-fairness logistic factor (`node/src/lib.rs`), but that logistic multiplier is purely a fairness knob—it does **not** change the issuance policy that the governor/telemetry signs.
 
-**Analogy:** Total supply is like the "size of the ocean," while annual issuance is like "how fast the faucet drips." The faucet (issuance) adjusts speed dynamically, but the ocean (total supply) has a fixed maximum capacity.
+**Analogy:** Total supply is the size of the ocean (`MAX_SUPPLY_BLOCK`), while the network-driven controller is the faucet whose flow rate adapts to demand, decentralization, and how much water already flowed through.
 
 ---
 
 ## The Four Layers
 
-### Layer 1: Adaptive Global BLOCK Issuance
+### Layer 1: Network-Driven Base Reward (canonical)
 
-**Problem**: Fixed issuance rate breaks if circulating supply or token price changes dramatically.
+**Problem**: Fixed or targetted issuance cannot keep pace with real activity, decentralization, or the remaining supply.
 
-**Solution**: Proportional controller maintains target inflation rate (starts at 40M BLOCK/year, adjusts dynamically).
+**Solution**: `NetworkIssuanceController` (`node/src/economics/network_issuance.rs`) is the canonical issuance engine. Every epoch it computes:
 
 ```
-Formula:
-  π_t = I_t / M_t              (realized inflation)
-  I_{t+1} = I_t × (1 + k_π × (π* - π_t))
-  I_{t+1} = clamp(I_{t+1}, I_min, I_max)
-
-Parameters:
-  π* = 500 bps (5% target inflation)
-  k_π = 0.10 (proportional gain)
-  I_min = 50M BLOCK/year
-  I_max = 300M BLOCK/year
+reward = base × activity_multiplier × decentralization_multiplier × supply_decay
 ```
 
-**Result**: If inflation drifts to 3%, issuance automatically increases. If it hits 10%, issuance decreases. Converges to 5% ±1% within ~10 epochs.
+- **Base reward:** Distributes 90% of `MAX_SUPPLY_BLOCK` across `expected_total_blocks`.
+- **Activity multiplier:** Geometric mean of `tx_count / baseline_tx_count`, `tx_volume / baseline_tx_volume`, and `1 + avg_market_utilization`. Each term is clamped and smoothed via adaptive baselines (EMA) to prevent manipulation while letting growing networks earn more.
+- **Decentralization multiplier:** `sqrt(unique_miners / baseline_miners)` (clamped) rewards larger validator sets and softly penalizes concentration.
+- **Supply decay:** `((max_supply - total_emission) / max_supply)^k` (with `k = SUPPLY_DECAY_SHARPNESS`) creates a halving-like tail that naturally pulls issuance toward zero as we near the cap.
 
-**Governance Knobs**:
-- `InflationTargetBps` (default: 500 = 5%)
-- `InflationControllerGain` (default: 0.10)
-- `MinAnnualIssuanceCt` (default: 50M)
-- `MaxAnnualIssuanceCt` (default: 300M)
+The controller updates `economics_block_reward_per_block` plus the persisted adaptive baselines so telemetry, orbiting governors, and explorers replay the identical numbers. After the controller outputs this base, the node multiplies it by the miner-fairness logistic factor (`node/src/lib.rs`) to keep validator clustering honest—this logistic adjustment is purely a fairness multiplier and does not change the canonical issuance policy that Launch Governor signs off on.
+
+#### Compatibility: Legacy Inflation Controller (monitor-only)
+
+The proportional `inflation_controller` (`node/src/economics/inflation_controller.rs`) remains for compatibility dashboards and proofs-of-concept. It populates `EconomicSnapshot.inflation` with a value that loosely tracks realized vs target inflation so older tools keep working, but it does **not** determine the block reward. Any changes to the legacy knobs (`inflation_target_bps`, `inflation_controller_gain`, `min_annual_issuance_block`, `max_annual_issuance_block`) must explicitly justify how they stay aligned with `NetworkIssuanceController` outputs before altering telemetry, CLS, or explorer views.
 
 ---
 
@@ -204,8 +195,8 @@ Every epoch (120 blocks):
    ├─ Read circulating BLOCK, ad volume, non-KYC volume, treasury inflow
    └─ Load governance parameters
 
-2. LAYER 1: Inflation Controller
-   └─ Compute I_{t+1} → Update annual issuance
+2. LAYER 1: Network Issuance Controller
+   └─ Run `NetworkIssuanceController` → Emit `economics_block_reward_per_block`, refresh adaptive baselines, and persist the sample the governor audits
 
 3. LAYER 2: Subsidy Allocator
    └─ Compute [φ_storage, φ_compute, φ_energy, φ_ad] → Update shares
@@ -234,9 +225,11 @@ Every epoch (120 blocks):
 
 All metrics exposed at `/metrics`:
 
-**Layer 1: Inflation**
-- `economics_annual_issuance_block` - Current annual BLOCK issuance
-- `economics_realized_inflation_bps` - Actual inflation rate
+**Layer 1: Network Issuance**
+- `economics_block_reward_per_block` - Canonical base reward audited by the governor
+- `economics_baseline_tx_count`, `economics_baseline_tx_volume`, `economics_baseline_miners` - Adaptive baselines the controller persists
+- `economics_prev_market_metrics_{utilization,provider_margin}_ppm` - The deterministic metrics that produced the reward and gate the economics autopilot
+- `economics_annual_issuance_block`, `economics_realized_inflation_bps` - Compatibility counters derived from the legacy inflation controller for dashboards; they should stay aligned with the network controller but are no longer the minting source
 
 **Layer 2: Subsidies**
 - `economics_subsidy_share_bps{market}` - Allocation per market (storage/compute/energy/ad)
@@ -629,7 +622,8 @@ cargo nextest run -p the_block --test economics_integration
 | File | Purpose | Lines |
 |------|---------|-------|
 | [node/src/economics/mod.rs](../node/src/economics/mod.rs) | Module root, unified control loop, parameter conversion | 1-243 |
-| [node/src/economics/inflation_controller.rs](../node/src/economics/inflation_controller.rs) | Layer 1: Adaptive issuance controller | 1-150 |
+| [node/src/economics/network_issuance.rs](../node/src/economics/network_issuance.rs) | Canonical layer-1 issuance controller (base reward formula) | 1-250 |
+| [node/src/economics/inflation_controller.rs](../node/src/economics/inflation_controller.rs) | Legacy Layer 1 telemetry controller (compatibility only) | 1-150 |
 | [node/src/economics/subsidy_allocator.rs](../node/src/economics/subsidy_allocator.rs) | Layer 2: Distress-driven subsidy allocator | 1-300 |
 | [node/src/economics/market_multiplier.rs](../node/src/economics/market_multiplier.rs) | Layer 3: Dual control multipliers | 1-200 |
 | [node/src/economics/ad_market_controller.rs](../node/src/economics/ad_market_controller.rs) | Layer 4: Ad & tariff drift controllers | 1-362 |
@@ -657,6 +651,8 @@ See full parameter list in [governance/src/lib.rs](../governance/src/lib.rs) lin
 **Layer 4 (7 params)**: AdPlatformTakeTargetBps, AdUserShareTargetBps, AdDriftRate, TariffPublicRevenueTargetBps, TariffDriftRate, TariffMinBps, TariffMaxBps
 
 **Total**: 39 new governance parameters
+
+> **Note:** The four Layer 1 governance knobs now only feed the legacy `inflation_controller` telemetry snapshot; they no longer drive minted rewards. The canonical issuance path is `node/src/economics/network_issuance.rs`, so keep any adjustments in sync with its output before touching dashboards or Explorer views.
 
 ---
 

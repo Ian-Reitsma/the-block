@@ -10,6 +10,22 @@
 
 - **Zero third-party rule**: registry/git dependencies are forbidden. Keep `FIRST_PARTY_ONLY=1`, ensure `dependency_guard` passes in build scripts, and reject deployments/PRs that add non-workspace crates. When vendoring is adjusted, refresh `config/dependency_policies.toml`, `provenance.json`, and `checksums.txt`, and surface the change in CI notes so ops can audit supply-chain drift before tagging.
 
+## Market Integrity Remediation Runbook
+
+### Storage market false positives
+
+- Every storage slash now records a deterministic audit trail (`SlashingAuditEvent` entries such as `RepairScheduled`, `RepairCleared`, `DuplicateNonce`, and `RegionDarkened`). Begin with `tb-cli storage repair-history --contract <id>` / `tb-cli storage providers` to correlate the slashing block with the `repair_deadline`, `is_chunk_missing`, and the `region` that triggered the hit.
+- If you believe the chunk is still retrievable, re-run the storage repair flow (`tb-cli storage repair-run`, `tb-cli storage repair-chunk`, or `tb-cli storage challenge`) so a fresh receipt reports the same `chunk_hash`. Once the receipt lands, the deterministic `RepairCleared` entry will appear, the pending repair flag clears, and future settlements resume paying the chunk.
+- Region-dark false positives resolve by pushing a heartbeat: either schedule a proof (via the repair CLI) or invoke `tb-cli storage providers --refresh <provider>` so the `RegionHeartbeat` entry updates `last_seen_block` and the `RegionDarkened` flag resets. The next `check_dark_regions` pass sees the updated `last_seen_block` plus the `dark_threshold`, clearing the slash candidate.
+- If a slash still looks wrong, capture the audit log snapshot (block height + event + `repair_deadline`), the offending receipt, and the CLI trace, then open a governance investigation referencing this runbook so the governor can replay the deterministic evidence before rolling back the penalty.
+
+### Compute market false positives
+
+- Use `tb-cli compute.status <job_id>`, `tb-cli compute.queue`, and `tb-cli compute proofs` together with the compute-market metrics (`proof_verification_latency_seconds`, `lane_match_latency_ms`, `verification_budget_exceeded` counter) to identify why a job hit an SLA. The new `VerificationBudget` guard emits a precise `verification_budget_exceeded` indicator in both the CLI telemetry and the `ComputeSlashReceipt.reason`.
+- When the budget fires spuriously, either reduce job size so verification stays under the cap or adjust the `DisputePolicy` budget/window in `node/src/compute_market/dispute.rs` before redeploying; after adjustments rerun the queue/stats commands to confirm the backlog drains and the aggregator snapshot (look for `proof_verification_latency_seconds` + `compute_slash_reasons`) matches the new behavior.
+- Lane scheduling false positives occur when `TB_COMPUTE_LANE_MODE` is set to `quarantine` or `strict` and the backlog trips the guard rails. Check `TB_COMPUTE_STRICT_MARGIN_MS`, `TB_COMPUTE_STRICT_MAX_HOLD_MS`, and `TB_COMPUTE_QUARANTINE_MS`; if the lane was quarantined, either drain the backlog and wait for the `quarantined_until` expiry or temporarily revert to `normal` mode, requeue the jobs, and then re-enable the stricter mode once the backlog clears.
+- Document every false-positive remediation in the governor incident log so reviewers can replay the deterministic `verification_budget` snapshot, the lane quarantine timeline, and the `ComputeSlashReceipt` reasons before the next gate flip. Include the CLI command outputs and the `/wrappers` hash that captures the proof latency metrics you just inspected.
+
 ## Telemetry Wiring
 
 ### BlockTorch receipt telemetry & plan enforcement
@@ -35,6 +51,13 @@
 
 - **New gate**: The BlockTorch governor now manages `proof_verification_budget_ms` (default 100 ms). Settlement inspects the recorded `ProofBundle::latency_ms` values in `SlaRecord::proofs` and flips `SlaOutcome::Completed` into `SlaOutcome::Violated { reason: "proof_latency_budget" }` whenever the max latency breaches the budget, triggering the normal slash/refund/telemetry flow. Reference `docs/system_reference.md#6.3`, cite the BlockTorch timeline (`tb-cli compute stats` / `tb-cli governor status`), and record any manual budget tweaks (or rollback steps) in this runbook.
 - **Operator note**: During incidents, query `tb-cli governor status --rpc <endpoint>` (the `telemetry gauges (ppm)` section now includes BlockTorch metrics). Correlate `proof_verification_latency` with the Grafana panel `blocktorch-proofs-latency` and the aggregator trace ID recorded in `/wrappers`.
+
+### Consensus finality telemetry & response
+
+- **Metrics to watch:** `telemetry.summary.finality` (and the `/wrappers` snapshot that mirrors it) exposes `finalized`, `equivocated_stake`, `effective_total_stake`, `finality_threshold`, plus per-hash `vote_support` and `equivocated_validators`. These fields derive directly from `node/src/consensus/finality.rs` and are meant to be your single source of truth whenever finality pauses.
+- **What to do when finality stalls:** If `finality_threshold > effective_total_stake`, the gadget cannot reach a 2/3 supermajority even if every remaining honest validator votes the same way. In that case, escalate to the Launch Governor (see `docs/architecture.md#launch-governor`) to rotate the UNL, slash/eject the equivocated identities, and refresh the validator set. Confirm the new `telemetry.summary.finality` sample (or the `/wrappers` hash) shows the expected decrease in `equivocated_stake` before expecting new votes to finalize.
+- **When finality resumes:** Finality automatically re-evaluates the threshold after every equivocation, so once 2/3 of the surviving stake coalesces on a hash the gadget will finalize it. Use the `vote_support` list from the snapshot and the Grafana panel that mirrors it to ensure no equivocators are contributing to the tallies, and log the snapshot hash in your incident report for audit.
+- **Quick sanity check:** Run `curl -s http://localhost:9091/metrics | grep telemetry_summary_finality` (or read the same values from `/wrappers`) to verify the `equivocated_stake` counter is decreasing after a UNL refresh; cross-check the `governor` intent hash from `tb-cli governor status --rpc <endpoint>` so the governor and telemetry agree on the new set.
 
 ### Bridge remediation ack latency persistence
 

@@ -1,5 +1,6 @@
 use storage_market::slashing::{
-    Config, ReceiptMetadata, RepairKey, RepairReport, SlashingController, SlashingReason,
+    Config, ReceiptMetadata, RepairKey, RepairReport, SlashingAuditEvent, SlashingController,
+    SlashingReason,
 };
 
 fn receipt_meta(
@@ -156,4 +157,73 @@ fn repair_deadline_clears_when_chunk_returns() {
 
     let slashes = controller.drain_slashes(110);
     assert!(slashes.is_empty());
+}
+
+#[test]
+fn missing_chunk_flag_prevents_payment_until_repaired() {
+    let config = Config {
+        repair_window: 6,
+        dark_threshold: 20,
+    };
+    let mut controller = SlashingController::new(config);
+    let key = repair_key("contract-42", "provider-e");
+    controller.report_missing_chunk(RepairReport {
+        key: key.clone(),
+        block_height: 5,
+        missing_bytes: 16,
+        provider_escrow: 40,
+        rent_per_byte: 3,
+        region: Some("sa-east".into()),
+    });
+
+    assert!(controller.is_chunk_missing(&key));
+    assert_eq!(controller.repair_deadline(&key), Some(11));
+
+    controller.record_receipt(receipt_meta(
+        "provider-e",
+        1,
+        10,
+        Some("sa-east"),
+        Some(key.chunk_hash),
+    ));
+
+    assert!(!controller.is_chunk_missing(&key));
+    assert!(controller.audit_log().iter().any(|entry| {
+        matches!(
+            &entry.event,
+            SlashingAuditEvent::RepairCleared { key: cleared, .. } if cleared == &key
+        )
+    }));
+}
+
+#[test]
+fn duplicate_nonce_emits_audit_event() {
+    let mut controller = SlashingController::new(Config::default());
+    let chunk_hash = [9u8; 32];
+    controller.record_receipt(receipt_meta(
+        "provider-a",
+        99,
+        10,
+        Some("us-central"),
+        Some(chunk_hash),
+    ));
+
+    controller.record_receipt(receipt_meta(
+        "provider-b",
+        99,
+        11,
+        Some("us-central"),
+        Some(chunk_hash),
+    ));
+
+    assert!(controller.audit_log().iter().any(|entry| {
+        matches!(
+            &entry.event,
+            SlashingAuditEvent::DuplicateNonce {
+                contract_id,
+                nonce,
+                providers,
+            } if *nonce == 99 && contract_id == "contract-1" && providers.len() == 2
+        )
+    }));
 }

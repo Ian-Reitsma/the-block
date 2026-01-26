@@ -11,7 +11,7 @@ use crate::receipt_crypto::{
     build_storage_preimage, verify_receipt_signature, CryptoError, NonceTracker, ProviderRegistry,
 };
 use crate::receipts::Receipt;
-use crypto_suite::hashing::blake3;
+use crypto_suite::hashing::blake3::{self, Hasher};
 use foundation_serialization::{Deserialize, Serialize};
 
 /// Hard ceiling for receipts per block (fuse; budgets are authoritative).
@@ -680,10 +680,13 @@ pub fn aggregate_signature_digest(
 }
 
 /// Encode a single receipt to determine serialized size for budgeting.
-pub fn encoded_receipt_len(receipt: &Receipt) -> Result<usize, String> {
+pub fn encode_receipt(receipt: &Receipt) -> Result<Vec<u8>, String> {
     block_binary::encode_receipts(&[receipt.clone()])
-        .map(|bytes| bytes.len())
         .map_err(|e| format!("encode receipt: {:?}", e))
+}
+
+pub fn encoded_receipt_len(receipt: &Receipt) -> Result<usize, String> {
+    encode_receipt(receipt).map(|bytes| bytes.len())
 }
 
 /// Parameters controlling receipt header derivation/validation.
@@ -735,8 +738,9 @@ pub fn derive_receipt_header(
         std::collections::HashMap::new();
 
     for receipt in receipts {
-        let encoded_len = encoded_receipt_len(receipt)?;
-        acc.add(receipt, encoded_len);
+        let encoded = encode_receipt(receipt)?;
+        let encoded_len = encoded.len();
+        acc.add(receipt, encoded_len, &encoded);
         let shard = shard_for_receipt(receipt, params.shard_count);
         let entry = diversity.entry(shard).or_default();
         let (id, region_hint, asn_hint) = match receipt {
@@ -797,7 +801,7 @@ pub fn derive_receipt_header(
     let aggregate_sig = aggregate_signature_digest(receipts, params.aggregate_scheme);
     let available_until =
         timestamp_millis.saturating_add(params.da_window_secs.saturating_mul(1000));
-    let blob_commitments = vec![[0u8; 32]; params.shard_count as usize];
+    let blob_commitments = acc.finalize_blob_commitments();
 
     Ok(ReceiptHeader {
         shard_count: params.shard_count,
@@ -830,6 +834,9 @@ pub fn validate_receipt_header(
     if expected.shard_roots != header.shard_roots {
         return Err("receipt shard roots mismatch".into());
     }
+    if expected.blob_commitments != header.blob_commitments {
+        return Err("receipt blob commitments mismatch".into());
+    }
     if expected.aggregate_sig != header.aggregate_sig {
         return Err("receipt aggregate signature mismatch".into());
     }
@@ -839,11 +846,11 @@ pub fn validate_receipt_header(
 /// Per-shard aggregation of receipt roots and resource usage. This is a
 /// stateless, append-only accumulator intended for builders and macro-block
 /// assembly to avoid a single global receipts Vec bottleneck.
-#[derive(Debug, Clone)]
 pub struct ReceiptShardAccumulator {
     shard_count: u16,
     leaves: Vec<Vec<[u8; 32]>>,
     usage: Vec<ReceiptBlockUsage>,
+    blob_hashers: Vec<Hasher>,
 }
 
 impl ReceiptShardAccumulator {
@@ -860,10 +867,11 @@ impl ReceiptShardAccumulator {
                 };
                 len
             ],
+            blob_hashers: vec![Hasher::new(); len],
         }
     }
 
-    pub fn add(&mut self, receipt: &Receipt, encoded_size: usize) {
+    pub fn add(&mut self, receipt: &Receipt, encoded_size: usize, encoded_bytes: &[u8]) {
         let shard = shard_for_receipt(receipt, self.shard_count);
         let idx = shard as usize;
         self.leaves[idx].push(receipt_leaf_hash(receipt));
@@ -872,6 +880,13 @@ impl ReceiptShardAccumulator {
         usage.count += 1;
         usage.bytes += encoded_size;
         usage.verify_units += units;
+        let hasher = &mut self.blob_hashers[idx];
+        hasher.update(b"receipt_blob");
+        hasher.update(receipt.market_name().as_bytes());
+        hasher.update(&receipt.block_height().to_le_bytes());
+        hasher.update(&receipt_leaf_hash(receipt));
+        hasher.update(&(encoded_size as u32).to_le_bytes());
+        hasher.update(encoded_bytes);
     }
 
     /// Compute per-shard Merkle roots (empty shards use the zero hash).
@@ -901,6 +916,14 @@ impl ReceiptShardAccumulator {
                 acc.verify_units += shard.verify_units;
                 acc
             })
+    }
+
+    /// Finalize per-shard blob commitments for DA enforcement.
+    pub fn finalize_blob_commitments(&mut self) -> Vec<[u8; 32]> {
+        self.blob_hashers
+            .iter_mut()
+            .map(|hasher| hasher.finalize().into())
+            .collect()
     }
 }
 
@@ -1273,6 +1296,24 @@ mod tests {
         let err = validate_receipt_header(&header, &receipts, params, &registry, 10_000)
             .expect_err("should detect agg mismatch");
         assert!(err.contains("aggregate signature"));
+    }
+
+    #[test]
+    fn blob_commitment_mismatch_detected() {
+        let receipts = vec![dummy_ad_receipt("pBlob", 10)];
+        let mut registry = ProviderRegistry::new();
+        let sk = SigningKey::generate(&mut StdRng::seed_from_u64(1));
+        let vk = sk.verifying_key();
+        registry
+            .register_provider_with_metadata("pBlob".into(), vk, 0, Some("region".into()), Some(42))
+            .unwrap();
+        let params = ReceiptHeaderParams::new(1, 10, 1, 1, 3, ReceiptAggregateScheme::BatchEd25519);
+        let mut header =
+            derive_receipt_header(&receipts, 5_000, params, &registry).expect("derive header");
+        header.blob_commitments[0][0] ^= 0xFF;
+        let err = validate_receipt_header(&header, &receipts, params, &registry, 5_000)
+            .expect_err("should detect blob mismatch");
+        assert!(err.contains("blob commitments"));
     }
 
     #[test]

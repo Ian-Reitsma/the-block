@@ -80,6 +80,7 @@ pub mod energy;
 pub mod exec;
 pub mod governor_snapshot;
 mod read_receipt;
+pub mod receipt_audit;
 pub mod receipt_crypto;
 pub mod receipts;
 pub mod receipts_validation;
@@ -4988,9 +4989,8 @@ impl Blockchain {
                 let mut acc =
                     receipts_validation::ReceiptShardAccumulator::new(self.receipt_shard_count);
                 for receipt in &block_receipts {
-                    let encoded_len =
-                        receipts_validation::encoded_receipt_len(receipt).unwrap_or_default();
-                    acc.add(receipt, encoded_len);
+                    let encoded = receipts_validation::encode_receipt(receipt).unwrap_or_default();
+                    acc.add(receipt, encoded.len(), &encoded);
                 }
                 for (idx, usage) in acc.per_shard_usage().iter().enumerate() {
                     crate::telemetry::receipts::record_shard_usage(idx as u16, usage);
