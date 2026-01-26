@@ -1083,6 +1083,14 @@ A trait-based, multi-provider signature verification system for energy market or
 
 ---
 
+### 19.5 Task 4: Real Market Cliffs (IN PROGRESS)
+
+- **Goal:** Wrap the accounting substrate provided by `node/src/receipts_validation.rs:551` with deterministic game-theory guards so storage incentives and compute SLA arbitration resist gaming. See [`docs/task4_market_cliffs.md`](docs/task4_market_cliffs.md) for the current spec.
+- **Status:** Receipt validation already rejects missing metadata, replayed nonces, and forged signatures. The new market-cliffs design enumerates provider selection, repair, slashing, dispute, and oracle-defense rules; the next delivery is code that emits `StorageSlash`/`ComputeSlash` receipts + telemetry hashes and tests the scenarios listed in the spec.
+- **Next steps:** Implement slashing and dispute controllers that consume the replayable metrics from the verdict table, add targeted regression tests (`node/tests/storage_slash.rs`, `node/tests/compute_dispute.rs`), and surface the deterministic hashes via explorer/CLI/telemetry so every economics gate demo matches the replayed receipts.
+
+---
+
 ### 19.5 Cross-Cutting Accomplishments
 
 #### Bug Fixes

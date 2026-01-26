@@ -1,12 +1,16 @@
 use super::erasure::{self, ErasureParams};
 use super::types::{ObjectManifest, Redundancy};
+use crate::compute_market::settlement::Settlement;
 use crate::simple_db::{names, SimpleDb};
 use crate::storage::manifest_binary::{decode_manifest, encode_manifest};
 use crate::storage::settings;
+use crate::storage::slash;
+use crate::telemetry::consensus_metrics::BLOCK_HEIGHT;
 #[cfg(feature = "telemetry")]
 use crate::telemetry::{
     STORAGE_REPAIR_ATTEMPTS_TOTAL, STORAGE_REPAIR_BYTES_TOTAL, STORAGE_REPAIR_FAILURES_TOTAL,
 };
+use storage_market::slashing::{RepairKey, RepairReport};
 
 #[cfg(feature = "telemetry")]
 fn with_metric_handle<T, E, F, const N: usize>(
@@ -42,11 +46,21 @@ use std::panic;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
+use std::sync::atomic::{AtomicI64, Ordering};
 const MAX_CONCURRENT_REPAIRS: usize = 4;
 const MAX_LOG_FILES: usize = 14;
 const FAILURE_PREFIX: &str = "repair/failures/";
 const FAILURE_BACKOFF_BASE_SECS: u64 = 30;
 const FAILURE_BACKOFF_CAP_SECS: u64 = 60 * 60;
+static RENT_RATE_PER_BYTE: AtomicI64 = AtomicI64::new(0);
+
+pub fn set_rent_rate(rate: i64) {
+    RENT_RATE_PER_BYTE.store(rate, Ordering::Relaxed);
+}
+
+fn current_rent_rate_per_byte() -> u64 {
+    RENT_RATE_PER_BYTE.load(Ordering::Relaxed).max(0) as u64
+}
 
 pub fn spawn(path: String, period: Duration) {
     let _ = thread::Builder::new()
@@ -418,6 +432,7 @@ enum RepairOutcome {
         writes: Vec<ShardWrite>,
         missing_slots: Vec<usize>,
         failure_key: String,
+        repair_key: RepairKey,
     },
     Failure {
         manifest: String,
@@ -437,6 +452,20 @@ enum RepairOutcome {
 struct ShardWrite {
     key: String,
     value: Vec<u8>,
+}
+
+fn report_missing_chunk_for(repair_key: &RepairKey, missing_bytes: u64, rent_per_byte: u64) {
+    let block_height = BLOCK_HEIGHT.get().value().max(0) as u64;
+    let provider_escrow = Settlement::balance(&repair_key.provider);
+    let report = RepairReport {
+        key: repair_key.clone(),
+        block_height,
+        missing_bytes,
+        provider_escrow,
+        rent_per_byte,
+        region: None,
+    };
+    slash::report_missing_chunk(report);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -604,6 +633,37 @@ pub fn run_once(
                     }
                 }
                 let failure_key = failure_key(&manifest_hex, chunk_idx);
+                let chunk_ref = match group.first() {
+                    Some(chunk_ref) => chunk_ref,
+                    None => continue,
+                };
+                let provider = chunk_ref
+                    .nodes
+                    .first()
+                    .and_then(|id| (!id.is_empty()).then(|| id.clone()))
+                    .or_else(|| {
+                        chunk_ref
+                            .provider_chunks
+                            .first()
+                            .map(|entry| entry.provider.clone())
+                    })
+                    .or_else(|| {
+                        manifest
+                            .provider_chunks
+                            .first()
+                            .map(|entry| entry.provider.clone())
+                    });
+                let provider = match provider {
+                    Some(provider) => provider,
+                    None => continue,
+                };
+                let repair_key = RepairKey {
+                    contract_id: manifest_hex.clone(),
+                    provider,
+                    chunk_hash: chunk_ref.id,
+                };
+                let missing_bytes = manifest.chunk_cipher_len(chunk_idx) as u64;
+                let rent_per_byte = current_rent_rate_per_byte();
                 let now = current_timestamp();
                 if !request.force {
                     if let Some(record) = load_failure_record(db, &failure_key) {
@@ -672,6 +732,10 @@ pub fn run_once(
                     }
                 }
 
+                if !missing.is_empty() {
+                    report_missing_chunk_for(&repair_key, missing_bytes, rent_per_byte);
+                }
+
                 if missing.is_empty() && !request.force {
                     continue;
                 }
@@ -703,6 +767,7 @@ pub fn run_once(
                     missing_slots,
                     failure_key: failure_key.clone(),
                     erasure: params.clone(),
+                    repair_key: repair_key.clone(),
                 });
             }
 
@@ -732,6 +797,7 @@ struct ScheduledJob {
     missing_slots: Vec<usize>,
     failure_key: String,
     erasure: ErasureParams,
+    repair_key: RepairKey,
 }
 
 fn run_scheduled_jobs(jobs: Vec<ScheduledJob>) -> Vec<RepairOutcome> {
@@ -822,6 +888,7 @@ fn process_job(job: ScheduledJob) -> RepairOutcome {
                     writes,
                     missing_slots: job.missing_slots,
                     failure_key: job.failure_key,
+                    repair_key: job.repair_key.clone(),
                 }
             }
             Err(err) => RepairOutcome::Failure {
@@ -857,8 +924,10 @@ fn handle_outcome(
             writes,
             missing_slots,
             failure_key,
+            repair_key,
         } => {
             let mut db_error = None;
+            slash::cancel_pending_repair(repair_key.clone());
             for write in &writes {
                 if let Err(err) = db.try_insert(&write.key, write.value.clone()) {
                     db_error = Some(err.to_string());
@@ -1125,7 +1194,7 @@ pub fn fountain_repair_roundtrip(data: &[u8]) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 use runtime::sync::mpsc::UnboundedSender;
 #[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 

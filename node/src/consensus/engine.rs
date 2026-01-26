@@ -18,6 +18,11 @@ impl ConsensusEngine {
         self.gadget.vote(validator, block_hash)
     }
 
+    /// Inspect the current voting state for auditing/tests.
+    pub fn snapshot(&self) -> super::finality::FinalitySnapshot {
+        self.gadget.snapshot()
+    }
+
     /// Roll back any finalized block.
     pub fn rollback(&mut self) {
         self.gadget.rollback();

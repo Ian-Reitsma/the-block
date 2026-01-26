@@ -8,4 +8,5 @@ pub mod placement;
 pub mod provider_directory;
 pub mod repair;
 pub mod settings;
+pub mod slash;
 pub mod types;

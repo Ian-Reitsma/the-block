@@ -39,11 +39,11 @@ fn market_persists_contracts_and_records_proofs() {
         .register_contract(contract, vec![replica])
         .expect("register");
 
-    market
-        .record_proof_outcome("obj", None, 4, true)
+    let _ = market
+        .record_proof_outcome("obj", None, 4, true, None)
         .expect("record success");
-    market
-        .record_proof_outcome("obj", None, 5, false)
+    let _ = market
+        .record_proof_outcome("obj", None, 5, false, None)
         .expect("record failure");
 
     drop(market);

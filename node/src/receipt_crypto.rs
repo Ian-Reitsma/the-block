@@ -255,6 +255,16 @@ fn build_storage_preimage(receipt: &StorageReceipt) -> Vec<u8> {
     hasher.update(&receipt.bytes.to_le_bytes());
     hasher.update(&receipt.price.to_le_bytes());
     hasher.update(&receipt.provider_escrow.to_le_bytes());
+    if let Some(chunk_hash) = &receipt.chunk_hash {
+        hasher.update(chunk_hash);
+    } else {
+        hasher.update(b"chunk_hash:none");
+    }
+    if let Some(region) = &receipt.region {
+        hasher.update(region.as_bytes());
+    } else {
+        hasher.update(b"region:none");
+    }
     hasher.update(&receipt.signature_nonce.to_le_bytes());
 
     hasher.finalize().as_bytes().to_vec()
@@ -329,7 +339,10 @@ pub fn verify_receipt_signature(
 ) -> Result<(), CryptoError> {
     if matches!(
         receipt,
-        Receipt::EnergySlash(_) | Receipt::ComputeSlash(_) | Receipt::Relay(_)
+        Receipt::EnergySlash(_)
+            | Receipt::ComputeSlash(_)
+            | Receipt::StorageSlash(_)
+            | Receipt::Relay(_)
     ) {
         return Ok(());
     }
@@ -355,6 +368,7 @@ pub fn verify_receipt_signature(
         ),
         Receipt::EnergySlash(_) => unreachable!("energy slash receipts are unsigned"),
         Receipt::ComputeSlash(_) => unreachable!("compute slash receipts are unsigned"),
+        Receipt::StorageSlash(_) => unreachable!("storage slash receipts are unsigned"),
         Receipt::Ad(r) => (
             build_ad_preimage(r),
             r.publisher.as_str(),
@@ -427,6 +441,8 @@ mod tests {
             price: 500,
             block_height: 100,
             provider_escrow: 10000,
+            region: None,
+            chunk_hash: None,
             provider_signature: vec![],
             signature_nonce: 1,
         };
@@ -464,6 +480,8 @@ mod tests {
             price: 500,
             block_height: 100,
             provider_escrow: 10000,
+            region: None,
+            chunk_hash: None,
             provider_signature: vec![],
             signature_nonce: 1,
         };
@@ -500,6 +518,8 @@ mod tests {
             price: 500,
             block_height: 100,
             provider_escrow: 10000,
+            region: None,
+            chunk_hash: None,
             provider_signature: vec![],
             signature_nonce: 1,
         };

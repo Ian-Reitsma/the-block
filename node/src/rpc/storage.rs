@@ -2,20 +2,28 @@
 
 use base64_fp::decode_standard;
 use concurrency::Lazy;
+use crypto_suite::hashing::blake3::Hasher;
 use foundation_serialization::json::{Map, Number, Value};
 use std::sync::Arc;
 use storage::{contract::ContractError, merkle_proof::MerkleProof, StorageContract, StorageOffer};
 use storage_market::{
-    ProofOutcome, ProofRecord, ProviderProfile, ReplicaIncentive, StorageMarket, StorageMarketError,
+    slashing::{RepairKey, RepairReport, SlashingReason, StorageSlash},
+    ProofOutcome, ProofRecord, ProviderDirectory, ProviderProfile, ReplicaIncentive, StorageMarket,
+    StorageMarketError,
 };
 
+use crate::compute_market::settlement::Settlement;
 use crate::drive::DriveStore;
 use crate::market_gates::{self, MarketMode};
+use crate::storage::types::ObjectManifest;
 use crate::storage::marketplace::SearchOptions;
 use crate::storage::pipeline::StoragePipeline;
 use crate::storage::provider_directory;
 use crate::storage::repair::repair_log_entry_to_value;
 use crate::storage::repair::RepairRequest;
+use crate::storage::slash;
+use crate::storage::types::{ChunkRef, ProviderChunkEntry};
+use crate::telemetry::consensus_metrics::BLOCK_HEIGHT;
 
 fn json_object(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
@@ -399,16 +407,29 @@ pub fn challenge(
             {
                 crate::telemetry::RETRIEVAL_SUCCESS_TOTAL.inc();
             }
-            match MARKET
-                .guard()
-                .record_proof_outcome(object_id, provider_id, current_block, true)
-            {
-                Ok(proof_record) => json_object(vec![
-                    ("status", Value::String("ok".to_string())),
-                    ("proof", proof_record_value(&proof_record)),
-                ]),
-                Err(err) => market_error_value(err),
+            let mut chunk_hasher = Hasher::new();
+            chunk_hasher.update(chunk_data);
+            let chunk_hash = chunk_hasher.finalize().into();
+            let (proof_record, profile) = {
+                let mut market = MARKET.guard();
+                match market.record_proof_outcome(
+                    object_id,
+                    provider_id,
+                    current_block,
+                    true,
+                    Some(chunk_hash),
+                ) {
+                    Ok(outcome) => outcome,
+                    Err(err) => return market_error_value(err),
+                }
+            };
+            if let Some(dir) = provider_directory::directory() {
+                dir.publish(profile);
             }
+            json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                ("proof", proof_record_value(&proof_record)),
+            ])
         }
         Err(ContractError::Expired) => {
             #[cfg(feature = "telemetry")]
@@ -433,10 +454,17 @@ pub fn challenge(
                 let updated = reputation.saturating_sub(1);
                 crate::compute_market::scheduler::merge_reputation(&provider, updated, u64::MAX);
             }
-            let _ =
-                MARKET
-                    .guard()
-                    .record_proof_outcome(object_id, provider_id, current_block, false);
+            let publish = {
+                let mut market = MARKET.guard();
+                market
+                    .record_proof_outcome(object_id, provider_id, current_block, false, None)
+                    .ok()
+            };
+            if let Some((_, profile)) = publish {
+                if let Some(dir) = provider_directory::directory() {
+                    dir.publish(profile);
+                }
+            }
             error_value("challenge_failed")
         }
     }
@@ -520,11 +548,17 @@ pub fn register_provider(
     profile.region = region.map(|value| value.to_string());
     profile.latency_ms = latency_ms;
     profile.tags = tags;
-    match MARKET.guard().register_provider_profile(profile) {
-        Ok(saved) => json_object(vec![
-            ("status", Value::String("ok".to_string())),
-            ("provider", provider_profile_value(&saved)),
-        ]),
+    let result = { MARKET.guard().register_provider_profile(profile) };
+    match result {
+        Ok(saved) => {
+            if let Some(dir) = provider_directory::directory() {
+                dir.publish(saved.clone());
+            }
+            json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                ("provider", provider_profile_value(&saved)),
+            ])
+        }
         Err(err) => market_error_value(err),
     }
 }
@@ -783,6 +817,179 @@ pub fn manifest_summaries(limit: Option<usize>) -> foundation_serialization::jso
     ])
 }
 
+/// Inspect manifests for missing chunks and report them to the slashing controller.
+pub fn audit(
+    manifest: Option<String>,
+    limit: Option<usize>,
+) -> foundation_serialization::json::Value {
+    let pipeline = StoragePipeline::open(&pipeline_path());
+    let max_entries = limit.unwrap_or(100).min(1000);
+    let manifest_ids = if let Some(hex) = manifest {
+        if hex.is_empty() {
+            return error_value("manifest hash cannot be empty");
+        }
+        vec![hex]
+    } else {
+        pipeline
+            .manifest_summaries(max_entries)
+            .into_iter()
+            .map(|summary| summary.manifest)
+            .collect::<Vec<_>>()
+    };
+
+    let rent_per_byte = pipeline.rent_rate_per_byte();
+    let block_height = BLOCK_HEIGHT.get().value().max(0) as u64;
+    let mut reports = Vec::new();
+
+    for manifest_hex in manifest_ids {
+        match crypto_suite::hex::decode(manifest_hex.as_str()) {
+            Ok(bytes) if bytes.len() == 32 => {
+                let mut hash = [0u8; 32];
+                hash.copy_from_slice(&bytes);
+                match pipeline.get_manifest(&hash) {
+                    Some(manifest) => {
+                        for (chunk_idx, chunk) in manifest.chunks.iter().enumerate() {
+                            if pipeline.has_chunk(&chunk.id) {
+                                continue;
+                            }
+                            let provider = match provider_for_chunk(&manifest, chunk_idx, chunk) {
+                                Some(provider) => provider,
+                                None => {
+                                    let mut entry = Map::new();
+                                    entry.insert(
+                                        "manifest".into(),
+                                        Value::String(manifest_hex.clone()),
+                                    );
+                                    entry.insert(
+                                        "chunk_index".into(),
+                                        Value::Number(Number::from(chunk_idx as u64)),
+                                    );
+                                    entry.insert(
+                                        "chunk_hash".into(),
+                                        Value::String(crypto_suite::hex::encode(chunk.id)),
+                                    );
+                                    entry.insert(
+                                        "error".into(),
+                                        Value::String("no provider available".to_string()),
+                                    );
+                                    reports.push(Value::Object(entry));
+                                    continue;
+                                }
+                            };
+                            let region = MARKET
+                                .guard()
+                                .provider_profile(&provider)
+                                .ok()
+                                .flatten()
+                                .and_then(|profile| profile.region.clone());
+                            let provider_escrow = Settlement::balance(&provider);
+                            let report = RepairReport {
+                                key: RepairKey {
+                                    contract_id: manifest_hex.clone(),
+                                    provider: provider.clone(),
+                                    chunk_hash: chunk.id,
+                                },
+                                block_height,
+                                missing_bytes: manifest.chunk_cipher_len(chunk_idx) as u64,
+                                provider_escrow,
+                                rent_per_byte,
+                                region: region.clone(),
+                            };
+                            slash::report_missing_chunk(report);
+                            let mut entry = Map::new();
+                            entry.insert("manifest".into(), Value::String(manifest_hex.clone()));
+                            entry.insert(
+                                "chunk_index".into(),
+                                Value::Number(Number::from(chunk_idx as u64)),
+                            );
+                            entry.insert(
+                                "chunk_hash".into(),
+                                Value::String(crypto_suite::hex::encode(chunk.id)),
+                            );
+                            entry.insert("provider".into(), Value::String(provider.clone()));
+                            entry.insert(
+                                "missing_bytes".into(),
+                                Value::Number(Number::from(
+                                    manifest.chunk_cipher_len(chunk_idx) as u64
+                                )),
+                            );
+                            entry.insert(
+                                "rent_per_byte".into(),
+                                Value::Number(Number::from(rent_per_byte)),
+                            );
+                            entry.insert(
+                                "provider_escrow".into(),
+                                Value::Number(Number::from(provider_escrow)),
+                            );
+                            entry.insert(
+                                "region".into(),
+                                region.map(Value::String).unwrap_or(Value::Null),
+                            );
+                            entry.insert("status".into(), Value::String("reported".to_string()));
+                            reports.push(Value::Object(entry));
+                        }
+                    }
+                    None => {
+                        let mut entry = Map::new();
+                        entry.insert("manifest".into(), Value::String(manifest_hex.clone()));
+                        entry.insert(
+                            "error".into(),
+                            Value::String("manifest not found".to_string()),
+                        );
+                        reports.push(Value::Object(entry));
+                    }
+                }
+            }
+            _ => {
+                let mut entry = Map::new();
+                entry.insert("manifest".into(), Value::String(manifest_hex.clone()));
+                entry.insert(
+                    "error".into(),
+                    Value::String("invalid manifest hash".to_string()),
+                );
+                reports.push(Value::Object(entry));
+            }
+        }
+    }
+
+    let missing_chunks = reports.len();
+
+    json_object(vec![
+        ("status", Value::String("ok".to_string())),
+        ("reports", Value::Array(reports)),
+        (
+            "missing_chunks",
+            Value::Number(Number::from(missing_chunks as u64)),
+        ),
+    ])
+}
+
+fn provider_for_chunk(
+    manifest: &ObjectManifest,
+    chunk_idx: usize,
+    chunk: &ChunkRef,
+) -> Option<String> {
+    chunk
+        .nodes
+        .iter()
+        .find(|id| !id.is_empty())
+        .cloned()
+        .or_else(|| provider_from_entries(&chunk.provider_chunks, chunk_idx))
+        .or_else(|| provider_from_entries(&manifest.provider_chunks, chunk_idx))
+}
+
+fn provider_from_entries(entries: &[ProviderChunkEntry], chunk_idx: usize) -> Option<String> {
+    entries
+        .iter()
+        .find(|entry| {
+            entry
+                .chunk_indices
+                .iter()
+                .any(|&idx| idx as usize == chunk_idx)
+        })
+        .map(|entry| entry.provider.clone())
+}
+
 /// Storage drive upload endpoint for `contract-cli storage put`.
 pub fn drive_put(encoded: &str) -> Value {
     let bytes = match decode_standard(encoded) {
@@ -820,8 +1027,10 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
             price: r.price,
             block_height: r.block_height,
             provider_escrow: r.provider_escrow,
+            region: r.region,
+            chunk_hash: r.chunk_hash,
             provider_signature: vec![],
-            signature_nonce: 0,
+            signature_nonce: r.signature_nonce,
         })
         .collect();
 
@@ -839,6 +1048,23 @@ pub fn drain_storage_receipts() -> Vec<crate::receipts::StorageReceipt> {
     }
 
     receipts
+}
+
+pub fn drain_storage_slash_receipts(
+    block_height: u64,
+) -> Vec<crate::receipts::StorageSlashReceipt> {
+    let slashes = slash::drain_slash_events(block_height);
+    if market_gates::storage_mode() == MarketMode::Rehearsal {
+        return Vec::new();
+    }
+    slashes
+        .into_iter()
+        .map(|slash| slash::storage_slash_to_receipt(slash))
+        .collect()
+}
+
+pub fn report_missing_chunk(report: RepairReport) {
+    slash::report_missing_chunk(report);
 }
 
 /// Test helper to enqueue a storage receipt in the global market queue.

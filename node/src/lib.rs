@@ -37,6 +37,7 @@ use diagnostics::tracing::info;
 use diagnostics::tracing::warn;
 use ledger::address::{self, ShardId};
 use ledger::shard::ShardState;
+use storage_market::slashing::ReceiptMetadata;
 pub mod block_binary;
 pub mod http_client;
 pub mod ledger_binary;
@@ -1340,6 +1341,7 @@ impl Blockchain {
                 for receipt in &block.receipts {
                     match receipt {
                         Receipt::Storage(_) => has_storage_receipts = true,
+                        Receipt::StorageSlash(_) => {}
                         Receipt::Compute(_) => has_compute_receipts = true,
                         Receipt::ComputeSlash(_) => {}
                         Receipt::Energy(_) => has_energy_receipts = true,
@@ -4887,7 +4889,23 @@ impl Blockchain {
             }));
         }
         for receipt in crate::rpc::storage::drain_storage_receipts() {
+            let metadata = ReceiptMetadata {
+                provider: receipt.provider.clone(),
+                signature_nonce: receipt.signature_nonce,
+                block_height: receipt.block_height,
+                contract_id: receipt.contract_id.clone(),
+                region: receipt.region.clone(),
+                chunk_hash: receipt.chunk_hash.clone(),
+            };
+            for slash in crate::storage::slash::record_receipt(metadata) {
+                block_receipts.push(Receipt::StorageSlash(
+                    crate::storage::slash::storage_slash_to_receipt(slash),
+                ));
+            }
             block_receipts.push(Receipt::Storage(receipt));
+        }
+        for slash in crate::rpc::storage::drain_storage_slash_receipts(index) {
+            block_receipts.push(Receipt::StorageSlash(slash));
         }
         crate::compute_market::set_compute_current_block(index);
         for receipt in crate::compute_market::drain_compute_receipts() {

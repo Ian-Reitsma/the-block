@@ -10,6 +10,7 @@ mod engine;
 mod importer;
 mod legacy;
 pub mod receipts;
+pub mod slashing;
 
 pub use importer::{
     AuditEntryStatus, AuditReport, ChecksumComparison, ChecksumDigest, ChecksumScope, ImportMode,
@@ -247,6 +248,7 @@ pub struct ProofRecord {
     pub remaining_deposit: u64,
     pub proof_successes: u64,
     pub proof_failures: u64,
+    pub chunk_hash: Option<[u8; 32]>,
 }
 
 #[derive(Clone)]
@@ -254,6 +256,7 @@ pub struct StorageMarket {
     engine: Engine,
     contracts: Tree,
     providers: Tree,
+    nonces: Tree,
     /// Pending settlement receipts for block inclusion
     pending_receipts: Vec<receipts::StorageSettlementReceipt>,
 }
@@ -264,17 +267,47 @@ impl StorageMarket {
         let engine = Engine::open(base)?;
         let contracts = engine.open_tree("market/contracts")?;
         let providers = engine.open_tree("market/providers")?;
+        let nonces = engine.open_tree("market/nonces")?;
         legacy::migrate_if_present(base, &contracts)?;
         Ok(Self {
             engine,
             contracts,
             providers,
+            nonces,
             pending_receipts: Vec::new(),
         })
     }
 
     pub fn base_path(&self) -> &Path {
         self.engine.base_path()
+    }
+
+    fn bump_provider_nonce(&self, provider_id: &str) -> Result<u64> {
+        let key = provider_id.as_bytes().to_vec();
+        loop {
+            let existing = self.nonces.get(&key)?;
+            let current_nonce = existing
+                .as_deref()
+                .and_then(|bytes| {
+                    if bytes.len() == 8 {
+                        let mut array = [0u8; 8];
+                        array.copy_from_slice(bytes);
+                        Some(u64::from_le_bytes(array))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+            let next = current_nonce.saturating_add(1);
+            let replacement = next.to_le_bytes().to_vec();
+            match self
+                .nonces
+                .compare_and_swap(&key, existing.clone(), Some(replacement))
+            {
+                Ok(_) => return Ok(next),
+                Err(_) => continue,
+            }
+        }
     }
 
     /// Drain all pending receipts for block inclusion
@@ -320,6 +353,7 @@ impl StorageMarket {
     pub fn clear(&self) -> Result<()> {
         self.contracts.clear()?;
         self.providers.clear()?;
+        self.nonces.clear()?;
         Ok(())
     }
 
@@ -329,7 +363,8 @@ impl StorageMarket {
         provider_id: Option<&str>,
         block: u64,
         success: bool,
-    ) -> Result<ProofRecord> {
+        chunk_hash: Option<[u8; 32]>,
+    ) -> Result<(ProofRecord, ProviderProfile)> {
         let key = object_id.as_bytes();
         loop {
             let current = self.contracts.get(key)?;
@@ -382,21 +417,26 @@ impl StorageMarket {
                         remaining_deposit,
                         proof_successes,
                         proof_failures,
+                        chunk_hash,
                     };
 
+                    let profile =
+                        self.record_provider_feedback(&proof.provider_id, success, block)?;
+
                     // Emit receipt for successful settlements with payment
-                    if let Some(receipt) = receipts::StorageSettlementReceipt::from_proof(
+                    if let Some(mut receipt) = receipts::StorageSettlementReceipt::from_proof(
                         &proof,
                         record.contract.original_bytes,
                         record.contract.price_per_block,
                         block,
+                        profile.region.clone(),
+                        chunk_hash,
                     ) {
+                        receipt.signature_nonce = self.bump_provider_nonce(&proof.provider_id)?;
                         self.pending_receipts.push(receipt);
                     }
 
-                    let _ = self.record_provider_feedback(&proof.provider_id, success, block);
-
-                    return Ok(proof);
+                    return Ok((proof, profile));
                 }
                 Err(_) => continue,
             }
@@ -440,9 +480,6 @@ impl StorageMarket {
         }
         let bytes = serialize_provider_profile(&profile)?;
         let _ = self.providers.insert(key, bytes)?;
-        if let Some(directory) = provider_directory() {
-            directory.publish(profile.clone());
-        }
         Ok(profile)
     }
 
@@ -542,7 +579,12 @@ impl StorageMarket {
         Ok(candidates)
     }
 
-    fn record_provider_feedback(&self, provider_id: &str, success: bool, block: u64) -> Result<()> {
+    fn record_provider_feedback(
+        &self,
+        provider_id: &str,
+        success: bool,
+        block: u64,
+    ) -> Result<ProviderProfile> {
         let key = provider_id.as_bytes();
         let mut profile = self
             .providers
@@ -560,10 +602,7 @@ impl StorageMarket {
         profile.expires_at = Some(Self::default_expiry());
         let bytes = serialize_provider_profile(&profile)?;
         let _ = self.providers.insert(key, bytes)?;
-        if let Some(directory) = provider_directory() {
-            directory.publish(profile);
-        }
-        Ok(())
+        Ok(profile)
     }
 }
 

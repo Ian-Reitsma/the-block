@@ -46,12 +46,12 @@ fn registration_and_proof_flow_persists_through_engine() -> TestResult<()> {
     assert_eq!(listing.len(), 1);
     assert_eq!(listing[0].contract.object_id, "obj-1");
 
-    let success = market.record_proof_outcome("obj-1", Some("primary"), 5, true)?;
+    let (success, _) = market.record_proof_outcome("obj-1", Some("primary"), 5, true, None)?;
     assert_eq!(success.outcome, ProofOutcome::Success);
     assert_eq!(success.amount_accrued, 40);
     assert_eq!(success.remaining_deposit, 100);
 
-    let failure = market.record_proof_outcome("obj-1", Some("backup"), 6, false)?;
+    let (failure, _) = market.record_proof_outcome("obj-1", Some("backup"), 6, false, None)?;
     assert_eq!(failure.outcome, ProofOutcome::Failure);
     assert_eq!(failure.slashed, 10);
     assert_eq!(failure.remaining_deposit, 40);

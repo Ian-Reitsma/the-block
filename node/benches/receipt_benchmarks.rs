@@ -26,6 +26,8 @@ fn create_storage_receipt(id: u64) -> Receipt {
         price: 1_000,
         block_height: id,
         provider_escrow: 10_000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![0u8; 64],
         signature_nonce: id,
     })

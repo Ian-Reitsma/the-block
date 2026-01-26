@@ -18,6 +18,7 @@ use foundation_serialization::{Deserialize, Serialize};
 #[serde(crate = "foundation_serialization::serde")]
 pub enum Receipt {
     Storage(StorageReceipt),
+    StorageSlash(StorageSlashReceipt),
     Compute(ComputeReceipt),
     ComputeSlash(ComputeSlashReceipt),
     Energy(EnergyReceipt),
@@ -45,11 +46,40 @@ pub struct StorageReceipt {
     pub block_height: u64,
     /// Provider's total escrow balance at settlement
     pub provider_escrow: u64,
+    /// Optional region recorded in provider metadata
+    #[serde(default)]
+    pub region: Option<String>,
+    /// Optional chunk fingerprint (BLAKE3) used for repairs/slashing
+    #[serde(default)]
+    pub chunk_hash: Option<[u8; 32]>,
     /// Provider Ed25519 signature over receipt fields (prevents forgery)
     #[serde(with = "foundation_serialization::serde_bytes")]
     pub provider_signature: Vec<u8>,
     /// Nonce to prevent replay attacks
     pub signature_nonce: u64,
+}
+
+/// Storage market slashing receipt (governance-initiated penalties).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(crate = "foundation_serialization::serde")]
+pub struct StorageSlashReceipt {
+    /// Provider address subject to the slash
+    pub provider: String,
+    /// Burned amount in BLOCK
+    pub amount: u64,
+    /// Region affected by the slash (if any)
+    #[serde(default)]
+    pub region: Option<String>,
+    /// Optional contract/repair identifier
+    #[serde(default)]
+    pub contract_id: Option<String>,
+    /// Optional chunk hash tied to the slash
+    #[serde(default)]
+    pub chunk_hash: Option<[u8; 32]>,
+    /// Reason code derived from SlashingReason
+    pub reason: String,
+    /// Block height when the slash was included
+    pub block_height: u64,
 }
 
 /// Compute market settlement receipt.
@@ -247,6 +277,7 @@ impl Receipt {
     pub fn market_name(&self) -> &'static str {
         match self {
             Receipt::Storage(_) => "storage",
+            Receipt::StorageSlash(_) => "storage_slash",
             Receipt::Compute(_) => "compute",
             Receipt::ComputeSlash(_) => "compute_slash",
             Receipt::Energy(_) => "energy",
@@ -260,6 +291,7 @@ impl Receipt {
     pub fn settlement_amount(&self) -> u64 {
         match self {
             Receipt::Storage(r) => r.price,
+            Receipt::StorageSlash(r) => r.amount,
             Receipt::Compute(r) => r.payment,
             Receipt::ComputeSlash(r) => r.burned,
             Receipt::Energy(r) => r.price,
@@ -273,6 +305,7 @@ impl Receipt {
     pub fn block_height(&self) -> u64 {
         match self {
             Receipt::Storage(r) => r.block_height,
+            Receipt::StorageSlash(r) => r.block_height,
             Receipt::Compute(r) => r.block_height,
             Receipt::ComputeSlash(r) => r.block_height,
             Receipt::Energy(r) => r.block_height,
@@ -296,6 +329,8 @@ mod tests {
             price: 500,
             block_height: 100,
             provider_escrow: 10000,
+            region: None,
+            chunk_hash: None,
             provider_signature: vec![0u8; 64],
             signature_nonce: 0,
         });

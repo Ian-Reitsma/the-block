@@ -48,6 +48,14 @@ Every epoch `node/src/lib.rs` increments the on-chain counters `economics_epoch_
 `economics_epoch_tx_volume_block`, and `economics_epoch_treasury_inflow_block` as transactions hit the
 chain. Those counters, along with `recent_miners` and the stored circulations, feed `NetworkIssuanceController`
 inside `execute_epoch_economics()`, which writes the next `economics_block_reward_per_block`.
+
+Launch Governor's `LiveSignalProvider` now samples those values by running `economics::replay::replay_economics_to_tip`
+against the current chain. The replay recomputes `economics_epoch_*`, `economics_prev_market_metrics` (via
+`economics::deterministic_metrics::derive_market_metrics_from_chain`), treasury inflow, and the pending base reward
+from block headers and receipts so every gate decision is rooted in ledger history rather than live measurement.
+The resulting sample hash, written into `governor/decisions/epoch-*.json`, matches the Prometheus gauges and any
+explorer/CLI output derived from the same metrics.
+
 Telemetry mirrors the same values (`ECONOMICS_EPOCH_*` gauges plus `ECONOMICS_BLOCK_REWARD_PER_BLOCK`)
 so Launch Governor's autopilot can verify throughput, volume, and treasury inflow before flipping the
 testnet → mainnet gate. Each node persists the latest base reward in `ChainDisk` so restarts follow the same

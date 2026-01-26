@@ -29,3 +29,25 @@ fn stake_weights_drive_finality() {
     assert!(engine.vote("v1", "C"));
     assert_eq!(engine.gadget.finalized(), Some("C"));
 }
+
+#[test]
+fn partitions_block_finality_until_supermajority_reconnects() {
+    let mut pos = PosState::default();
+    for id in ["v1", "v2", "v3", "v4"] {
+        pos.register(id.into());
+        pos.bond(id, "validator", 25);
+    }
+    // Two disjoint partitions each hold 50% stake; neither can finalize.
+    let mut engine = ConsensusEngine::new(pos.unl());
+    assert!(!engine.vote("v1", "A"));
+    assert!(!engine.vote("v2", "A"));
+    assert_eq!(engine.gadget.finalized(), None);
+    assert!(!engine.vote("v3", "B"));
+    assert!(!engine.vote("v4", "B"));
+    assert_eq!(engine.gadget.finalized(), None);
+
+    // Partition heals, honest validators converge on A and finalize.
+    assert!(!engine.vote("v3", "A"));
+    assert!(engine.vote("v4", "A"));
+    assert_eq!(engine.gadget.finalized(), Some("A"));
+}

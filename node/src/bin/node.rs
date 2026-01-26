@@ -1235,6 +1235,7 @@ fn spawn_read_ack_worker(
                         }
                     }
                     // Rehearsal gating: optionally suppress real settlements until stability windows satisfied.
+                    #[cfg_attr(not(feature = "telemetry"), allow(unused_variables))]
                     let (
                         rehearsal_enabled,
                         required_stable_windows,

@@ -91,7 +91,7 @@
   - `economics_block_reward_per_block` shows the current base reward that Launch Governor was replaying when it evaluated economics.
   - `economics_prev_market_metrics_{utilization,provider_margin}_ppm` mirror the deterministic metrics derived from settlement receipts; these are the same samples that are held alongside the executor intent (`governor/decisions/epoch-*.json`) for audit.
   - `economics_epoch_tx_count`, `economics_epoch_tx_volume_block`, and `economics_epoch_treasury_inflow_block` capture the network activity, volume, and treasury inflow that feed the control loop.
-  - `tb-cli governor status --rpc <endpoint>` prints the `telemetry gauges (ppm)` section plus the `last_economics_snapshot_hash` so you can prove the Prometheus series comes from the same sample the governor evaluated.
+  - `tb-cli governor status --rpc <endpoint>` prints the `telemetry gauges (ppm)` section plus the `last_economics_snapshot_hash`; that hash targets the JSON emitted by `economics::replay::replay_economics_to_tip`, so you can replay the same receipt-derived sample (tx counts, treasury inflow, and market metrics) that the governor evaluated.
   - Shadow mode is the default: set `TB_GOVERNOR_SHADOW_ONLY=1` to keep intents and snapshot hashes flowing without mutating runtime params, then flip it to `0` once the telemetry streak looks healthy to allow apply.
 
 - **Auditing workflow**

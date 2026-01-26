@@ -33,16 +33,19 @@ fn derive_test_signing_key() -> SigningKey {
             create_test_receipt(3, 2),
             create_test_receipt(4, 3),
         ];
-        let all_ok = samples.iter().all(|r| {
-            let preimage = match r {
-                Receipt::Storage(sr) => build_storage_preimage(sr),
-                Receipt::Compute(cr) => build_compute_preimage(cr),
-                Receipt::Energy(er) => build_energy_preimage(er),
-                Receipt::Ad(ar) => build_ad_preimage(ar),
-                Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_) => {
+            let all_ok = samples.iter().all(|r| {
+                let preimage = match r {
+                    Receipt::Storage(sr) => build_storage_preimage(sr),
+                    Receipt::Compute(cr) => build_compute_preimage(cr),
+                    Receipt::Energy(er) => build_energy_preimage(er),
+                    Receipt::Ad(ar) => build_ad_preimage(ar),
+                Receipt::ComputeSlash(_)
+                | Receipt::EnergySlash(_)
+                | Receipt::Relay(_)
+                | Receipt::StorageSlash(_) => {
                     Vec::new()
                 }
-            };
+                };
             let sig = sk.sign(&preimage);
             vk.verify(&preimage, &sig).is_ok()
         });
@@ -136,6 +139,8 @@ fn create_test_receipt(id: u64, receipt_type: usize) -> Receipt {
             price: 100,
             block_height: id,
             provider_escrow: 1000,
+            region: None,
+            chunk_hash: None,
             provider_signature: vec![0u8; 64],
             signature_nonce: id,
         }),
@@ -259,6 +264,8 @@ fn stress_large_receipt_payload() {
                 price: u64::MAX / 2,
                 block_height: i,
                 provider_escrow: u64::MAX / 2,
+                region: None,
+                chunk_hash: None,
                 provider_signature: vec![0u8; 64],
                 signature_nonce: i,
             })
@@ -425,7 +432,10 @@ fn signature_round_trip_single_case() {
         Receipt::Compute(r) => build_compute_preimage(r),
         Receipt::Energy(r) => build_energy_preimage(r),
         Receipt::Ad(r) => build_ad_preimage(r),
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_) => Vec::new(),
+        Receipt::ComputeSlash(_)
+        | Receipt::EnergySlash(_)
+        | Receipt::Relay(_)
+        | Receipt::StorageSlash(_) => Vec::new(),
     };
     let sig = sk.sign(&preimage);
     assert!(
@@ -474,6 +484,7 @@ fn receipt_provider_id(receipt: &Receipt) -> &str {
         Receipt::Energy(r) => r.provider.as_str(),
         Receipt::Ad(r) => r.publisher.as_str(),
         Receipt::Relay(r) => r.provider.as_str(),
+        Receipt::StorageSlash(r) => r.provider.as_str(),
         Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => "",
     }
 }
@@ -481,7 +492,10 @@ fn receipt_provider_id(receipt: &Receipt) -> &str {
 fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
     if matches!(
         receipt,
-        Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) | Receipt::Relay(_)
+        Receipt::ComputeSlash(_)
+            | Receipt::EnergySlash(_)
+            | Receipt::Relay(_)
+            | Receipt::StorageSlash(_)
     ) {
         return;
     }
@@ -490,7 +504,10 @@ fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
         Receipt::Compute(r) => build_compute_preimage(r),
         Receipt::Energy(r) => build_energy_preimage(r),
         Receipt::Ad(r) => build_ad_preimage(r),
-        Receipt::Relay(_) | Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
+        Receipt::Relay(_)
+        | Receipt::ComputeSlash(_)
+        | Receipt::EnergySlash(_)
+        | Receipt::StorageSlash(_) => unreachable!(),
     };
     let signature = sk.sign(&preimage).to_bytes().to_vec();
     match receipt {
@@ -498,7 +515,10 @@ fn sign_receipt(receipt: &mut Receipt, sk: &SigningKey) {
         Receipt::Compute(r) => r.provider_signature = signature.clone(),
         Receipt::Energy(r) => r.provider_signature = signature.clone(),
         Receipt::Ad(r) => r.publisher_signature = signature,
-        Receipt::Relay(_) | Receipt::ComputeSlash(_) | Receipt::EnergySlash(_) => unreachable!(),
+        Receipt::Relay(_)
+        | Receipt::ComputeSlash(_)
+        | Receipt::EnergySlash(_)
+        | Receipt::StorageSlash(_) => unreachable!(),
     }
 }
 
@@ -605,6 +625,8 @@ fn stress_all_storage_receipts() {
                 price: i * 10,
                 block_height: i,
                 provider_escrow: i * 100,
+                region: None,
+                chunk_hash: None,
                 provider_signature: vec![0u8; 64],
                 signature_nonce: i,
             })

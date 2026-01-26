@@ -14,6 +14,9 @@ pub struct StorageSettlementReceipt {
     pub price: u64,
     pub block_height: u64,
     pub provider_escrow: u64,
+    pub region: Option<String>,
+    pub chunk_hash: Option<[u8; 32]>,
+    pub signature_nonce: u64,
 }
 
 impl StorageSettlementReceipt {
@@ -23,6 +26,8 @@ impl StorageSettlementReceipt {
         bytes: u64,
         price_per_block: u64,
         block_height: u64,
+        region: Option<String>,
+        chunk_hash: Option<[u8; 32]>,
     ) -> Option<Self> {
         // Only emit receipts for successful proofs with payment
         if proof.outcome == ProofOutcome::Success && proof.amount_accrued > 0 {
@@ -33,6 +38,9 @@ impl StorageSettlementReceipt {
                 price: price_per_block,
                 block_height,
                 provider_escrow: proof.remaining_deposit,
+                region,
+                chunk_hash,
+                signature_nonce: 0,
             })
         } else {
             None
@@ -55,9 +63,10 @@ mod tests {
             remaining_deposit: 900,
             proof_successes: 1,
             proof_failures: 0,
+            chunk_hash: None,
         };
 
-        let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100);
+        let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100, None, None);
         assert!(receipt.is_some());
 
         let receipt = receipt.unwrap();
@@ -80,9 +89,10 @@ mod tests {
             remaining_deposit: 890,
             proof_successes: 0,
             proof_failures: 1,
+            chunk_hash: None,
         };
 
-        let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100);
+        let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100, None, None);
         assert!(receipt.is_none());
     }
 
@@ -97,9 +107,10 @@ mod tests {
             remaining_deposit: 900,
             proof_successes: 1,
             proof_failures: 0,
+            chunk_hash: None,
         };
 
-        let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100);
+        let receipt = StorageSettlementReceipt::from_proof(&proof, 1024, 10, 100, None, None);
         assert!(receipt.is_none());
     }
 }

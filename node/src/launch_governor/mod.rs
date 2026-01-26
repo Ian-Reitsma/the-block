@@ -1,6 +1,7 @@
 use crate::ad_readiness;
 use crate::blockchain::process::validate_and_apply;
 use crate::economics::deterministic_metrics;
+use crate::economics::replay::replay_economics_to_tip;
 use crate::gateway::dns;
 use crate::governance::Runtime;
 use crate::governor_snapshot;
@@ -433,12 +434,30 @@ impl SignalProvider for LiveSignalProvider {
 
     fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {
         let guard = self.chain.lock().unwrap_or_else(|e| e.into_inner());
+        let replay_state = replay_economics_to_tip(&guard.chain, &guard.params);
+        let epoch_metrics = replay_state.latest_epoch_metrics.clone();
+        let (epoch_tx_count, epoch_tx_volume_block, epoch_treasury_inflow_block, market_metrics) =
+            if let Some(metrics) = epoch_metrics {
+                (
+                    metrics.tx_count,
+                    metrics.tx_volume_block,
+                    metrics.treasury_inflow_block,
+                    metrics.market_metrics,
+                )
+            } else {
+                (
+                    guard.economics_epoch_tx_count,
+                    guard.economics_epoch_tx_volume_block,
+                    guard.economics_epoch_treasury_inflow_block,
+                    replay_state.prev_market_metrics.clone(),
+                )
+            };
         EconomicsSample {
-            epoch_tx_count: guard.economics_epoch_tx_count,
-            epoch_tx_volume_block: guard.economics_epoch_tx_volume_block,
-            epoch_treasury_inflow_block: guard.economics_epoch_treasury_inflow_block,
-            block_reward_per_block: guard.economics_block_reward_per_block,
-            market_metrics: guard.economics_prev_market_metrics.clone(),
+            epoch_tx_count,
+            epoch_tx_volume_block,
+            epoch_treasury_inflow_block,
+            block_reward_per_block: replay_state.block_reward_per_block,
+            market_metrics,
         }
     }
 }

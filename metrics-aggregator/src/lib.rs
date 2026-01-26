@@ -971,6 +971,7 @@ impl AppState {
             if let Some(snapshot) = updated_snapshot {
                 self.persist_bridge_remediation_snapshot(&snapshot);
             }
+            reset_bridge_remediation_ack_metrics();
             if !observations.is_empty() {
                 let metrics = aggregator_metrics();
                 for sample in observations {

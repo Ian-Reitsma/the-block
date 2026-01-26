@@ -103,6 +103,8 @@ fn reject_unsigned_storage_receipt() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![], // UNSIGNED
         signature_nonce: 1,
     });
@@ -126,6 +128,8 @@ fn reject_invalid_signature() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };
@@ -163,6 +167,8 @@ fn reject_unknown_provider() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };
@@ -196,6 +202,8 @@ fn reject_duplicate_receipt_across_blocks() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };
@@ -241,6 +249,8 @@ fn reject_corrupted_signature() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };
@@ -279,6 +289,8 @@ fn accept_valid_storage_receipt() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };
@@ -381,6 +393,8 @@ fn receipt_deduplication_registry() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![1, 2, 3],
         signature_nonce: 1,
     });
@@ -409,6 +423,8 @@ fn nonce_prevents_replay_across_multiple_receipts() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };
@@ -420,6 +436,8 @@ fn nonce_prevents_replay_across_multiple_receipts() {
         price: 1000,
         block_height: 100,
         provider_escrow: 20000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1, // SAME NONCE - replay attack
     };
@@ -466,6 +484,8 @@ fn forged_settlement_data_rejected() {
         price: 500,
         block_height: 100,
         provider_escrow: 10000,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![],
         signature_nonce: 1,
     };

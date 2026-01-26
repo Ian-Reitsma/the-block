@@ -3,7 +3,7 @@ use std::convert::TryFrom;
 
 use foundation_serialization::binary_cursor::{CursorError, Reader, Writer};
 
-use crate::receipts::BlockTorchReceiptMetadata;
+use crate::receipts::{BlockTorchReceiptMetadata, StorageSlashReceipt};
 use crate::receipts_validation::{ReceiptAggregateScheme, ReceiptHeader};
 use crate::root_assembler::{MicroShardRootEntry, RootBundle, RootSizeClass};
 use crate::transaction::binary::{EncodeError, EncodeResult};
@@ -426,11 +426,37 @@ fn write_receipts(writer: &mut Writer, receipts: &[Receipt]) -> EncodeResult<()>
                 struct_writer.field_u64("price", r.price);
                 struct_writer.field_u64("block_height", r.block_height);
                 struct_writer.field_u64("provider_escrow", r.provider_escrow);
+                if let Some(region) = &r.region {
+                    struct_writer.field_string("region", region);
+                }
+                if let Some(chunk_hash) = &r.chunk_hash {
+                    struct_writer.field_with("chunk_hash", |field_writer| {
+                        write_fixed(field_writer, chunk_hash);
+                    });
+                }
                 struct_writer.field_with("provider_signature", |field_writer| {
                     write_bytes(field_writer, &r.provider_signature, "provider_signature")
                         .expect("signature length fits");
                 });
                 struct_writer.field_u64("signature_nonce", r.signature_nonce);
+            }
+            Receipt::StorageSlash(r) => {
+                struct_writer.field_string("type", "storage_slash");
+                struct_writer.field_string("provider", &r.provider);
+                struct_writer.field_u64("amount", r.amount);
+                struct_writer.field_u64("block_height", r.block_height);
+                struct_writer.field_string("reason", &r.reason);
+                if let Some(region) = &r.region {
+                    struct_writer.field_string("region", region);
+                }
+                if let Some(contract_id) = &r.contract_id {
+                    struct_writer.field_string("contract_id", contract_id);
+                }
+                if let Some(chunk_hash) = &r.chunk_hash {
+                    struct_writer.field_with("chunk_hash", |field_writer| {
+                        write_fixed(field_writer, chunk_hash);
+                    });
+                }
             }
             Receipt::Compute(r) => {
                 struct_writer.field_string("type", "compute");
@@ -632,6 +658,7 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut publisher = None;
         let mut buyer = None;
         let mut bytes = None;
+        let mut amount = None;
         let mut compute_units = None;
         let mut energy_units = None;
         let mut impressions = None;
@@ -648,6 +675,8 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
         let mut deadline = None;
         let mut resolved_at = None;
         let mut reason = None;
+        let mut region = None;
+        let mut chunk_hash = None;
         let mut conversions = None;
         let mut claim_routes: Option<HashMap<String, String>> = None;
         let mut role_breakdown: Option<crate::receipts::AdRoleBreakdown> = None;
@@ -692,12 +721,15 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
             "provider_escrow" => {
                 assign_once(&mut provider_escrow, reader.read_u64()?, "provider_escrow")
             }
+            "amount" => assign_once(&mut amount, reader.read_u64()?, "amount"),
             "verified" => assign_once(&mut verified, reader.read_u64()?, "verified"),
             "proof_hash" => assign_once(&mut proof_hash, read_fixed(reader)?, "proof_hash"),
             "meter_hash" => assign_once(&mut meter_hash, read_fixed(reader)?, "meter_hash"),
             "slash_amount" => assign_once(&mut slash_amount, reader.read_u64()?, "slash_amount"),
             "burned" => assign_once(&mut burned, reader.read_u64()?, "burned"),
             "reason" => assign_once(&mut reason, reader.read_string()?, "reason"),
+            "region" => assign_once(&mut region, reader.read_string()?, "region"),
+            "chunk_hash" => assign_once(&mut chunk_hash, read_fixed(reader)?, "chunk_hash"),
             "deadline" => assign_once(&mut deadline, reader.read_u64()?, "deadline"),
             "resolved_at" => assign_once(&mut resolved_at, reader.read_u64()?, "resolved_at"),
             "conversions" => assign_once(&mut conversions, reader.read_u64()?, "conversions"),
@@ -875,10 +907,21 @@ fn read_receipts(reader: &mut Reader<'_>) -> Result<Vec<Receipt>, DecodeError> {
                 block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
                 provider_escrow: provider_escrow
                     .ok_or(DecodeError::MissingField("provider_escrow"))?,
+                region,
+                chunk_hash,
                 provider_signature: provider_signature
                     .ok_or(DecodeError::MissingField("provider_signature"))?,
                 signature_nonce: signature_nonce
                     .ok_or(DecodeError::MissingField("signature_nonce"))?,
+            })),
+            "storage_slash" => Ok(Receipt::StorageSlash(StorageSlashReceipt {
+                provider: provider.ok_or(DecodeError::MissingField("provider"))?,
+                amount: amount.ok_or(DecodeError::MissingField("amount"))?,
+                block_height: block_height.ok_or(DecodeError::MissingField("block_height"))?,
+                reason: reason.ok_or(DecodeError::MissingField("reason"))?,
+                region,
+                contract_id,
+                chunk_hash,
             })),
             "compute" => {
                 let blocktorch = blocktorch_kernel_variant_digest.and_then(|digest| {

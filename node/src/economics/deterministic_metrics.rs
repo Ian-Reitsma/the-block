@@ -13,6 +13,7 @@ use crate::receipts::Receipt;
 use crate::Block;
 use foundation_serialization::{Deserialize, Serialize};
 use std::collections::HashSet;
+use storage_market::slashing::{Config as SlashingConfig, ReceiptMetadata, SlashingController};
 
 /// Market metric snapshot for telemetry (parts per million format).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,7 @@ pub fn derive_market_metrics_from_chain(
     epoch_start: u64,
     epoch_end: u64,
 ) -> MarketMetrics {
+    let mut slash_controller = SlashingController::new(SlashingConfig::default());
     let mut storage_state = MarketState::default();
     let mut compute_state = MarketState::default();
     let mut energy_state = MarketState::default();
@@ -94,6 +96,15 @@ pub fn derive_market_metrics_from_chain(
         for receipt in &block.receipts {
             match receipt {
                 Receipt::Storage(r) => {
+                    let metadata = ReceiptMetadata {
+                        provider: r.provider.clone(),
+                        signature_nonce: r.signature_nonce,
+                        block_height: r.block_height,
+                        contract_id: r.contract_id.clone(),
+                        region: r.region.clone(),
+                        chunk_hash: r.chunk_hash.clone(),
+                    };
+                    let _ = slash_controller.record_receipt(metadata);
                     storage_state.revenue = storage_state.revenue.saturating_add(r.price);
                     storage_state.capacity = storage_state.capacity.saturating_add(r.bytes);
                     storage_state.provider_escrow = storage_state
@@ -111,6 +122,7 @@ pub fn derive_market_metrics_from_chain(
                     compute_state.settlement_count += 1;
                     compute_state.providers.insert(r.provider.clone());
                 }
+                Receipt::StorageSlash(_) => {}
                 Receipt::Energy(r) => {
                     energy_state.revenue = energy_state.revenue.saturating_add(r.price);
                     energy_state.capacity = energy_state.capacity.saturating_add(r.energy_units);

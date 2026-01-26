@@ -27,6 +27,8 @@ fn treasury_event_block() -> Block {
         price: 10,
         block_height: 1,
         provider_escrow: 50,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![0u8; 64],
         signature_nonce: 0,
     });
@@ -59,6 +61,8 @@ fn replay_roundtrip_block_with_receipts() {
         price: 10,
         block_height: 1,
         provider_escrow: 50,
+        region: None,
+        chunk_hash: None,
         provider_signature: vec![0u8; 64],
         signature_nonce: 0,
     });

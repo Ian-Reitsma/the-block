@@ -438,6 +438,11 @@ impl StoragePipeline {
 
     pub fn set_rent_rate(&mut self, rate: i64) {
         self.rent_rate = rate;
+        repair::set_rent_rate(rate);
+    }
+
+    pub fn rent_rate_per_byte(&self) -> u64 {
+        self.rent_rate.max(0) as u64
     }
 
     /// Logical quota in bytes derived from the provider's stake balance.
@@ -1115,6 +1120,11 @@ impl StoragePipeline {
     pub fn get_manifest(&self, manifest_hash: &[u8; 32]) -> Option<ObjectManifest> {
         let key = format!("manifest/{}", crypto_suite::hex::encode(manifest_hash));
         self.db.get(&key).and_then(|b| decode_manifest(&b).ok())
+    }
+
+    pub fn has_chunk(&self, chunk_hash: &[u8; 32]) -> bool {
+        let key = format!("chunk/{}", crypto_suite::hex::encode(chunk_hash));
+        self.db.get(&key).is_some()
     }
 
     pub fn db_mut(&mut self) -> &mut SimpleDb {

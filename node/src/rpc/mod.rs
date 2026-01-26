@@ -796,6 +796,7 @@ const PUBLIC_METHODS: &[&str] = &[
     "storage.register_provider",
     "storage.discover_providers",
     "storage.manifests",
+    "storage.audit",
     "pow.submit",
     "inflation.params",
     "compute_market.stats",
@@ -3109,6 +3110,19 @@ fn dispatch(
                 .and_then(|v| v.as_u64())
                 .map(|v| v as usize);
             storage::manifest_summaries(limit)
+        }
+        "storage.audit" => {
+            let limit = req
+                .params
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize);
+            let manifest = req
+                .params
+                .get("manifest")
+                .and_then(|v| v.as_str())
+                .map(|value| value.to_string());
+            storage::audit(manifest, limit)
         }
         "storage_provider_profiles" => storage::provider_profiles(),
         "storage_provider_set_maintenance" => {

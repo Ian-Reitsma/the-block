@@ -71,6 +71,22 @@ pub static RECEIPTS_STORAGE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
     )
 });
 
+#[cfg(feature = "telemetry")]
+pub static RECEIPTS_STORAGE_SLASH: Lazy<IntCounter> = Lazy::new(|| {
+    register_counter(
+        "receipts_storage_slash_total",
+        "Total storage slash receipts across all blocks",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPTS_STORAGE_SLASH_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
+    register_int_gauge(
+        "receipts_storage_slash_per_block",
+        "Number of storage slash receipts in current block",
+    )
+});
+
 /// Compute receipt count per block (gauge)
 #[cfg(feature = "telemetry")]
 pub static RECEIPTS_COMPUTE_PER_BLOCK: Lazy<IntGauge> = Lazy::new(|| {
@@ -146,6 +162,14 @@ pub static RECEIPT_SETTLEMENT_STORAGE: Lazy<Gauge> = Lazy::new(|| {
     register_gauge(
         "receipt_settlement_storage",
         "Total storage receipt settlement (BLOCK) in current block",
+    )
+});
+
+#[cfg(feature = "telemetry")]
+pub static RECEIPT_SETTLEMENT_STORAGE_SLASH: Lazy<Gauge> = Lazy::new(|| {
+    register_gauge(
+        "receipt_settlement_storage_slash",
+        "Total storage slash settlement (BLOCK) in current block",
     )
 });
 
@@ -372,6 +396,8 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
     // Count by type and accumulate settlements
     let mut storage_count = 0i64;
     let mut storage_settlement = 0.0;
+    let mut storage_slash_count = 0i64;
+    let mut storage_slash_settlement = 0.0;
     let mut compute_count = 0i64;
     let mut compute_settlement = 0.0;
     let mut compute_slash_count = 0i64;
@@ -390,6 +416,14 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
                 storage_count += 1;
                 storage_settlement += settlement;
                 RECEIPTS_STORAGE.inc();
+            }
+            Receipt::StorageSlash(_) => {
+                storage_count += 1;
+                storage_settlement += settlement;
+                storage_slash_count += 1;
+                storage_slash_settlement += settlement;
+                RECEIPTS_STORAGE.inc();
+                RECEIPTS_STORAGE_SLASH.inc();
             }
             Receipt::Compute(_) => {
                 compute_count += 1;
@@ -430,6 +464,7 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
 
     // Update per-block gauges
     RECEIPTS_STORAGE_PER_BLOCK.set(storage_count);
+    RECEIPTS_STORAGE_SLASH_PER_BLOCK.set(storage_slash_count);
     RECEIPTS_COMPUTE_PER_BLOCK.set(compute_count);
     RECEIPTS_ENERGY_PER_BLOCK.set(energy_count);
     RECEIPTS_ENERGY_SLASH_PER_BLOCK.set(energy_slash_count);
@@ -438,6 +473,7 @@ pub fn record_receipts(receipts: &[Receipt], serialized_bytes: usize) {
 
     // Update settlement amounts
     RECEIPT_SETTLEMENT_STORAGE.set(storage_settlement);
+    RECEIPT_SETTLEMENT_STORAGE_SLASH.set(storage_slash_settlement);
     RECEIPT_SETTLEMENT_COMPUTE.set(compute_settlement);
     RECEIPT_SETTLEMENT_ENERGY.set(energy_settlement);
     RECEIPT_SETTLEMENT_COMPUTE_SLASH.set(compute_slash_settlement);
