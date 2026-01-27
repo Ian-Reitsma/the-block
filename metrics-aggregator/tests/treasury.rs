@@ -240,6 +240,31 @@ fn wrappers_schema_hash_is_stable() {
                     labels: relay_reason_budget.clone(),
                     value: 0.0,
                 },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_coverage_percent".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_cost_per_share".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_estimated_total_cost".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_selected_provider_count".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_required_provider_count".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
             ],
             governance: Some(GovernanceWrapperEntry {
                 treasury_balance: 1_200,
@@ -274,7 +299,7 @@ fn wrappers_schema_hash_is_stable() {
     let hash_hex = hash.to_hex().to_string();
     assert_eq!(
         hash_hex.as_str(),
-        "f766ed3e71bf125cfc50a9df666fee536bba71d534abc9e08e0f2c2c73aa38c5",
+        "e642a8db353a7f06746aad480a73b460bcb959c3583d6a457e4a1f1503ae7951",
         "wrappers schema or field set drifted; update consumers or refresh the expected hash intentionally"
     );
 }

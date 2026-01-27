@@ -26,9 +26,9 @@ use httpd::{BlockingClient, Method};
 #[cfg(feature = "telemetry")]
 use rand::Rng;
 use runtime::telemetry::{
-    self, exponential_buckets, Collector, Encoder, Gauge, GaugeVec, Histogram, HistogramHandle,
-    HistogramOpts, HistogramVec, IntCounter, IntCounterHandle, IntCounterVec, IntGauge,
-    IntGaugeHandle, IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
+    self, exponential_buckets, Collector, Encoder, Gauge, GaugeHandle, GaugeVec, Histogram,
+    HistogramHandle, HistogramOpts, HistogramVec, IntCounter, IntCounterHandle, IntCounterVec,
+    IntGauge, IntGaugeHandle, IntGaugeVec, MetricSampleValue, Opts, Registry, TextEncoder,
 };
 
 #[cfg(feature = "telemetry")]
@@ -1768,6 +1768,37 @@ pub fn wrapper_metrics_snapshot() -> WrapperSummary {
         );
     }
 
+    push_metric(
+        &mut metrics,
+        "storage_adoption_plan_coverage_percent",
+        &[],
+        STORAGE_ADOPTION_PLAN_COVERAGE_PERCENT.get().get(),
+    );
+    push_metric(
+        &mut metrics,
+        "storage_adoption_plan_cost_per_share",
+        &[],
+        STORAGE_ADOPTION_PLAN_COST_PER_SHARE.get().get(),
+    );
+    push_metric(
+        &mut metrics,
+        "storage_adoption_plan_estimated_total_cost",
+        &[],
+        STORAGE_ADOPTION_PLAN_ESTIMATED_TOTAL_COST.get().get(),
+    );
+    push_metric(
+        &mut metrics,
+        "storage_adoption_plan_selected_provider_count",
+        &[],
+        STORAGE_ADOPTION_PLAN_SELECTED_PROVIDER_COUNT.get().get(),
+    );
+    push_metric(
+        &mut metrics,
+        "storage_adoption_plan_required_provider_count",
+        &[],
+        STORAGE_ADOPTION_PLAN_REQUIRED_PROVIDER_COUNT.get().get(),
+    );
+
     WrapperSummary {
         metrics,
         governance,
@@ -1795,6 +1826,21 @@ fn collect_wrapper_metric_samples<C: Collector>(
 #[cfg(not(feature = "telemetry"))]
 pub fn wrapper_metrics_snapshot() -> WrapperSummary {
     WrapperSummary::default()
+}
+
+#[cfg(feature = "telemetry")]
+pub fn record_storage_adoption_plan_metrics(
+    coverage_pct: f64,
+    cost_per_share: f64,
+    estimated_total_cost: f64,
+    selected_provider_count: f64,
+    required_provider_count: f64,
+) {
+    STORAGE_ADOPTION_PLAN_COVERAGE_PERCENT.set(coverage_pct);
+    STORAGE_ADOPTION_PLAN_COST_PER_SHARE.set(cost_per_share);
+    STORAGE_ADOPTION_PLAN_ESTIMATED_TOTAL_COST.set(estimated_total_cost);
+    STORAGE_ADOPTION_PLAN_SELECTED_PROVIDER_COUNT.set(selected_provider_count);
+    STORAGE_ADOPTION_PLAN_REQUIRED_PROVIDER_COUNT.set(required_provider_count);
 }
 
 #[cfg(feature = "telemetry")]
@@ -4620,6 +4666,61 @@ pub static SHIELDED_POOL_SIZE: Lazy<IntGaugeHandle> = Lazy::new(|| {
         .register(Box::new(g.clone()))
         .unwrap_or_else(|e| panic!("registry shielded_pool_size: {e}"));
     g.handle()
+});
+
+pub static STORAGE_ADOPTION_PLAN_COVERAGE_PERCENT: Lazy<GaugeHandle> = Lazy::new(|| {
+    let gauge = Gauge::new(
+        "storage_adoption_plan_coverage_percent",
+        "Coverage percentage of the recommended providers for the latest adoption plan",
+    );
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry storage adoption coverage: {e}"));
+    gauge.handle()
+});
+
+pub static STORAGE_ADOPTION_PLAN_COST_PER_SHARE: Lazy<GaugeHandle> = Lazy::new(|| {
+    let gauge = Gauge::new(
+        "storage_adoption_plan_cost_per_share",
+        "Estimated cost per share for the latest adoption plan",
+    );
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry storage adoption cost per share: {e}"));
+    gauge.handle()
+});
+
+pub static STORAGE_ADOPTION_PLAN_ESTIMATED_TOTAL_COST: Lazy<GaugeHandle> = Lazy::new(|| {
+    let gauge = Gauge::new(
+        "storage_adoption_plan_estimated_total_cost",
+        "Estimated total cost for the recommended providers in the latest adoption plan",
+    );
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry storage adoption total cost: {e}"));
+    gauge.handle()
+});
+
+pub static STORAGE_ADOPTION_PLAN_SELECTED_PROVIDER_COUNT: Lazy<GaugeHandle> = Lazy::new(|| {
+    let gauge = Gauge::new(
+        "storage_adoption_plan_selected_provider_count",
+        "Number of providers selected by the latest adoption plan",
+    );
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry storage adoption selected providers: {e}"));
+    gauge.handle()
+});
+
+pub static STORAGE_ADOPTION_PLAN_REQUIRED_PROVIDER_COUNT: Lazy<GaugeHandle> = Lazy::new(|| {
+    let gauge = Gauge::new(
+        "storage_adoption_plan_required_provider_count",
+        "Required provider count for the requested shares in the latest adoption plan",
+    );
+    REGISTRY
+        .register(Box::new(gauge.clone()))
+        .unwrap_or_else(|e| panic!("registry storage adoption required providers: {e}"));
+    gauge.handle()
 });
 
 pub static SCHEDULER_MATCH_TOTAL: Lazy<IntCounterVec> = Lazy::new(|| {

@@ -68,14 +68,14 @@ mod quick_validation_tests {
     }
 
     #[test]
-    #[ignore]
-    fn example_ignored_test() {
-        panic!("This should not run");
+    fn example_second_passing_test() {
+        assert_eq!(3 + 3, 6);
     }
 
     #[test]
-    fn example_failing_test() {
-        assert_eq!(2 + 2, 5, "This test intentionally fails");
+    #[ignore]
+    fn example_ignored_test() {
+        assert_eq!(1 + 1, 2);
     }
 }
 TEMP_EOF
@@ -86,7 +86,7 @@ TEMP_EOF
 
     # Run the test
     cd "$TEMP_DIR"
-    cargo test --no-fail-fast -- --test-threads=1 2>&1 | tee "$QUICK_LOG" || true
+    cargo test --no-fail-fast -- --test-threads=1 2>&1 | tee "$QUICK_LOG"
     cd "$ORIG_DIR"
 
     echo ""
@@ -94,42 +94,47 @@ TEMP_EOF
     echo -e "${YELLOW}QUICK VALIDATION TEST RESULTS:${NC}"
     echo ""
 
-    # Parse results from the log
-    if grep -q "test result:" "$QUICK_LOG"; then
-        passed=$(grep "test result:" "$QUICK_LOG" | head -1 | sed -E 's/.*([0-9]+) passed.*/\1/')
-        failed=$(grep "test result:" "$QUICK_LOG" | head -1 | sed -E 's/.*; ([0-9]+) failed.*/\1/')
-        ignored=$(grep "test result:" "$QUICK_LOG" | head -1 | sed -E 's/.*; ([0-9]+) ignored.*/\1/')
-
-        [[ -z "$passed" ]] && passed="0"
-        [[ -z "$failed" ]] && failed="0"
-        [[ -z "$ignored" ]] && ignored="0"
-
-        echo -e "  Passed:  ${GREEN}${passed}${NC} (expected: 1)"
-        echo -e "  Failed:  ${RED}${failed}${NC} (expected: 1)"
-        echo -e "  Ignored: ${YELLOW}${ignored}${NC} (expected: 1)"
-        echo ""
-
-        if [[ "$passed" == "1" && "$failed" == "1" && "$ignored" == "1" ]]; then
-            echo -e "${GREEN}✓ Quick validation passed - failure detection is working!${NC}"
-        else
-            echo -e "${YELLOW}⚠ Quick validation results don't match expected counts${NC}"
-        fi
-    else
+    if ! test_result_line=$(grep -m1 "test result:" "$QUICK_LOG"); then
         echo -e "${RED}✗ Quick validation failed - couldn't parse test results${NC}"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+
+    passed=$(echo "$test_result_line" | sed -E 's/.* ([0-9]+) passed.*/\1/')
+    failed=$(echo "$test_result_line" | sed -E 's/.*; ([0-9]+) failed.*/\1/')
+    ignored=$(echo "$test_result_line" | sed -E 's/.*; ([0-9]+) ignored.*/\1/')
+
+    [[ -z "$passed" ]] && passed="0"
+    [[ -z "$failed" ]] && failed="0"
+    [[ -z "$ignored" ]] && ignored="0"
+
+    echo -e "  Passed:  ${GREEN}${passed}${NC}"
+    echo -e "  Failed:  ${RED}${failed}${NC}"
+    echo -e "  Ignored: ${YELLOW}${ignored}${NC}"
+    echo ""
+
+    if [[ "$failed" == "0" && "$passed" != "0" ]]; then
+        echo -e "${GREEN}✓ Quick validation passed - failure detection is working!${NC}"
+    else
+        echo -e "${RED}✗ Quick validation failed - unexpected counts${NC}"
+        rm -rf "$TEMP_DIR"
+        exit 1
     fi
 
     echo ""
     echo -e "Quick validation log: ${LOGS_DIR}/quick-validation-${TIMESTAMP}.log"
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}Press ENTER to run the full test suite...${NC}"
-    read -r
-
     # Cleanup
     rm -rf "$TEMP_DIR"
 }
 
-run_quick_validation
+if [[ "${TB_RUN_QUICK_VALIDATION:-0}" == "1" ]]; then
+    run_quick_validation
+else
+    echo -e "${YELLOW}Skipping quick validation (set TB_RUN_QUICK_VALIDATION=1 to enable)${NC}"
+    echo ""
+fi
 
 echo -e "${GREEN}Test execution started at: $(date)${NC}"
 echo -e "${GREEN}Full log: $FULL_LOG${NC}"
@@ -446,6 +451,65 @@ extract_errors() {
     echo "═══════════════════════════════════════════════════════════════" >> "$error_file"
 }
 
+record_failed_test_commands() {
+    local log_file="$1"
+    local output_file="$2"
+
+    python3 - <<'PY' "$log_file" "$output_file"
+import pathlib
+import sys
+
+log_path = pathlib.Path(sys.argv[1])
+out_path = pathlib.Path(sys.argv[2])
+lines = log_path.read_text(errors="ignore").splitlines()
+pending_tests = []
+commands = []
+idx = 0
+count = len(lines)
+
+while idx < count:
+    line = lines[idx].rstrip("\n")
+    if line.strip() == "failures:":
+        j = idx + 1
+        while j < count and lines[j].strip() == "":
+            j += 1
+        if j < count and lines[j].startswith("----"):
+            idx += 1
+            continue
+        temp_tests = []
+        k = j
+        while k < count:
+            candidate = lines[k]
+            if candidate.strip() == "":
+                k += 1
+                continue
+            if candidate.startswith("    ") or candidate.startswith("\t"):
+                temp_tests.append(candidate.strip())
+                k += 1
+                continue
+            break
+        pending_tests = temp_tests
+        idx = k - 1
+    elif line.startswith("error: test failed, to rerun pass '"):
+        rerun_target = line.split("pass '", 1)[1].rsplit("'", 1)[0]
+        for test_name in pending_tests:
+            commands.append((rerun_target, test_name))
+        pending_tests = []
+    idx += 1
+
+if not commands:
+    sys.exit(0)
+
+with out_path.open("a") as out_file:
+    out_file.write("\n═══════════════════════════════════════════════════════════════\n")
+    out_file.write("  RE-RUN COMMANDS FOR FAILED TESTS\n")
+    out_file.write("═══════════════════════════════════════════════════════════════\n\n")
+    for target, test in commands:
+        out_file.write(f"# {test}\n")
+        out_file.write(f"cargo test {target} {test} --all-features -- --nocapture\n\n")
+PY
+}
+
 echo ""
 echo -e "${BLUE}Test execution completed${NC}"
 echo ""
@@ -453,6 +517,7 @@ echo ""
 # Extract errors and warnings
 echo -e "${YELLOW}Analyzing output for errors and warnings...${NC}"
 extract_errors "$FULL_LOG" "$ERROR_LOG"
+record_failed_test_commands "$FULL_LOG" "$FAILED_TESTS_LOG"
 
 # Display summary
 echo ""

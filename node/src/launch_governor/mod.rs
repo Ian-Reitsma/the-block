@@ -1,6 +1,8 @@
 use crate::ad_readiness;
 use crate::blockchain::process::validate_and_apply;
-use crate::economics::replay::replay_economics_to_tip;
+use crate::economics::replay::{
+    replay_economics_to_tip, EpochEconomicsMetrics, ReplayedEconomicsState,
+};
 use crate::economics::{deterministic_metrics, MarketMetrics};
 use crate::gateway::dns;
 use crate::governance::Runtime;
@@ -20,6 +22,7 @@ use runtime::sync::CancellationToken;
 use runtime::{self, sleep, JoinHandle};
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering},
@@ -474,7 +477,7 @@ impl SignalProvider for LiveSignalProvider {
 
     fn economics_sample(&self, _window_secs: u64) -> EconomicsSample {
         let guard = self.chain.lock().unwrap_or_else(|e| e.into_inner());
-        let replay_state = replay_economics_to_tip(&guard.chain, &guard.params);
+        let replay_state = safe_replay_state(&guard);
         let epoch_metrics = replay_state.latest_epoch_metrics.clone();
         let stored_metrics = guard.economics_prev_market_metrics.clone();
         let prev_market_metrics = if replay_state.prev_market_metrics == MarketMetrics::default()
@@ -507,6 +510,41 @@ impl SignalProvider for LiveSignalProvider {
             block_reward_per_block: replay_state.block_reward_per_block,
             market_metrics,
         }
+    }
+}
+
+fn safe_replay_state(guard: &Blockchain) -> ReplayedEconomicsState {
+    match panic::catch_unwind(AssertUnwindSafe(|| {
+        replay_economics_to_tip(&guard.chain, &guard.params)
+    })) {
+        Ok(state) => state,
+        Err(err) => {
+            diagnostics::tracing::warn!(
+                error = ?err,
+                "governor_economics_replay_panic: replay_economics_to_tip panicked; using ledger-backed fallback metrics"
+            );
+            fallback_replay_state(&guard)
+        }
+    }
+}
+
+fn fallback_replay_state(guard: &Blockchain) -> ReplayedEconomicsState {
+    let epoch = guard.block_height / crate::EPOCH_BLOCKS;
+    let market_metrics = guard.economics_prev_market_metrics.clone();
+    let latest_epoch_metrics = EpochEconomicsMetrics {
+        epoch,
+        tx_count: guard.economics_epoch_tx_count,
+        tx_volume_block: guard.economics_epoch_tx_volume_block,
+        treasury_inflow_block: guard.economics_epoch_treasury_inflow_block,
+        block_reward_per_block: guard.economics_block_reward_per_block,
+        market_metrics: market_metrics.clone(),
+    };
+    ReplayedEconomicsState {
+        block_height: guard.block_height,
+        block_reward_per_block: guard.economics_block_reward_per_block,
+        prev_market_metrics: market_metrics,
+        latest_epoch_metrics: Some(latest_epoch_metrics),
+        ..ReplayedEconomicsState::default()
     }
 }
 
@@ -1261,7 +1299,26 @@ fn process_intent(intent: IntentRecord, chain: &Arc<Mutex<Blockchain>>, shared: 
     if shared.shadow_only() {
         return;
     }
+    if !intent_snapshot_verified(shared, &intent) {
+        diagnostics::tracing::warn!(
+            intent_id = %intent.id,
+            gate = %intent.gate,
+            "governor intent snapshot verification failed; delaying apply"
+        );
+        return;
+    }
     apply_intent(chain, shared, intent);
+}
+
+fn intent_snapshot_verified(shared: &SharedState, intent: &IntentRecord) -> bool {
+    if intent.snapshot_hash_hex.is_empty() {
+        return false;
+    }
+    governor_snapshot::verify_snapshot_hash(
+        &shared.base_path,
+        intent.epoch_apply,
+        &intent.snapshot_hash_hex,
+    )
 }
 
 fn apply_intent(

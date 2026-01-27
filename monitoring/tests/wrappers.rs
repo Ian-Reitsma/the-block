@@ -325,6 +325,31 @@ fn wrappers_snapshot_hash_is_pinned() {
                     labels: handshake_s2n_labels.clone(),
                     value: 5.0,
                 },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_coverage_percent".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_cost_per_share".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_estimated_total_cost".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_selected_provider_count".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
+                WrapperMetricEntry {
+                    metric: "storage_adoption_plan_required_provider_count".into(),
+                    labels: HashMap::new(),
+                    value: 0.0,
+                },
             ],
             governance: Some(GovernanceWrapperEntry {
                 treasury_balance: 1_200,
@@ -358,7 +383,7 @@ fn wrappers_snapshot_hash_is_pinned() {
     let hash = blake3::hash(&encoded).to_hex().to_string();
     assert_eq!(
         hash.as_str(),
-        "f156c98a6c47f5991af9404d6ee131102a50bf8a270bb7bf130b77cfcf7a86d5",
+        "8b416fbd87775dab530c47cc3655303be50b4ddca65e6f9e2c69a74a266c6ab1",
         "wrappers schema or field set drifted; refresh snapshot intentionally (current {})",
         hash
     );

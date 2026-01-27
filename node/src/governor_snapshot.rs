@@ -83,6 +83,37 @@ pub fn persist_snapshot(base: &str, payload: &DecisionPayload, epoch: u64) -> io
     Ok(*digest.as_bytes())
 }
 
+pub fn snapshot_hash(base: &str, epoch: u64) -> Option<[u8; 32]> {
+    let (path, _) = snapshot_path(base, epoch);
+    let bytes = fs::read(&path).ok()?;
+    let digest = blake3::hash(&bytes);
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(digest.as_bytes());
+    Some(arr)
+}
+
+pub fn verify_snapshot_hash(base: &str, epoch: u64, expected_hex: &str) -> bool {
+    if expected_hex.is_empty() {
+        return false;
+    }
+    let expected = match hex::decode(expected_hex) {
+        Ok(bytes) => {
+            if bytes.len() != 32 {
+                return false;
+            }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            arr
+        }
+        Err(_) => return false,
+    };
+    if let Some(actual) = snapshot_hash(base, epoch) {
+        actual == expected
+    } else {
+        false
+    }
+}
+
 fn should_sign() -> bool {
     env::var("TB_GOVERNOR_SIGN")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -168,6 +199,23 @@ mod tests {
             Some(digest_hex.as_str())
         );
         // Guards automatically clean up environment variables when dropped
+    }
+
+    #[test]
+    fn snapshot_hash_verifies_saved_payload() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = tmp.path().to_str().unwrap();
+        let payload = sample_payload();
+        let digest = persist_snapshot(path, &payload, payload.epoch).expect("snapshot");
+        assert_eq!(snapshot_hash(path, payload.epoch).expect("hash"), digest);
+        assert!(
+            verify_snapshot_hash(path, payload.epoch, &hex::encode(digest)),
+            "hash verification should succeed for persisted payload"
+        );
+        assert!(
+            !verify_snapshot_hash(path, payload.epoch + 1, &hex::encode(digest)),
+            "missing epoch should return false"
+        );
     }
 
     #[test]

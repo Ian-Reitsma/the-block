@@ -72,6 +72,16 @@ pub enum StorageCmd {
         min_success_rate_ppm: Option<u64>,
         json: bool,
     },
+    /// Build a storage adoption plan for the wedge narrative
+    AdoptionPlan {
+        object_size: u64,
+        shares: u16,
+        retention_blocks: u64,
+        region: Option<String>,
+        max_price_per_block: Option<u64>,
+        min_success_rate_ppm: Option<u64>,
+        json: bool,
+    },
     /// Toggle maintenance mode for a provider
     Maintenance {
         provider_id: String,
@@ -795,6 +805,54 @@ impl StorageCmd {
             )
             .subcommand(
                 CommandBuilder::new(
+                    CommandId("storage.adoption_plan"),
+                    "adoption-plan",
+                    "Summarize the storage adoption plan for the storage wedge",
+                )
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "object-size",
+                        "object-size",
+                        "Size of the object to store (bytes)",
+                    )
+                    .required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new("shares", "shares", "Number of shares (minimum 1)")
+                        .required(true),
+                ))
+                .arg(ArgSpec::Option(
+                    OptionSpec::new(
+                        "retention-blocks",
+                        "retention-blocks",
+                        "Desired retention in blocks",
+                    )
+                    .required(true),
+                ))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "region",
+                    "region",
+                    "Optional region hint for discovery",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "max-price-per-block",
+                    "max-price-per-block",
+                    "Upper bound on price per block",
+                )))
+                .arg(ArgSpec::Option(OptionSpec::new(
+                    "min-success-rate-ppm",
+                    "min-success-rate-ppm",
+                    "Minimum provider success rate (ppm)",
+                )))
+                .arg(ArgSpec::Flag(FlagSpec::new(
+                    "json",
+                    "json",
+                    "Emit JSON instead of human-readable output",
+                )))
+                .build(),
+            )
+            .subcommand(
+                CommandBuilder::new(
                     CommandId("storage.maintenance"),
                     "maintenance",
                     "Toggle maintenance mode for a provider",
@@ -975,6 +1033,34 @@ impl StorageCmd {
                     object_size,
                     shares: shares_raw.min(u16::MAX as u64) as u16,
                     limit,
+                    region,
+                    max_price_per_block,
+                    min_success_rate_ppm,
+                    json,
+                })
+            }
+            "adoption-plan" => {
+                let object_size =
+                    parse_u64_required(take_string(sub_matches, "object-size"), "object-size")?;
+                let shares_raw = parse_u64_required(take_string(sub_matches, "shares"), "shares")?;
+                let retention_blocks = parse_u64_required(
+                    take_string(sub_matches, "retention-blocks"),
+                    "retention-blocks",
+                )?;
+                let region = take_string(sub_matches, "region");
+                let max_price_per_block = parse_u64(
+                    take_string(sub_matches, "max-price-per-block"),
+                    "max-price-per-block",
+                )?;
+                let min_success_rate_ppm = parse_u64(
+                    take_string(sub_matches, "min-success-rate-ppm"),
+                    "min-success-rate-ppm",
+                )?;
+                let json = sub_matches.get_flag("json");
+                Ok(StorageCmd::AdoptionPlan {
+                    object_size,
+                    shares: shares_raw.min(u16::MAX as u64) as u16,
+                    retention_blocks,
                     region,
                     max_price_per_block,
                     min_success_rate_ppm,
@@ -1424,6 +1510,29 @@ pub fn handle(cmd: StorageCmd) {
                 println!("{}", resp);
             }
         }
+        StorageCmd::AdoptionPlan {
+            object_size,
+            shares,
+            retention_blocks,
+            region,
+            max_price_per_block,
+            min_success_rate_ppm,
+            json,
+        } => {
+            let resp = rpc::storage::adoption_plan(
+                object_size,
+                shares,
+                retention_blocks,
+                region.as_deref(),
+                max_price_per_block,
+                min_success_rate_ppm,
+            );
+            if json {
+                println!("{}", resp);
+            } else {
+                render_adoption_plan(&resp);
+            }
+        }
         StorageCmd::Maintenance {
             provider_id,
             maintenance,
@@ -1568,5 +1677,171 @@ pub fn handle(cmd: StorageCmd) {
             }
         }
         StorageCmd::Importer(cmd) => handle_importer(cmd),
+    }
+}
+
+fn render_adoption_plan(resp: &JsonValue) {
+    let plan_name = resp
+        .get("plan_name")
+        .and_then(|value| value.as_str())
+        .unwrap_or("storage_adoption_wedge");
+    let object_size = resp
+        .get("object_size")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let shares = resp
+        .get("shares")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let retention_blocks = resp
+        .get("retention_blocks")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let coverage = plan_value_to_string(resp.get("coverage_percentage"));
+    let selected_providers = resp
+        .get("selected_provider_count")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let required_providers = resp
+        .get("required_provider_count")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let total_cost = plan_value_to_string(resp.get("estimated_total_cost"));
+    let primary_provider = resp
+        .get("primary_provider")
+        .and_then(|value| value.as_str())
+        .unwrap_or("-");
+    let filters = resp
+        .get("search_filters")
+        .and_then(|value| value.as_object());
+    let region_filter = filters
+        .and_then(|map| map.get("region"))
+        .map(|value| plan_value_to_string(Some(value)))
+        .unwrap_or_else(|| "-".into());
+    let max_price = filters
+        .and_then(|map| map.get("max_price_per_block"))
+        .map(|value| plan_value_to_string(Some(value)))
+        .unwrap_or_else(|| "-".into());
+    let min_success = filters
+        .and_then(|map| map.get("min_success_rate_ppm"))
+        .map(|value| plan_value_to_string(Some(value)))
+        .unwrap_or_else(|| "-".into());
+
+    println!("Plan: {plan_name}");
+    println!(
+        "  object size: {object_size} bytes · shares: {shares} · retention: {retention_blocks} blocks"
+    );
+    println!(
+        "  providers: {selected_providers}/{required_providers} · coverage: {coverage}% · total cost: {total_cost} BLOCK"
+    );
+    println!("  primary provider: {primary_provider}");
+    println!(
+        "  filters: region={region_filter} · max price={max_price} · min success={min_success}"
+    );
+
+    if let Some(providers) = resp.get("providers").and_then(|value| value.as_array()) {
+        if !providers.is_empty() {
+            println!();
+            println!(
+                "{:>20} {:>10} {:>8} {:>10} {:>8} {:>14} {:>14} {:<}",
+                "provider",
+                "region",
+                "price",
+                "success%",
+                "latency",
+                "cost/share",
+                "cost/shares",
+                "tags"
+            );
+            for entry in providers {
+                let provider = entry
+                    .get("provider")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("-");
+                let region = entry
+                    .get("region")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("-");
+                let price = entry
+                    .get("price_per_block")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                let success = plan_value_to_string(entry.get("success_rate_pct"));
+                let latency = plan_value_to_string(entry.get("latency_ms"));
+                let cost_share = plan_value_to_string(entry.get("estimated_cost_per_share"));
+                let cost_shares = plan_value_to_string(entry.get("estimated_cost_for_shares"));
+                let tags = entry
+                    .get("tags")
+                    .and_then(|value| value.as_array())
+                    .map(|tags| {
+                        tags.iter()
+                            .filter_map(|value| value.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| "-".into());
+                println!(
+                    "{:>20} {:>10} {:>8} {:>10} {:>8} {:>14} {:>14} {:<}",
+                    provider, region, price, success, latency, cost_share, cost_shares, tags
+                );
+            }
+        }
+    }
+
+    if let Some(actions) = resp
+        .get("recommended_actions")
+        .and_then(|value| value.as_array())
+    {
+        if !actions.is_empty() {
+            println!();
+            println!("Recommended actions:");
+            for (idx, action) in actions.iter().enumerate() {
+                let title = plan_value_to_string(action.get("title"));
+                let detail = plan_value_to_string(action.get("detail"));
+                println!("  {}. {} – {}", idx + 1, title, detail);
+            }
+        }
+    }
+
+    if let Some(signals) = resp
+        .get("monitoring_signals")
+        .and_then(|value| value.as_array())
+    {
+        if !signals.is_empty() {
+            println!();
+            println!("Monitoring signals:");
+            for signal in signals {
+                let metric = plan_value_to_string(signal.get("metric"));
+                let goal = plan_value_to_string(signal.get("goal"));
+                let reason = plan_value_to_string(signal.get("reason"));
+                println!("  - {metric} (goal {goal}): {reason}");
+            }
+        }
+    }
+
+    if let Some(failures) = resp
+        .get("failure_workflow")
+        .and_then(|value| value.as_array())
+    {
+        if !failures.is_empty() {
+            println!();
+            println!("Failure workflow:");
+            for entry in failures {
+                let trigger = plan_value_to_string(entry.get("trigger"));
+                let response = plan_value_to_string(entry.get("response"));
+                println!("  • {trigger} -> {response}");
+            }
+        }
+    }
+}
+
+fn plan_value_to_string(value: Option<&JsonValue>) -> String {
+    match value {
+        Some(JsonValue::String(value)) => value.clone(),
+        Some(JsonValue::Number(number)) => number.to_string(),
+        Some(JsonValue::Bool(flag)) => flag.to_string(),
+        Some(other) => other.to_string(),
+        None => "-".into(),
     }
 }

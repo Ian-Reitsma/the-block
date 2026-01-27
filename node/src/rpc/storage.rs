@@ -24,7 +24,7 @@ use crate::storage::slash;
 use crate::storage::types::ObjectManifest;
 use crate::storage::types::{ChunkRef, ProviderChunkEntry};
 #[cfg(feature = "telemetry")]
-use crate::telemetry::consensus_metrics::BLOCK_HEIGHT;
+use crate::telemetry::{consensus_metrics::BLOCK_HEIGHT, record_storage_adoption_plan_metrics};
 
 fn json_object(pairs: Vec<(&str, Value)>) -> Value {
     let mut map = Map::new();
@@ -46,6 +46,16 @@ fn number_from_option_i32(value: Option<i32>) -> Value {
     value
         .map(|inner| Value::Number(Number::from(inner)))
         .unwrap_or(Value::Null)
+}
+
+fn number_from_option_u64(value: Option<u64>) -> Value {
+    value
+        .map(|inner| Value::Number(Number::from(inner)))
+        .unwrap_or(Value::Null)
+}
+
+fn value_from_u128(value: u128) -> Value {
+    Value::String(value.to_string())
 }
 
 fn gate_rehearsal_response(action: &str) -> Value {
@@ -574,6 +584,76 @@ pub fn register_provider(
     }
 }
 
+fn cost_for_retention(price_per_block: u64, retention_blocks: u64) -> u128 {
+    (price_per_block as u128).saturating_mul(retention_blocks as u128)
+}
+
+fn provider_plan_value(profile: &ProviderProfile, retention_blocks: u64, shares: u16) -> Value {
+    let mut map = Map::new();
+    let success_ppm = profile.success_rate_ppm();
+    let failure_ppm = 1_000_000u64.saturating_sub(success_ppm);
+    let retention_cost = cost_for_retention(profile.price_per_block, retention_blocks);
+    let contract_cost = retention_cost.saturating_mul(shares as u128);
+    let success_pct = success_ppm as f64 / 10000.0;
+
+    map.insert(
+        "provider".into(),
+        Value::String(profile.provider_id.clone()),
+    );
+    map.insert("region".into(), string_from_option(profile.region.clone()));
+    map.insert(
+        "price_per_block".into(),
+        Value::Number(Number::from(profile.price_per_block)),
+    );
+    map.insert(
+        "max_capacity_bytes".into(),
+        Value::Number(Number::from(profile.max_capacity_bytes)),
+    );
+    map.insert(
+        "escrow_deposit".into(),
+        Value::Number(Number::from(profile.escrow_deposit)),
+    );
+    map.insert(
+        "success_rate_ppm".into(),
+        Value::Number(Number::from(success_ppm)),
+    );
+    map.insert(
+        "success_rate_pct".into(),
+        Value::String(format!("{success_pct:.2}")),
+    );
+    map.insert(
+        "failure_probability_ppm".into(),
+        Value::Number(Number::from(failure_ppm)),
+    );
+    map.insert(
+        "latency_ms".into(),
+        number_from_option_u64(profile.latency_ms.map(|value| value as u64)),
+    );
+    map.insert(
+        "last_seen_block".into(),
+        number_from_option_u64(profile.last_seen_block),
+    );
+    map.insert(
+        "tags".into(),
+        Value::Array(
+            profile
+                .tags
+                .iter()
+                .map(|tag| Value::String(tag.clone()))
+                .collect(),
+        ),
+    );
+    map.insert(
+        "estimated_cost_per_share".into(),
+        value_from_u128(retention_cost),
+    );
+    map.insert(
+        "estimated_cost_for_shares".into(),
+        value_from_u128(contract_cost),
+    );
+    Value::Object(map)
+}
+
 pub fn discover_providers(
     object_size: u64,
     shares: u16,
@@ -627,6 +707,219 @@ pub fn discover_providers(
                 .inc();
             market_error_value(err)
         }
+    }
+}
+
+pub fn adoption_plan(
+    object_size: u64,
+    shares: u16,
+    retention_blocks: u64,
+    region: Option<&str>,
+    max_price_per_block: Option<u64>,
+    min_success_rate_ppm: Option<u64>,
+) -> foundation_serialization::json::Value {
+    let pipeline = StoragePipeline::open(&pipeline_path());
+    let mut options = pipeline.marketplace_search_options(object_size, shares);
+    let target_shares = shares.max(1);
+    let limit_required = target_shares as usize;
+    options.limit = options.limit.max(limit_required).max(5).min(128);
+    let region_filter = region.map(|value| value.to_string());
+    if let Some(region_value) = region_filter.as_deref() {
+        options.region = Some(region_value.to_string());
+    }
+    if let Some(max_price) = max_price_per_block {
+        options.max_price_per_block = Some(max_price);
+    }
+    if let Some(min_ppm) = min_success_rate_ppm {
+        options.min_success_rate_ppm = Some(min_ppm);
+    }
+
+    match MARKET
+        .guard()
+        .discover_providers(options.discovery_request())
+    {
+        Ok(providers) => {
+            let selected_providers: Vec<_> = providers.iter().take(limit_required).collect();
+            let total_cost = selected_providers
+                .iter()
+                .map(|profile| cost_for_retention(profile.price_per_block, retention_blocks))
+                .sum();
+            let coverage_pct = if limit_required == 0 {
+                0.0
+            } else {
+                (selected_providers.len() as f64 / limit_required as f64 * 100.0).min(100.0)
+            };
+            #[cfg(feature = "telemetry")]
+            {
+                let total_cost_f = total_cost as f64;
+                let per_share_cost = if target_shares == 0 {
+                    0.0
+                } else {
+                    total_cost_f / target_shares as f64
+                };
+                record_storage_adoption_plan_metrics(
+                    coverage_pct,
+                    per_share_cost,
+                    total_cost_f,
+                    selected_providers.len() as f64,
+                    limit_required as f64,
+                );
+            }
+            let recommended_provider = selected_providers
+                .get(0)
+                .map(|profile| Value::String(profile.provider_id.clone()))
+                .unwrap_or(Value::Null);
+            let provider_values = providers
+                .iter()
+                .map(|profile| provider_plan_value(profile, retention_blocks, shares))
+                .collect::<Vec<_>>();
+            let search_filters = json_object(vec![
+                ("region", string_from_option(region_filter.clone())),
+                (
+                    "max_price_per_block",
+                    number_from_option_u64(max_price_per_block),
+                ),
+                (
+                    "min_success_rate_ppm",
+                    number_from_option_u64(min_success_rate_ppm),
+                ),
+            ]);
+            let recommended_actions = vec![
+                json_object(vec![
+                    ("title", Value::String("Lock in resilient providers".into())),
+                    (
+                        "detail",
+                        Value::String(format!(
+                            "Use the top {} of {} discovered providers (~{coverage_pct:.1}% coverage) to meet the requested {} shares and retention.",
+                            selected_providers.len(),
+                            providers.len(),
+                            target_shares,
+                        )),
+                    ),
+                ]),
+                json_object(vec![
+                    ("title", Value::String("Deploy the storage contract".into())),
+                    (
+                        "detail",
+                        Value::String(
+                            "Create the upload via `contract-cli storage upload`, pay the retention, and verify each provider's quoted price before committing."
+                                .into(),
+                        ),
+                    ),
+                ]),
+                json_object(vec![
+                    ("title", Value::String("Watch the metrics".into())),
+                    (
+                        "detail",
+                        Value::String(
+                            "Keep `storage_repair_failures_total` and `storage_slash_total` at zero; rerun discovery when maintenance or dark-region flags appear."
+                                .into(),
+                        ),
+                    ),
+                ]),
+            ];
+            let monitoring_signals = vec![
+                json_object(vec![
+                    (
+                        "metric",
+                        Value::String("storage_repair_failures_total".into()),
+                    ),
+                    ("goal", Value::String("0".into())),
+                    (
+                        "reason",
+                        Value::String(
+                            "Any non-zero value means a provider dropped proofs; trigger `contract-cli storage repair-history` immediately."
+                                .into(),
+                        ),
+                    ),
+                ]),
+                json_object(vec![
+                    ("metric", Value::String("storage_slash_total".into())),
+                    ("goal", Value::String("0".into())),
+                    (
+                        "reason",
+                        Value::String(
+                            "Slash counters show invalid proof submissions; coordinate with the provider and governance before retrying."
+                                .into(),
+                        ),
+                    ),
+                ]),
+            ];
+            let failure_workflow = vec![
+                json_object(vec![
+                    (
+                        "trigger",
+                        Value::String("Chunk absence or proof failure".into()),
+                    ),
+                    (
+                        "response",
+                        Value::String(
+                            "Inspect `contract-cli storage repair-history --limit 20`, then run `contract-cli storage repair-chunk` or open a governance slash if the provider stays silent."
+                                .into(),
+                        ),
+                    ),
+                ]),
+                json_object(vec![
+                    (
+                        "trigger",
+                        Value::String("Provider maintenance or latency spikes".into()),
+                    ),
+                    (
+                        "response",
+                        Value::String(
+                            "Rerun `contract-cli storage discover-providers` with updated filters and redeploy to healthy providers."
+                                .into(),
+                        ),
+                    ),
+                ]),
+                json_object(vec![
+                    (
+                        "trigger",
+                        Value::String("Dark-region or repeated slashes".into()),
+                    ),
+                    (
+                        "response",
+                        Value::String(
+                            "Scale to alternate regions, adjust escrow via `contract-cli storage register-provider`, and track `storage_region_dark_total` before resuming uploads."
+                                .into(),
+                        ),
+                    ),
+                ]),
+            ];
+            json_object(vec![
+                ("status", Value::String("ok".to_string())),
+                (
+                    "plan_name",
+                    Value::String("storage_adoption_wedge".to_string()),
+                ),
+                ("object_size", Value::Number(Number::from(object_size))),
+                ("shares", Value::Number(Number::from(target_shares as u64))),
+                (
+                    "retention_blocks",
+                    Value::Number(Number::from(retention_blocks)),
+                ),
+                (
+                    "selected_provider_count",
+                    Value::Number(Number::from(selected_providers.len() as u64)),
+                ),
+                (
+                    "required_provider_count",
+                    Value::Number(Number::from(limit_required as u64)),
+                ),
+                (
+                    "coverage_percentage",
+                    Value::String(format!("{coverage_pct:.1}")),
+                ),
+                ("estimated_total_cost", value_from_u128(total_cost)),
+                ("primary_provider", recommended_provider),
+                ("search_filters", search_filters),
+                ("providers", Value::Array(provider_values)),
+                ("recommended_actions", Value::Array(recommended_actions)),
+                ("monitoring_signals", Value::Array(monitoring_signals)),
+                ("failure_workflow", Value::Array(failure_workflow)),
+            ])
+        }
+        Err(err) => market_error_value(err),
     }
 }
 
