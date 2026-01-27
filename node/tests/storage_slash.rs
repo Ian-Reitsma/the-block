@@ -7,6 +7,7 @@ fn receipt_meta(
     provider: &str,
     nonce: u64,
     block_height: u64,
+    contract_id: &str,
     region: Option<&str>,
     chunk_hash: Option<[u8; 32]>,
 ) -> ReceiptMetadata {
@@ -14,7 +15,7 @@ fn receipt_meta(
         provider: provider.to_string(),
         signature_nonce: nonce,
         block_height,
-        contract_id: "contract-1".to_string(),
+        contract_id: contract_id.to_string(),
         region: region.map(str::to_string),
         chunk_hash,
     }
@@ -64,11 +65,24 @@ fn missing_repairs_emit_slash() {
 fn replayed_nonces_trigger_slash() {
     let mut controller = SlashingController::new(Config::default());
 
-    let first = controller.record_receipt(receipt_meta("provider-b", 42, 5, Some("us-west"), None));
+    let first = controller.record_receipt(receipt_meta(
+        "provider-b",
+        42,
+        5,
+        "contract-1",
+        Some("us-west"),
+        None,
+    ));
     assert!(first.is_empty());
 
-    let second =
-        controller.record_receipt(receipt_meta("provider-b", 42, 9, Some("us-west"), None));
+    let second = controller.record_receipt(receipt_meta(
+        "provider-b",
+        42,
+        9,
+        "contract-1",
+        Some("us-west"),
+        None,
+    ));
     assert_eq!(second.len(), 1);
     assert!(matches!(
         second[0].reason,
@@ -83,7 +97,14 @@ fn dark_region_reroutes_mark_dark() {
         dark_threshold: 3,
     };
     let mut controller = SlashingController::new(config);
-    controller.record_receipt(receipt_meta("provider-c", 1, 7, Some("eu-central"), None));
+    controller.record_receipt(receipt_meta(
+        "provider-c",
+        1,
+        7,
+        "contract-1",
+        Some("eu-central"),
+        None,
+    ));
 
     let slashes = controller.drain_slashes(11);
     assert!(slashes.iter().any(|slash| matches!(
@@ -106,6 +127,7 @@ fn colluding_providers_duplicate_nonce_slash_all() {
         "provider-a",
         12,
         20,
+        "contract-1",
         Some("us-west"),
         Some(chunk_hash),
     ));
@@ -114,6 +136,7 @@ fn colluding_providers_duplicate_nonce_slash_all() {
         "provider-b",
         12,
         21,
+        "contract-1",
         Some("us-west"),
         Some(chunk_hash),
     ));
@@ -125,9 +148,11 @@ fn colluding_providers_duplicate_nonce_slash_all() {
         .collect();
     assert!(providers.contains("provider-a"));
     assert!(providers.contains("provider-b"));
-    assert!(slashes
-        .iter()
-        .all(|slash| matches!(slash.reason, SlashingReason::ReplayedNonce { nonce: 12 })));
+    assert!(
+        slashes
+            .iter()
+            .all(|slash| matches!(slash.reason, SlashingReason::ReplayedNonce { nonce: 12 }))
+    );
 }
 
 #[test]
@@ -151,6 +176,7 @@ fn repair_deadline_clears_when_chunk_returns() {
         "provider-d",
         99,
         102,
+        "contract-1",
         Some("ap-south"),
         Some(key.chunk_hash),
     ));
@@ -183,6 +209,7 @@ fn missing_chunk_flag_prevents_payment_until_repaired() {
         "provider-e",
         1,
         10,
+        "contract-42",
         Some("sa-east"),
         Some(key.chunk_hash),
     ));
@@ -204,6 +231,7 @@ fn duplicate_nonce_emits_audit_event() {
         "provider-a",
         99,
         10,
+        "contract-1",
         Some("us-central"),
         Some(chunk_hash),
     ));
@@ -212,6 +240,7 @@ fn duplicate_nonce_emits_audit_event() {
         "provider-b",
         99,
         11,
+        "contract-1",
         Some("us-central"),
         Some(chunk_hash),
     ));

@@ -10,7 +10,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use sys::tempfile::tempdir;
 #[cfg(feature = "telemetry")]
 use the_block::telemetry;
-use the_block::{net::Node, Blockchain, ShutdownFlag};
+use the_block::{
+    compute_market::settlement::{SettleMode, Settlement},
+    net::Node,
+    Blockchain, ShutdownFlag,
+};
 
 static NODE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -134,6 +138,7 @@ struct ChaosRun {
 }
 fn init_env(test_name: &str) -> ChaosRun {
     cleanup_env();
+    Settlement::init("", SettleMode::DryRun);
     let dir = tempdir().unwrap();
     the_block::net::ban_store::init(dir.path().join("ban_db").to_str().unwrap());
     std::env::set_var("TB_NET_KEY_PATH", dir.path().join("net_key"));
@@ -170,6 +175,7 @@ fn timeout_factor() -> u64 {
 }
 
 fn cleanup_env() {
+    Settlement::shutdown();
     std::env::remove_var("TB_NET_PACKET_LOSS");
     std::env::remove_var("TB_NET_JITTER_MS");
     std::env::remove_var("TB_NET_KEY_PATH");

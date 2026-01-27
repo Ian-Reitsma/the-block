@@ -94,13 +94,9 @@ pub static RECEIPT_VALIDATION_TIME: Lazy<Histogram> = Lazy::new(|| {
     )
 });
 
-/// Failed receipt validations
-pub static RECEIPT_VALIDATION_FAILURES: Lazy<IntCounter> = Lazy::new(|| {
-    register_counter(
-        "receipt_validation_failures_total",
-        "Number of receipts that failed validation",
-    )
-});
+/// Failed receipt validations (shared with receipts telemetry)
+#[cfg(feature = "telemetry")]
+pub use crate::telemetry::receipts::RECEIPT_VALIDATION_FAILURES_TOTAL as RECEIPT_VALIDATION_FAILURES;
 
 /// Storage proof validation time
 pub static STORAGE_PROOF_VALIDATION_TIME: Lazy<Histogram> = Lazy::new(|| {
